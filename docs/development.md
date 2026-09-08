@@ -1,6 +1,6 @@
 # Zotero Codex Reader：macOS 开发流程
 
-本文件定义将执行的流程。当前仓库仍处于规划阶段；除 Cursor/Codex/Node 等已核查工具外，本文提及的源码、构建脚本和开发 profile 从 S0/S1 起逐步建立。执行顺序以[分阶段计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)为准。
+本文件定义当前实际开发流程。S0 工程基础和 S1 原生侧栏开发预览已经实现；当前版本为 npm/workspaces `0.1.0-alpha.2`、Zotero manifest `0.1.0a2`，下一阶段为 S2。执行顺序以[分阶段计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)为准。
 
 ## 工作台
 
@@ -14,14 +14,14 @@ Codex 桌面任务可继续用于计划讨论或独立审阅；实际代码修�
 
 ```text
 先读 AGENTS.md、docs/project-decisions.md 和对应任务。
-本次执行 S1 的工具栏入口与基础布局，参考 T2 实施细则。
-范围：packages/zotero/src/reader/ 与相关测试。
-目标：搜索左侧开关可开关原生风格侧栏；PDF 真实自适应并保持当前阅读段落。
-验收：对应 A25、A27、A28；记录实际测试结果，不把源码可行性写成运行成功。
+本次执行 S2 的原生运行与官方登录最小闭环，参考阶段计划中的 S2。
+范围：Codex 协议核心、Zotero 原生进程适配、账户状态和相关测试。
+目标：从开发 XPI 启动受控的随包 Codex，通过官方浏览器登录，并提交明确标为合成测试的一条真实请求。
+验收：分别记录假进程测试、真实 Zotero 原生进程证据和真实登录结果；不能用 fixture 文本代替模型回复。
 公共接口若需要变化，先更新契约和调用方；与其他任务同时工作时不修改其文件。
 ```
 
-S0 建立根 AGENTS、Git 基线与最小工程入口后，S1 起使用以上日常模板。T0 是跨阶段验证清单，不代表先完成所有原型再初始化仓库。
+S0/S1 已建立根规则、工程入口和原生布局。后续仍按一个小任务写明范围、预期结果和证据层级；T0 是跨阶段验证清单，不代表某个单元测试能替代宿主验收。
 
 ## 开发反馈循环
 
@@ -31,21 +31,22 @@ S0 建立根 AGENTS、Git 基线与最小工程入口后，S1 起使用以上日
 4. 构建插件开发目录，在专用 Zotero profile 中加载/重新加载。原生 API、selection popup 和 PDF 缩放都要在宿主验证。
 5. 记录实际结果，修复错误，重复受影响的验证；通过后提交这一项。
 
-从 S0 起按阶段逐步建立的开发命令如下，脚本落地前不能宣称已可执行：
+先用 `npm ci` 按 lockfile 安装开发依赖。当前 `package.json` 实际提供以下脚本：
+
+<!-- AUTO-GENERATED: package scripts -->
 
 | 命令 | 预期行为 |
 | --- | --- |
-| `npm ci` | 按已提交 lockfile 安装开发依赖 |
 | `npm run dev` | 监听编译 TypeScript/CSS，生成可加载的开发扩展目录；不自动重置 Zotero 状态 |
 | `npm run typecheck` | 检查 contracts/core/zotero 的类型边界 |
 | `npm run lint` | 检查源码约定 |
-| `npm run test:unit` | 核心、协议、UI 纯逻辑测试；无真实模型请求 |
-| `npm run test:integration` | 假 Codex 进程/存储与完整业务集成；无真实账户凭据 |
-| `npm run test:live` | 显式运行真实 Codex 协议的合成材料测试；Gecko 原生路径另在 Zotero 验收 |
+| `npm run test:unit` | 运行当前源码、构建、打包和 UI 纯逻辑测试；无真实模型请求 |
 | `npm run build` | 产出可打包扩展 bundle |
-| `npm run package:dev` | 生成明确标记的开发 XPI；S1 可只含宿主外壳，S2 加入实验 Codex 资产 |
-| `npm run package` | 生成包含固定 Codex runtime 的完整平台发行 XPI |
-| `npm run verify:artifacts` | 验证包结构、版本、许可、hash、无个人数据 |
+| `npm run package:dev` | 先构建，再按 manifest 版本生成明确标记的开发 XPI；当前只含 S1 外壳 |
+
+<!-- END AUTO-GENERATED -->
+
+当前没有 `test:integration`、`test:live`、正式 `package` 或 `verify:artifacts` npm script。它们仍是后续阶段目标，不能当作已执行检查。`package:dev` 的文件名从已验证的 Zotero manifest 版本生成；当前输出为 `dist/zotero-codex-reader-0.1.0a2-dev.xpi`。
 
 watch 构建不等于 Zotero 已热更新代码。修改 bootstrap、原生注册或进程管理时必须按生命周期重新加载插件，并确认旧监听器和子进程已清理。
 
@@ -57,6 +58,23 @@ watch 构建不等于 Zotero 已热更新代码。修改 bootstrap、原生注�
 - 错误定位先判断属于 UI、选择几何、会话状态、stdio 协议、原生进程或文件存储哪一层，再修改对应适配器。
 
 测试截图只使用合成论文。原始论文文字和对话日志属于私有数据，不进入默认调试导出或 GitHub issue。
+
+### 当前专用宿主测试流程
+
+先确认专用 Zotero 测试实例已经关闭，然后在仓库根目录运行：
+
+```sh
+npm run package:dev
+node scripts/prepare-host-test.mjs
+/Applications/Zotero.app/Contents/MacOS/zotero \
+  -no-remote \
+  -profile "$PWD/.zcr-dev/profile" \
+  -datadir "$PWD/.zcr-dev/data"
+```
+
+`prepare-host-test.mjs` 也接受一个显式 XPI 路径作为第一个参数。它只写入忽略的 `.zcr-dev/`，创建合成 PDF，关闭更新、同步和遥测，并将开发 XPI 与测试驱动安装进专用 profile。测试结果写入 `.zcr-dev/host-report.json`。测试驱动在最后卸载被测插件以核对实际清理，因此再次运行宿主流程前必须重新执行 `node scripts/prepare-host-test.mjs`。不要把这套命令改成普通 Zotero profile，也不要提交 `.zcr-dev/` 内容。
+
+当前专用 Zotero 9.0.6 流程通过 27/27 检查：开发内容真实挂载在原生区域，PDF 宽度从 1512 变为 1155，继续阅读到第 2 页后关闭仍保持 top 745，固定缩放和手动缩放的基础规则成立；原生侧栏开关能恢复原生内容，Codex 开关能重新选择聊天内容；三轮停用/启用没有产生重复按钮或监听器；同一父条目下的两个附件保持不同身份；实际卸载完成后，被测 add-on、按钮、pane 注册、活动 class 和监听器均已清理。完整结果和证据边界见 [S0/S1 QA 记录](qa/s0-s1.md)。
 
 ## 并行与审阅
 
@@ -70,7 +88,7 @@ UI 与协议核心需要并行时使用独立 worktree；每个工作者先确�
 
 ## 从开发到 GitHub
 
-1. S0 初始化工程，S1 验证真实宿主布局，S2 验证随包 Codex 的原生运行/授权；随后完成主功能与恢复。
+1. 保持已经通过当前开发与宿主检查的 S0/S1 预览可构建；随后在 S2 验证随包 Codex 的原生运行与官方授权。
 2. 完成 30 项验收，区分 PASS/FAIL/NOT RUN。
 3. 从干净 checkout 构建完整 macOS arm64 XPI，附准确版本与许可资料。
 4. 在没有系统 Node/Codex CLI 的干净环境，从实际下载的 XPI 安装使用。

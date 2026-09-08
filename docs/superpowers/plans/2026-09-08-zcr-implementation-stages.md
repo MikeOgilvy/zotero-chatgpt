@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- 当前状态：只有 README 和规划文档，Git 尚未初始化，插件代码尚未开始。
+- 起始状态：只有 README 和规划文档。2026-09-08 已完成 S0/S1 开发预览及基础宿主验证，见 [progress](../../progress.md) 和 [QA](../../qa/s0-s1.md)。
 - 正式目录为 `/Users/kuhn/Desktop/ZoteroCodexReader`。所有开发命令先确认该目录，避免回到原规划目录写代码。
 - 用户安装一个完整平台 XPI 后，通过官方浏览器登录 ChatGPT；正常用户不安装 Node/CLI，不操作终端或配对码。
 - UI 保持 Zotero 原生风格；搜索旁开关、选区上方操作条、原生标注共存、PDF 自适应都属于首版要求。
@@ -61,15 +61,15 @@ flowchart LR
 
 **创建/更新文件：** 根 `.gitignore`、`AGENTS.md`、`package.json`、lockfile、`.nvmrc`、TypeScript/ESLint/Vitest 配置；三个 packages 的 package.json；最小插件 manifest/bootstrap/entry；`scripts/build.mjs`、`scripts/dev.mjs`。其他业务文件等使用时创建。
 
-- [ ] 再次确认项目路径、文件清单和 Git 状态；保留已有 README/docs。
-- [ ] 初始化本地 Git，建立 `.gitignore` 和根 AGENTS，提交现有规划基线。
-- [ ] 建立 `codex/s0-bootstrap` 功能分支；后续并行 worktree 以这个有提交的仓库为基础。
-- [ ] 配置 npm workspaces 与 TypeScript strict；Node 版本固定在开发基线，依赖写入 lockfile。
-- [ ] 建立能编译的最小插件入口和稳定扩展 UUID，不一次生成所有空业务类。
-- [ ] 建立 build/dev/typecheck/lint 命令。Vitest 配置就绪，出现真实行为测试后启用对应 test 脚本，不用空测试套件宣称功能通过。
-- [ ] 构建一次，再从 lockfile 重新安装验证开发依赖可复现；记录实际命令与结果。
+- [x] 再次确认项目路径、文件清单和 Git 状态；保留已有 README/docs。
+- [x] 初始化本地 Git，建立 `.gitignore` 和根 AGENTS，提交现有规划基线。
+- [x] 建立 `codex/s0-bootstrap` 功能分支；后续并行 worktree 以这个有提交的仓库为基础。
+- [x] 配置 npm workspaces 与 TypeScript strict；Node 版本固定在开发基线，依赖写入 lockfile。
+- [x] 建立能编译的最小插件入口和稳定扩展 UUID，不一次生成所有空业务类。
+- [x] 建立 build/dev/typecheck/lint 命令。Vitest 配置就绪，出现真实行为测试后启用对应 test 脚本，不用空测试套件宣称功能通过。
+- [x] 构建一次，再从 lockfile 重新安装验证开发依赖可复现；记录实际命令与结果。
 
-执行时的 Git 顺序示意，命令当前尚未运行：
+已执行的 Git 初始化顺序：
 
 ```sh
 git init -b main
@@ -88,13 +88,13 @@ Git 作者信息若缺失，在真正提交前明确处理，不伪造用户身�
 
 **文件重点：** `packages/zotero/src/index.ts`、reader/{toolbar,reader-pane,layout}.ts、chat/view.ts、assets/sidebar.css、locale 文件；`scripts/package.mjs` 的开发包模式；toolbar/layout 测试。
 
-- [ ] 创建独立 Zotero profile 与 data directory，导入自制 PDF；这一环境只用于开发。
-- [ ] 建立 `npm run package:dev`，生成标明开发用途的 XPI，安装后验证启用、停用和卸载钩子。
-- [ ] 在搜索左侧增加原生风格按钮，打开基础聊天区；允许固定合成内容用于验证布局，但明确标为开发预览。
-- [ ] 证明它是参与真实宿主布局的停靠区域：打开后 PDF 视口变窄，关闭后恢复。
-- [ ] 验证基础原生缩放和当前阅读页/锚点可保持，原生信息/笔记区域不会被破坏。
-- [ ] 记录当前附件身份，特别验证同一父条目下两个 PDF 不能混用；此时还不调用模型。
-- [ ] 三轮启停无重复按钮或监听器；在真实 Zotero 中记录 G1 的基础证据。
+- [x] 创建独立 Zotero profile 与 data directory，导入自制 PDF；这一环境只用于开发。
+- [x] 建立 `npm run package:dev`，生成标明开发用途的 XPI，安装后验证启用、停用和卸载钩子。
+- [x] 在搜索左侧增加原生风格按钮，打开基础聊天区；允许固定合成内容用于验证布局，但明确标为开发预览。
+- [x] 证明它是参与真实宿主布局的停靠区域：打开后 PDF 视口变窄，关闭后恢复。
+- [x] 验证基础原生缩放和当前阅读页/锚点可保持，原生信息/笔记区域不会被破坏。
+- [x] 记录当前附件身份，特别验证同一父条目下两个 PDF 不能混用；此时还不调用模型。
+- [x] 三轮启停无重复按钮或监听器；在真实 Zotero 中记录 G1 的基础证据。
 
 **交付标准：** 用户可以在 Zotero 点击按钮打开和关闭正确位置的侧栏，真实 PDF 布局成立。不能只用浏览器页面或截图模拟达到这一阶段。
 

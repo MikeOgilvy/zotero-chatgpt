@@ -1,6 +1,6 @@
 # Zotero Codex Reader：模块设计
 
-状态：设计阶段，尚未实现。技术路线遵循[项目决策](project-decisions.md)，具体数据类型与错误语义遵循[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。
+状态：本文描述完整目标设计；S0/S1 已实现工程、阅读器适配和侧栏预览，其他模块仍按阶段推进。当前进度见 [progress](progress.md)。技术路线遵循[项目决策](project-decisions.md)，具体数据类型与错误语义遵循[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。
 
 ## 1. 从使用流程划分职责
 
