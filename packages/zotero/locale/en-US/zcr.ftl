@@ -1,1 +1,3 @@
-zcr-pane-title = Codex
+zcr-pane-title =
+    .label = Codex
+    .tooltiptext = Codex
