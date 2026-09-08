@@ -10,7 +10,7 @@ export interface HostReader {
   _window: ZoteroWindow;
   _iframeWindow?: Window;
   _internalReader?: { _lastView?: { _iframeWindow?: { PDFViewerApplication?: {
-    pdfViewer: { _location?: { pageNumber: number; left: number; top: number; scale: string | number } };
+    pdfViewer: { currentScaleValue: number | string; _location?: { pageNumber: number; left: number; top: number; scale: string | number } };
     eventBus?: PdfEventBus;
   } } } };
   zoomPageWidth(): void;

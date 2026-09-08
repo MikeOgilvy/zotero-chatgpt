@@ -94,7 +94,13 @@ export class NativeReaderPane implements LayoutHost {
     this.win.requestAnimationFrame(() => {
       if (generation !== this.zoomGeneration) return;
       this.pendingFixedScale = undefined;
-      this.reader.navigate({ dest: [anchor.pageIndex, { name: 'XYZ' }, anchor.left, anchor.top, typeof scale === 'number' ? scale / 100 : null] });
+      if (typeof scale === 'number') {
+        // Zotero sets ignoreDestinationZoom=true. A numeric XYZ destination
+        // cannot restore zoom; use PDF.js's native scale setter in this adapter.
+        const viewer = this.reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+        if (viewer) viewer.currentScaleValue = scale / 100;
+      }
+      this.reader.navigate({ dest: [anchor.pageIndex, { name: 'XYZ' }, anchor.left, anchor.top, null] });
     });
   }
   private observeZoom(): void {
