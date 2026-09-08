@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cp,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -50,6 +51,55 @@ async function readArchive(filePath: string): Promise<ArchiveEntry[]> {
   return entries;
 }
 
+async function createPackagingFixture(parentDirectory: string): Promise<{
+  expectedFiles: Map<string, Buffer>;
+  sourceDirectory: string;
+}> {
+  const sourceDirectory = path.join(parentDirectory, "package-source");
+  await Promise.all([
+    mkdir(path.join(sourceDirectory, "content/assets"), { recursive: true }),
+    mkdir(path.join(sourceDirectory, "locale/en-US"), { recursive: true }),
+    mkdir(path.join(sourceDirectory, "docs"), { recursive: true }),
+  ]);
+
+  const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
+  await Promise.all(
+    requiredFiles.map(async (file) => {
+      const destination = path.join(sourceDirectory, file);
+      await mkdir(path.dirname(destination), { recursive: true });
+      await cp(path.join(builtExtension, file), destination);
+    }),
+  );
+  await Promise.all([
+    writeFile(path.join(sourceDirectory, "content/assets/example.css"), "body {}\n"),
+    writeFile(
+      path.join(sourceDirectory, "locale/en-US/example.ftl"),
+      "example-label = Example\n",
+    ),
+    writeFile(
+      path.join(sourceDirectory, "docs/private-notes.txt"),
+      "must not be packaged\n",
+    ),
+  ]);
+
+  const packagedFiles = [
+    "bootstrap.js",
+    "content/assets/example.css",
+    "content/zcr.js",
+    "locale/en-US/example.ftl",
+    "manifest.json",
+  ];
+  const expectedFiles = new Map(
+    await Promise.all(
+      packagedFiles.map(async (file) => [
+        file,
+        await readFile(path.join(sourceDirectory, file)),
+      ] as const),
+    ),
+  );
+  return { expectedFiles, sourceDirectory };
+}
+
 beforeAll(async () => {
   builtExtension = await makeTemporaryDirectory();
   await execFileAsync(
@@ -75,16 +125,18 @@ afterEach(async () => {
 });
 
 describe("development XPI packaging", () => {
-  it("packages only the required runtime files with their real contents", async () => {
+  it("preserves allowed runtime files and excludes unrelated files", async () => {
     const outputDirectory = await makeTemporaryDirectory();
     const archivePath = path.join(outputDirectory, "extension.xpi");
+    const { expectedFiles, sourceDirectory } =
+      await createPackagingFixture(outputDirectory);
 
     await execFileAsync(
       process.execPath,
       [
         "scripts/package.mjs",
         "--source",
-        builtExtension,
+        sourceDirectory,
         "--output",
         archivePath,
       ],
@@ -92,17 +144,14 @@ describe("development XPI packaging", () => {
     );
 
     const entries = await readArchive(archivePath);
-    expect(entries.map(({ name }) => name).sort()).toEqual([
-      "bootstrap.js",
-      "content/zcr.js",
-      "manifest.json",
-    ]);
-    await Promise.all(
-      entries.map(async ({ name, contents }) => {
-        const builtContents = await readFile(path.join(builtExtension, name));
-        expect(contents.equals(builtContents), `${name} contents`).toBe(true);
-      }),
+    expect(entries.map(({ name }) => name).sort()).toEqual(
+      [...expectedFiles.keys()].sort(),
     );
+    for (const { name, contents } of entries) {
+      expect(contents.equals(expectedFiles.get(name)!), `${name} contents`).toBe(
+        true,
+      );
+    }
   });
 
   it("rejects a build missing a required runtime file", async () => {
