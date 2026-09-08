@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Zotero Codex Reader (Development)",
-  "version": "0.1.0a1",
+  "version": "0.1.0a2",
   "description": "Development preview for reading and discussing papers with Codex in Zotero.",
   "applications": {
     "zotero": {

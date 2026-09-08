@@ -2,6 +2,7 @@
 // Runs only in the separate test-driver addon inside the dedicated test profile.
 async function runHostSmoke(config) {
   const report = { startedAt: new Date().toISOString(), checks: [], status: 'running' };
+  report.build = { version: config.subjectVersion, sha256: config.artifactHash };
   const delay = (ms) => Zotero.Promise.delay(ms);
   const save = () => Zotero.File.putContentsAsync(config.reportPath, JSON.stringify(report, null, 2));
   const check = async (name, ok, details = {}) => {
@@ -22,6 +23,7 @@ async function runHostSmoke(config) {
     ?._iframeWindow?.PDFViewerApplication?.pdfViewer;
   const toolbar = (reader) => reader._iframeWindow?.document.querySelector('[data-zcr-toggle]');
   const viewWidth = (reader) => reader._iframeWindow?.innerWidth;
+  const click = (node) => { node.focus(); node.click(); };
   try {
     await Zotero.initializationPromise;
     await check('isolated-data-directory', Zotero.DataDirectory.dir === config.dataDir, { dataDir: Zotero.DataDirectory.dir });
@@ -30,7 +32,9 @@ async function runHostSmoke(config) {
     await Zotero.Libraries.get(Zotero.Libraries.userLibraryID).waitForDataLoad('item');
     const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
     const subject = await AddonManager.getAddonByID(config.subjectID);
-    await check('development-xpi-loaded', subject?.isActive, { version: subject?.version });
+    // A previous interrupted lifecycle test may leave this test addon disabled.
+    if (subject?.userDisabled) await subject.enable();
+    await check('development-xpi-loaded', subject?.isActive && subject.version === config.subjectVersion, { version: subject?.version });
     const parent = new Zotero.Item('book');
     parent.setField('title', 'ZCR synthetic host test - disposable');
     const notifierQueue = new Zotero.Notifier.Queue();
@@ -51,22 +55,23 @@ async function runHostSmoke(config) {
       delay(15000).then(() => { throw new Error('Reader.open timed out'); }),
     ]);
     await until(() => toolbar(reader) && pdf(reader)?._location, 'reader + plugin toolbar');
+    await (reader._internalReader._lastView || reader._internalReader._primaryView).initializedPromise;
     await delay(500);
     const button = toolbar(reader);
     const find = reader._iframeWindow.document.querySelector('button.find');
     await check('toolbar-before-find', button.getBoundingClientRect().right <= find.getBoundingClientRect().left);
     await check('single-toolbar-button', reader._iframeWindow.document.querySelectorAll('[data-zcr-toggle]').length === 1);
     win.ZoteroContextPane.collapsed = true;
-    await reader.navigate({ dest: [0, { name: 'XYZ' }, 0, 600, null] });
+    pdf(reader).scrollPageIntoView({ pageNumber: 1, destArray: [0, { name: 'XYZ' }, 0, 600, null], allowNegativeOffset: true, ignoreDestinationZoom: true });
     await delay(350);
-    reader.zoomIn();
+    click(reader._iframeWindow.document.getElementById('zoomIn'));
     await delay(300);
     report.nativeZoom = { scale: pdf(reader).currentScale, value: pdf(reader).currentScaleValue, location: { ...pdf(reader)._location } };
     await save();
     await until(() => typeof pdf(reader)?._location?.scale === 'number', 'native fixed zoom');
     await delay(150);
     const before = { width: viewWidth(reader), scale: pdf(reader).currentScale, location: { ...pdf(reader)._location } };
-    toolbar(reader).click();
+    click(toolbar(reader));
     await delay(300);
     report.openDiagnostic = {
       pressed: toolbar(reader)?.getAttribute('aria-pressed'),
@@ -104,55 +109,84 @@ async function runHostSmoke(config) {
     });
     await check('attachment-identity-from-reader', panel?.textContent.includes(first.key), { expected: first.key });
     await check('fixed-zoom-adapts-to-width', opened.scale === 'page-width', { scale: opened.scale });
-    await reader.navigate({ dest: [1, { name: 'XYZ' }, 0, 650, null] });
+    click(reader._iframeWindow.document.getElementById('next'));
+    await until(() => pdf(reader).currentPageNumber === 2, 'native next-page button');
+    pdf(reader).container.scrollTop += 180;
+    pdf(reader).update();
+    await delay(500);
+    report.navigationDiagnostic = {
+      pageNumber: pdf(reader).currentPageNumber, location: { ...pdf(reader)._location },
+      count: pdf(reader).pagesCount, scrollMode: pdf(reader).scrollMode, spreadMode: pdf(reader).spreadMode,
+      scrollTop: pdf(reader).container.scrollTop, scrollHeight: pdf(reader).container.scrollHeight,
+      viewportHeight: pdf(reader).container.clientHeight,
+      secondPageTop: pdf(reader).getPageView(1).div.offsetTop,
+      documentHidden: pdf(reader).container.ownerDocument.hidden,
+      windowHidden: win.document.hidden,
+    };
+    await save();
     await until(() => pdf(reader).currentPageNumber === 2 && pdf(reader)._location.pageNumber === 2, 'navigate to second page');
     await delay(300);
     const anchorBeforeClose = { ...pdf(reader)._location };
-    toolbar(reader).click();
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'false', 'sidebar close');
     await delay(400);
     const closed = { width: viewWidth(reader), scale: pdf(reader).currentScale, location: { ...pdf(reader)._location } };
     await check('close-restores-width-and-fixed-zoom', Math.abs(closed.width - before.width) < 3 && Math.abs(closed.scale - before.scale) < 0.01, { before, closed });
     await check('close-keeps-current-page', pdf(reader).currentPageNumber === 2, { before: anchorBeforeClose, after: closed.location, pageNumber: pdf(reader).currentPageNumber });
     await check('closing-keeps-current-anchor', Math.abs(closed.location.top - anchorBeforeClose.top) < 3, { before: anchorBeforeClose, closed: closed.location });
-    toolbar(reader).click();
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'true', 'second open');
     await delay(250);
-    reader.zoomIn();
+    click(reader._iframeWindow.document.getElementById('zoomIn'));
     await delay(250);
     const manual = pdf(reader).currentScale;
-    toolbar(reader).click();
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'false', 'second close');
     await delay(350);
     await check('manual-zoom-wins', Math.abs(pdf(reader).currentScale - manual) < 0.01, { manual, current: pdf(reader).currentScale });
-    toolbar(reader).click();
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'true', 'open before native toggle');
-    reader._iframeWindow.document.querySelector('button.context-pane-toggle').click();
+    const nativeToggle = reader._iframeWindow.document.querySelector('button.context-pane-toggle')
+      || win.document.querySelector('#zotero-context-pane-sidenav [data-action="toggle-pane"]');
+    await check('native-toggle-available', nativeToggle, { location: nativeToggle?.ownerDocument === win.document ? 'native-sidenav' : 'reader-toolbar' });
+    click(nativeToggle);
     await until(() => win.ZoteroContextPane.collapsed && toolbar(reader)?.getAttribute('aria-pressed') === 'false', 'native close clears chat mode');
-    reader._iframeWindow.document.querySelector('button.context-pane-toggle').click();
+    click(nativeToggle);
     await until(() => !win.ZoteroContextPane.collapsed, 'native context reopens');
     await delay(200);
     await check('native-toggle-shows-native-content', win.document.querySelectorAll('item-details.zcr-chat-active').length === 0);
-    toolbar(reader).click();
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'true', 'codex selects its own content');
     await check('codex-toggle-selects-chat-content', win.document.querySelectorAll('item-details.zcr-chat-active [data-zcr-sidebar]').length === 1);
-    toolbar(reader).click();
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'false', 'restore native content');
     await check('close-restores-previous-native-pane', !win.ZoteroContextPane.collapsed && win.document.querySelectorAll('item-details.zcr-chat-active').length === 0);
     for (let i = 0; i < 3; i++) {
       await subject.disable();
       await until(() => !toolbar(reader), `disable ${i}`);
+      // AddonManager returns before Zotero's async bootstrap/observer chain ends.
+      await until(() => Zotero.Reader._registeredListeners.filter(listener => listener.pluginID === config.subjectID).length === 0, `disable listener cleanup ${i}`);
+      await check(`disable-cleans-listeners-${i + 1}`, Zotero.Reader._registeredListeners.filter(listener => listener.pluginID === config.subjectID).length === 0);
       await subject.enable();
       await until(() => toolbar(reader), `enable ${i}`);
-      await check(`enable-disable-cycle-${i + 1}`, reader._iframeWindow.document.querySelectorAll('[data-zcr-toggle]').length === 1);
+      await check(`enable-disable-cycle-${i + 1}`, reader._iframeWindow.document.querySelectorAll('[data-zcr-toggle]').length === 1
+        && Zotero.Reader._registeredListeners.filter(listener => listener.pluginID === config.subjectID).length === 1);
     }
     reader = await Zotero.Reader.open(second.id);
     await until(() => toolbar(reader) && pdf(reader)?._location, 'second attachment');
-    toolbar(reader).click();
+    await (reader._internalReader._lastView || reader._internalReader._primaryView).initializedPromise;
+    click(toolbar(reader));
     await until(() => toolbar(reader)?.getAttribute('aria-pressed') === 'true', 'second attachment panel');
     await delay(300);
     const secondPanel = win.document.querySelector('item-details.zcr-chat-active [data-zcr-sidebar]');
     await check('siblings-have-distinct-identities', secondPanel?.textContent.includes(second.key) && !secondPanel?.textContent.includes(first.key), { expected: second.key });
+    await subject.uninstall();
+    await until(() => !Zotero.Reader._readers.some(current => toolbar(current)), 'uninstall removes reader controls');
+    await until(() => !win.document.querySelector('item-details.zcr-chat-active, [data-zcr-section]')
+      && Zotero.Reader._registeredListeners.filter(listener => listener.pluginID === config.subjectID).length === 0, 'uninstall native cleanup');
+    await check('uninstall-cleans-native-ui', !win.document.querySelector('item-details.zcr-chat-active, [data-zcr-section]')
+      && Zotero.Reader._registeredListeners.filter(listener => listener.pluginID === config.subjectID).length === 0);
+    await check('uninstall-removes-addon', !(await AddonManager.getAddonByID(config.subjectID)));
     report.status = 'passed';
     report.finishedAt = new Date().toISOString();
     await save();

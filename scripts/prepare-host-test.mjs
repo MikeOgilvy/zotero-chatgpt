@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { ZipFile } from 'yazl';
 import { createFixturePdf } from '../tests/fixtures/create-pdf.mjs';
 
@@ -11,7 +12,8 @@ const dev = join(root, '.zcr-dev');
 const profile = join(dev, 'profile');
 const dataDir = join(dev, 'data');
 const subjectID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
-const subjectXpi = resolve(process.argv[2] ?? join(root, 'dist/zotero-codex-reader-0.1.0a1-dev.xpi'));
+const subjectManifest = JSON.parse(await readFile(join(root, 'packages/zotero/manifest.json'), 'utf8'));
+const subjectXpi = resolve(process.argv[2] ?? join(root, `dist/zotero-codex-reader-${subjectManifest.version}-dev.xpi`));
 await stat(subjectXpi);
 const processes = execFileSync('ps', ['-axo', 'args='], { encoding: 'utf8' });
 if (processes.split('\n').some((line) => line.startsWith('/Applications/Zotero.app/Contents/MacOS/zotero ') && line.includes(` -profile ${profile}`))) {
@@ -41,7 +43,7 @@ const prefs = {
 };
 await writeFile(join(profile, 'user.js'), Object.entries(prefs).map(([key, value]) => `user_pref(${JSON.stringify(key)}, ${JSON.stringify(value)});`).join('\n') + '\n');
 await copyFile(subjectXpi, join(profile, 'extensions', `${subjectID}.xpi`));
-const config = { subjectID, dataDir, reportPath: join(dev, 'host-report.json'), pdfPath: join(dev, 'fixtures/reading.pdf') };
+const config = { subjectID, subjectVersion: subjectManifest.version, artifactHash: createHash('sha256').update(await readFile(subjectXpi)).digest('hex'), dataDir, reportPath: join(dev, 'host-report.json'), pdfPath: join(dev, 'fixtures/reading.pdf') };
 const manifest = {
   manifest_version: 2,
   name: 'ZCR isolated host test driver',
