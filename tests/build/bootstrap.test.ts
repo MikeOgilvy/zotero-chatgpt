@@ -28,6 +28,7 @@ interface LoadedBootstrap {
   >;
   resolveInitialization: () => void;
   scope: Record<string, unknown>;
+  services: object;
   windows: object[];
 }
 
@@ -53,16 +54,22 @@ async function loadBootstrap(): Promise<LoadedBootstrap> {
       moduleScope.ZoteroCodexReader = api;
     },
   );
+  const services = { scriptloader: { loadSubScript } };
   const scope: Record<string, unknown> = {
-    ChromeUtils: {
-      importESModule: () => ({ Services: { scriptloader: { loadSubScript } } }),
-    },
+    Services: services,
     Zotero: zotero,
   };
   vm.createContext(scope);
   vm.runInContext(await readFile(bootstrapPath, "utf8"), scope);
 
-  return { api, loadSubScript, resolveInitialization, scope, windows };
+  return {
+    api,
+    loadSubScript,
+    resolveInitialization,
+    scope,
+    services,
+    windows,
+  };
 }
 
 function lifecycleFunction<T>(
@@ -180,5 +187,22 @@ describe("Zotero bootstrap lifecycle", () => {
 
     expect(loaded.loadSubScript).not.toHaveBeenCalled();
     expect(loaded.api.startup).not.toHaveBeenCalled();
+  });
+
+  it("uses Zotero's injected Services global without clearing it", async () => {
+    const loaded = await loadBootstrap();
+    loaded.resolveInitialization();
+    const startup = lifecycleFunction<
+      (context: { id: string; rootURI: string }) => Promise<void>
+    >(loaded.scope, "startup");
+    const shutdown = lifecycleFunction<() => Promise<void>>(
+      loaded.scope,
+      "shutdown",
+    );
+
+    await startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    await shutdown();
+
+    expect(loaded.scope.Services).toBe(loaded.services);
   });
 });

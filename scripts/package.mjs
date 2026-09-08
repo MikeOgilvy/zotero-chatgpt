@@ -11,6 +11,14 @@ const defaultArchivePath = path.join(
   "dist/zotero-codex-reader-0.1.0a1-dev.xpi",
 );
 const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
+const requiredManifestFields = [
+  ["name"],
+  ["version"],
+  ["applications", "zotero", "id"],
+  ["applications", "zotero", "strict_min_version"],
+  ["applications", "zotero", "strict_max_version"],
+  ["applications", "zotero", "update_url"],
+];
 const fixedLocalTimestamp = new Date(1980, 0, 1, 0, 0, 0, 0);
 
 function requireNode24() {
@@ -77,6 +85,36 @@ async function validateRequiredFiles(sourceDirectory) {
   }
 }
 
+function nestedValue(object, pathSegments) {
+  let value = object;
+  for (const segment of pathSegments) {
+    if (!value || typeof value !== "object" || !(segment in value)) {
+      return undefined;
+    }
+    value = value[segment];
+  }
+  return value;
+}
+
+async function validateManifest(sourceDirectory) {
+  const manifestPath = path.join(sourceDirectory, "manifest.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error("Invalid Zotero manifest JSON", { cause: error });
+  }
+
+  for (const fieldPath of requiredManifestFields) {
+    const value = nestedValue(manifest, fieldPath);
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(
+        `Missing required Zotero manifest field: ${fieldPath.join(".")}`,
+      );
+    }
+  }
+}
+
 async function writeArchive(sourceDirectory, archivePath, files) {
   await mkdir(path.dirname(archivePath), { recursive: true });
   const zipFile = new yazl.ZipFile();
@@ -104,6 +142,7 @@ async function main() {
   const sourceDirectory = readOption("--source", defaultSourceDirectory);
   const archivePath = readOption("--output", defaultArchivePath);
   await validateRequiredFiles(sourceDirectory);
+  await validateManifest(sourceDirectory);
   const files = (await listFiles(sourceDirectory)).filter(isRuntimeFile).sort();
   await writeArchive(sourceDirectory, archivePath, files);
   console.log(`Packaged development XPI at ${archivePath}`);

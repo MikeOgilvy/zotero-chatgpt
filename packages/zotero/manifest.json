@@ -7,7 +7,8 @@
     "zotero": {
       "id": "{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}",
       "strict_min_version": "9.0.6",
-      "strict_max_version": "9.0.*"
+      "strict_max_version": "9.0.*",
+      "update_url": "https://zcr-dev.invalid/updates.json"
     }
   }
 }

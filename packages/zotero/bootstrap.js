@@ -1,6 +1,5 @@
 var ZoteroCodexReader;
 var Zotero;
-var Services;
 var scriptScope;
 var startupTask;
 var shutdownRequested = false;
@@ -16,10 +15,6 @@ async function startup({ id, rootURI }) {
 }
 
 async function initialize({ id, rootURI }) {
-  Services = ChromeUtils.importESModule(
-    "resource://gre/modules/Services.sys.mjs",
-  ).Services;
-
   await Zotero.initializationPromise;
   if (shutdownRequested) {
     return;
@@ -101,7 +96,6 @@ async function shutdown() {
   registeredWindows.clear();
   ZoteroCodexReader = undefined;
   scriptScope = undefined;
-  Services = undefined;
   startupTask = undefined;
 }
 

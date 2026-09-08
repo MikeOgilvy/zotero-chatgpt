@@ -139,6 +139,47 @@ describe("development XPI packaging", () => {
     expect(stderr).toContain("Missing required runtime file: bootstrap.js");
   });
 
+  it("rejects a manifest missing Zotero's required update URL", async () => {
+    const testDirectory = await makeTemporaryDirectory();
+    const incompleteBuild = path.join(testDirectory, "incomplete-manifest");
+    await cp(builtExtension, incompleteBuild, { recursive: true });
+    const manifestPath = path.join(incompleteBuild, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      applications: { zotero: { update_url?: string } };
+    };
+    delete manifest.applications.zotero.update_url;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    let stderr = "";
+    try {
+      await execFileAsync(
+        process.execPath,
+        [
+          "scripts/package.mjs",
+          "--source",
+          incompleteBuild,
+          "--output",
+          path.join(testDirectory, "invalid-manifest.xpi"),
+        ],
+        { cwd: repositoryRoot },
+      );
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        "stderr" in error &&
+        typeof error.stderr === "string"
+      ) {
+        stderr = error.stderr;
+      } else {
+        throw error;
+      }
+    }
+
+    expect(stderr).toContain(
+      "Missing required Zotero manifest field: applications.zotero.update_url",
+    );
+  });
+
   it("produces byte-identical archives from unchanged input", async () => {
     const outputDirectory = await makeTemporaryDirectory();
     const firstArchive = path.join(outputDirectory, "first.xpi");
