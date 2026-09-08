@@ -50,6 +50,16 @@ describe('native dock ownership', () => {
     const opening = controller.toggle(); await controller.toggle(); resolve(true); await opening;
     expect(state.chat).toBe(false); expect(state.pressed).toBe(false); expect(state.dock.collapsed).toBe(true);
   });
+  it('adapts at the current anchor when reading continues during mounting', async () => {
+    const { state, controller, deferMount } = setup();
+    let resolve!: (value: boolean) => void;
+    deferMount(() => new Promise<boolean>(done => { resolve = done; }));
+    const opening = controller.toggle();
+    state.position.anchor = { pageIndex: 7, left: 14, top: 210 };
+    resolve(true); await opening;
+    expect(state.zooms[0]).toEqual({ scale: 'page-width', anchor: { pageIndex: 7, left: 14, top: 210 } });
+    controller.close(); expect(state.position.scale).toBe(125);
+  });
   it('restores the dock after a failed mount', async () => {
     const { state, controller, deferMount } = setup(); deferMount(() => Promise.resolve(false));
     await controller.toggle(); expect(state.dock.collapsed).toBe(true); expect(state.pressed).toBe(false);

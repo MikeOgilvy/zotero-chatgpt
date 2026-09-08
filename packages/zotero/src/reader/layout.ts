@@ -38,7 +38,8 @@ export class ReaderLayoutController {
         return;
       }
       if (!ready) { this.close(); return; }
-      if (this.previousFixedScale !== undefined && position) this.host.setZoom('page-width', position.anchor);
+      const currentPosition = this.host.capturePosition();
+      if (this.previousFixedScale !== undefined && currentPosition) this.host.setZoom('page-width', currentPosition.anchor);
       this.host.setActive(true);
     } catch (error) {
       if (generation === this.generation) this.close();
