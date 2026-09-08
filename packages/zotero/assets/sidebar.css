@@ -1,0 +1,28 @@
+/* Scoped to the registered section: removing zcr-chat-active restores native panes. */
+item-details.zcr-chat-active .zotero-view-item-main > item-pane-header,
+item-details.zcr-chat-active #zotero-view-item > :not([data-zcr-section]) {
+  display: none !important;
+}
+item-details.zcr-chat-active .zotero-view-item-main,
+item-details.zcr-chat-active #zotero-view-item,
+item-details.zcr-chat-active [data-zcr-section],
+item-details.zcr-chat-active [data-zcr-section] > collapsible-section,
+item-details.zcr-chat-active [data-zcr-section] [data-type="body"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+item-details.zcr-chat-active #zotero-view-item { overflow: hidden; padding: 0; }
+item-details.zcr-chat-active [data-zcr-section] > collapsible-section > .head { display: none; }
+item-details.zcr-chat-active [data-zcr-section] [data-type="body"] { padding: 0; }
+.zcr-sidebar { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; font: inherit; color: var(--fill-primary, CanvasText); background: var(--material-background, Canvas); padding: 12px; box-sizing: border-box; overflow: auto; }
+.zcr-sidebar header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-panedivider, GrayText); padding-bottom: 8px; gap: 8px; }
+.zcr-sidebar header button { font: inherit; background: transparent; color: inherit; border: 0; border-radius: 4px; min-width: 24px; min-height: 24px; }
+.zcr-sidebar header button:hover { background: var(--fill-quinary, ButtonFace); }
+.zcr-sidebar h2 { font: inherit; font-weight: 600; margin: 14px 0 4px; overflow-wrap: anywhere; }
+.zcr-identity { color: var(--fill-secondary, GrayText); margin: 0; font-size: .9em; overflow-wrap: anywhere; }
+.zcr-status { margin: 24px 0; line-height: 1.5; }
+.zcr-status p { margin-top: 8px; }
+.zcr-sidebar footer { margin-top: auto; padding-top: 16px; color: var(--fill-secondary, GrayText); font-size: .9em; }

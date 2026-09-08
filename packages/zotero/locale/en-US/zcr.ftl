@@ -1,0 +1,1 @@
+zcr-pane-title = Codex
