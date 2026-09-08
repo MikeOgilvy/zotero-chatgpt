@@ -73,7 +73,8 @@ export function onMainWindowLoad(window: Window): void {
   const css = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
   css.setAttribute('rel', 'stylesheet'); css.setAttribute('href', `${context.rootURI}content/assets/sidebar.css`);
   const locale = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
-  locale.setAttribute('rel', 'localization'); locale.setAttribute('href', `${context.rootURI}locale/en-US/zcr.ftl`);
+  // Zotero registers plugin locale files by resource basename, not absolute URI.
+  locale.setAttribute('rel', 'localization'); locale.setAttribute('href', 'zcr.ftl');
   doc.documentElement.append(css, locale);
   const onNativeClick = (event: Event) => {
     const target = event.target as Element | null;

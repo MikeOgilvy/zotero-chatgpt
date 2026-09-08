@@ -21,6 +21,7 @@ export class NativeReaderPane implements LayoutHost {
   private alive = true;
   private expectedPreset: string | undefined;
   private zoomGeneration = 0;
+  private pendingFixedScale: number | undefined;
   private disconnectZoom: (() => void) | undefined;
   constructor(private zotero: ZoteroHost, readonly reader: HostReader, private paneID: string, private buttons: Set<HTMLButtonElement>) {}
   private get win(): ZoteroWindow { return this.reader._window; }
@@ -37,8 +38,14 @@ export class NativeReaderPane implements LayoutHost {
     const context = this.win.ZoteroContextPane!;
     return { collapsed: context.collapsed, mode: context.context.mode, scrollTop: this.currentDetails()?.querySelector('#zotero-view-item')?.scrollTop ?? 0 };
   }
-  capturePosition(): ViewPosition | undefined { return capturePosition(this.reader); }
+  capturePosition(): ViewPosition | undefined {
+    const position = capturePosition(this.reader);
+    // A reopen inherits the restoration target even before the queued native call.
+    return position && { ...position, scale: this.pendingFixedScale ?? position.scale };
+  }
   showDock(): void {
+    ++this.zoomGeneration;
+    this.pendingFixedScale = undefined;
     const context = this.win.ZoteroContextPane!;
     context.context.mode = 'item'; context.collapsed = false;
   }
@@ -78,6 +85,7 @@ export class NativeReaderPane implements LayoutHost {
   private focusButton(): void { Array.from(this.buttons).find(button => button.isConnected)?.focus(); }
   setZoom(scale: Scale, anchor: Anchor): void {
     const generation = ++this.zoomGeneration;
+    this.pendingFixedScale = typeof scale === 'number' ? scale : undefined;
     this.expectedPreset = typeof scale === 'string' ? scale : undefined;
     if (scale === 'page-width') this.reader.zoomPageWidth();
     else if (scale === 'page-fit') this.reader.zoomPageHeight();
@@ -85,6 +93,7 @@ export class NativeReaderPane implements LayoutHost {
     // Native preset methods resize the canvas. Restore the PDF anchor after layout settles.
     this.win.requestAnimationFrame(() => {
       if (generation !== this.zoomGeneration) return;
+      this.pendingFixedScale = undefined;
       this.reader.navigate({ dest: [anchor.pageIndex, { name: 'XYZ' }, anchor.left, anchor.top, typeof scale === 'number' ? scale / 100 : null] });
     });
   }
