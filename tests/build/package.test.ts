@@ -162,4 +162,27 @@ describe("development XPI packaging", () => {
       digest(await readFile(firstArchive)),
     );
   });
+
+  it("produces byte-identical archives across process timezones", async () => {
+    const outputDirectory = await makeTemporaryDirectory();
+    const utcArchive = path.join(outputDirectory, "utc.xpi");
+    const shanghaiArchive = path.join(outputDirectory, "shanghai.xpi");
+    const packageInTimezone = async (timezone: string, archivePath: string) => {
+      await execFileAsync(
+        process.execPath,
+        ["scripts/package.mjs", "--source", builtExtension, "--output", archivePath],
+        {
+          cwd: repositoryRoot,
+          env: { ...process.env, TZ: timezone },
+        },
+      );
+    };
+
+    await packageInTimezone("UTC", utcArchive);
+    await packageInTimezone("Asia/Shanghai", shanghaiArchive);
+
+    expect((await readFile(utcArchive)).equals(await readFile(shanghaiArchive))).toBe(
+      true,
+    );
+  });
 });

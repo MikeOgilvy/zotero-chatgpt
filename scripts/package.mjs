@@ -11,7 +11,7 @@ const defaultArchivePath = path.join(
   "dist/zotero-codex-reader-0.1.0a1-dev.xpi",
 );
 const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
-const fixedTimestamp = new Date("1980-01-01T00:00:00.000Z");
+const fixedLocalTimestamp = new Date(1980, 0, 1, 0, 0, 0, 0);
 
 function requireNode24() {
   if (process.versions.node.split(".")[0] !== "24") {
@@ -91,7 +91,8 @@ async function writeArchive(sourceDirectory, archivePath, files) {
   for (const file of files) {
     zipFile.addBuffer(await readFile(path.join(sourceDirectory, file)), file, {
       mode: 0o100644,
-      mtime: fixedTimestamp,
+      mtime: fixedLocalTimestamp,
+      forceDosTimestamp: true,
     });
   }
   zipFile.end();

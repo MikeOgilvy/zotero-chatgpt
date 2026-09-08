@@ -136,4 +136,49 @@ describe("Zotero bootstrap lifecycle", () => {
     ).toEqual(loaded.windows);
     expect(loaded.api.shutdown).toHaveBeenCalledOnce();
   });
+
+  it("registers a window arriving during startup exactly once", async () => {
+    const loaded = await loadBootstrap();
+    const arrivingWindow = { name: "arriving" };
+    loaded.windows.splice(0, loaded.windows.length, arrivingWindow);
+    const startup = lifecycleFunction<
+      (context: { id: string; rootURI: string }) => Promise<void>
+    >(loaded.scope, "startup");
+    const onMainWindowLoad = lifecycleFunction<
+      (data: { window: object }) => Promise<void>
+    >(loaded.scope, "onMainWindowLoad");
+
+    const started = startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    const hookOutcome = onMainWindowLoad({ window: arrivingWindow }).then(
+      () => "resolved",
+      (error: unknown) =>
+        error instanceof Error ? `rejected: ${error.message}` : "rejected",
+    );
+    loaded.resolveInitialization();
+
+    await started;
+    expect(await hookOutcome).toBe("resolved");
+    expect(
+      loaded.api.onMainWindowLoad.mock.calls.map(([window]) => window),
+    ).toEqual([arrivingWindow]);
+  });
+
+  it("cancels a pending startup when shutdown begins", async () => {
+    const loaded = await loadBootstrap();
+    const startup = lifecycleFunction<
+      (context: { id: string; rootURI: string }) => Promise<void>
+    >(loaded.scope, "startup");
+    const shutdown = lifecycleFunction<() => Promise<void>>(
+      loaded.scope,
+      "shutdown",
+    );
+
+    const started = startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    const stopped = shutdown();
+    loaded.resolveInitialization();
+    await Promise.all([started, stopped]);
+
+    expect(loaded.loadSubScript).not.toHaveBeenCalled();
+    expect(loaded.api.startup).not.toHaveBeenCalled();
+  });
 });
