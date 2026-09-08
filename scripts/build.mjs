@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { build } from "esbuild";
+import { copyBundledRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const zoteroPackage = path.join(repositoryRoot, "packages/zotero");
@@ -63,12 +64,13 @@ export function bundleOptions(outputDirectory) {
   };
 }
 
-export async function buildDevelopmentExtension(outputDirectory = defaultOutputDirectory) {
+export async function buildDevelopmentExtension(outputDirectory = defaultOutputDirectory, options = {}) {
   requireNode24();
   await rm(outputDirectory, { force: true, recursive: true });
   await mkdir(path.join(outputDirectory, "content"), { recursive: true });
   await Promise.all([
     copyStaticFiles(outputDirectory),
+    copyBundledRuntime(outputDirectory, options.runtime),
     build(bundleOptions(outputDirectory)),
   ]);
 }

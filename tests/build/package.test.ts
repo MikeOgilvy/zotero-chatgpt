@@ -7,7 +7,6 @@ import {
   readdir,
   readFile,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -65,6 +64,7 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
   ]);
 
   const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
+  await cp(path.join(builtExtension, "content/runtime"), path.join(sourceDirectory, "content/runtime"), { recursive: true });
   await Promise.all(
     requiredFiles.map(async (file) => {
       const destination = path.join(sourceDirectory, file);
@@ -88,6 +88,12 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
     "bootstrap.js",
     "content/assets/example.css",
     "content/zcr.js",
+    "content/runtime/codex-aarch64-apple-darwin",
+    "content/runtime/manifest.json",
+    "content/runtime/licenses/LICENSE",
+    "content/runtime/licenses/NOTICE",
+    "content/runtime/licenses/RATATUI-LICENSE",
+    "content/runtime/licenses/WEZTERM-LICENSE",
     "locale/en-US/example.ftl",
     "manifest.json",
   ];
@@ -106,7 +112,7 @@ beforeAll(async () => {
   builtExtension = await makeTemporaryDirectory();
   await execFileAsync(
     process.execPath,
-    ["scripts/build.mjs", "--outdir", builtExtension],
+    ["tests/runtime/package-fixture.mjs", "build", "--outdir", builtExtension],
     { cwd: repositoryRoot },
   );
 });
@@ -136,7 +142,7 @@ describe("development XPI packaging", () => {
     await execFileAsync(
       process.execPath,
       [
-        "scripts/package.mjs",
+        "tests/runtime/package-fixture.mjs", "package",
         "--source",
         sourceDirectory,
         "--output",
@@ -167,7 +173,7 @@ describe("development XPI packaging", () => {
       await execFileAsync(
         process.execPath,
         [
-          "scripts/package.mjs",
+          "tests/runtime/package-fixture.mjs", "package",
           "--source",
           incompleteBuild,
           "--output",
@@ -206,7 +212,7 @@ describe("development XPI packaging", () => {
       await execFileAsync(
         process.execPath,
         [
-          "scripts/package.mjs",
+          "tests/runtime/package-fixture.mjs", "package",
           "--source",
           incompleteBuild,
           "--output",
@@ -241,22 +247,10 @@ describe("development XPI packaging", () => {
     manifest.version = "0.1.0a42";
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-    const isolatedScriptDirectory = path.join(testDirectory, "scripts");
-    await mkdir(isolatedScriptDirectory, { recursive: true });
-    await cp(
-      path.join(repositoryRoot, "scripts/package.mjs"),
-      path.join(isolatedScriptDirectory, "package.mjs"),
-    );
-    await symlink(
-      path.join(repositoryRoot, "node_modules"),
-      path.join(testDirectory, "node_modules"),
-      "dir",
-    );
-
     await execFileAsync(
       process.execPath,
-      [path.join(isolatedScriptDirectory, "package.mjs"), "--source", sourceDirectory],
-      { cwd: testDirectory },
+      ["tests/runtime/package-fixture.mjs", "package", "--source", sourceDirectory, "--repository", testDirectory],
+      { cwd: repositoryRoot },
     );
 
     expect(await readdir(path.join(testDirectory, "dist"))).toEqual([
@@ -271,13 +265,13 @@ describe("development XPI packaging", () => {
 
     await execFileAsync(
       process.execPath,
-      ["scripts/package.mjs", "--source", builtExtension, "--output", firstArchive],
+      ["tests/runtime/package-fixture.mjs", "package", "--source", builtExtension, "--output", firstArchive],
       { cwd: repositoryRoot },
     );
     await writeFile(path.join(builtExtension, "timestamp-noise"), new Date().toISOString());
     await execFileAsync(
       process.execPath,
-      ["scripts/package.mjs", "--source", builtExtension, "--output", secondArchive],
+      ["tests/runtime/package-fixture.mjs", "package", "--source", builtExtension, "--output", secondArchive],
       { cwd: repositoryRoot },
     );
 
@@ -295,7 +289,7 @@ describe("development XPI packaging", () => {
     const packageInTimezone = async (timezone: string, archivePath: string) => {
       await execFileAsync(
         process.execPath,
-        ["scripts/package.mjs", "--source", builtExtension, "--output", archivePath],
+        ["tests/runtime/package-fixture.mjs", "package", "--source", builtExtension, "--output", archivePath],
         {
           cwd: repositoryRoot,
           env: { ...process.env, TZ: timezone },

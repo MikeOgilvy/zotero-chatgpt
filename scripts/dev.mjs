@@ -4,6 +4,7 @@ import path from "node:path";
 import { context } from "esbuild";
 
 import { bundleOptions, copyStaticFiles } from "./build.mjs";
+import { copyBundledRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const sourceDirectory = path.join(repositoryRoot, "packages/zotero");
@@ -16,6 +17,7 @@ if (process.versions.node.split(".")[0] !== "24") {
 await rm(outputDirectory, { force: true, recursive: true });
 await mkdir(path.join(outputDirectory, "content"), { recursive: true });
 await copyStaticFiles(outputDirectory);
+await copyBundledRuntime(outputDirectory);
 
 const buildContext = await context(bundleOptions(outputDirectory));
 await buildContext.watch();

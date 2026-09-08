@@ -1,8 +1,10 @@
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import yazl from "yazl";
+import { PINNED_RUNTIME, validatePackagedRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
@@ -52,7 +54,8 @@ async function listFiles(directory, prefix = "") {
   return files;
 }
 
-function isRuntimeFile(filePath) {
+function isRuntimeFile(filePath, runtimeManifest) {
+  if (filePath.startsWith("content/runtime/")) return [runtimeManifest.entry, "content/runtime/manifest.json", ...runtimeManifest.licenses.map(name => "content/runtime/licenses/" + name)].includes(filePath);
   return (
     filePath === "bootstrap.js" ||
     filePath === "manifest.json" ||
@@ -124,7 +127,7 @@ async function writeArchive(sourceDirectory, archivePath, files) {
 
   zipFile.outputStream.pipe(output);
   for (const file of files) {
-    zipFile.addBuffer(await readFile(path.join(sourceDirectory, file)), file, {
+    zipFile.addFile(path.join(sourceDirectory, file), file, {
       mode: 0o100644,
       mtime: fixedLocalTimestamp,
       forceDosTimestamp: true,
@@ -134,24 +137,23 @@ async function writeArchive(sourceDirectory, archivePath, files) {
   await completion;
 }
 
-async function main() {
+export async function packageExtension(sourceDirectory = defaultSourceDirectory, requestedArchivePath, options = {}) {
   requireNode24();
-  const sourceDirectory = readOption("--source", defaultSourceDirectory);
-  const requestedArchivePath = readOption("--output", undefined);
   await validateRequiredFiles(sourceDirectory);
   const manifest = await validateManifest(sourceDirectory);
-  const archivePath =
-    requestedArchivePath ??
-    path.join(
-      repositoryRoot,
-      `dist/zotero-codex-reader-${manifest.version}-dev.xpi`,
-    );
-  const files = (await listFiles(sourceDirectory)).filter(isRuntimeFile).sort();
+  const runtimeManifest = options.runtimeManifest ?? PINNED_RUNTIME;
+  await validatePackagedRuntime(sourceDirectory, runtimeManifest);
+  const archivePath = requestedArchivePath ?? path.join(options.repositoryRoot ?? repositoryRoot, `dist/zotero-codex-reader-${manifest.version}-dev.xpi`);
+  const files = (await listFiles(sourceDirectory)).filter(file => isRuntimeFile(file, runtimeManifest)).sort();
   await writeArchive(sourceDirectory, archivePath, files);
+  return archivePath;
+}
+async function main() {
+  const archivePath = await packageExtension(readOption("--source", defaultSourceDirectory), readOption("--output", undefined));
   console.log(`Packaged development XPI at ${archivePath}`);
 }
 
-main().catch((error) => {
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) main().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

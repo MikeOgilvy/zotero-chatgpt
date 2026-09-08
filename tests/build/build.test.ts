@@ -31,10 +31,11 @@ describe("development build", () => {
 
     await execFileAsync(
       process.execPath,
-      ["scripts/build.mjs", "--outdir", outputDirectory],
+      ["tests/runtime/package-fixture.mjs", "build", "--outdir", outputDirectory],
       { cwd: repositoryRoot },
     );
 
+    expect(await readFile(path.join(outputDirectory, "content/runtime/codex-aarch64-apple-darwin"), "utf8")).toBe("abc");
     const [bundle, manifest, bootstrap] = await Promise.all([
       readFile(path.join(outputDirectory, "content/zcr.js"), "utf8"),
       readFile(path.join(outputDirectory, "manifest.json"), "utf8"),
