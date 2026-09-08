@@ -6,10 +6,6 @@ import yazl from "yazl";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
-const defaultArchivePath = path.join(
-  repositoryRoot,
-  "dist/zotero-codex-reader-0.1.0a1-dev.xpi",
-);
 const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
 const requiredManifestFields = [
   ["name"],
@@ -113,6 +109,7 @@ async function validateManifest(sourceDirectory) {
       );
     }
   }
+  return manifest;
 }
 
 async function writeArchive(sourceDirectory, archivePath, files) {
@@ -140,9 +137,15 @@ async function writeArchive(sourceDirectory, archivePath, files) {
 async function main() {
   requireNode24();
   const sourceDirectory = readOption("--source", defaultSourceDirectory);
-  const archivePath = readOption("--output", defaultArchivePath);
+  const requestedArchivePath = readOption("--output", undefined);
   await validateRequiredFiles(sourceDirectory);
-  await validateManifest(sourceDirectory);
+  const manifest = await validateManifest(sourceDirectory);
+  const archivePath =
+    requestedArchivePath ??
+    path.join(
+      repositoryRoot,
+      `dist/zotero-codex-reader-${manifest.version}-dev.xpi`,
+    );
   const files = (await listFiles(sourceDirectory)).filter(isRuntimeFile).sort();
   await writeArchive(sourceDirectory, archivePath, files);
   console.log(`Packaged development XPI at ${archivePath}`);

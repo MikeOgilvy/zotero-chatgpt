@@ -55,7 +55,13 @@ describe("development build", () => {
       expect(api[method], method).toBeTypeOf("function");
     }
 
-    const parsedManifest: unknown = JSON.parse(manifest);
+    const parsedManifest = JSON.parse(manifest) as { version?: unknown };
+    const sourceManifest = JSON.parse(
+      await readFile(
+        path.join(repositoryRoot, "packages/zotero/manifest.json"),
+        "utf8",
+      ),
+    ) as { version?: unknown };
     expect(parsedManifest).toMatchObject({
       applications: {
         zotero: {
@@ -65,8 +71,8 @@ describe("development build", () => {
         },
       },
       name: "Zotero Codex Reader (Development)",
-      version: "0.1.0a1",
     });
+    expect(parsedManifest.version).toBe(sourceManifest.version);
     expect(bootstrap.length).toBeGreaterThan(0);
   });
 });

@@ -4,8 +4,10 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -227,6 +229,39 @@ describe("development XPI packaging", () => {
     expect(stderr).toContain(
       "Missing required Zotero manifest field: applications.zotero.update_url",
     );
+  });
+
+  it("derives the default archive name from the validated manifest version", async () => {
+    const testDirectory = await makeTemporaryDirectory();
+    const { sourceDirectory } = await createPackagingFixture(testDirectory);
+    const manifestPath = path.join(sourceDirectory, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      version: string;
+    };
+    manifest.version = "0.1.0a42";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const isolatedScriptDirectory = path.join(testDirectory, "scripts");
+    await mkdir(isolatedScriptDirectory, { recursive: true });
+    await cp(
+      path.join(repositoryRoot, "scripts/package.mjs"),
+      path.join(isolatedScriptDirectory, "package.mjs"),
+    );
+    await symlink(
+      path.join(repositoryRoot, "node_modules"),
+      path.join(testDirectory, "node_modules"),
+      "dir",
+    );
+
+    await execFileAsync(
+      process.execPath,
+      [path.join(isolatedScriptDirectory, "package.mjs"), "--source", sourceDirectory],
+      { cwd: testDirectory },
+    );
+
+    expect(await readdir(path.join(testDirectory, "dist"))).toEqual([
+      "zotero-codex-reader-0.1.0a42-dev.xpi",
+    ]);
   });
 
   it("produces byte-identical archives from unchanged input", async () => {
