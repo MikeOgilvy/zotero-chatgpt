@@ -1,0 +1,13 @@
+{
+  "manifest_version": 2,
+  "name": "Zotero Codex Reader (Development)",
+  "version": "0.1.0a1",
+  "description": "Development preview for reading and discussing papers with Codex in Zotero.",
+  "applications": {
+    "zotero": {
+      "id": "{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}",
+      "strict_min_version": "9.0.6",
+      "strict_max_version": "9.0.*"
+    }
+  }
+}

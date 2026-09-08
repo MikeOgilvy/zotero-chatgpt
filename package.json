@@ -1,0 +1,35 @@
+{
+  "name": "zotero-codex-reader",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.6.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint packages scripts tests eslint.config.mjs vitest.config.ts",
+    "test:unit": "vitest run",
+    "package:dev": "npm run build && node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.5.0",
+    "@types/yauzl": "3.4.0",
+    "@types/yazl": "3.3.0",
+    "eslint": "10.10.0",
+    "esbuild": "0.28.2",
+    "globals": "17.12.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.0",
+    "yauzl": "3.4.0",
+    "yazl": "3.3.1"
+  }
+}

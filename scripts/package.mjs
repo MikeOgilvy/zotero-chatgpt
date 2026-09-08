@@ -1,0 +1,114 @@
+import { createWriteStream } from "node:fs";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import path from "node:path";
+
+import yazl from "yazl";
+
+const repositoryRoot = path.resolve(import.meta.dirname, "..");
+const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
+const defaultArchivePath = path.join(
+  repositoryRoot,
+  "dist/zotero-codex-reader-0.1.0a1-dev.xpi",
+);
+const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
+const fixedTimestamp = new Date("1980-01-01T00:00:00.000Z");
+
+function requireNode24() {
+  if (process.versions.node.split(".")[0] !== "24") {
+    throw new Error(`Node 24 is required; found ${process.versions.node}`);
+  }
+}
+
+function readOption(name, fallback) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) {
+    return fallback;
+  }
+
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${name} requires a value`);
+  }
+  return path.resolve(value);
+}
+
+async function listFiles(directory, prefix = "") {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const archivePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(filePath, archivePath)));
+    } else if (entry.isFile()) {
+      files.push(archivePath);
+    }
+  }
+  return files;
+}
+
+function isRuntimeFile(filePath) {
+  return (
+    filePath === "bootstrap.js" ||
+    filePath === "manifest.json" ||
+    filePath.startsWith("content/") ||
+    filePath.startsWith("locale/") ||
+    filePath.startsWith("locales/")
+  );
+}
+
+async function validateRequiredFiles(sourceDirectory) {
+  for (const requiredFile of requiredFiles) {
+    const filePath = path.join(sourceDirectory, requiredFile);
+    try {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile()) {
+        throw new Error(`Missing required runtime file: ${requiredFile}`);
+      }
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ENOENT") {
+        throw new Error(`Missing required runtime file: ${requiredFile}`, {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+  }
+}
+
+async function writeArchive(sourceDirectory, archivePath, files) {
+  await mkdir(path.dirname(archivePath), { recursive: true });
+  const zipFile = new yazl.ZipFile();
+  const output = createWriteStream(archivePath, { flags: "w" });
+  const completion = new Promise((resolve, reject) => {
+    output.on("close", resolve);
+    output.on("error", reject);
+    zipFile.outputStream.on("error", reject);
+  });
+
+  zipFile.outputStream.pipe(output);
+  for (const file of files) {
+    zipFile.addBuffer(await readFile(path.join(sourceDirectory, file)), file, {
+      mode: 0o100644,
+      mtime: fixedTimestamp,
+    });
+  }
+  zipFile.end();
+  await completion;
+}
+
+async function main() {
+  requireNode24();
+  const sourceDirectory = readOption("--source", defaultSourceDirectory);
+  const archivePath = readOption("--output", defaultArchivePath);
+  await validateRequiredFiles(sourceDirectory);
+  const files = (await listFiles(sourceDirectory)).filter(isRuntimeFile).sort();
+  await writeArchive(sourceDirectory, archivePath, files);
+  console.log(`Packaged development XPI at ${archivePath}`);
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

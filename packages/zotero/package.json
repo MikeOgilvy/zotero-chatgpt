@@ -1,0 +1,10 @@
+{
+  "name": "@zotero-codex-reader/zotero",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@zotero-codex-reader/contracts": "0.1.0-alpha.1",
+    "@zotero-codex-reader/core": "0.1.0-alpha.1"
+  }
+}
