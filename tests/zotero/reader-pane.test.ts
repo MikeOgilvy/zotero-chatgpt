@@ -8,6 +8,7 @@ it('restores fixed scale across rapid reopen when Zotero ignores destination zoo
   const scales: number[] = [];
   const pdfViewer = { _location: location,
     set currentScaleValue(value: number) { scales.push(value); location.scale = value * 100; },
+    scrollPageIntoView: ({ pageNumber }: { pageNumber: number }) => { location.pageNumber = pageNumber; },
   };
   const reader: HostReader = {
     itemID: 42, tabID: 'pdf-tab', type: 'pdf', _window: win,
@@ -30,4 +31,41 @@ it('restores fixed scale across rapid reopen when Zotero ignores destination zoo
   pane.controller.close(); flushFrames();
   expect(location.scale).toBe(125);
   expect(scales).toEqual([1.25]);
+});
+it('restores the current page without delayed link-navigation focus from the opening page', async () => {
+  const frames: FrameRequestCallback[] = [];
+  const location = { pageNumber: 1, left: -11, top: 600, scale: 210 as string | number };
+  const textLayerFocus: (() => void)[] = [];
+  const operations: string[] = [];
+  const win = { ZoteroContextPane: { collapsed: true, context: { mode: 'item' } }, requestAnimationFrame: (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; } } as ZoteroWindow;
+  const viewer = { _location: location,
+    set currentScaleValue(value: number) {
+      operations.push('scale'); location.scale = value * 100;
+      // A scale change renders old pages again. Link-service destinations left
+      // textlayerrendered callbacks that can focus and scroll the opening page.
+      for (const focus of textLayerFocus.splice(0)) frames.push(() => focus());
+    },
+    scrollPageIntoView: ({ pageNumber, destArray, allowNegativeOffset }: { pageNumber: number; destArray: [number, { name: string }, number, number, null]; allowNegativeOffset: boolean }) => {
+      operations.push('anchor'); location.pageNumber = pageNumber;
+      location.left = allowNegativeOffset ? destArray[2] : Math.max(0, destArray[2]); location.top = destArray[3];
+    },
+  };
+  const reader: HostReader = {
+    itemID: 42, tabID: 'pdf-tab', type: 'pdf', _window: win,
+    _internalReader: { _lastView: { _iframeWindow: { PDFViewerApplication: { pdfViewer: viewer } } } },
+    zoomPageWidth: () => { location.scale = 'page-width'; }, zoomPageHeight: () => {}, zoomAuto: () => {},
+    navigate: ({ dest }) => { location.pageNumber = dest[0] + 1; textLayerFocus.push(() => { location.pageNumber = dest[0] + 1; }); },
+  };
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set());
+  vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0 });
+  vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
+  vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
+  const flushFrames = () => { for (const callback of frames.splice(0)) callback(0); };
+  await pane.controller.toggle(); flushFrames();
+  location.pageNumber = 2; location.top = 651;
+  operations.length = 0;
+  pane.controller.close(); flushFrames(); flushFrames();
+  expect(location).toEqual({ pageNumber: 2, left: -11, top: 651, scale: 210 });
+  expect(operations).toEqual(['scale', 'anchor']);
+  expect(textLayerFocus).toHaveLength(0);
 });
