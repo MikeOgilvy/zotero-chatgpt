@@ -13,7 +13,10 @@ const profile = join(dev, 'profile');
 const dataDir = join(dev, 'data');
 const subjectID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
 const subjectManifest = JSON.parse(await readFile(join(root, 'packages/zotero/manifest.json'), 'utf8'));
-const subjectXpi = resolve(process.argv[2] ?? join(root, `dist/zotero-codex-reader-${subjectManifest.version}-dev.xpi`));
+const argumentsList = process.argv.slice(2);
+const s2 = argumentsList.includes('--s2');
+const interactiveLogin = argumentsList.includes('--login');
+const subjectXpi = resolve(argumentsList.find(value => !value.startsWith('--')) ?? join(root, `dist/zotero-codex-reader-${subjectManifest.version}-dev.xpi`));
 await stat(subjectXpi);
 const processes = execFileSync('ps', ['-axo', 'args='], { encoding: 'utf8' });
 if (processes.split('\n').some((line) => line.startsWith('/Applications/Zotero.app/Contents/MacOS/zotero ') && line.includes(` -profile ${profile}`))) {
@@ -43,7 +46,7 @@ const prefs = {
 };
 await writeFile(join(profile, 'user.js'), Object.entries(prefs).map(([key, value]) => `user_pref(${JSON.stringify(key)}, ${JSON.stringify(value)});`).join('\n') + '\n');
 await copyFile(subjectXpi, join(profile, 'extensions', `${subjectID}.xpi`));
-const config = { subjectID, subjectVersion: subjectManifest.version, artifactHash: createHash('sha256').update(await readFile(subjectXpi)).digest('hex'), dataDir, reportPath: join(dev, 'host-report.json'), pdfPath: join(dev, 'fixtures/reading.pdf') };
+const config = { interactiveLogin, subjectID, subjectVersion: subjectManifest.version, artifactHash: createHash('sha256').update(await readFile(subjectXpi)).digest('hex'), dataDir, reportPath: join(dev, 'host-report.json'), pdfPath: join(dev, 'fixtures/reading.pdf') };
 const manifest = {
   manifest_version: 2,
   name: 'ZCR isolated host test driver',
@@ -52,7 +55,7 @@ const manifest = {
 };
 const bootstrap = `function startup(data) {
   Zotero.initializationPromise.then(async () => {
-    const scope = { Zotero, ChromeUtils };
+    const scope = { Zotero, ChromeUtils, PathUtils, TextDecoder };
     Services.scriptloader.loadSubScript(data.rootURI + "driver.js", scope);
     await scope.runHostSmoke(${JSON.stringify(config)});
   }).catch(error => Zotero.logError(error));
@@ -65,7 +68,7 @@ const zip = new ZipFile();
 for (const [name, contents] of [
   ['manifest.json', JSON.stringify(manifest)],
   ['bootstrap.js', bootstrap],
-  ['driver.js', await readFile(join(root, 'tests/host/driver.js'))],
+  ['driver.js', await readFile(join(root, s2 ? 'tests/host/s2-driver.js' : 'tests/host/driver.js'))],
 ]) zip.addBuffer(Buffer.isBuffer(contents) ? contents : Buffer.from(contents), name);
 const out = join(profile, 'extensions', 'zcr-host-test@local.xpi');
 const written = pipeline(zip.outputStream, createWriteStream(out));

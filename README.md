@@ -2,7 +2,7 @@
 
 在 Zotero 中使用 Codex 阅读和讨论论文。
 
-当前状态：S0 工程基础和 S1 Zotero 原生侧栏开发预览已经落地，下一阶段是 S2 自带 Codex、官方登录和最小协议闭环。当前 npm/workspace 版本为 `0.1.0-alpha.2`，Zotero manifest 版本为 `0.1.0a2`。
+当前状态：S0 工程基础、S1 Zotero 原生侧栏开发预览和 S2 自带 Codex 运行/官方登录开发预览已经落地；S2 的真实流式回复与停止检查因测试账户限额暂未运行，通过后进入 S3 选区闭环。当前 npm/workspace 版本为 `0.2.0-alpha.1`，Zotero manifest 版本为 `0.2.0a1`。
 
 ## 当前开发预览
 
@@ -20,7 +20,7 @@ npm run test:unit
 npm run package:dev
 ```
 
-`npm run package:dev` 先构建，再生成 `dist/zotero-codex-reader-0.1.0a2-dev.xpi`。它不是公开发行版；真实 Zotero 验证必须使用隔离的 `.zcr-dev/` profile，具体步骤见 [macOS 开发流程](docs/development.md)。
+`npm run package:dev` 先构建，再生成 `dist/zotero-codex-reader-0.2.0a1-dev.xpi`；构建前需先执行 `node scripts/runtime-prepare.mjs` 下载并校验固定版本的官方 Codex 运行组件。它不是公开发行版；真实 Zotero 验证必须使用隔离的 `.zcr-dev/` profile，具体步骤见 [macOS 开发流程](docs/development.md)。
 
 ## 规划文档
 

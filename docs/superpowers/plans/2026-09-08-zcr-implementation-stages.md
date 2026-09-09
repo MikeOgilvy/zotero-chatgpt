@@ -106,15 +106,17 @@ Git 作者信息若缺失，在真正提交前明确处理，不伪造用户身�
 
 **文件重点：** core/src/codex/{client,account,events,reader-policy}.ts；core/src/sessions/{service,request-journal}.ts 的最小请求路径；zotero/src/runtime/{supervisor,process,storage,paths}.ts；account/controller.ts；runtime 清单、Codex 资产构建、JSONL/运行时测试。
 
-- [ ] 先用可控 ProcessPort 验证握手、UTF-8/JSONL 拆包、EOF、请求与响应相关和退出。
-- [ ] 实验 XPI 内加入固定 Codex 资产；在插件目录内验证 hash、提取并通过原生 Subprocess 启动，不能用开发机已安装的 CLI 路径充当这一验收。
-- [ ] 确立插件专用运行/账户状态和启动前的阅读策略，检查非预期工具/配置继承。
-- [ ] 在侧栏提供“使用 ChatGPT 登录”，打开官方浏览器授权页；成功、取消、超时都回到明确界面状态。
-- [ ] 在第一条真实合成请求前，验证最小 requestId、一次活动请求限制、提交日志写入顺序及 stdout 故障后的 uncertain 状态。
-- [ ] 提交一个明确标为合成测试的问题，逐步显示真实回复，再验证停止、退出收尾和重复启动复用。
-- [ ] 验证基本模型目录可读取；其完整菜单与同会话设置切换在 S4 完成。
+- [x] 先用可控 ProcessPort 验证握手、UTF-8/JSONL 拆包、EOF、请求与响应相关和退出。（`tests/core/transport.test.ts`、`tests/core/client.test.ts`；原生解码见 `tests/runtime/process.test.ts`）
+- [x] 实验 XPI 内加入固定 Codex 资产；在插件目录内验证 hash、提取并通过原生 Subprocess 启动，不能用开发机已安装的 CLI 路径充当这一验收。（2026-09-09 专用 Zotero 9.0.6 宿主：`native-runtime-handshake-ready`、`one-owned-codex-process`）
+- [x] 确立插件专用运行/账户状态和启动前的阅读策略，检查非预期工具/配置继承。（`config/read` 有效配置/层/来源门与专用 `CODEX_HOME` 交叉检查在宿主通过；实际 0.144.1 形状由隔离探测确认）
+- [ ] 在侧栏提供“使用 ChatGPT 登录”，打开官方浏览器授权页；成功、取消、超时都回到明确界面状态。（界面与核心状态机已实现并有单元回归；宿主上登录状态可跨重启恢复，但点击登录→浏览器授权的 `--login` 流程尚未在宿主驱动中运行）
+- [x] 在第一条真实合成请求前，验证最小 requestId、一次活动请求限制、提交日志写入顺序及 stdout 故障后的 uncertain 状态。（`tests/core/journal.test.ts`、`tests/core/client.test.ts`；宿主重启后以相同 ID/终态恢复且不重发）
+- [ ] 提交一个明确标为合成测试的问题，逐步显示真实回复，再验证停止、退出收尾和重复启动复用。（`turn/start` 已真实提交并到达模型后端，上游以“usage limit”拒绝并按类型化原因显示；真实回复与停止待账户限额恢复；退出收尾与重复启动复用已通过）
+- [x] 验证基本模型目录可读取；其完整菜单与同会话设置切换在 S4 完成。（真实目录 7 个模型，默认 `gpt-5.6-sol`，默认档位 `null` 回显为 `"default"`）
 
 **交付标准：** 从实验 XPI 自动运行自带 Codex，用户在插件中发起官方登录，能看到真实流式回复并停止。不会复制认证文件，不用假回复代替成功。
+
+**2026-09-09 状态：** 见 [S2 QA](../../qa/s2.md)。12/12 已执行宿主检查通过；真实回复、非空输出与停止三项因测试账户的 Codex 周限额用尽（2026-09-15 恢复）保持 NOT RUN。限额恢复后重跑 `node scripts/prepare-host-test.mjs --s2` 即可补齐，无需改动实现。
 
 **门槛：** 阅读策略、原生进程或最小提交记录未成立时，不开放 S3 真实论文发送。完整平台下载来源、升级回退矩阵在 S6 扩大验证，不能因此省略这里的随包原生启动。
 
