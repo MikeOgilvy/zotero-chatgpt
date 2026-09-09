@@ -43,6 +43,8 @@ export class GeckoProcessPort implements ProcessPort {
         if (!exited) { try { await native.kill(this.graceMs); } catch { throw new Error('Unable to stop owned Codex process'); } }
         await exit;
       })();
+      // A failed stop is reported, not memoized: the owner may retry on the same handle.
+      stopping = stopping.catch(error => { stopping = null; throw error; });
       return stopping;
     };
     // Never decode, retain or log stderr: it can contain authentication material.

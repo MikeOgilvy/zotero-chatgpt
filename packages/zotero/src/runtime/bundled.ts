@@ -15,9 +15,20 @@ export async function ensureBundledRuntime(host: AssetHost, rootURI: string, pri
       if (!await checkPath(host, file, 'regular')) throw new Error('Missing executable');
       if ((await host.io.stat(file)).size !== manifest.size || await host.io.computeHexDigest(file, 'sha256') !== manifest.sha256) throw new Error('Runtime integrity mismatch');
     };
-    if (await checkPath(host, target, 'regular')) { await verify(target); await host.io.setPermissions(target, 0o700, false); }
-    else {
-      const token = host.uuid(); if (!/^[a-zA-Z0-9-]+$/u.test(token)) throw new Error('Invalid temporary identifier');
+    const token = host.uuid(); if (!/^[a-zA-Z0-9-]+$/u.test(token)) throw new Error('Invalid temporary identifier');
+    let cached = await checkPath(host, target, 'regular');
+    if (cached) {
+      try { await verify(target); }
+      catch {
+        // The immutable path must hold exactly the pinned bytes. Retain the corrupt file as
+        // evidence and extract the packaged copy again. This runs only before a spawn, after
+        // the supervisor has confirmed that no owned process is running; renaming never
+        // alters an inode another process might still be executing.
+        await host.io.move(target, host.join(directory, `corrupt-${token}`), { noOverwrite: true });
+        cached = false;
+      }
+    }
+    if (!cached) {
       staging = await privateDirectory(host, directory, `staging-${token}`);
       const file = host.join(staging, 'codex');
       const bytes = await host.load(rootURI + manifest.entry);
@@ -28,8 +39,9 @@ export async function ensureBundledRuntime(host: AssetHost, rootURI: string, pri
       await host.io.setPermissions(file, 0o700, false);
       await host.io.move(file, target, { noOverwrite: true });
     }
+    await host.io.setPermissions(target, 0o700, false);
     if ((await host.io.stat(target)).permissions !== 0o700) throw new Error('Runtime permission mismatch');
     return target;
-  } catch { throw new Error('Bundled runtime preparation failed; reinstall the matching complete XPI'); }
+  } catch { throw new Error('Bundled runtime preparation failed; the packaged Codex could not be extracted or verified in this Zotero profile'); }
   finally { if (staging) await host.io.remove(staging, { recursive: true, ignoreAbsent: true }).catch(() => undefined); }
 }

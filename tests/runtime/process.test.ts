@@ -26,6 +26,13 @@ describe('Gecko byte stream and owned process', () => {
     expect(await process.wait()).toEqual({ exitCode: 0 }); expect(native.stdin.close).toHaveBeenCalledTimes(1);
     expect(stderr.read).toHaveBeenCalledTimes(3); expect(native.kill).not.toHaveBeenCalled();
   });
+  it('does not memoize a failed termination so the owner can retry stopping the same handle', async () => {
+    const exit = deferred<{ exitCode: number | null }>(); let kills = 0;
+    const native: NativeProcess = { stdin: { write: () => Promise.resolve(0), close: () => Promise.resolve() }, stdout: raw(), stderr: raw(), wait: () => exit.promise, kill: vi.fn(() => { if (++kills === 1) return Promise.reject(new Error('raw signal failure')); exit.resolve({ exitCode: -9 }); return Promise.resolve(); }) };
+    const process = await new GeckoProcessPort({ call: () => Promise.resolve(native) }, 1).spawn({ executable: '/private/codex', args: [], cwd: '/private', env: {} });
+    await expect(process.terminate()).rejects.toThrow('Unable to stop owned Codex process');
+    await process.terminate(); expect(native.kill).toHaveBeenCalledTimes(2); expect(await process.wait()).toEqual({ exitCode: -9 });
+  });
   it('kills only its owned handle when graceful close does not exit', async () => {
     const exit = deferred<{ exitCode: number | null }>();
     const native: NativeProcess = { stdin: { write: () => Promise.resolve(0), close: () => Promise.resolve() }, stdout: raw(), stderr: raw(), wait: () => exit.promise, kill: vi.fn(() => { exit.resolve({ exitCode: -9 }); return Promise.resolve(); }) };

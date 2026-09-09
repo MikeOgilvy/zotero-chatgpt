@@ -14,7 +14,18 @@ it('extracts verified bytes from only the fixed packaged resource and rechecks t
   expect(await readFile(target, 'utf8')).toBe('abc'); expect((await stat(target)).mode & 0o777).toBe(0o700);
   expect(host.load).toHaveBeenCalledWith('jar:file:///extension.xpi!/content/runtime/codex-aarch64-apple-darwin');
   expect(await ensureBundledRuntime(host, 'jar:file:///extension.xpi!/', root, manifest)).toBe(target); expect(host.load).toHaveBeenCalledTimes(1);
-  await writeFile(target, 'bad'); await expect(ensureBundledRuntime(host, 'jar:file:///extension.xpi!/', root, manifest)).rejects.toThrow();
+});
+it('repairs a corrupt cached executable from the packaged copy while retaining the corrupt bytes as evidence', async () => {
+  const { root, host } = await setup(); const target = await ensureBundledRuntime(host, 'jar:file:///extension.xpi!/', root, manifest);
+  await writeFile(target, 'bad');
+  expect(await ensureBundledRuntime(host, 'jar:file:///extension.xpi!/', root, manifest)).toBe(target);
+  expect(await readFile(target, 'utf8')).toBe('abc'); expect((await stat(target)).mode & 0o777).toBe(0o700); expect(host.load).toHaveBeenCalledTimes(2);
+  const retained = (await readdir(path.dirname(target))).filter(name => name.startsWith('corrupt-'));
+  expect(retained).toHaveLength(1); expect(await readFile(path.join(path.dirname(target), retained[0]!), 'utf8')).toBe('bad');
+  // A corrupt packaged copy cannot repair anything and must not replace the retained evidence with a broken runtime.
+  await writeFile(target, 'bad'); host.load = () => Promise.resolve(new TextEncoder().encode('wrong'));
+  await expect(ensureBundledRuntime(host, 'jar:file:///extension.xpi!/', root, manifest)).rejects.toThrow('Bundled runtime preparation failed');
+  expect((await readdir(path.dirname(target))).some(name => name.includes('staging-'))).toBe(false);
 });
 it('rejects unsupported platform, architecture and arbitrary asset paths before loading', async () => {
   const { root, host } = await setup();
