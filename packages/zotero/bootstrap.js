@@ -20,7 +20,12 @@ async function initialize({ id, rootURI }) {
     return;
   }
 
-  scriptScope = { Zotero };
+  // loadSubScript's target does not inherit the plugin sandbox capabilities.
+  scriptScope = {
+    Zotero, ChromeUtils, IOUtils, PathUtils, Services,
+    Cc: Components.classes, Ci: Components.interfaces,
+    fetch, crypto, TextDecoder, TextEncoder, URL, setTimeout, clearTimeout,
+  };
   Services.scriptloader.loadSubScript(
     `${rootURI}content/zcr.js`,
     scriptScope,

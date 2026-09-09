@@ -2,6 +2,7 @@ import { renderPreview, type AttachmentIdentity } from '../chat/view.ts';
 import { ReaderLayoutController, type Anchor, type DockState, type LayoutHost, type Scale, type ViewPosition } from './layout.ts';
 import type { HostReader, ItemDetails, ZoteroHost, ZoteroWindow } from './host-types.ts';
 import { updateToolbarButton } from './toolbar.ts';
+export type SidebarRenderer = (body: HTMLElement, identity: AttachmentIdentity, close: () => void, active: boolean) => (() => void) | void;
 
 export function attachmentIdentity(zotero: ZoteroHost, reader: HostReader): AttachmentIdentity | undefined {
   const item = zotero.Items.get(reader.itemID);
@@ -18,12 +19,13 @@ export function capturePosition(reader: HostReader): ViewPosition | undefined {
 export class NativeReaderPane implements LayoutHost {
   readonly controller = new ReaderLayoutController(this);
   private details: ItemDetails | undefined;
+  private disposeView: (() => void) | undefined;
   private alive = true;
   private expectedPreset: string | undefined;
   private zoomGeneration = 0;
   private pendingFixedScale: number | undefined;
   private disconnectZoom: (() => void) | undefined;
-  constructor(private zotero: ZoteroHost, readonly reader: HostReader, private paneID: string, private buttons: Set<HTMLButtonElement>) {}
+  constructor(private zotero: ZoteroHost, readonly reader: HostReader, private paneID: string, private buttons: Set<HTMLButtonElement>, private renderView: SidebarRenderer = renderPreview) {}
   private get win(): ZoteroWindow { return this.reader._window; }
   supported(): boolean {
     return this.alive && this.reader.type === 'pdf' && !!this.reader.tabID && !!this.win.ZoteroContextPane
@@ -68,7 +70,7 @@ export class NativeReaderPane implements LayoutHost {
         section.dataset.zcrSection = '';
         const collapsible = section.querySelector<HTMLElement & { open: boolean }>('collapsible-section');
         if (collapsible) collapsible.open = true;
-        renderPreview(body, identity, () => { this.controller.close(); this.focusButton(); });
+        this.render(body);
         details.classList.add('zcr-chat-active');
         await details.scrollToPane(this.paneID, 'instant');
         if (!this.controller.active || !this.selected()) { this.unmountChat(); return false; }
@@ -80,7 +82,16 @@ export class NativeReaderPane implements LayoutHost {
     }
     return false;
   }
-  unmountChat(): void { this.details?.classList.remove('zcr-chat-active'); }
+  render(body: HTMLElement): void {
+    this.disposeView?.(); this.disposeView = undefined;
+    const identity = attachmentIdentity(this.zotero, this.reader);
+    if (!identity) { body.replaceChildren(); return; }
+    this.disposeView = this.renderView(body, identity, () => { this.controller.close(); this.focusButton(); }, this.controller.active) || undefined;
+  }
+  unmountChat(): void {
+    this.details?.classList.remove('zcr-chat-active');
+    this.disposeView?.(); this.disposeView = undefined;
+  }
   setActive(active: boolean): void { for (const button of this.buttons) updateToolbarButton(button, active && this.selected()); }
   private focusButton(): void { Array.from(this.buttons).find(button => button.isConnected)?.focus(); }
   setZoom(scale: Scale, anchor: Anchor): void {
@@ -125,5 +136,5 @@ export class NativeReaderPane implements LayoutHost {
     const context = this.win.ZoteroContextPane;
     if (!this.selected() || context?.collapsed || context?.context.mode !== 'item') this.controller.nativeAction();
   }
-  dispose(): void { this.controller.dispose(); this.alive = false; this.disconnectZoom?.(); this.disconnectZoom = undefined; this.buttons.clear(); }
+  dispose(): void { this.controller.dispose(); this.disposeView?.(); this.disposeView = undefined; this.alive = false; this.disconnectZoom?.(); this.disconnectZoom = undefined; this.buttons.clear(); }
 }

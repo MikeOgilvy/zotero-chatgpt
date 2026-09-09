@@ -31,6 +31,7 @@ export interface SectionEvent { doc: Document; body: HTMLElement; tabType: strin
 export interface ZoteroHost {
   getMainWindows(): ZoteroWindow[];
   logError(error: unknown): void;
+  launchURL(url: string): void;
   Prefs: { get(key: string): unknown };
   Items: { get(id: number): { key: string; libraryID: number; getField(name: string): string } | undefined };
   Reader: {

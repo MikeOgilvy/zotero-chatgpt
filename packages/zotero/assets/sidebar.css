@@ -26,3 +26,15 @@ item-details.zcr-chat-active [data-zcr-section] [data-type="body"] { padding: 0;
 .zcr-status { margin: 24px 0; line-height: 1.5; }
 .zcr-status p { margin-top: 8px; }
 .zcr-sidebar footer { margin-top: auto; padding-top: 16px; color: var(--fill-secondary, GrayText); font-size: .9em; }
+
+.zcr-account { display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 10px; padding-top: 18px; }
+.zcr-account p { margin: 0; line-height: 1.5; }
+.zcr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.zcr-actions button { font: inherit; color: inherit; background: var(--material-background, ButtonFace); border: 1px solid var(--color-panedivider, GrayText); padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+.zcr-actions button:hover { background: var(--fill-quinary, ButtonFace); }
+.zcr-actions button:disabled { opacity: .5; cursor: default; }
+.zcr-actions button:focus-visible { outline: 2px solid AccentColor; outline-offset: 2px; }
+.zcr-actions [hidden], .zcr-account [hidden] { display: none; }
+.zcr-test-question { border-top: 1px solid var(--color-panedivider, GrayText); padding-top: 12px; }
+.zcr-test-output { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; min-height: 24px; }
+.zcr-error { color: var(--fill-primary, CanvasText); border-left: 2px solid var(--fill-secondary, GrayText); padding-left: 8px; overflow-wrap: anywhere; }

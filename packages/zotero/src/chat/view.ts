@@ -1,7 +1,6 @@
 export interface AttachmentIdentity { title: string; key: string; libraryID: number }
 const HTML = 'http://www.w3.org/1999/xhtml';
-/** S1 has no account or transport. All text here describes that observable state. */
-export function renderPreview(body: HTMLElement, identity: AttachmentIdentity, close: () => void): void {
+export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentity, close: () => void): HTMLElement {
   const doc = body.ownerDocument;
   const element = (tag: string, text: string, className?: string) => {
     const node = doc.createElementNS(HTML, tag);
@@ -23,9 +22,14 @@ export function renderPreview(body: HTMLElement, identity: AttachmentIdentity, c
   header.append(closeButton);
   const title = element('h2', identity.title || 'PDF attachment');
   const identityLine = element('p', `Library ${identity.libraryID} · Attachment ${identity.key}`, 'zcr-identity');
-  const status = element('div', '', 'zcr-status');
-  status.append(element('strong', 'Development preview'), element('p', 'No model connected. Login and messaging are not available in this version.'));
-  const footer = element('footer', 'This preview tests the native dock and PDF layout.');
-  root.append(header, title, identityLine, status, footer);
+  root.append(header, title, identityLine);
   body.replaceChildren(root);
+  return root;
+}
+/** Retained as the transport-free fallback for reader adapter tests. */
+export function renderPreview(body: HTMLElement, identity: AttachmentIdentity, close: () => void): void {
+  const root = renderReaderShell(body, identity, close);
+  const status = body.ownerDocument.createElementNS(HTML, 'p');
+  status.textContent = 'Development preview · No model connected.';
+  root.append(status);
 }

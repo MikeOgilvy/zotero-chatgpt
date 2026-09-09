@@ -58,6 +58,9 @@ async function loadBootstrap(): Promise<LoadedBootstrap> {
   const scope: Record<string, unknown> = {
     Services: services,
     Zotero: zotero,
+    ChromeUtils: { importESModule: () => ({}) }, IOUtils: {}, PathUtils: {},
+    Components: { classes: {}, interfaces: {} },
+    fetch, crypto, TextDecoder, TextEncoder, URL, setTimeout, clearTimeout,
   };
   vm.createContext(scope);
   vm.runInContext(await readFile(bootstrapPath, "utf8"), scope);
@@ -82,6 +85,19 @@ function lifecycleFunction<T>(
 }
 
 describe("Zotero bootstrap lifecycle", () => {
+  it("passes native runtime capabilities and UTF8 codecs to the bundled scope", async () => {
+    const loaded = await loadBootstrap(); loaded.resolveInitialization();
+    const startup = lifecycleFunction<(context: { id: string; rootURI: string }) => Promise<void>>(loaded.scope, "startup");
+    await startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    const bundle = loaded.loadSubScript.mock.calls[0]![1];
+    expect(bundle.ChromeUtils).toBe(loaded.scope.ChromeUtils);
+    expect(bundle.IOUtils).toBe(loaded.scope.IOUtils);
+    expect(bundle.Services).toBe(loaded.services);
+    expect(bundle.TextDecoder).toBeTypeOf("function");
+    const decode = new (bundle.TextDecoder as typeof TextDecoder)();
+    expect(decode.decode(new Uint8Array([228, 184, 173]))).toBe("中");
+  });
+
   it("waits for Zotero initialization before loading and starting existing windows", async () => {
     const loaded = await loadBootstrap();
     const startup = lifecycleFunction<

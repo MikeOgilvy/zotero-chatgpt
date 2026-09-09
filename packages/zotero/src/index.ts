@@ -1,4 +1,6 @@
-import { renderPreview } from './chat/view.ts';
+import { renderReaderShell } from './chat/view.ts';
+import { mountAccountView } from './account/view.ts';
+import { createRuntimeSupervisor } from './runtime/supervisor.ts';
 import { NativeReaderPane, attachmentIdentity } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
@@ -9,6 +11,7 @@ let context: PluginContext | undefined;
 let paneID = '';
 let active = false;
 let notifierID: string | undefined;
+let runtime: ReturnType<typeof createRuntimeSupervisor> | undefined;
 const readers = new Map<HostReader, ReaderEntry>();
 const windows = new Map<ZoteroWindow, () => void>();
 
@@ -16,7 +19,14 @@ function entry(reader: HostReader): ReaderEntry {
   let current = readers.get(reader);
   if (!current) {
     const buttons = new Set<HTMLButtonElement>();
-    current = { buttons, pane: new NativeReaderPane(Zotero, reader, paneID, buttons) };
+    current = { buttons, pane: new NativeReaderPane(Zotero, reader, paneID, buttons, (body, identity, close, opened) => {
+      const root = renderReaderShell(body, identity, close);
+      return mountAccountView(root, {
+        ensureStarted: () => runtime ? runtime.ensureStarted() : Promise.reject(new Error('Plugin stopped.')),
+        openAuthorization: url => Zotero.launchURL(url),
+        uuid: () => body.ownerDocument.defaultView!.crypto.randomUUID(),
+      }, opened);
+    }) };
     readers.set(reader, current);
   }
   return current;
@@ -45,6 +55,7 @@ function reconcile(): void {
 export function startup(options: PluginContext): void {
   if (active) return;
   context = options; active = true;
+  runtime = createRuntimeSupervisor(options.rootURI);
   paneID = Zotero.ItemPaneManager.registerSection({
     paneID: 'codex-reader', pluginID: options.pluginID,
     header: { l10nID: 'zcr-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
@@ -58,7 +69,7 @@ export function startup(options: PluginContext): void {
       const identity = reader && attachmentIdentity(Zotero, reader);
       if (!win || !reader || !identity) { body.replaceChildren(); return; }
       body.closest<HTMLElement>('item-pane-custom-section')?.setAttribute('data-zcr-section', '');
-      renderPreview(body, identity, () => entry(reader).pane.controller.close());
+      entry(reader).pane.render(body);
     },
   });
   // Zotero 9.0.6's unregisterEventListener has an inverted filter. PluginObserver
@@ -109,7 +120,7 @@ export function onMainWindowUnload(window: Window): void {
   }
   windows.get(win)?.(); windows.delete(win);
 }
-export function shutdown(): void {
+export async function shutdown(): Promise<void> {
   active = false;
   for (const win of windows.keys()) onMainWindowUnload(win);
   for (const current of readers.values()) { for (const button of current.buttons) button.remove(); current.pane.dispose(); }
@@ -118,4 +129,6 @@ export function shutdown(): void {
   notifierID = undefined;
   if (paneID) Zotero.ItemPaneManager.unregisterSection(paneID);
   paneID = ''; context = undefined;
+  const stopping = runtime; runtime = undefined;
+  await stopping?.stop();
 }
