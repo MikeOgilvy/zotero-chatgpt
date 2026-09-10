@@ -1,8 +1,9 @@
 import { renderPreview, type AttachmentIdentity } from '../chat/view.ts';
-import { ReaderLayoutController, type Anchor, type DockState, type LayoutHost, type Scale, type ViewPosition } from './layout.ts';
+import { DEFAULT_SIDEBAR_WIDTH, ReaderLayoutController, type Anchor, type DockState, type LayoutHost, type Scale, type ViewPosition } from './layout.ts';
 import type { HostReader, ItemDetails, ZoteroHost, ZoteroWindow } from './host-types.ts';
 import { updateToolbarButton } from './toolbar.ts';
 export type SidebarRenderer = (body: HTMLElement, identity: AttachmentIdentity, close: () => void, active: boolean) => (() => void) | void;
+const WIDTH_PREF = 'extensions.zcr.sidebarWidth';
 
 export function attachmentIdentity(zotero: ZoteroHost, reader: HostReader): AttachmentIdentity | undefined {
   const item = zotero.Items.get(reader.itemID);
@@ -25,6 +26,11 @@ export class NativeReaderPane implements LayoutHost {
   private zoomGeneration = 0;
   private pendingFixedScale: number | undefined;
   private disconnectZoom: (() => void) | undefined;
+  private disconnectLayout: (() => void) | undefined;
+  private layoutTimer: number | undefined;
+  private applyingWidth = false;
+  private lastAvailable = 0;
+  private lastWidth = 0;
   constructor(private zotero: ZoteroHost, readonly reader: HostReader, private paneID: string, private buttons: Set<HTMLButtonElement>, private renderView: SidebarRenderer = renderPreview) {}
   private get win(): ZoteroWindow { return this.reader._window; }
   supported(): boolean {
@@ -38,7 +44,7 @@ export class NativeReaderPane implements LayoutHost {
   }
   captureDock(): DockState {
     const context = this.win.ZoteroContextPane!;
-    return { collapsed: context.collapsed, mode: context.context.mode, scrollTop: this.currentDetails()?.querySelector('#zotero-view-item')?.scrollTop ?? 0 };
+    return { collapsed: context.collapsed, mode: context.context.mode, scrollTop: this.currentDetails()?.querySelector('#zotero-view-item')?.scrollTop ?? 0, width: this.currentWidth() };
   }
   capturePosition(): ViewPosition | undefined {
     const position = capturePosition(this.reader);
@@ -53,10 +59,53 @@ export class NativeReaderPane implements LayoutHost {
   }
   restoreDock(state: DockState): void {
     if (!this.selected()) return;
+    this.applyWidth(state.width);
     const context = this.win.ZoteroContextPane!;
     context.context.mode = state.mode; context.collapsed = state.collapsed;
     const scroll = this.currentDetails()?.querySelector('#zotero-view-item');
     if (scroll) scroll.scrollTop = state.scrollTop;
+  }
+  readDesiredWidth(): number {
+    const stored = this.zotero.Prefs?.get?.(WIDTH_PREF, true);
+    if (typeof stored === 'number' && Number.isFinite(stored) && stored > 0) return stored;
+    const current = this.currentWidth();
+    if (current >= 240 && this.win.ZoteroContextPane && !this.win.ZoteroContextPane.collapsed) return current;
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+  rememberWidth(cssPixels: number): void { this.zotero.Prefs?.set?.(WIDTH_PREF, cssPixels, true); }
+  measureAvailableWidth(): number {
+    const pane = this.contextPane();
+    const splitter = this.win.document?.getElementById?.('zotero-context-splitter');
+    const readerWidth = this.reader._iframeWindow?.innerWidth ?? 0;
+    const paneWidth = pane && !this.win.ZoteroContextPane?.collapsed ? pane.getBoundingClientRect().width : 0;
+    const splitterWidth = splitter?.getBoundingClientRect().width ?? 0;
+    const total = readerWidth + paneWidth + splitterWidth;
+    return total > 0 ? total : (this.win.innerWidth || DEFAULT_SIDEBAR_WIDTH / 0.45);
+  }
+  currentWidth(): number {
+    const pane = this.contextPane();
+    if (!pane) return DEFAULT_SIDEBAR_WIDTH;
+    const rect = pane.getBoundingClientRect().width;
+    if (rect > 0) return rect;
+    const styled = Number.parseFloat(pane.style.width);
+    return Number.isFinite(styled) && styled > 0 ? styled : DEFAULT_SIDEBAR_WIDTH;
+  }
+  applyWidth(cssPixels: number): void {
+    const pane = this.contextPane();
+    if (!pane) return;
+    this.applyingWidth = true;
+    try {
+      const rounded = Math.round(cssPixels);
+      pane.style.width = `${rounded}px`;
+      pane.setAttribute('width', String(rounded));
+      const context = this.win.ZoteroContextPane as { width?: number } | undefined;
+      if (context && typeof context.width === 'number') context.width = rounded;
+      this.lastWidth = rounded;
+      this.lastAvailable = this.measureAvailableWidth();
+    } finally { this.applyingWidth = false; }
+  }
+  private contextPane(): HTMLElement | null {
+    return this.win.document?.getElementById?.('zotero-context-pane') ?? null;
   }
   async mountChat(): Promise<boolean> {
     for (let attempt = 0; attempt < 60; attempt++) {
@@ -75,6 +124,7 @@ export class NativeReaderPane implements LayoutHost {
         await details.scrollToPane(this.paneID, 'instant');
         if (!this.controller.active || !this.selected()) { this.unmountChat(); return false; }
         this.observeZoom();
+        this.observeLayout();
         body.querySelector<HTMLElement>('button')?.focus();
         return true;
       }
@@ -91,6 +141,7 @@ export class NativeReaderPane implements LayoutHost {
   unmountChat(): void {
     this.details?.classList.remove('zcr-chat-active');
     this.disposeView?.(); this.disposeView = undefined;
+    this.details = undefined;
   }
   setActive(active: boolean): void { for (const button of this.buttons) updateToolbarButton(button, active && this.selected()); }
   private focusButton(): void { Array.from(this.buttons).find(button => button.isConnected)?.focus(); }
@@ -111,12 +162,24 @@ export class NativeReaderPane implements LayoutHost {
       if (typeof scale === 'number') viewer.currentScaleValue = scale / 100;
       // Reader.navigate routes through link history and installs a deferred
       // text-layer focus callback, which can jump back after a later zoom render.
-      viewer.scrollPageIntoView({
-        pageNumber: anchor.pageIndex + 1,
-        destArray: [anchor.pageIndex, { name: 'XYZ' }, anchor.left, anchor.top, null],
-        allowNegativeOffset: true,
-        ignoreDestinationZoom: true,
-      });
+      this.scrollTo(anchor);
+    });
+  }
+  keepAnchor(anchor: Anchor): void {
+    const generation = ++this.zoomGeneration;
+    this.win.requestAnimationFrame(() => {
+      if (generation !== this.zoomGeneration) return;
+      this.scrollTo(anchor);
+    });
+  }
+  private scrollTo(anchor: Anchor): void {
+    const viewer = this.reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+    if (!viewer) return;
+    viewer.scrollPageIntoView({
+      pageNumber: anchor.pageIndex + 1,
+      destArray: [anchor.pageIndex, { name: 'XYZ' }, anchor.left, anchor.top, null],
+      allowNegativeOffset: true,
+      ignoreDestinationZoom: true,
     });
   }
   private observeZoom(): void {
@@ -131,10 +194,59 @@ export class NativeReaderPane implements LayoutHost {
     };
     bus.on('scalechanging', handler); this.disconnectZoom = () => bus.off('scalechanging', handler);
   }
+  private observeLayout(): void {
+    if (this.disconnectLayout) return;
+    const win = this.win;
+    const pane = this.contextPane();
+    const splitter = win.document?.getElementById?.('zotero-context-splitter');
+    const schedule = () => {
+      if (this.layoutTimer !== undefined) win.clearTimeout(this.layoutTimer);
+      this.layoutTimer = win.setTimeout(() => { this.layoutTimer = undefined; this.onLayoutSettled(); }, 80);
+    };
+    win.addEventListener('resize', schedule);
+    const Observer = win.ResizeObserver;
+    const observer = pane && Observer ? new Observer(() => schedule()) : undefined;
+    observer?.observe(pane!);
+    splitter?.addEventListener('mouseup', schedule);
+    splitter?.addEventListener('pointerup', schedule);
+    this.lastAvailable = this.measureAvailableWidth();
+    this.lastWidth = this.currentWidth();
+    this.disconnectLayout = () => {
+      win.removeEventListener('resize', schedule);
+      observer?.disconnect();
+      splitter?.removeEventListener('mouseup', schedule);
+      splitter?.removeEventListener('pointerup', schedule);
+      if (this.layoutTimer !== undefined) win.clearTimeout(this.layoutTimer);
+      this.layoutTimer = undefined;
+    };
+  }
+  private onLayoutSettled(): void {
+    if (!this.controller.active || this.applyingWidth) return;
+    const available = this.measureAvailableWidth();
+    const width = this.currentWidth();
+    const availableChanged = Math.abs(available - this.lastAvailable) > 1;
+    const widthChanged = Math.abs(width - this.lastWidth) > 1;
+    if (!availableChanged && !widthChanged) return;
+    if (availableChanged) this.controller.viewportChanged();
+    else void this.controller.setWidth(width);
+    this.lastAvailable = this.measureAvailableWidth();
+    this.lastWidth = this.currentWidth();
+  }
   reconcile(): void {
     if (!this.controller.active) return;
     const context = this.win.ZoteroContextPane;
-    if (!this.selected() || context?.collapsed || context?.context.mode !== 'item') this.controller.nativeAction();
+    // Switching to another reader is not a close. The dock belongs to the selected tab;
+    // this reader keeps ownership so coming back remounts the same conversation.
+    if (!this.selected()) { this.unmountChat(); return; }
+    if (context?.collapsed || context?.context.mode !== 'item') this.controller.nativeAction();
+    else if (!this.details?.isConnected || !this.details.classList.contains('zcr-chat-active')) {
+      void this.mountChat().then(ready => { if (ready && this.controller.active && this.selected()) this.setActive(true); });
+    }
   }
-  dispose(): void { this.controller.dispose(); this.disposeView?.(); this.disposeView = undefined; this.alive = false; this.disconnectZoom?.(); this.disconnectZoom = undefined; this.buttons.clear(); }
+  dispose(): void {
+    this.controller.dispose(); this.disposeView?.(); this.disposeView = undefined; this.alive = false;
+    this.disconnectZoom?.(); this.disconnectZoom = undefined;
+    this.disconnectLayout?.(); this.disconnectLayout = undefined;
+    this.buttons.clear();
+  }
 }

@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/unbound-method -- assertions inspect injected spies without invoking them. */
 import { expect, it, vi } from 'vitest';
-import { RuntimeFailure, type ManagedProcess, type S2Client, type StoragePort } from '../../packages/contracts/src/runtime.ts';
+import { RuntimeFailure, type ManagedProcess, type ReaderClient, type StoragePort } from '../../packages/contracts/src/runtime.ts';
 import { RuntimeSupervisor, type SupervisorDependencies } from '../../packages/zotero/src/runtime/supervisor.ts';
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 function fixture() {
   const process: ManagedProcess = { stdout: { async *[Symbol.asyncIterator]() { yield await Promise.resolve(''); } }, writeStdin: () => Promise.resolve(), wait: () => Promise.resolve({ exitCode: 0 }), terminate: vi.fn(() => Promise.resolve()) };
-  const client: S2Client = { snapshot: () => ({ revision: 0, runtime: 'ready', account: { state: 'signedOut' }, login: null, models: [], request: null, error: null }), subscribe: () => () => undefined, refreshAccount: vi.fn(() => Promise.resolve()), startLogin: () => Promise.reject(new Error()), cancelLogin: () => Promise.resolve(), runSynthetic: () => Promise.resolve(), cancelRequest: () => Promise.resolve(), close: vi.fn(() => Promise.resolve()) };
+  const client: ReaderClient = { snapshot: () => ({ revision: 0, runtime: "ready", account: { state: "signedOut" }, login: null, models: [], error: null }), observe: () => () => undefined, refreshAccount: vi.fn(() => Promise.resolve()), startLogin: () => Promise.reject(new Error()), cancelLogin: () => Promise.resolve(), current: () => Promise.reject(new Error()), newConversation: () => Promise.reject(new Error()), list: () => Promise.resolve([]), get: () => Promise.reject(new Error()), select: () => Promise.reject(new Error()), send: () => Promise.reject(new Error()), request: () => Promise.reject(new Error()), cancel: () => Promise.reject(new Error()), diagnostics: () => Promise.reject(new Error()), subscribe: () => () => undefined, close: vi.fn(() => Promise.resolve()) };
   const storage: StoragePort = { read: () => Promise.resolve(null), writeAtomic: () => Promise.resolve(), append: () => Promise.resolve() };
   const prepared = { spec: { executable: '/private/codex', args: ['app-server'], cwd: '/private/scratch', env: { CODEX_HOME: '/private/account' } as Record<string, string> }, codexVersion: '0.144.1', storage };
   const dependencies: SupervisorDependencies = { prepare: vi.fn(() => Promise.resolve(prepared)), process: { spawn: vi.fn(() => Promise.resolve(process)) }, connect: vi.fn(() => Promise.resolve(client)), uuid: () => 'uuid' };
@@ -26,7 +26,7 @@ it('stop during extraction prevents any spawn and further start', async () => {
   expect(f.dependencies.process.spawn).not.toHaveBeenCalled(); await expect(supervisor.ensureStarted()).rejects.toThrow('Runtime stopped');
 });
 it('stop during handshake terminates its handle and closes a late client exactly once', async () => {
-  const f = fixture(); const connected = deferred<S2Client>(); f.dependencies.connect = () => connected.promise;
+  const f = fixture(); const connected = deferred<ReaderClient>(); f.dependencies.connect = () => connected.promise;
   const supervisor = new RuntimeSupervisor(f.dependencies); const start = supervisor.ensureStarted(); const rejection = expect(start).rejects.toThrow('Runtime stopped');
   await new Promise(r => setTimeout(r, 0)); const stop = supervisor.stop(); connected.resolve(f.client); await stop; await rejection;
   expect(f.process.terminate).toHaveBeenCalledTimes(1); expect(f.client.close).toHaveBeenCalledTimes(1); expect(f.client.refreshAccount).not.toHaveBeenCalled();
@@ -53,7 +53,7 @@ it('keeps ownership of a process whose termination failed and retries terminatio
 });
 it('failed cleanup of an errored runtime blocks replacement, keeps the handle for stop and never spawns twice', async () => {
   const f = fixture(); const supervisor = new RuntimeSupervisor(f.dependencies); await supervisor.ensureStarted();
-  f.client.snapshot = () => ({ revision: 1, runtime: 'error', account: { state: 'signedOut' }, login: null, models: [], request: null, error: 'Connection ended' });
+  f.client.snapshot = () => ({ revision: 1, runtime: "error", account: { state: "signedOut" }, login: null, models: [], error: "Connection ended" });
   f.process.terminate = vi.fn(() => Promise.reject(new Error('raw kill failure')));
   await expect(supervisor.ensureStarted()).rejects.toThrow('Unable to stop the previous Codex process');
   expect(f.dependencies.process.spawn).toHaveBeenCalledTimes(1); expect(f.client.close).toHaveBeenCalledTimes(1);
@@ -80,8 +80,8 @@ it('never spawns a runtime that lacks a dedicated account directory', async () =
 });
 it('explicit retry after a process failure replaces the dead client without submitting a turn', async () => {
   const f = fixture(); const supervisor = new RuntimeSupervisor(f.dependencies); await supervisor.ensureStarted();
-  f.client.snapshot = () => ({ revision: 1, runtime: 'error', account: { state: 'signedOut' }, login: null, models: [], request: null, error: 'Connection ended' });
-  const replacement = { ...fixture().client, runSynthetic: vi.fn(() => Promise.resolve()) }; f.dependencies.connect = () => Promise.resolve(replacement);
+  f.client.snapshot = () => ({ revision: 1, runtime: "error", account: { state: "signedOut" }, login: null, models: [], error: "Connection ended" });
+  const replacement = { ...fixture().client, send: vi.fn(() => Promise.reject(new Error())) }; f.dependencies.connect = () => Promise.resolve(replacement);
   expect(await supervisor.ensureStarted()).toBe(replacement); expect(f.dependencies.process.spawn).toHaveBeenCalledTimes(2);
-  expect(f.client.close).toHaveBeenCalledTimes(1); expect(replacement.runSynthetic).not.toHaveBeenCalled(); await supervisor.stop();
+  expect(f.client.close).toHaveBeenCalledTimes(1); expect(replacement.send).not.toHaveBeenCalled(); await supervisor.stop();
 });

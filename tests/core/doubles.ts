@@ -26,6 +26,12 @@ export class MemoryStorage implements StoragePort {
   fail = false;
   read(path: string) { return Promise.resolve(this.files.get(path) ?? null); }
   writeAtomic(path: string, bytes: Uint8Array) { if (this.fail) return Promise.reject(new Error('private-storage-path')); this.files.set(path, bytes); this.writes.push(new TextDecoder().decode(bytes)); return Promise.resolve(); }
-  async append(path: string, bytes: Uint8Array) { await this.writeAtomic(path, bytes); }
+  append(path: string, bytes: Uint8Array) {
+    if (this.fail) return Promise.reject(new Error('private-storage-path'));
+    const previous = this.files.get(path) ?? new Uint8Array();
+    const next = new Uint8Array(previous.length + bytes.length);
+    next.set(previous, 0); next.set(bytes, previous.length);
+    this.files.set(path, next); this.writes.push(new TextDecoder().decode(bytes)); return Promise.resolve();
+  }
 }
 export async function flush() { for (let i = 0; i < 100; i++) await Promise.resolve(); }

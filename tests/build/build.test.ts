@@ -75,5 +75,9 @@ describe("development build", () => {
     });
     expect(parsedManifest.version).toBe(sourceManifest.version);
     expect(bootstrap.length).toBeGreaterThan(0);
+    const katexCss = await readFile(path.join(outputDirectory, "content/assets/katex/katex.min.css"), "utf8");
+    expect(katexCss).toContain("@font-face");
+    expect(katexCss).not.toMatch(/https?:\/\//u);
+    expect(bundle).not.toMatch(/cdn\.jsdelivr|cdnjs\.cloudflare|katex\.org\/css/u);
   });
 });

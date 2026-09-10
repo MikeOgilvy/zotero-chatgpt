@@ -11,7 +11,7 @@
 | GitHub 仓库名 | **`zotero-codex-reader`** |
 | 中文说明 | **在 Zotero 内使用 Codex 阅读和讨论论文** |
 | 项目定位 | 社区开发的 Zotero 阅读插件，说明与 Zotero/OpenAI 无官方隶属关系 |
-| 首个测试版本 | 当前开发预览 `0.2.0-alpha.1`（XPI `0.2.0a1`）；通过发行验收后再发布 `0.1.0` |
+| 首个测试版本 | 当前开发预览 `0.3.0-alpha.1`（XPI `0.3.0a1`）；通过发行验收后再发布 `0.1.0` |
 | 仓库状态 | 名称已选定，尚未创建远程仓库，也不声称名称独占或已注册 |
 
 这个名称同时说明宿主、后端和使用场景，适合 GitHub 搜索、README 与用户安装列表。仓库名固定，GitHub owner 在实际创建仓库时选定；扩展 UUID `{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}` 已生成并保持稳定，不随仓库地址变动。
@@ -61,7 +61,7 @@ flowchart LR
 4. 文件快照原子替换和请求日志的持久化语义可支撑不确定提交恢复；不能靠函数名推断落盘保证。——停用/重启后请求记录以相同 ID 与终态恢复且不重发；掉电语义未证明。
 5. 模型、速度、推理强度在同一个对话下一轮生效。——S4；已证实 0.144.1 把请求的 `null` 档位回显为 `"default"`。
 
-如果原生接口存在阻断问题，先修复适配器并记录证据；若确实必须改变运行架构，更新本文和三个计划文档，不静默恢复另一套实现。
+如果原生接口存在阻断问题，先修复适配器并记录证据；若确实必须改变运行架构，更新本文以及仍在使用的[分阶段计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)和[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)，不静默恢复另一套实现。被取代的 T0–T12 清单见[历史归档](archive/README.md)。
 
 ## 3. macOS 开发基线
 
@@ -116,6 +116,6 @@ flowchart LR
 
 ## 6. 下一步
 
-先完成 S0 仓库/工程初始化与 S1 真实 Zotero 外壳，然后进入 S2 的自带 Codex/官方登录。最小去重和提交记录在真实发送前建立，T0 的对应验证穿插进行。当前已实现工程、工具栏、侧栏开发预览以及随包 Codex 运行、阅读策略门、账户状态和合成请求的提交与记录；真实流式回复与停止待测试账户限额恢复后验证，随后进入 S3。
+S0–S3 开发预览已实现。S4/S5 专用宿主（不发送）已记录。S6 在 `.zcr-dev/s6-virgin/` 上用 AddonManager 安装了现有本地开发 XPI，并在 `.zcr-dev/s6-upgrade/` 上完成 a1→a2→a1 宿主升级/回退（signedOut，不发送）。S7 只有 dry-run 发行计划，没有 GitHub Release。当前开发 XPI 为 `aba8fe14…`；此前人工产品验收曾用 `2aab2704…` 装进已登录的 `.zcr-dev/profile`（无 host driver）。A23–A24 发送、A26 主题自动化、800px 窗口和进行中 turn 的 resume 尚未跑。S2/S3 的真实流式回复与停止待测试账户限额恢复后补齐。公开 GitHub Release、LICENSE 选择和干净 `git HEAD` 重建仍待作者决定。
 
-详细日常操作见[macOS 开发流程](development.md)，完整任务见[开发计划](superpowers/plans/2026-09-08-zotero-codex-reader.md)。
+详细日常操作见[macOS 开发流程](development.md)，阶段顺序见[分阶段实施计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)。

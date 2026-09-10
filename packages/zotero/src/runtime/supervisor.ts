@@ -1,21 +1,21 @@
-import { RuntimeFailure, type ManagedProcess, type ProcessPort, type ProcessSpec, type S2Client, type StoragePort } from '../../../contracts/src/runtime.ts';
+import { RuntimeFailure, type ManagedProcess, type ProcessPort, type ProcessSpec, type ReaderClient, type StoragePort } from '../../../contracts/src/runtime.ts';
 export interface PreparedRuntime { spec: ProcessSpec; storage: StoragePort; codexVersion: string }
 export interface ConnectOptions { codexVersion: string; cwd: string; uuid: () => string; codexHome?: string }
 export interface SupervisorDependencies {
   prepare(): Promise<PreparedRuntime>;
   process: ProcessPort;
-  connect(process: ManagedProcess, storage: StoragePort, options: ConnectOptions): Promise<S2Client>;
+  connect(process: ManagedProcess, storage: StoragePort, options: ConnectOptions): Promise<ReaderClient>;
   uuid(): string;
 }
 /** One owned runtime. It remains owned until its process exit has been confirmed. */
-interface OwnedRuntime { process: ManagedProcess | null; client: S2Client | null; usable: boolean; closing: Promise<void> | null; termination: Promise<void> | null }
+interface OwnedRuntime { process: ManagedProcess | null; client: ReaderClient | null; usable: boolean; closing: Promise<void> | null; termination: Promise<void> | null }
 export class RuntimeSupervisor {
-  private starting: Promise<S2Client> | null = null;
+  private starting: Promise<ReaderClient> | null = null;
   private owned: OwnedRuntime | null = null;
   private stopped = false;
   private stopping: Promise<void> | null = null;
   constructor(private dependencies: SupervisorDependencies) {}
-  ensureStarted(): Promise<S2Client> {
+  ensureStarted(): Promise<ReaderClient> {
     if (this.stopped) return Promise.reject(new Error('Runtime stopped'));
     if (this.starting) return this.starting;
     const current = this.owned;
@@ -24,7 +24,7 @@ export class RuntimeSupervisor {
     return this.starting;
   }
   private checkRunning() { if (this.stopped) throw new Error('Runtime stopped'); }
-  private async restart(previous: OwnedRuntime | null): Promise<S2Client> {
+  private async restart(previous: OwnedRuntime | null): Promise<ReaderClient> {
     if (previous) {
       // A dead runtime keeps ownership until its exit is confirmed; no replacement before that.
       try { await this.release(previous); }
@@ -82,7 +82,7 @@ export class RuntimeSupervisor {
   }
 }
 
-import { createS2Client } from '../../../core/src/index.ts';
+import { createReaderClient } from '../../../core/src/index.ts';
 import { GeckoProcessPort } from './process.ts';
 import { geckoHost } from './gecko.ts';
 import { prepareRuntime } from './prepare.ts';
@@ -91,5 +91,5 @@ import { prepareRuntime } from './prepare.ts';
  */
 export function createRuntimeSupervisor(rootURI: string): RuntimeSupervisor {
   const { host, subprocess } = geckoHost();
-  return new RuntimeSupervisor({ prepare: () => prepareRuntime(host, rootURI), process: new GeckoProcessPort(subprocess), connect: createS2Client, uuid: () => host.uuid() });
+  return new RuntimeSupervisor({ prepare: () => prepareRuntime(host, rootURI), process: new GeckoProcessPort(subprocess), connect: createReaderClient, uuid: () => host.uuid() });
 }

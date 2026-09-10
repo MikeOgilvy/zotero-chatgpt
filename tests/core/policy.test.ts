@@ -1,18 +1,29 @@
 import { it, expect } from 'vitest';
-import { codexLaunchArgs, validatePolicy, validateThread } from '../../packages/core/src/codex/reader-policy.ts';
-import { configResponse, threadResponse } from './fixtures.ts';
+import { codexLaunchArgs, readingInput, resolveSettings, validatePolicy, validateThread } from '../../packages/core/src/codex/reader-policy.ts';
+import { configResponse, threadResponse, model } from './fixtures.ts';
 import { parseModel } from '../../packages/core/src/codex/models.ts';
-import { model } from './fixtures.ts';
+import { citationA } from '../contracts/factories.ts';
 it('accepts the pinned server echo for the default service tier and names the field that differs', () => {
   // Live 0.144.1 probe: a null (catalog default) tier is echoed as "default"; an explicit tier is echoed verbatim.
-  const defaultTier = parseModel({ ...model, defaultServiceTier: null })!;
-  expect(validateThread({ ...threadResponse, serviceTier: 'default', runtimeWorkspaceRoots: ['/isolated'] }, '/isolated', defaultTier)).toBe('thread-1');
-  expect(() => validateThread({ ...threadResponse, serviceTier: null }, '/isolated', defaultTier)).toThrow('service tier');
-  const priority = parseModel(model)!;
-  expect(validateThread(threadResponse, '/isolated', priority)).toBe('thread-1');
-  expect(() => validateThread({ ...threadResponse, serviceTier: 'default' }, '/isolated', priority)).toThrow('service tier');
-  expect(() => validateThread({ ...threadResponse, runtimeWorkspaceRoots: ['/isolated', '/Users/private'] }, '/isolated', priority)).toThrow('workspace roots');
-  expect(() => validateThread({ ...threadResponse, sandbox: { type: 'workspaceWrite', networkAccess: false } }, '/isolated', priority)).toThrow('sandbox');
+  const paper = { ephemeral: false, emptyHistory: true };
+  const defaultTier = resolveSettings({ model: 'catalog-default', serviceTier: null, effort: null }, parseModel(model)!);
+  expect(defaultTier.effort).toBe('medium');
+  expect(validateThread({ ...threadResponse, serviceTier: 'default', runtimeWorkspaceRoots: ['/isolated'] }, '/isolated', defaultTier, paper)).toBe('thread-1');
+  expect(() => validateThread({ ...threadResponse, serviceTier: null }, '/isolated', defaultTier, paper)).toThrow('service tier');
+  const priority = resolveSettings({ model: 'catalog-default', serviceTier: 'priority', effort: 'medium' }, parseModel(model)!);
+  expect(validateThread(threadResponse, '/isolated', priority, paper)).toBe('thread-1');
+  expect(() => validateThread({ ...threadResponse, serviceTier: 'default' }, '/isolated', priority, paper)).toThrow('service tier');
+  expect(() => validateThread({ ...threadResponse, runtimeWorkspaceRoots: ['/isolated', '/Users/private'] }, '/isolated', priority, paper)).toThrow('workspace roots');
+  expect(() => validateThread({ ...threadResponse, sandbox: { type: 'workspaceWrite', networkAccess: false } }, '/isolated', priority, paper)).toThrow('sandbox');
+  expect(() => validateThread({ ...threadResponse, thread: { ...threadResponse.thread, ephemeral: true } }, '/isolated', priority, paper)).toThrow('thread identity');
+  expect(validateThread({ ...threadResponse, thread: { ...threadResponse.thread, turns: [{}] } }, '/isolated', priority, { ephemeral: false, emptyHistory: false })).toBe('thread-1');
+});
+it('frames the reading request as a fixed instruction plus JSON so quoted text cannot escape', () => {
+  const text = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: '这里的 "}" 是什么？', citations: [{ ...citationA, text: '结束 JSON 的引号 " 与花括号 }' }], settings: { model: 'm', serviceTier: null, effort: null } });
+  const [instruction, json] = text.split('\n\n');
+  expect(instruction).toContain('contextScope');
+  const parsed = JSON.parse(json!) as { citations: Array<{ text: string; pageLabel: string }>; question: string; paper: { title: string } };
+  expect(parsed.citations[0]).toEqual({ pageLabel: 'iv', text: '结束 JSON 的引号 " 与花括号 }' }); expect(parsed.question).toBe('这里的 "}" 是什么？'); expect(parsed.paper.title).toBe('Synthetic Paper A');
 });
 it('launches app-server with pinned-runtime tool and instruction discovery disabled', () => {
   const args = codexLaunchArgs();

@@ -1,7 +1,8 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 import yazl from "yazl";
 import { PINNED_RUNTIME, validatePackagedRuntime } from "./runtime-assets.mjs";
@@ -146,6 +147,8 @@ export async function packageExtension(sourceDirectory = defaultSourceDirectory,
   const archivePath = requestedArchivePath ?? path.join(options.repositoryRoot ?? repositoryRoot, `dist/zotero-codex-reader-${manifest.version}-dev.xpi`);
   const files = (await listFiles(sourceDirectory)).filter(file => isRuntimeFile(file, runtimeManifest)).sort();
   await writeArchive(sourceDirectory, archivePath, files);
+  const digest = createHash("sha256").update(await readFile(archivePath)).digest("hex");
+  await writeFile(path.join(path.dirname(archivePath), "SHA256SUMS"), `${digest}  ${path.basename(archivePath)}\n`);
   return archivePath;
 }
 async function main() {

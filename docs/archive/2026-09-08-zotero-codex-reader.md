@@ -8,7 +8,7 @@
 
 **Tech Stack:** macOS arm64、Cursor + 官方 Codex IDE 扩展、TypeScript、npm workspaces、开发用 Node.js 24、esbuild、Zotero bootstrap/Gecko Subprocess/IOUtils、原生 DOM/CSS、markdown-it、DOMPurify、KaTeX、Vitest、GitHub Actions。具体依赖版本在 T1 核实后写入 lockfile；不使用浮动依赖构建发行包。
 
-**Spec:** 执行顺序以[分阶段实施计划](2026-09-08-zcr-implementation-stages.md)为准；[模块设计](../../module-design.md)定义职责；[项目决策](../../project-decisions.md)固定名称/技术路线，[macOS 开发流程](../../development.md)固定 Cursor + Codex 工作方式；[用户流程](../../zotero-codex-user-flow.md)是产品验收依据；[现有设计](../../zotero-codex-design.md)、[接口与状态约定](2026-09-08-zotero-codex-reader-contracts.md)、[验收与发布矩阵](2026-09-08-zotero-codex-reader-acceptance.md)共同定义实施范围。
+**Spec:** 执行顺序以[分阶段实施计划](../superpowers/plans/2026-09-08-zcr-implementation-stages.md)为准；[模块设计](../module-design.md)定义职责；[项目决策](../project-decisions.md)固定名称/技术路线，[macOS 开发流程](../development.md)固定 Cursor + Codex 工作方式；[用户流程](../zotero-codex-user-flow.md)是产品验收依据；[现有设计](zotero-codex-design.md)、[接口与状态约定](../superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)、[验收与发布矩阵](2026-09-08-zotero-codex-reader-acceptance.md)共同定义实施范围。
 
 ## Global Constraints
 
@@ -212,7 +212,7 @@ zotero-codex-reader/
 
 ## 5. 执行顺序与里程碑
 
-本文件保留 T0–T12 的实现细则和测试参考；实际顺序改为[分阶段实施计划](2026-09-08-zcr-implementation-stages.md)中的 S0–S7。T0 作为跨阶段技术验证集合，不要求在仓库初始化前完成整套产品验证。
+本文件保留 T0–T12 的实现细则和测试参考；实际顺序改为[分阶段实施计划](../superpowers/plans/2026-09-08-zcr-implementation-stages.md)中的 S0–S7。T0 作为跨阶段技术验证集合，不要求在仓库初始化前完成整套产品验证。
 
 | 阶段 | 实施范围 | 对应细则 | 交付成果 |
 | --- | --- | --- | --- |
@@ -607,7 +607,7 @@ npm run verify:artifacts
 4. 阅读 PDF，选中原文后点击 More details 或 Ask in sidechat，自动展开聊天窗口。
 5. 在输入框下方选择模型、速度、推理强度；连续提问与切换设置都保留当前上下文。
 
-完整交互以[用户流程](../../zotero-codex-user-flow.md)为准。Node/CLI 命令仅用于开发者构建与调试；产品内部为直接 stdio，不存在用户配对流程。
+完整交互以[用户流程](../zotero-codex-user-flow.md)为准。Node/CLI 命令仅用于开发者构建与调试；产品内部为直接 stdio，不存在用户配对流程。
 
 退出 Zotero/禁用插件时监督器收尾，重开恢复后台和历史。升级只替换完整 XPI，后台自动处理运行组件版本；失败保留上一版与数据，在界面重试或回退。登录/运行状态使用插件专用目录，不修改用户另外安装的 Codex 或其登录。
 

@@ -1,6 +1,6 @@
 # Zotero Codex Reader：接口与状态约定
 
-这是[开发计划](2026-09-08-zotero-codex-reader.md)的规范性附录，描述待实现的 v0.1 接口，不表示代码已经存在。数字上限属于首版工程选择，可依据测试调整并同步修改测试。
+这是恢复、布局和 Codex 适配的语义附录。公共类型与 `ReaderClient` 以 `packages/contracts` 为准（侧栏使用 `snapshot`/`observe`，不是早期草案里的 `status()`/`models()`）。数字上限在 `packages/contracts/src/validation.ts` 的 `LIMITS`，可依据测试调整。
 
 ## 1. 模块边界
 
@@ -197,6 +197,7 @@ export interface ModelOption {
 | `newConversation(paper, title, settings?)` | 当前附件、标题和可选初始设置 | `Conversation`；显式新建会话 |
 | `list(paper)` | 当前附件范围 | `Conversation[]`；只返回本插件管理的会话 |
 | `get(conversationId)` | 会话 ID | 包含 `lastSeq` 的 `Conversation` 完整快照 |
+| `select(paper, conversationId)` | 当前附件与会话 ID | 将该会话设为当前并返回快照；不属于该附件则 `NOT_FOUND` |
 | `send(input)` | `SendInput` | `SendReceipt`；相同请求重放返回 `replay: true`；复用 ID 但内容不同则 `REQUEST_CONFLICT`，会话已有活动请求则 `BUSY` |
 | `request(conversationId, requestId)` | 会话与请求 ID | `SendReceipt`；用于发送结果不确定时查询；不存在时抛出 `NOT_FOUND` |
 | `cancel(conversationId, requestId)` | 会话与请求 ID | `SendReceipt`；只表示已提出取消或当前终态，只有终态事件代表已取消 |
@@ -234,6 +235,7 @@ export interface ReaderClient {
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
   list(paper: PaperScope): Promise<Conversation[]>;
   get(conversationId: UUID): Promise<Conversation>;
+  select(paper: PaperScope, conversationId: UUID): Promise<Conversation>;
   send(input: SendInput): Promise<SendReceipt>;
   request(conversationId: UUID, requestId: UUID): Promise<SendReceipt>;
   cancel(conversationId: UUID, requestId: UUID): Promise<SendReceipt>;
@@ -282,6 +284,7 @@ export interface ConversationRepository {
   create(paper: PaperScope, title: string, settings: GenerationSettings): Promise<Conversation>;
   list(paper: PaperScope): Promise<Conversation[]>;
   get(id: UUID): Promise<Conversation>;
+  select(paper: PaperScope, id: UUID): Promise<Conversation>;
   save(value: Conversation): Promise<void>;
 }
 ```
@@ -301,14 +304,7 @@ export interface Draft {
 }
 ```
 
-UI 持久化未提交草稿使用以下类型化接口，不直接取得 StoragePort。实际文件为 `packages/zotero/src/storage/local-state.ts`；请求是否已发送仍仅由 ReaderClient/M3 决定。
-
-```ts
-export interface DraftStore {
-  read(paper: PaperScope): Promise<Draft | null>;
-  write(draft: Draft): Promise<void>;
-}
-```
+UI 将未提交草稿保存在 `ConversationPresenter` 内存中（按会话分袋），不直接取得 StoragePort。请求是否已发送仍仅由 ReaderClient/M3 决定。
 
 纯函数 `paperId(paper: PaperScope): string` 使用 `JSON.stringify([clientId, libraryId, attachmentKey])`，不靠标题或字符串拼接的歧义判断论文身份。`validateSendInput(value: unknown): SendInput` 返回已检查对象或抛出携带 `INVALID_REQUEST` 的错误。
 

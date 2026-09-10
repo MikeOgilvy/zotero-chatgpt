@@ -25,7 +25,8 @@ export function createFixturePdf(title = 'ZCR synthetic reading fixture') {
       '',
       ...Array.from({ length: 14 }, (_, i) => `Anchor line ${page + 1}.${i + 1}: preserve selection and reading position.`),
     ];
-    return ['BT', '/F1 13 Tf', '18 TL', '48 790 Td', ...lines.flatMap((line) => [`(${escapePdf(line)}) Tj`, 'T*']), 'ET'].join('\n');
+    const footer = 'Bottom-edge selection line: keep More details and Ask inside the view.';
+    return ['BT', '/F1 13 Tf', '18 TL', '48 790 Td', ...lines.flatMap((line) => [`(${escapePdf(line)}) Tj`, 'T*']), 'ET', 'BT', '/F1 13 Tf', '1 0 0 1 48 48 Tm', `(${escapePdf(footer)}) Tj`, 'ET'].join('\n');
   });
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [0 << /S /r >> 1 << /S /D /St 1 >>] >> >>',

@@ -254,8 +254,16 @@ describe("development XPI packaging", () => {
     );
 
     expect(await readdir(path.join(testDirectory, "dist"))).toEqual([
+      "SHA256SUMS",
       "zotero-codex-reader-0.1.0a42-dev.xpi",
     ]);
+    const archiveName = "zotero-codex-reader-0.1.0a42-dev.xpi";
+    const digest = createHash("sha256")
+      .update(await readFile(path.join(testDirectory, "dist", archiveName)))
+      .digest("hex");
+    expect(await readFile(path.join(testDirectory, "dist", "SHA256SUMS"), "utf8")).toBe(
+      `${digest}  ${archiveName}\n`,
+    );
   });
 
   it("produces byte-identical archives from unchanged input", async () => {

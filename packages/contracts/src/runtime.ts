@@ -1,3 +1,4 @@
+import type { Conversation, GenerationSettings, PaperScope, ReaderEvent, SendInput, SendReceipt, ShareableDiagnostics } from './index.ts';
 export interface ProcessSpec {
   executable: string;
   args: readonly string[];
@@ -35,21 +36,13 @@ export interface ModelOption {
   serviceTiers: Array<{ id: string; name: string; description: string }>;
   defaultServiceTier: string | null;
 }
-export interface SyntheticRequest {
-  requestId: string;
-  state: 'accepted' | 'dispatching' | 'running' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
-  question: string;
-  model: string;
-  output: string;
-  error: string | null;
-}
-export interface S2Snapshot {
+/** Reactive runtime/account state shared by every view; conversations use ReaderEvent instead. */
+export interface RuntimeSnapshot {
   revision: number;
   runtime: 'ready' | 'error' | 'stopped';
   account: AccountStatus;
   login: LoginStatus | null;
   models: ModelOption[];
-  request: SyntheticRequest | null;
   error: string | null;
 }
 /**
@@ -60,13 +53,25 @@ export interface S2Snapshot {
 export class RuntimeFailure extends Error {
   constructor(message: string) { super(message); this.name = 'RuntimeFailure'; }
 }
-export interface S2Client {
-  snapshot(): S2Snapshot;
-  subscribe(listener: (snapshot: S2Snapshot) => void): () => void;
+/**
+ * In-process reader API used by the sidebar. Views borrow it from the plugin-wide supervisor and
+ * never receive pipes, file handles or credentials. Business failures are ReaderError instances.
+ */
+export interface ReaderClient {
+  snapshot(): RuntimeSnapshot;
+  observe(listener: (snapshot: RuntimeSnapshot) => void): () => void;
   refreshAccount(): Promise<void>;
   startLogin(): Promise<LoginFlow>;
   cancelLogin(): Promise<void>;
-  runSynthetic(requestId: string): Promise<void>;
-  cancelRequest(): Promise<void>;
+  current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
+  newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
+  list(paper: PaperScope): Promise<Conversation[]>;
+  get(conversationId: string): Promise<Conversation>;
+  select(paper: PaperScope, conversationId: string): Promise<Conversation>;
+  send(input: SendInput): Promise<SendReceipt>;
+  request(conversationId: string, requestId: string): Promise<SendReceipt>;
+  cancel(conversationId: string, requestId: string): Promise<SendReceipt>;
+  diagnostics(conversationId: string): Promise<ShareableDiagnostics>;
+  subscribe(listener: (event: ReaderEvent) => void): () => void;
   close(): Promise<void>;
 }

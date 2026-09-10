@@ -1,24 +1,40 @@
 import { FakeProcess } from './doubles.ts';
 export const model = { id: 'catalog-entry', model: 'catalog-default', upgrade: null, upgradeInfo: null, availabilityNux: null, displayName: 'Catalog Default', description: 'Test fixture', hidden: false, supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }], defaultReasoningEffort: 'medium', inputModalities: ['text'], supportsPersonality: false, additionalSpeedTiers: [], serviceTiers: [{ id: 'priority', name: 'Priority', description: 'Priority service' }], defaultServiceTier: 'priority', isDefault: true };
-export const thread = { id: 'thread-1', sessionId: 'session-1', forkedFromId: null, parentThreadId: null, preview: '', ephemeral: true, modelProvider: 'openai', createdAt: 1, updatedAt: 1, recencyAt: null, status: { type: 'idle' }, path: null, cwd: '/isolated', cliVersion: '0.144.1', source: 'appServer', threadSource: null, agentNickname: null, agentRole: null, gitInfo: null, name: null, turns: [] };
+// Paper threads are kept by the plugin-private Codex home (ephemeral: false) so they can be resumed.
+export const thread = { id: 'thread-1', sessionId: 'session-1', forkedFromId: null, parentThreadId: null, preview: '', ephemeral: false, modelProvider: 'openai', createdAt: 1, updatedAt: 1, recencyAt: null, status: { type: 'idle' }, path: null, cwd: '/isolated', cliVersion: '0.144.1', source: 'appServer', threadSource: null, agentNickname: null, agentRole: null, gitInfo: null, name: null, turns: [] };
 export const threadResponse = { thread, model: model.model, modelProvider: 'openai', serviceTier: 'priority', cwd: '/isolated', instructionSources: [], approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false }, reasoningEffort: 'medium' };
 export const turn = { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1, completedAt: null, durationMs: null };
 export function server() {
   const p = new FakeProcess();
   const handlers = new Map<string, (params: Record<string, unknown>, id: unknown) => unknown>();
+  let threads = 0; let turns = 0;
   handlers.set('initialize', () => ({ userAgent: 'codex/0.144.1', codexHome: '/isolated/auth', platformFamily: 'unix', platformOs: 'macos' }));
   handlers.set('config/read', () => configResponse());
   handlers.set('account/read', () => ({ account: { type: 'chatgpt', email: 'private@example.test', planType: 'plus' }, requiresOpenaiAuth: true }));
   handlers.set('model/list', () => ({ data: [model], nextCursor: null }));
-  handlers.set('thread/start', () => threadResponse);
-  handlers.set('turn/start', () => ({ turn }));
+  handlers.set('thread/start', () => { threads++; const id = threads === 1 ? 'thread-1' : `thread-${threads}`; return { ...threadResponse, thread: { ...thread, id } }; });
+  handlers.set('thread/resume', params => ({ ...threadResponse, thread: { ...thread, id: params.threadId as string, turns: [{ id: 'earlier' }] } }));
+  handlers.set('thread/read', params => ({ thread: { ...thread, id: params.threadId as string, turns: [] } }));
+  handlers.set('turn/start', params => { turns++; return { turn: { ...turn, id: turns === 1 ? 'turn-1' : `turn-${turns}`, threadId: params.threadId } }; });
   handlers.set('turn/interrupt', () => ({}));
   handlers.set('account/login/start', () => ({ type: 'chatgpt', loginId: 'login-1', authUrl: 'https://auth.openai.com/oauth/authorize?state=secret' }));
   handlers.set('account/login/cancel', () => ({ status: 'canceled' }));
   p.onWrite = m => {
     if (!('id' in m) || typeof m.method !== 'string') return;
-    const result = handlers.get(m.method)?.((m.params ?? {}) as Record<string, unknown>, m.id);
-    if (result !== undefined) p.emit({ id: m.id, result });
+    try {
+      const result = handlers.get(m.method)?.((m.params ?? {}) as Record<string, unknown>, m.id);
+      if (result === undefined) return;
+      if (result && typeof result === 'object' && typeof (result as Promise<unknown>).then === 'function') {
+        void (result as Promise<unknown>).then(
+          value => { p.emit({ id: m.id, result: value }); },
+          () => { p.emit({ id: m.id, error: { code: -32000, message: 'handler failed' } }); },
+        );
+        return;
+      }
+      p.emit({ id: m.id, result });
+    } catch {
+      p.emit({ id: m.id, error: { code: -32000, message: 'handler failed' } });
+    }
   };
   return { p, handlers };
 }

@@ -3,11 +3,11 @@
 状态：可行性核查与首版设计，尚未实现或运行插件。
 日期：2026-09-08。
 
-正式项目名为 **Zotero Codex Reader**（ZCR），仓库名 `zotero-codex-reader`。当前技术路线与 macOS Cursor + Codex 流程以[项目决策](project-decisions.md)为准：生产插件通过 Gecko 原生管道直连 Codex，Node 仅作开发工具。
+正式项目名为 **Zotero Codex Reader**（ZCR），仓库名 `zotero-codex-reader`。当前技术路线与 macOS Cursor + Codex 流程以[项目决策](../project-decisions.md)为准：生产插件通过 Gecko 原生管道直连 Codex，Node 仅作开发工具。
 
-模块职责见[模块设计](module-design.md)，执行顺序见[分阶段计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)；原[任务细则](superpowers/plans/2026-09-08-zotero-codex-reader.md)提供 T0–T12 的实现与验收参考。
+模块职责见[模块设计](../module-design.md)，执行顺序见[分阶段计划](../superpowers/plans/2026-09-08-zcr-implementation-stages.md)；原[任务细则](2026-09-08-zotero-codex-reader.md)提供 T0–T12 的实现与验收参考。
 
-用户已进一步确定[使用流程](zotero-codex-user-flow.md)：一个 GitHub 插件安装包、自动加载和启动后台、插件内发起 ChatGPT 官方登录、底部模型/速度/推理控制。此前要求用户手动启动连接层或配对的开发便利性假设已被替换。
+用户已进一步确定[使用流程](../zotero-codex-user-flow.md)：一个 GitHub 插件安装包、自动加载和启动后台、插件内发起 ChatGPT 官方登录、底部模型/速度/推理控制。此前要求用户手动启动连接层或配对的开发便利性假设已被替换。
 
 ## 目标与已确定选择
 

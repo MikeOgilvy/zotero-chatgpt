@@ -1,46 +1,53 @@
-import { RuntimeFailure, type ManagedProcess, type StoragePort, type S2Client, type S2Snapshot, type SyntheticRequest, type LoginFlow, type ModelOption } from '../../contracts/src/runtime.ts';
+import { RuntimeFailure, type LoginFlow, type ManagedProcess, type ModelOption, type ReaderClient, type RuntimeSnapshot, type StoragePort } from '../../contracts/src/runtime.ts';
+import { clone } from '../../contracts/src/clone.ts';
+import type { Conversation, ErrorCode, GenerationSettings, PaperScope, ReaderEvent, SendInput, SendReceipt, ShareableDiagnostics } from '../../contracts/src/index.ts';
 import { RpcTransport, record } from './codex/transport.ts';
 import { parseModel, string } from './codex/models.ts';
-import { SYNTHETIC_QUESTION, threadParams, validatePolicy, validateThread } from './codex/reader-policy.ts';
-import { describeTurnError } from './codex/errors.ts';
-import { RequestJournal, active } from './sessions/journal.ts';
+import { validatePolicy } from './codex/reader-policy.ts';
+import { ConversationStore } from './sessions/store.ts';
+import { ReaderService } from './sessions/service.ts';
+export { shareableDiagnostics } from './sessions/diagnostics.ts';
+export type { ShareableDiagnostics } from './sessions/diagnostics.ts';
 /** `codexHome`, when known to the caller, must equal the account directory the runtime reports. */
-export interface S2Options { codexVersion: string; cwd: string; uuid: () => string; loginTimeoutMs?: number; codexHome?: string }
-export async function createS2Client(process: ManagedProcess, storage: StoragePort, options: S2Options): Promise<S2Client> {
+export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => string; pluginVersion?: string; loginTimeoutMs?: number; codexHome?: string; deltaFlushMs?: number; now?: () => string }
+export async function createReaderClient(process: ManagedProcess, storage: StoragePort, options: ReaderOptions): Promise<ReaderClient> {
   let rpc: RpcTransport | null = null;
   try {
     if (options.codexVersion !== '0.144.1' || !options.cwd) throw new RuntimeFailure('Unsupported runtime version or directory');
-    const journal = await RequestJournal.open(storage);
     rpc = new RpcTransport(process);
-    const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero Codex Reader', version: '0.1.0' }, capabilities: { experimentalApi: false } }));
+    const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero Codex Reader', version: '0.2.0' }, capabilities: { experimentalApi: false } }));
     if (typeof response.userAgent !== 'string' || !/^[^/]+\/0\.144\.1(?:\s|$)/u.test(response.userAgent)) throw new RuntimeFailure('Unsupported runtime version');
     const codexHome = typeof response.codexHome === 'string' ? response.codexHome : '';
     if (!codexHome.startsWith('/') || (options.codexHome !== undefined && options.codexHome !== codexHome)) throw new RuntimeFailure('Reader policy unavailable: the runtime is not using the dedicated account directory');
     await rpc.notify('initialized');
     // Effective configuration and its provenance gate every later account or model call.
     validatePolicy(await rpc.request('config/read', { includeLayers: true, cwd: options.cwd }), codexHome);
-    return new ConnectionClient(rpc, journal, options);
+    return new RuntimeSession(rpc, storage, options);
   } catch (error) { if (rpc) await rpc.close().catch(() => undefined); else await process.terminate().catch(() => undefined); throw error; }
 }
-class ConnectionClient implements S2Client {
-  private state: S2Snapshot;
-  private listeners = new Set<(snapshot: S2Snapshot) => void>();
+/** Owns the transport, account/login/model state and routes thread notifications to the conversation service. */
+class RuntimeSession implements ReaderClient {
+  private state: RuntimeSnapshot;
+  private observers = new Set<(snapshot: RuntimeSnapshot) => void>();
   private changes = Promise.resolve();
   private queued = 0;
   private failureStarted = false;
-  private runs = new Map<string, Promise<void>>();
   private loginFlight: Promise<LoginFlow> | null = null;
   private loginTimer: ReturnType<typeof setTimeout> | null = null;
   private loginNotices = new Map<string, Record<string, unknown>>();
-  private threadId: string | null = null;
-  private turnId: string | null = null;
-  private cancelWanted = false;
-  private interrupted = false;
-  private items = new Map<string, string>();
   private closing = false;
   private closeFlight: Promise<void> | null = null;
-  constructor(private rpc: RpcTransport, private journal: RequestJournal, private options: S2Options) {
-    this.state = { revision: 0, runtime: 'ready', account: { state: 'signedOut' }, login: null, models: [], request: journal.latest(), error: null };
+  private service: ReaderService;
+  constructor(private rpc: RpcTransport, storage: StoragePort, private options: ReaderOptions) {
+    const now = options.now ?? (() => new Date().toISOString());
+    this.state = { revision: 0, runtime: 'ready', account: { state: 'signedOut' }, login: null, models: [], error: null };
+    this.service = new ReaderService(new ConversationStore(storage, { uuid: options.uuid, now }), {
+      request: (method, params) => this.rpc.request(method, params),
+      models: () => this.state.models,
+      ready: () => this.state.runtime === 'ready' && !this.closing,
+      signedIn: () => this.state.account.state === 'signedIn',
+      breach: () => { this.state.runtime = 'error'; this.state.error = 'Reader policy rejected an unsupported interaction.'; this.emit(); void this.rpc.close().catch(() => undefined); },
+    }, { cwd: options.cwd, uuid: options.uuid, now, ...(options.deltaFlushMs !== undefined ? { deltaFlushMs: options.deltaFlushMs } : {}) });
     rpc.subscribe(message => {
       if (this.closing || this.failureStarted) return;
       if (this.queued >= 1024) { void this.transportFailed(); return; }
@@ -49,33 +56,31 @@ class ConnectionClient implements S2Client {
     });
     rpc.onFailure(() => { if (!this.closing) void this.transportFailed(); });
   }
-  snapshot(): S2Snapshot { return JSON.parse(JSON.stringify(this.state)) as S2Snapshot; }
-  subscribe(listener: (snapshot: S2Snapshot) => void) { this.listeners.add(listener); listener(this.snapshot()); return () => { this.listeners.delete(listener); }; }
+  // ---- reactive runtime state -----------------------------------------------------------------
+  snapshot(): RuntimeSnapshot { return clone(this.state); }
+  observe(listener: (snapshot: RuntimeSnapshot) => void) { this.observers.add(listener); listener(this.snapshot()); return () => { this.observers.delete(listener); }; }
   private emit() {
     this.state.revision++;
-    for (const listener of this.listeners) { try { listener(this.snapshot()); } catch { /* View failures do not stop the service. */ } }
+    for (const listener of this.observers) { try { listener(this.snapshot()); } catch { /* View failures do not stop the service. */ } }
   }
   private enqueue(operation: () => Promise<void>): Promise<void> {
     const result = this.changes.then(operation);
     this.changes = result.catch(async () => {
-      this.state.runtime = 'error'; this.state.error = 'Unable to save or process this request safely.';
-      if (active(this.state.request)) this.state.request = { ...this.state.request!, state: 'uncertain', error: 'Request state could not be saved; it will not be resent.' };
-      this.emit(); await this.rpc.close().catch(() => undefined);
+      this.state.runtime = 'error'; this.state.error = 'Unable to process a runtime notification safely.'; this.emit();
+      await this.rpc.close().catch(() => undefined);
     });
     return this.changes;
   }
-  private async save(request: SyntheticRequest) { await this.journal.save(request); this.state.request = { ...request }; this.emit(); }
   private async transportFailed() {
     if (this.failureStarted || this.closing) return;
     this.failureStarted = true;
     this.state.runtime = 'error'; this.state.error = 'Codex connection ended.'; this.emit();
     void this.rpc.close().catch(() => undefined);
-    await this.enqueue(async () => {
-      this.state.runtime = 'error'; this.state.error = 'Codex connection ended.';
-      if (active(this.state.request)) await this.save({ ...this.state.request!, state: 'uncertain', error: 'Connection ended before confirmation; this request will not be resent.' });
+    await this.service.settleAll('The Codex connection ended before confirmation; this request will not be resent.');
+    await this.enqueue(() => {
       this.clearLoginTimer();
       if (this.state.login?.state === 'pending') { this.state.login = { ...this.state.login, state: 'failed', message: 'Codex connection ended during login.' }; this.state.account = { state: 'signedOut' }; this.loginFlight = null; }
-      this.emit();
+      this.emit(); return Promise.resolve();
     });
   }
   async refreshAccount(): Promise<void> {
@@ -85,11 +90,9 @@ class ConnectionClient implements S2Client {
       if (this.closing) return;
       if (typeof response.requiresOpenaiAuth !== 'boolean') throw new Error('Protocol account invalid');
       if (response.account === null) { this.state.account = { state: 'signedOut' }; this.state.models = []; this.state.error = null; this.emit(); return; }
-      else {
-        const account = record(response.account);
-        if (account.type !== 'chatgpt') throw new Error('Official ChatGPT login required');
-        this.state.account = { state: 'signedIn', displayLabel: 'ChatGPT' };
-      }
+      const account = record(response.account);
+      if (account.type !== 'chatgpt') throw new Error('Official ChatGPT login required');
+      this.state.account = { state: 'signedIn', displayLabel: 'ChatGPT' };
       const models: ModelOption[] = []; const cursors = new Set<string>(); let cursor: string | null = null;
       do {
         const page = record(await this.rpc.request('model/list', { cursor, limit: 100, includeHidden: false }));
@@ -152,106 +155,51 @@ class ConnectionClient implements S2Client {
     this.state.account = { state: 'signedOut' }; this.emit();
     if (params.success) await this.refreshAccount().catch(() => undefined);
   }
-  runSynthetic(requestId: string): Promise<void> {
-    if (!requestId || requestId.length > 128) return Promise.reject(new Error('Invalid request ID'));
-    const existing = this.runs.get(requestId); if (existing) return existing;
-    if (this.journal.get(requestId)) return Promise.resolve();
-    if (this.journal.hasUncertain()) return Promise.reject(new Error('An uncertain request must be reconciled before another submission'));
-    if (this.runs.size || active(this.state.request)) return Promise.reject(new Error('Request busy'));
-    this.cancelWanted = false;
-    const run = this.dispatch(requestId); this.runs.set(requestId, run);
-    void run.finally(() => { this.runs.delete(requestId); }).catch(() => undefined);
-    return run;
-  }
-  private async dispatch(requestId: string) {
-    if (this.state.runtime !== 'ready' || this.closing) throw new Error('Runtime unavailable');
-    if (this.state.account.state !== 'signedIn') throw new Error('Official ChatGPT login required');
-    const defaults = this.state.models.filter(m => m.isDefault);
-    if (defaults.length !== 1) throw new Error('Default model unavailable');
-    const model = defaults[0]!;
-    const request: SyntheticRequest = { requestId, state: 'accepted', question: SYNTHETIC_QUESTION, model: model.id, output: '', error: null };
-    if (!await this.journal.accept(request)) return;
-    this.state.request = request; this.interrupted = false; this.threadId = null; this.turnId = null; this.items.clear(); this.emit();
-    let submitted = false;
-    try {
-      await this.enqueue(async () => { await this.save({ ...request, state: 'dispatching' }); });
-      if (this.state.runtime !== 'ready') return;
-      const response = await this.rpc.request('thread/start', threadParams(this.options.cwd, model));
-      this.threadId = validateThread(response, this.options.cwd, model);
-      if (this.cancelWanted) { await this.enqueue(async () => { if (active(this.state.request)) await this.save({ ...this.state.request!, state: 'cancelled' }); }); return; }
-      if (!active(this.state.request) || this.state.runtime !== 'ready') return;
-      submitted = true;
-      const result = record(await this.rpc.request('turn/start', { threadId: this.threadId, clientUserMessageId: requestId, input: [{ type: 'text', text: SYNTHETIC_QUESTION, text_elements: [] }], cwd: this.options.cwd, approvalPolicy: 'never', approvalsReviewer: 'user', sandboxPolicy: { type: 'readOnly', networkAccess: false }, model: model.id, serviceTier: model.defaultServiceTier, effort: model.defaultReasoningEffort }));
-      await this.enqueue(async () => { await this.applyTurn(record(result.turn)); });
-      await this.maybeInterrupt();
-    } catch (error) {
-      // Deliberate policy failures carry constant text naming the mismatch; other errors stay generic.
-      const reason = error instanceof RuntimeFailure ? `${error.message}; no turn was submitted.` : 'Reader policy or connection unavailable; no turn was submitted.';
-      await this.enqueue(async () => {
-        if (active(this.state.request)) await this.save({ ...this.state.request!, state: submitted || this.closing ? 'uncertain' : 'failed', error: submitted || this.closing ? 'Submission could not be confirmed; this request will not be resent.' : reason });
-      });
-    }
-  }
-  async cancelRequest() { this.cancelWanted = true; await this.maybeInterrupt(); }
-  private async maybeInterrupt() {
-    if (!this.cancelWanted || this.interrupted || !this.threadId || !this.turnId || !active(this.state.request)) return;
-    this.interrupted = true;
-    try { await this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }); }
-    catch { await this.transportFailed(); }
-  }
-  private async applyTurn(turn: Record<string, unknown>) {
-    if (!active(this.state.request)) return;
-    const id = string(turn.id);
-    if (this.turnId && this.turnId !== id) throw new Error('Protocol turn mismatch');
-    this.turnId = id;
-    if (!Array.isArray(turn.items)) throw new Error('Protocol turn items invalid');
-    for (const item of turn.items) this.applyItem(record(item));
-    const status = string(turn.status);
-    let state: SyntheticRequest['state'] | null = status === 'completed' ? 'completed' : status === 'interrupted' ? 'cancelled' : status === 'failed' ? 'failed' : status === 'inProgress' ? 'running' : null;
-    if (!state) throw new Error('Protocol turn status invalid');
-    const output = this.output();
-    const emptyCompletion = state === 'completed' && !output.trim();
-    if (emptyCompletion) state = 'failed';
-    await this.save({ ...this.state.request!, state, output, error: emptyCompletion ? 'The model completed without an answer.' : state === 'failed' ? describeTurnError(turn.error) : null });
-    if (state === 'running') void this.maybeInterrupt();
-  }
-  private output() { const output = [...this.items.values()].join('\n\n'); if (output.length > 1024 * 1024) throw new Error('Protocol output too large'); return output; }
-  private applyItem(item: Record<string, unknown>) {
-    if (item.type === 'agentMessage') this.items.set(string(item.id), string(item.text));
-    else if (!['userMessage', 'reasoning', 'plan'].includes(string(item.type))) throw new Error('Unsupported interaction');
-  }
+  // ---- notifications --------------------------------------------------------------------------
   private async notice(message: Record<string, unknown>) {
+    const params = record(message.params ?? {});
     if ('id' in message) {
+      // Server-initiated requests (approvals, tools) are never granted; the affected request fails closed.
       if (['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(string(message.method))) await this.rpc.respond(message.id, { decision: 'decline' });
       else await this.rpc.rejectRequest(message.id);
-      if (active(this.state.request)) await this.save({ ...this.state.request!, state: 'failed', error: 'Unsupported tool or approval interaction was rejected.' });
+      if (typeof params.threadId === 'string') await this.service.failThread(params.threadId, 'UNSUPPORTED_INTERACTION', 'Unsupported tool or approval interaction was rejected.');
       this.state.runtime = 'error'; this.state.error = 'Reader policy rejected an unsupported interaction.'; this.emit();
       await this.rpc.close().catch(() => undefined); return;
     }
-    const params = record(message.params ?? {});
-    if (message.method === 'account/login/completed') {
+    const method = string(message.method);
+    if (method === 'account/login/completed') {
       if (typeof params.loginId !== 'string') return;
       if (!this.state.login) { if (this.loginNotices.size >= 16) this.loginNotices.clear(); this.loginNotices.set(params.loginId, params); }
       else await this.applyLoginNotice(params);
       return;
     }
-    if (message.method === 'account/updated') { void this.refreshAccount().catch(() => undefined); return; }
-    if (!active(this.state.request) || params.threadId !== this.threadId) return;
-    if (params.turnId !== undefined) { if (this.turnId && params.turnId !== this.turnId) return; this.turnId = string(params.turnId); }
-    if (message.method === 'turn/started' || message.method === 'turn/completed') { await this.applyTurn(record(params.turn)); return; }
-    if (message.method === 'error') {
-      if (params.willRetry === true) return;
-      await this.save({ ...this.state.request!, state: 'failed', error: describeTurnError(params.error) }); return;
-    }
-    if (message.method === 'item/agentMessage/delta') {
-      const id = string(params.itemId); this.items.set(id, (this.items.get(id) ?? '') + string(params.delta));
-      await this.save({ ...this.state.request!, output: this.output() });
-    } else if (message.method === 'item/completed' || message.method === 'item/started') {
-      try { this.applyItem(record(params.item)); }
-      catch { await this.save({ ...this.state.request!, state: 'failed', error: 'Unexpected tool activity; the reader connection has been stopped.' }); await this.rpc.close().catch(() => undefined); return; }
-      await this.save({ ...this.state.request!, output: this.output() });
-    }
+    if (method === 'account/updated') { void this.refreshAccount().catch(() => undefined); return; }
+    this.service.handleNotice(method, params);
   }
+  // ---- conversations (delegated) --------------------------------------------------------------
+  current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> { return this.service.current(paper, title, settings); }
+  newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> { return this.service.newConversation(paper, title, settings); }
+  list(paper: PaperScope): Promise<Conversation[]> { return this.service.list(paper); }
+  get(conversationId: string): Promise<Conversation> { return this.service.get(conversationId); }
+  select(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.select(paper, conversationId); }
+  send(input: SendInput): Promise<SendReceipt> { return this.service.send(input); }
+  request(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.request(conversationId, requestId); }
+  cancel(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.cancel(conversationId, requestId); }
+  diagnostics(conversationId: string): Promise<ShareableDiagnostics> {
+    return this.service.diagnostics(conversationId, {
+      pluginVersion: this.options.pluginVersion ?? '0.3.0-alpha.1',
+      runtimeVersion: this.options.codexVersion,
+      errorCode: this.runtimeErrorCode(),
+    });
+  }
+  subscribe(listener: (event: ReaderEvent) => void): () => void { return this.service.subscribe(listener); }
+  private runtimeErrorCode(): ErrorCode | null {
+    if (this.state.runtime !== 'error') return null;
+    if (this.state.error === 'Codex connection ended.') return 'CODEX_EXITED';
+    if (this.state.error === 'Reader policy rejected an unsupported interaction.') return 'READER_POLICY_UNAVAILABLE';
+    return 'RUNTIME_UNAVAILABLE';
+  }
+  // ---- shutdown -------------------------------------------------------------------------------
   close(): Promise<void> {
     if (this.closeFlight) return this.closeFlight;
     this.closing = true; this.clearLoginTimer();
@@ -261,16 +209,12 @@ class ConnectionClient implements S2Client {
     this.closeFlight = this.stop(); return this.closeFlight;
   }
   private async stop() {
-    // Fail the transport first so pending RPC calls cannot hold shutdown open. The
-    // durable state settles regardless of whether the owned process could be stopped;
-    // that termination result is reported to the caller afterwards.
+    // Fail the transport first so pending RPC calls cannot hold shutdown open. Durable state settles
+    // regardless of whether the owned process could be stopped; that result is reported afterwards.
     const termination = this.rpc.close(); termination.catch(() => undefined);
-    await Promise.allSettled([...this.runs.values()]);
-    await this.enqueue(async () => {
-      if (active(this.state.request)) await this.save({ ...this.state.request!, state: 'uncertain', error: 'Plugin stopped before confirmation; this request will not be resent.' });
-      this.state.runtime = 'stopped'; this.emit();
-    });
-    this.listeners.clear();
+    await this.service.close();
+    this.state.runtime = 'stopped'; this.emit();
+    this.observers.clear();
     await termination;
   }
 }
