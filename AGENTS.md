@@ -3,7 +3,7 @@
 ## Working context
 
 - Work from this repository. Read `docs/project-decisions.md` and `docs/module-design.md` before implementation.
-- Use `docs/superpowers/plans/2026-09-08-zcr-implementation-stages.md` for execution order; T0–T12 are reference work packages, not a sequential prerequisite list.
+- Use `docs/superpowers/plans/2026-09-08-zcr-implementation-stages.md` for execution order; T0–T12 named in that plan are reference work packages, not a sequential prerequisite list. Superseded T0–T12 checklists and the first-pass design note live in `docs/archive/`.
 - Read `docs/progress.md` to resume the current stage. User-facing behavior is defined in `docs/zotero-codex-user-flow.md`.
 - Develop in Cursor with the official Codex extension on macOS. Keep one writer responsible for each file; use separate worktrees only for genuinely independent tasks.
 

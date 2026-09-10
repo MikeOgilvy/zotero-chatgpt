@@ -1,0 +1,77 @@
+import type { Conversation, GenerationSettings, PaperScope, ReaderEvent, SendInput, SendReceipt, ShareableDiagnostics } from './index.ts';
+export interface ProcessSpec {
+  executable: string;
+  args: readonly string[];
+  cwd: string;
+  env: Readonly<Record<string, string>>;
+}
+export interface ManagedProcess {
+  stdout: AsyncIterable<string>;
+  writeStdin(chunk: string): Promise<void>;
+  wait(): Promise<{ exitCode: number | null }>;
+  terminate(): Promise<void>;
+}
+export interface ProcessPort { spawn(spec: ProcessSpec): Promise<ManagedProcess> }
+export interface StoragePort {
+  read(relativePath: string): Promise<Uint8Array | null>;
+  writeAtomic(relativePath: string, bytes: Uint8Array): Promise<void>;
+  append(relativePath: string, bytes: Uint8Array): Promise<void>;
+}
+export interface AccountStatus {
+  state: 'signedOut' | 'signingIn' | 'signedIn' | 'expired';
+  displayLabel?: string;
+}
+export interface LoginFlow { loginId: string; authorizationUrl: string }
+export interface LoginStatus {
+  loginId: string;
+  state: 'pending' | 'succeeded' | 'cancelled' | 'failed';
+  message?: string;
+}
+export interface ModelOption {
+  id: string;
+  displayName: string;
+  isDefault: boolean;
+  supportedReasoningEfforts: Array<{ id: string; description: string }>;
+  defaultReasoningEffort: string | null;
+  serviceTiers: Array<{ id: string; name: string; description: string }>;
+  defaultServiceTier: string | null;
+}
+/** Reactive runtime/account state shared by every view; conversations use ReaderEvent instead. */
+export interface RuntimeSnapshot {
+  revision: number;
+  runtime: 'ready' | 'error' | 'stopped';
+  account: AccountStatus;
+  login: LoginStatus | null;
+  models: ModelOption[];
+  error: string | null;
+}
+/**
+ * A deliberate failure whose message is safe to show users: constant text chosen by
+ * this project, never upstream output, paths or account data. Adapters may surface
+ * its message; any other error is reported generically.
+ */
+export class RuntimeFailure extends Error {
+  constructor(message: string) { super(message); this.name = 'RuntimeFailure'; }
+}
+/**
+ * In-process reader API used by the sidebar. Views borrow it from the plugin-wide supervisor and
+ * never receive pipes, file handles or credentials. Business failures are ReaderError instances.
+ */
+export interface ReaderClient {
+  snapshot(): RuntimeSnapshot;
+  observe(listener: (snapshot: RuntimeSnapshot) => void): () => void;
+  refreshAccount(): Promise<void>;
+  startLogin(): Promise<LoginFlow>;
+  cancelLogin(): Promise<void>;
+  current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
+  newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
+  list(paper: PaperScope): Promise<Conversation[]>;
+  get(conversationId: string): Promise<Conversation>;
+  select(paper: PaperScope, conversationId: string): Promise<Conversation>;
+  send(input: SendInput): Promise<SendReceipt>;
+  request(conversationId: string, requestId: string): Promise<SendReceipt>;
+  cancel(conversationId: string, requestId: string): Promise<SendReceipt>;
+  diagnostics(conversationId: string): Promise<ShareableDiagnostics>;
+  subscribe(listener: (event: ReaderEvent) => void): () => void;
+  close(): Promise<void>;
+}

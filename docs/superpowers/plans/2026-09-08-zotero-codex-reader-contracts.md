@@ -1,6 +1,6 @@
 # Zotero Codex Reader：接口与状态约定
 
-这是[开发计划](2026-09-08-zotero-codex-reader.md)的规范性附录，描述待实现的 v0.1 接口，不表示代码已经存在。数字上限属于首版工程选择，可依据测试调整并同步修改测试。
+这是恢复、布局和 Codex 适配的语义附录。公共类型与 `ReaderClient` 以 `packages/contracts` 为准（侧栏使用 `snapshot`/`observe`，不是早期草案里的 `status()`/`models()`）。数字上限在 `packages/contracts/src/validation.ts` 的 `LIMITS`，可依据测试调整。
 
 ## 1. 模块边界
 
@@ -197,6 +197,7 @@ export interface ModelOption {
 | `newConversation(paper, title, settings?)` | 当前附件、标题和可选初始设置 | `Conversation`；显式新建会话 |
 | `list(paper)` | 当前附件范围 | `Conversation[]`；只返回本插件管理的会话 |
 | `get(conversationId)` | 会话 ID | 包含 `lastSeq` 的 `Conversation` 完整快照 |
+| `select(paper, conversationId)` | 当前附件与会话 ID | 将该会话设为当前并返回快照；不属于该附件则 `NOT_FOUND` |
 | `send(input)` | `SendInput` | `SendReceipt`；相同请求重放返回 `replay: true`；复用 ID 但内容不同则 `REQUEST_CONFLICT`，会话已有活动请求则 `BUSY` |
 | `request(conversationId, requestId)` | 会话与请求 ID | `SendReceipt`；用于发送结果不确定时查询；不存在时抛出 `NOT_FOUND` |
 | `cancel(conversationId, requestId)` | 会话与请求 ID | `SendReceipt`；只表示已提出取消或当前终态，只有终态事件代表已取消 |
@@ -234,6 +235,7 @@ export interface ReaderClient {
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
   list(paper: PaperScope): Promise<Conversation[]>;
   get(conversationId: UUID): Promise<Conversation>;
+  select(paper: PaperScope, conversationId: UUID): Promise<Conversation>;
   send(input: SendInput): Promise<SendReceipt>;
   request(conversationId: UUID, requestId: UUID): Promise<SendReceipt>;
   cancel(conversationId: UUID, requestId: UUID): Promise<SendReceipt>;
@@ -282,6 +284,7 @@ export interface ConversationRepository {
   create(paper: PaperScope, title: string, settings: GenerationSettings): Promise<Conversation>;
   list(paper: PaperScope): Promise<Conversation[]>;
   get(id: UUID): Promise<Conversation>;
+  select(paper: PaperScope, id: UUID): Promise<Conversation>;
   save(value: Conversation): Promise<void>;
 }
 ```
@@ -301,14 +304,7 @@ export interface Draft {
 }
 ```
 
-UI 持久化未提交草稿使用以下类型化接口，不直接取得 StoragePort。实际文件为 `packages/zotero/src/storage/local-state.ts`；请求是否已发送仍仅由 ReaderClient/M3 决定。
-
-```ts
-export interface DraftStore {
-  read(paper: PaperScope): Promise<Draft | null>;
-  write(draft: Draft): Promise<void>;
-}
-```
+UI 将未提交草稿保存在 `ConversationPresenter` 内存中（按会话分袋），不直接取得 StoragePort。请求是否已发送仍仅由 ReaderClient/M3 决定。
 
 纯函数 `paperId(paper: PaperScope): string` 使用 `JSON.stringify([clientId, libraryId, attachmentKey])`，不靠标题或字符串拼接的歧义判断论文身份。`validateSendInput(value: unknown): SendInput` 返回已检查对象或抛出携带 `INVALID_REQUEST` 的错误。
 
@@ -485,3 +481,23 @@ More details / Ask in sidechat 在选区上方的独立紧凑操作条中呈现�
 截图里的主窗口标准右侧布局是首轮验证基线。Zotero 堆叠布局可能把 context pane 放到底部，独立阅读窗口也没有相同路径：必须分别验证适配，不静默改用户全局布局，不在未测试时宣称同样支持。全高聊天和 native section 共存是 G1 的验证项，不能从 API 存在直接推出成功。
 
 依据：[Zotero 阅读器事件 API](https://www.zotero.org/support/dev/zotero_7_for_developers#custom_reader_event_handlers)；本机 9.0.6 安装包中的 reader.js、reader.css、contextPane.js、itemPaneSidenav.js 和 PDF viewer.mjs 源码。当前为源码核查和产品规则，尚未进行真实 UI 验收。
+
+
+## S2 实施范围（2026-09-08）
+
+S2 先实现 `packages/contracts/src/runtime.ts` 中的 `S2Client`，供登录和合成连接测试界面使用。它提供快照订阅、账户刷新、发起/取消官方登录、固定问题测试、停止请求和关闭运行时。此时不实现上文完整 `ReaderClient` 的论文会话、引用、历史列表或任意问题接口；S3 再接入这些方法。
+
+`S2Snapshot` 明确包含运行状态、账户状态、登录状态、真实模型目录、最后一条合成请求和可显示错误。视图先取得客户端再订阅完整快照，取消订阅不关闭运行时。`runSynthetic(requestId)` 仅提交固定、明确标为连接测试的中文问题；问题不包含当前附件内容。同一请求 ID 去重，一次仅允许一个活动请求。恢复遇到未确认派发状态时标记 uncertain，不自动重新发送。
+
+原生监督器仍遵循前述 ProcessPort/StoragePort 和固定运行文件校验要求。0.144.1 运行配置使用插件专用 CODEX_HOME，固定文件凭据存储，并在 `environments.toml` 中设置 `include_local = false`、无远程环境条目，同时设置子进程 `CODEX_EXEC_SERVER_URL=none`。其目的是去除文件和命令执行环境；只读 sandbox 本身不代表禁用工具。无外部能力的内置 planning-state 工具可存在，文件/命令/浏览器/MCP/应用工具不开放。真实运行和发行验收分别记录，不能用静态配置检查宣称全部功能通过。
+
+### 已验证的 0.144.1 适配语义（2026-09-09）
+
+以下由隔离探测（无登录、无模型调用）和专用宿主运行确认，实现位于 `packages/core/src/codex/`：
+
+- 启动参数为 `app-server --strict-config` 加逐项 `-c`。除禁用特性外还固定 `approval_policy="never"`、`approvals_reviewer="user"`、`sandbox_mode="read-only"`、`default_permissions=":read-only"`、`history.persistence="none"`、`features.memories=false`、`features.remote_control=false`；全部被 `--strict-config` 接受并在有效配置中回显。`tools.experimental_request_user_input.enabled=false` 被接受但不回显，因此不作为门的必需项。
+- `initialized` 之后、任何账户或模型调用之前发送 `config/read {includeLayers:true, cwd}`。`validatePolicy` 要求：列举的有效值逐项匹配（空表表示必须为空）；`features` 中不允许任何 `true`；`layers` 必须是数组，恰有一个 `sessionFlags` 层，`user` 层文件等于 `${codexHome}/config.toml`、`profile` 为 null 且内容为空，`system/mdm/enterpriseManaged/project/legacyManaged*` 层只能为空对象，其他类型拒绝；`origins` 只能来自 `sessionFlags`。`initialize` 返回的 `codexHome` 为规范化绝对路径（`/tmp` 报告为 `/private/tmp`），监督器传入专用账户目录后必须完全相等。任一失败抛出 `RuntimeFailure('Reader policy unavailable: …')` 并终止进程。
+- `thread/start` 回显：请求 `serviceTier: null` 时返回 `"default"`，请求具体档位时原样返回，显式 `"default"` 字符串也被接受。`validateThread` 因此以 `defaultServiceTier ?? 'default'` 为期望值；`cwd` 原样回显（不规范化）；额外字段 `runtimeWorkspaceRoots` 若存在必须全部等于 cwd；`activePermissionProfile`、`multiAgentMode: "explicitRequestOnly"`、`historyMode` 不作校验。失败时以字段名说明原因，写入请求记录。
+- `model/list` 与 `thread/start` 无账户即可成功；只有 `turn/start` 需要登录。`remoteControl/status/changed`（`status: "disabled"`，含主机名与安装 ID）即使设置了禁用标记仍会出现，适配层忽略且不记录。
+- 轮次失败原因来自类型化 `codexErrorInfo`（`usageLimitExceeded`、`unauthorized`、`serverOverloaded`、`{responseStreamDisconnected:{httpStatusCode}}` 等），映射为常量文本；上游自由文本 `message` 永不写入记录或界面。`error` 通知先于 `turn/completed(failed)` 到达时以前者为准。
+- 核心的可展示失败统一使用 `contracts/src/runtime.ts` 的 `RuntimeFailure`；监督器只透传该类型的消息，原生阶段失败使用常量文本，其他错误保持通用文案。

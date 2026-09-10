@@ -1,0 +1,217 @@
+/* Scoped to the registered section: removing zcr-chat-active restores native panes. */
+item-details.zcr-chat-active .zotero-view-item-main > item-pane-header,
+item-details.zcr-chat-active #zotero-view-item > :not([data-zcr-section]) {
+  display: none !important;
+}
+item-details.zcr-chat-active .zotero-view-item-main,
+item-details.zcr-chat-active #zotero-view-item,
+item-details.zcr-chat-active [data-zcr-section],
+item-details.zcr-chat-active [data-zcr-section] > collapsible-section,
+item-details.zcr-chat-active [data-zcr-section] [data-type="body"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+item-details.zcr-chat-active #zotero-view-item { overflow: hidden; padding: 0; }
+item-details.zcr-chat-active [data-zcr-section] [data-type="body"] { padding: 0; }
+
+/* Native section head is the pane title bar: same height/border language as the reader toolbar. */
+item-details.zcr-chat-active [data-zcr-section] > collapsible-section > .head {
+  display: flex;
+  align-items: center;
+  min-height: var(--toolbarbutton-height, 32px);
+  margin: 0;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--color-panedivider, GrayText);
+  background: var(--material-toolbar, var(--material-sidepane, var(--material-background, Canvas)));
+}
+item-details.zcr-chat-active [data-zcr-section] > collapsible-section > .head .twisty {
+  display: none;
+}
+
+.zcr-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  font: inherit;
+  color-scheme: inherit;
+  color: var(--fill-primary, CanvasText);
+  background: var(--material-sidepane, var(--material-background, Canvas));
+  padding: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.zcr-chat { display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 0; }
+.zcr-chat [hidden] { display: none !important; }
+.zcr-chat p { margin: 0; line-height: 1.45; }
+.zcr-status-line { color: var(--fill-secondary, GrayText); font-size: 12px; padding: 4px 8px 0; }
+.zcr-chrome {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--toolbarbutton-height, 28px);
+  padding: 3px 8px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--color-panedivider, GrayText);
+  background: var(--material-toolbar, var(--material-sidepane, transparent));
+}
+.zcr-context {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--fill-secondary, GrayText);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.zcr-context-title {
+  margin: 0;
+  font: inherit;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 12rem;
+}
+.zcr-context-source, .zcr-context-citation {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.zcr-context-citation .zcr-button { padding: 0 4px; font-size: inherit; min-height: 18px; }
+.zcr-button {
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--color-panedivider, GrayText);
+  padding: 1px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.3;
+  min-height: 20px;
+}
+.zcr-button:hover { background: var(--fill-quinary, ButtonFace); }
+.zcr-button:disabled { opacity: .5; cursor: default; }
+.zcr-button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zcr-send {
+  flex: 0 0 auto;
+  background: var(--fill-quinary, ButtonFace);
+  font-weight: 600;
+}
+.zcr-error { color: var(--fill-primary, CanvasText); border-left: 2px solid var(--fill-secondary, GrayText); margin: 4px 8px 0; padding-left: 8px; overflow-wrap: anywhere; font-size: 12px; }
+.zcr-transcript {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.zcr-transcript[data-empty="true"] { justify-content: center; }
+.zcr-empty {
+  margin: auto;
+  padding: 16px 20px;
+  max-width: 16rem;
+  text-align: center;
+  color: var(--fill-secondary, GrayText);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.zcr-messages { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 8px; }
+.zcr-transcript[data-empty="true"] .zcr-messages { display: none; }
+.zcr-new-content { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 1; }
+.zcr-message { display: flex; flex-direction: column; gap: 4px; }
+.zcr-message-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.zcr-message-author { color: var(--fill-secondary, GrayText); font-size: 12px; }
+.zcr-message-header .zcr-button { padding: 0 5px; font-size: 11px; }
+.zcr-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.zcr-message-text.zcr-rendered { white-space: normal; }
+.zcr-message-text.zcr-rendered p { margin: 0 0 .55em; }
+.zcr-message-text.zcr-rendered p:last-child { margin-bottom: 0; }
+.zcr-message-text .katex-display, .zcr-message-text .zcr-math-fallback { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+.zcr-message[data-role="user"] .zcr-message-text { background: var(--fill-quinary, ButtonFace); border-radius: 4px; padding: 6px 8px; }
+.zcr-message-meta { color: var(--fill-secondary, GrayText); font-size: 11px; }
+.zcr-message[data-status="failed"] .zcr-message-meta, .zcr-message[data-status="uncertain"] .zcr-message-meta { color: var(--fill-primary, CanvasText); }
+.zcr-draft-citations { display: flex; flex-direction: column; gap: 6px; }
+.zcr-citation { border-left: 2px solid var(--color-panedivider, GrayText); padding: 2px 0 2px 8px; }
+.zcr-citation-text { margin: 0; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; color: var(--fill-primary, CanvasText); }
+.zcr-citation-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--fill-secondary, GrayText); font-size: 11px; margin-top: 2px; }
+.zcr-citation-meta .zcr-button { padding: 0 5px; font-size: 11px; }
+
+.zcr-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--color-panedivider, GrayText);
+  padding: 8px;
+  background: var(--material-background, var(--material-sidepane, Canvas));
+}
+.zcr-input {
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: var(--material-background, Field);
+  border: 1px solid var(--color-panedivider, GrayText);
+  border-radius: 3px;
+  padding: 6px 8px;
+  resize: none;
+  min-height: 44px;
+  max-height: 96px;
+  box-sizing: border-box;
+  width: 100%;
+}
+.zcr-input:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zcr-composer {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+.zcr-settings {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.zcr-menu {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  color: inherit;
+  background: var(--material-background, Field);
+  border: 1px solid var(--color-panedivider, GrayText);
+  border-radius: 3px;
+  padding: 1px 4px;
+  min-height: 20px;
+  max-width: 8.5rem;
+  min-width: 0;
+  cursor: pointer;
+}
+.zcr-history { max-width: 11rem; }
+.zcr-menu:disabled { opacity: .5; cursor: default; }
+.zcr-menu:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zcr-footnote {
+  color: var(--fill-secondary, GrayText);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

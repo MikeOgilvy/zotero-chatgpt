@@ -1,13 +1,13 @@
 # Zotero Codex Reader：用户流程
 
-2026-09-08，依据用户对首版使用流程的明确说明修订。本文件是产品验收依据，优先于先前计划中的开发便利性假设；所述功能目前仍待实现。
+2026-09-08，依据用户对首版使用流程的明确说明修订。本文件是产品验收依据，优先于开发便利性假设。当前实现与缺口见 [progress](progress.md)。
 
 ## 1. 下载、安装和首次登录
 
 1. 用户在 GitHub Release 下载适合自己平台的一个 Zotero 插件安装文件。
 2. 打开 Zotero，通过插件管理器安装；插件自动加载。
 3. 插件自动准备并启动随包提供的运行组件。必要时显示“正在准备”，用户无需安装 Node/Codex CLI、打开终端或复制本机配对码。
-4. 首次打开聊天侧栏时显示 **使用 ChatGPT 登录**。
+4. 首次打开聊天侧栏时显示 **Sign in with ChatGPT**。
 5. 点击后打开系统浏览器中的官方授权页；用户在官方页面完成登录。
 6. 授权完成后，Zotero 侧栏自动显示已登录状态和可用的聊天设置。
 7. 之后重启 Zotero 自动恢复可用登录；登录过期时在侧栏重新授权，保留文献与聊天历史。
@@ -52,25 +52,19 @@
 
 ```text
 ┌──────────────────────────────┐
-│ 当前论文 · 对话历史   新对话   │
+│ Codex                        │  ← native Zotero section head
+│ New chat          title · p.4│  ← one chrome row (history only if 2+)
 ├──────────────────────────────┤
-│  引用：选中的原文              │
-│  论文标题 · 第 4 页 · 返回原文  │
-│                              │
-│  用户的问题                   │
-│  GPT 的回答                   │
-│  后续追问与回答               │
-│                              │
+│  Select text or ask below    │  ← empty hint; messages fill when present
 ├──────────────────────────────┤
-│ 待发送引用卡（可移除）         │
-│ 输入问题……                   │
-│                              │
-│ 模型 ▾  速度 ▾  推理强度 ▾    │
-│                     发送 / 停止│
+│ Pending citation (removable) │
+│ Ask a question…              │
+│ Model · Speed · Reasoning  ➤ │  ← one composer row
+│ Preview · selected text only │
 └──────────────────────────────┘
 ```
 
-聊天操作与设置能力向 Codex 对齐，视觉使用 Zotero 的界面语言：系统字体、字号层级、灰阶背景、分隔线、输入框、下拉菜单、滚动条和焦点状态。默认不使用醒目的品牌大按钮、厚阴影或独立网页式卡片布局。侧栏由插件实现，会话与推理由 Codex 后台提供。
+侧栏默认文案为英文。聊天操作与设置能力向 Codex 对齐，视觉使用 Zotero 的界面语言：系统字体、字号层级、灰阶背景、分隔线、输入框、紧凑下拉按钮、滚动条和焦点状态。论文标题、附件身份和页码引用放在消息列表外的上下文条，不出现在对话正文里。默认不使用醒目的品牌大按钮、厚阴影或独立网页式卡片布局。侧栏由插件实现，会话与推理由 Codex 后台提供。关闭侧栏用阅读器工具栏开关，不再在侧栏顶部放一颗独立的关闭按钮。
 
 ### 停靠、宽度与原生侧栏协作
 
@@ -117,4 +111,4 @@
 - 上方插件操作条和下方原生标注面板共存、视口边缘避让、点击不丢选区均需验收，见 A29–A30。
 - 单一安装包的原生运行组件提取、执行、平台签名/隔离属性和升级回退必须实测；在它们通过前不能宣称上述安装体验已经实现。
 
-实施安排见[开发计划](superpowers/plans/2026-09-08-zotero-codex-reader.md)与[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。官方登录入口参见 [Codex App Server](https://learn.chatgpt.com/docs/app-server)。
+实施安排见[分阶段实施计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)与[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。官方登录入口参见 [Codex App Server](https://learn.chatgpt.com/docs/app-server)。

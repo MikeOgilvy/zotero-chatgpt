@@ -1,6 +1,6 @@
 # Zotero Codex Reader：模块设计
 
-状态：设计阶段，尚未实现。技术路线遵循[项目决策](project-decisions.md)，具体数据类型与错误语义遵循[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。
+状态：本文描述完整目标设计；S0–S6 开发预览已在专用宿主落地，S7 仅有 dry-run。当前进度见 [progress](progress.md)。技术路线遵循[项目决策](project-decisions.md)，公共类型以 `packages/contracts` 为准，恢复与 Codex 适配语义见[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。
 
 ## 1. 从使用流程划分职责
 
@@ -13,7 +13,7 @@
 | 模块 | 负责什么 | 调用方使用的接口 | 内部隐藏的复杂性 | 完成后如何验证 |
 | --- | --- | --- | --- | --- |
 | M1 阅读器适配 | 当前附件、选区、工具栏入口、原生停靠、PDF 缩放与引用定位 | `captureSelection`、`openCitation`、`ReaderLayoutController` | 父文献/附件区别、PDF/屏幕坐标、宿主 DOM 和版本差异、原生面板恢复 | 在真实 Zotero 捕获正确选区、按钮位置正确、开关后阅读位置保持 |
-| M2 聊天交互 | 引用卡、草稿、输入框、模型设置、回答显示与焦点 | `ChatController` 的 activate/add/explain/send/cancel/setSettings | 视图渲染、输入法、草稿保存、滚动策略、公式与主题 | 使用可控 ReaderClient，验证两个选区动作和连续界面状态 |
+| M2 聊天交互 | 引用卡、草稿、输入框、模型设置、回答显示与焦点 | `ConversationPresenter` 的 activate/addCitation/explain/send/cancel/setSettings | 视图渲染、输入法、草稿保存、滚动策略、公式与主题 | 使用可控 ReaderClient，验证两个选区动作和连续界面状态 |
 | M3 会话与请求 | 附件到会话的归属、请求顺序、去重、事件状态与恢复 | `ReaderClient` 的 current/newConversation/send/request/cancel/get/subscribe | 请求日志、并发排他、seq 去重、uncertain 对账、消息状态迁移 | 正文/补充 PDF 不串话，双击不重复请求，恢复不重新提交 |
 | M4 Codex 通信与账户 | App Server 握手、官方登录、模型能力、轮次与事件转换 | 内部 `CodexClient` | JSONL 拆包、request ID、服务端请求、账户通知、模型/速度/推理映射 | 假进程协议测试，再做真实官方登录、输出与取消 |
 | M5 原生运行管理 | 自带 Codex 校验/提取、原生启动、进程退出、插件全局生命周期 | `RuntimeSupervisor.ensureStarted/stop`，注入 `ProcessPort` | 原生句柄、UTF-8 流、stderr 排空、有限重启、平台路径与运行配置 | 一个插件实例只创建一个自有后台；关闭侧栏不丢回答；停用能收尾 |
@@ -30,19 +30,17 @@
 packages/
   contracts/          共享业务类型、能力端口、输入校验
   core/
-    sessions/         M3 会话与请求
+    sessions/         M3 会话与请求、快照/请求日志（store.ts、log.ts）
     codex/            M4 协议、账户、模型能力
-    persistence/      M6 平台无关的快照/日志规则
   zotero/
     reader/           M1；实际源码位于 src/reader/
-    chat/             M2；实际源码位于 src/chat/
-    runtime/          M5；实际源码位于 src/runtime/
-    storage/          M6 Gecko 存储适配；实际源码位于 src/storage/ 与 src/runtime/storage.ts
+    chat/             M2；实际源码位于 src/chat/（presenter 持有未提交草稿）
+    runtime/          M5 与 M6 Gecko 存储适配；实际源码位于 src/runtime/
 scripts/              M7 开发、编译、打包和验证
 tests/                对应模块的行为与集成测试
 ```
 
-上述是逻辑分布。现有详细文件清单将 repository/journal 放在 `core/src/sessions/`，初期沿用即可；只有增长到独立维护更清楚时才提取 persistence 文件夹，不预先制造空目录。
+上述是逻辑分布。会话快照与请求日志在 `core/src/sessions/`，不预先抽出空的 persistence 目录。
 
 ```mermaid
 flowchart TD
@@ -105,11 +103,11 @@ UI 不拼接原始 JSON-RPC。握手、登录、模型目录、每轮参数、�
 
 ### M6：先有最小可靠记录，再扩展历史管理
 
-早期实现必需的请求日志、附件映射和当前对话记录；后续再增加历史列表、迁移和坏尾恢复矩阵。核心对“写入成功”的解释必须由 Gecko 适配器实测支持。
+早期实现必需的请求日志、附件映射和当前对话记录；S5 已补上每附件历史、JSONL 请求日志坏尾恢复和 schema 拒绝写入。核心对“写入成功”的解释必须由 Gecko 适配器实测支持。
 
 正文记录与可分享诊断分开。诊断仅包含允许字段；错误处理不会自动打包原文、账户信息或完整进程输出。
 
-草稿和已提交对话可共用底层 StoragePort，但接口不同：UI 使用类型化 `DraftStore.read(paper)` / `write(draft)`，会话核心使用 ConversationRepository 和请求日志。二者不能分别维护请求状态。DraftStore 位于现有 `packages/zotero/src/storage/local-state.ts`，内部再调用平台存储，避免 UI 获得任意文件读写能力。
+未提交草稿由 `ConversationPresenter` 按附件/会话保存在内存中，关闭侧栏不丢失，也不写入 StoragePort。已提交对话与请求日志只走 M3 的 `ConversationStore`。二者不能分别维护“是否已发送”。UI 不得取得任意文件读写能力。
 
 ### M7：开发循环与发行链路同时存在
 
