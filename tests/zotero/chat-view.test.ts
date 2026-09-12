@@ -316,6 +316,15 @@ it('reports a rejected citation open without clobbering the presenter message sl
   expect(root.textContent).not.toContain('/private');
 });
 
+it('routes a rejected draft-citation open through the same dedicated slot', async () => {
+  const openCitation = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
+  const { root } = await mountReadyChat({ draftCitations: [citationA], openCitation });
+  root.querySelector<HTMLButtonElement>('[data-zcr-citation] [data-zcr-action="open-citation"]')!.click();
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(viewError.textContent).toBe('The source could not be opened.'));
+  expect(root.textContent).not.toContain('/private');
+});
+
 it('keeps the offline composer editable while preventing model submission', async () => {
   const f = await mountReadyChat(); f.updateRuntime({ runtime: 'error', error: 'Connection ended' });
   expect(f.root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.disabled).toBe(false);

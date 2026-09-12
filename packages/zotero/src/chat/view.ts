@@ -573,7 +573,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const quote = el('blockquote', 'zcr-citation-text', citation.text.length > 240 ? `${[...citation.text].slice(0, 240).join('')}…` : citation.text);
     const meta = el('div', 'zcr-citation-meta');
     meta.append(el('span', '', COPY.page(pageLabel(citation))));
-    if (hooks.openCitation) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(error => { alert.textContent = error instanceof Error ? error.message : 'The source could not be opened.'; alert.hidden = false; }); }, 'source'));
+    if (hooks.openCitation) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(() => reportViewMessage(COPY.sourceOpenFailed)); }, 'source'));
     if (removable) meta.append(button(COPY.remove, 'remove-citation', () => { presenter.removeCitation(citation.id); }, 'remove'));
     card.append(quote, meta); return card;
   };
