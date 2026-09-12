@@ -1,21 +1,21 @@
 import { RuntimeFailure, type LoginFlow, type ManagedProcess, type ModelOption, type ReaderClient, type RuntimeSnapshot, type StoragePort } from '../../contracts/src/runtime.ts';
 import { clone } from '../../contracts/src/clone.ts';
-import type { Conversation, ErrorCode, GenerationSettings, PaperScope, ReaderEvent, SendInput, SendReceipt, ShareableDiagnostics } from '../../contracts/src/index.ts';
+import type { Conversation, ErrorCode, GenerationSettings, ImageAttachment, PaperScope, ReaderEvent, SendInput, SendReceipt, ShareableDiagnostics } from '../../contracts/src/index.ts';
 import { RpcTransport, record } from './codex/transport.ts';
-import { parseModel, string } from './codex/models.ts';
+import { mergeRateLimitNotice, parseModel, parseProviderCapabilities, parseRateLimits, string, visibleRateLimits, type RateLimitBuckets } from './codex/models.ts';
 import { validatePolicy } from './codex/reader-policy.ts';
 import { ConversationStore } from './sessions/store.ts';
 import { ReaderService } from './sessions/service.ts';
 export { shareableDiagnostics } from './sessions/diagnostics.ts';
 export type { ShareableDiagnostics } from './sessions/diagnostics.ts';
 /** `codexHome`, when known to the caller, must equal the account directory the runtime reports. */
-export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => string; pluginVersion?: string; loginTimeoutMs?: number; codexHome?: string; deltaFlushMs?: number; now?: () => string }
+export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => string; pluginVersion?: string; loginTimeoutMs?: number; codexHome?: string; deltaFlushMs?: number; now?: () => string; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment> }
 export async function createReaderClient(process: ManagedProcess, storage: StoragePort, options: ReaderOptions): Promise<ReaderClient> {
   let rpc: RpcTransport | null = null;
   try {
     if (options.codexVersion !== '0.144.1' || !options.cwd) throw new RuntimeFailure('Unsupported runtime version or directory');
     rpc = new RpcTransport(process);
-    const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero Codex Reader', version: '0.2.0' }, capabilities: { experimentalApi: false } }));
+    const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero Codex Reader', version: options.pluginVersion ?? 'unknown' }, capabilities: { experimentalApi: false } }));
     if (typeof response.userAgent !== 'string' || !/^[^/]+\/0\.144\.1(?:\s|$)/u.test(response.userAgent)) throw new RuntimeFailure('Unsupported runtime version');
     const codexHome = typeof response.codexHome === 'string' ? response.codexHome : '';
     if (!codexHome.startsWith('/') || (options.codexHome !== undefined && options.codexHome !== codexHome)) throw new RuntimeFailure('Reader policy unavailable: the runtime is not using the dedicated account directory');
@@ -38,6 +38,12 @@ class RuntimeSession implements ReaderClient {
   private closing = false;
   private closeFlight: Promise<void> | null = null;
   private service: ReaderService;
+  private accountEpoch = 0;
+  private accountRefresh: { epoch: number; promise: Promise<void> } | null = null;
+  private optionalNext: { epoch: number; signedIn: boolean } | null = null;
+  private optionalFlight: Promise<void> | null = null;
+  private rateBuckets: RateLimitBuckets | null = null;
+  private rateNoticeVersion = 0;
   constructor(private rpc: RpcTransport, storage: StoragePort, private options: ReaderOptions) {
     const now = options.now ?? (() => new Date().toISOString());
     this.state = { revision: 0, runtime: 'ready', account: { state: 'signedOut' }, login: null, models: [], error: null };
@@ -47,12 +53,12 @@ class RuntimeSession implements ReaderClient {
       ready: () => this.state.runtime === 'ready' && !this.closing,
       signedIn: () => this.state.account.state === 'signedIn',
       breach: () => { this.state.runtime = 'error'; this.state.error = 'Reader policy rejected an unsupported interaction.'; this.emit(); void this.rpc.close().catch(() => undefined); },
-    }, { cwd: options.cwd, uuid: options.uuid, now, ...(options.deltaFlushMs !== undefined ? { deltaFlushMs: options.deltaFlushMs } : {}) });
+    }, { cwd: options.cwd, uuid: options.uuid, now, ...(options.deltaFlushMs !== undefined ? { deltaFlushMs: options.deltaFlushMs } : {}), ...(options.generatedImage ? { generatedImage: options.generatedImage } : {}) });
     rpc.subscribe(message => {
       if (this.closing || this.failureStarted) return;
       if (this.queued >= 1024) { void this.transportFailed(); return; }
       this.queued++;
-      void this.enqueue(async () => { try { if (!this.failureStarted && !this.closing) await this.notice(message); } finally { this.queued--; } });
+      void this.enqueueNotice(async () => { try { if (!this.failureStarted && !this.closing) await this.notice(message); } finally { this.queued--; } });
     });
     rpc.onFailure(() => { if (!this.closing) void this.transportFailed(); });
   }
@@ -63,7 +69,7 @@ class RuntimeSession implements ReaderClient {
     this.state.revision++;
     for (const listener of this.observers) { try { listener(this.snapshot()); } catch { /* View failures do not stop the service. */ } }
   }
-  private enqueue(operation: () => Promise<void>): Promise<void> {
+  private enqueueNotice(operation: () => Promise<void>): Promise<void> {
     const result = this.changes.then(operation);
     this.changes = result.catch(async () => {
       this.state.runtime = 'error'; this.state.error = 'Unable to process a runtime notification safely.'; this.emit();
@@ -74,21 +80,33 @@ class RuntimeSession implements ReaderClient {
   private async transportFailed() {
     if (this.failureStarted || this.closing) return;
     this.failureStarted = true;
+    this.invalidateAccountExtras();
     this.state.runtime = 'error'; this.state.error = 'Codex connection ended.'; this.emit();
     void this.rpc.close().catch(() => undefined);
     await this.service.settleAll('The Codex connection ended before confirmation; this request will not be resent.');
-    await this.enqueue(() => {
+    await this.enqueueNotice(() => {
       this.clearLoginTimer();
       if (this.state.login?.state === 'pending') { this.state.login = { ...this.state.login, state: 'failed', message: 'Codex connection ended during login.' }; this.state.account = { state: 'signedOut' }; this.loginFlight = null; }
       this.emit(); return Promise.resolve();
     });
   }
-  async refreshAccount(): Promise<void> {
-    if (this.closing) throw new Error('Runtime stopped');
+  private invalidateAccountExtras(): void {
+    this.accountEpoch++; this.optionalNext = null; this.rateBuckets = null; this.rateNoticeVersion++; delete this.state.rateLimits;
+  }
+  refreshAccount(): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('Runtime stopped'));
+    if (this.accountRefresh?.epoch === this.accountEpoch) return this.accountRefresh.promise;
+    const hadLimits = this.state.rateLimits !== undefined; this.invalidateAccountExtras(); if (hadLimits) this.emit();
+    const epoch = this.accountEpoch; const promise = this.readAccountAndModels(epoch);
+    this.accountRefresh = { epoch, promise };
+    void promise.finally(() => { if (this.accountRefresh?.promise === promise) this.accountRefresh = null; }).catch(() => undefined);
+    return promise;
+  }
+  private async readAccountAndModels(epoch: number): Promise<void> {
     let accountVerified = false;
     try {
       const response = record(await this.rpc.request('account/read', { refreshToken: false }));
-      if (this.closing) return;
+      if (this.closing || epoch !== this.accountEpoch) return;
       if (typeof response.requiresOpenaiAuth !== 'boolean') throw new Error('Protocol account invalid');
       if (response.account === null) this.state.account = { state: 'signedOut' };
       else {
@@ -100,7 +118,7 @@ class RuntimeSession implements ReaderClient {
       const models: ModelOption[] = []; const cursors = new Set<string>(); let cursor: string | null = null;
       do {
         const page = record(await this.rpc.request('model/list', { cursor, limit: 100, includeHidden: false }));
-        if (this.closing) return;
+        if (this.closing || epoch !== this.accountEpoch) return;
         if (!Array.isArray(page.data) || (page.nextCursor !== null && typeof page.nextCursor !== 'string')) throw new Error('Protocol model list invalid');
         for (const data of page.data) { const model = parseModel(data); if (model) models.push(model); }
         cursor = page.nextCursor;
@@ -110,11 +128,46 @@ class RuntimeSession implements ReaderClient {
       } while (cursor);
       if (new Set(models.map(m => m.id)).size !== models.length) throw new Error('Protocol duplicate model');
       this.state.models = models; this.state.error = null; this.emit();
-    } catch { if (this.closing) return; this.state.models = []; this.state.error = 'Unable to read the official account or model catalog.'; this.emit(); if (accountVerified && this.state.account.state === 'signedOut') return; throw new RuntimeFailure(this.state.error); }
+      this.queueOptional(epoch, this.state.account.state === 'signedIn');
+    } catch { if (this.closing || epoch !== this.accountEpoch) return; this.state.models = []; this.state.error = 'Unable to read the official account or model catalog.'; this.emit(); if (accountVerified && this.state.account.state === 'signedOut') return; throw new RuntimeFailure(this.state.error); }
+  }
+  private queueOptional(epoch: number, signedIn: boolean): void {
+    if (this.closing || epoch !== this.accountEpoch) return;
+    this.optionalNext = { epoch, signedIn }; if (this.optionalFlight) return;
+    const flight = this.readOptional(); this.optionalFlight = flight;
+    void flight.finally(() => {
+      if (this.optionalFlight === flight) this.optionalFlight = null;
+      const next = this.optionalNext; if (next && !this.closing) this.queueOptional(next.epoch, next.signedIn);
+    }).catch(() => undefined);
+  }
+  private async readOptional(): Promise<void> {
+    while (this.optionalNext && !this.closing) {
+      const requested = this.optionalNext; this.optionalNext = null;
+      if (requested.epoch !== this.accountEpoch) continue;
+      const noticeVersion = this.rateNoticeVersion;
+      const applyProvider = (value: unknown) => {
+        if (this.closing || requested.epoch !== this.accountEpoch) return;
+        const before = JSON.stringify(this.state.capabilities); const capabilities = parseProviderCapabilities(value);
+        if (capabilities) this.state.capabilities = capabilities; else delete this.state.capabilities;
+        if (JSON.stringify(this.state.capabilities) !== before) this.emit();
+      };
+      const applyRates = (value: unknown) => {
+        // A late full read must not replace newer rolling usage already received.
+        if (this.closing || requested.epoch !== this.accountEpoch || this.state.account.state !== 'signedIn' || noticeVersion !== this.rateNoticeVersion) return;
+        const before = JSON.stringify(this.state.rateLimits); this.rateBuckets = parseRateLimits(value);
+        const visible = visibleRateLimits(this.rateBuckets); if (visible) this.state.rateLimits = visible; else delete this.state.rateLimits;
+        if (JSON.stringify(this.state.rateLimits) !== before) this.emit();
+      };
+      await Promise.allSettled([
+        this.rpc.requestOptional('modelProvider/capabilities/read', {}).then(applyProvider, () => applyProvider(undefined)),
+        requested.signedIn ? this.rpc.requestOptional('account/rateLimits/read', {}).then(applyRates, () => applyRates(undefined)) : Promise.resolve(),
+      ]);
+    }
   }
   startLogin(): Promise<LoginFlow> {
     if (this.closing || this.state.runtime !== 'ready') return Promise.reject(new Error('Runtime unavailable'));
     if (this.loginFlight) return this.loginFlight.then(flow => ({ ...flow }));
+    this.invalidateAccountExtras();
     this.state.login = null; this.loginNotices.clear();
     this.state.account = { state: 'signingIn' }; this.state.error = null; this.emit();
     const flight = this.beginLogin(); this.loginFlight = flight;
@@ -146,7 +199,7 @@ class RuntimeSession implements ReaderClient {
     const login = this.state.login;
     if (!login || login.state !== 'pending') return;
     this.clearLoginTimer(); this.state.login = { ...login, state: timeout ? 'failed' : 'cancelled', ...(timeout ? { message: 'Login timed out. Start a new login to continue.' } : {}) };
-    this.state.account = { state: 'signedOut' }; this.loginFlight = null; this.emit();
+    this.state.account = { state: 'signedOut' }; this.loginFlight = null; this.invalidateAccountExtras(); this.emit();
     try { const result = record(await this.rpc.request('account/login/cancel', { loginId: login.loginId })); if (!['canceled', 'notFound'].includes(string(result.status))) throw new Error('Protocol cancel invalid'); }
     catch { this.state.error = 'Login cancellation could not be confirmed.'; this.emit(); }
   }
@@ -156,11 +209,20 @@ class RuntimeSession implements ReaderClient {
     if (typeof params.success !== 'boolean') throw new Error('Protocol login completion invalid');
     this.clearLoginTimer(); this.loginFlight = null;
     this.state.login = { loginId: login.loginId, state: params.success ? 'succeeded' : 'failed', ...(!params.success ? { message: 'Official login did not complete.' } : {}) };
-    this.state.account = { state: 'signedOut' }; this.emit();
+    this.state.account = { state: 'signedOut' }; this.invalidateAccountExtras(); this.emit();
     if (params.success) await this.refreshAccount().catch(() => undefined);
   }
   // ---- notifications --------------------------------------------------------------------------
   private async notice(message: Record<string, unknown>) {
+    const method = string(message.method);
+    if (method === 'account/rateLimits/updated' && !('id' in message)) {
+      if (this.state.account.state !== 'signedIn') return;
+      const previous = JSON.stringify(this.state.rateLimits);
+      this.rateBuckets = mergeRateLimitNotice(message.params, this.rateBuckets);
+      const visible = visibleRateLimits(this.rateBuckets); if (visible) this.state.rateLimits = visible; else delete this.state.rateLimits;
+      if (JSON.stringify(this.state.rateLimits) !== previous) { this.rateNoticeVersion++; this.emit(); }
+      return;
+    }
     const params = record(message.params ?? {});
     if ('id' in message) {
       // Server-initiated requests (approvals, tools) are never granted; the affected request fails closed.
@@ -170,7 +232,6 @@ class RuntimeSession implements ReaderClient {
       this.state.runtime = 'error'; this.state.error = 'Reader policy rejected an unsupported interaction.'; this.emit();
       await this.rpc.close().catch(() => undefined); return;
     }
-    const method = string(message.method);
     if (method === 'account/login/completed') {
       if (typeof params.loginId !== 'string') return;
       if (!this.state.login) { if (this.loginNotices.size >= 16) this.loginNotices.clear(); this.loginNotices.set(params.loginId, params); }
@@ -186,13 +247,17 @@ class RuntimeSession implements ReaderClient {
   list(paper: PaperScope): Promise<Conversation[]> { return this.service.list(paper); }
   get(conversationId: string): Promise<Conversation> { return this.service.get(conversationId); }
   select(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.select(paper, conversationId); }
+  renameConversation(conversationId: string, title: string): Promise<Conversation> { return this.service.renameConversation(conversationId, title); }
+  branchConversation(conversationId: string, messageId: string): Promise<Conversation> { return this.service.branchConversation(conversationId, messageId); }
   deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.deleteConversation(paper, conversationId); }
   send(input: SendInput): Promise<SendReceipt> { return this.service.send(input); }
+  enqueue(input: SendInput): Promise<SendReceipt> { return this.service.enqueue(input); }
+  releaseBatch(conversationId: string, batchId: string): Promise<void> { return this.service.releaseBatch(conversationId, batchId); }
   request(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.request(conversationId, requestId); }
   cancel(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.cancel(conversationId, requestId); }
   diagnostics(conversationId: string): Promise<ShareableDiagnostics> {
     return this.service.diagnostics(conversationId, {
-      pluginVersion: this.options.pluginVersion ?? '0.3.0-alpha.1',
+      pluginVersion: this.options.pluginVersion ?? '0.4.0-alpha.1',
       runtimeVersion: this.options.codexVersion,
       errorCode: this.runtimeErrorCode(),
     });
@@ -208,6 +273,7 @@ class RuntimeSession implements ReaderClient {
   close(): Promise<void> {
     if (this.closeFlight) return this.closeFlight;
     this.closing = true; this.clearLoginTimer();
+    this.invalidateAccountExtras();
     if (this.state.login?.state === 'pending') this.state.login = { ...this.state.login, state: 'cancelled' };
     if (this.state.account.state === 'signingIn') this.state.account = { state: 'signedOut' };
     this.loginFlight = null;

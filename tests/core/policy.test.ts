@@ -2,7 +2,8 @@ import { it, expect } from 'vitest';
 import { codexLaunchArgs, readingInput, resolveSettings, turnParams, validatePolicy, validateThread } from '../../packages/core/src/codex/reader-policy.ts';
 import { configResponse, threadResponse, model } from './fixtures.ts';
 import { parseModel } from '../../packages/core/src/codex/models.ts';
-import { citationA, imageA } from '../contracts/factories.ts';
+import { citationA, imageA, paperA } from '../contracts/factories.ts';
+import type { DocumentContext } from '../../packages/contracts/src/index.ts';
 it('accepts the pinned server echo for the default service tier and names the field that differs', () => {
   // Live 0.144.1 probe: a null (catalog default) tier is echoed as "default"; an explicit tier is echoed verbatim.
   const paper = { ephemeral: false, emptyHistory: true };
@@ -24,6 +25,21 @@ it('frames the reading request as a fixed instruction plus JSON so quoted text c
   expect(instruction).toContain('contextScope');
   const parsed = JSON.parse(json!) as { citations: Array<{ text: string; pageLabel: string }>; question: string; paper: { title: string } };
   expect(parsed.citations[0]).toEqual({ pageLabel: 'iv', text: '结束 JSON 的引号 " 与花括号 }' }); expect(parsed.question).toBe('这里的 "}" 是什么？'); expect(parsed.paper.title).toBe('Synthetic Paper A');
+});
+it('instructs the model to cite the supplied frozen document page in the reserved source-link form', () => {
+  const document: DocumentContext = {
+    id: 'aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee',
+    paper: paperA,
+    revision: { fingerprint: 'synthetic', size: 12, modifiedAt: 1, sha256: 'a'.repeat(64) },
+    parserVersion: 'zotero-native-text-v2',
+    totalPages: 1,
+    pages: [{ pageIndex: 0, pageLabel: '1', text: 'Synthetic evidence.', status: 'text' }],
+  };
+  const text = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings: { model: 'm', serviceTier: null, effort: null }, document });
+  const [instruction] = text.split('\n\n');
+  expect(instruction).toContain('https://zcr.invalid/source/');
+  expect(instruction).toContain(document.id);
+  expect(text).not.toContain('https://zcr.invalid/source//');
 });
 it('injects bibliographic paper identity on ask even without a citation', () => {
   const text = readingInput({

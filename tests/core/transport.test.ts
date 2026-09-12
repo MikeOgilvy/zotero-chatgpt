@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { RpcTransport } from '../../packages/core/src/codex/transport.ts';
 import { FakeProcess, flush } from './doubles.ts';
 describe('JSONL transport', () => {
@@ -32,4 +32,31 @@ it('does not start the next stdin write before prior backpressure resolves', asy
 it('rejects truncated EOF without exposing the partial protocol frame', async () => {
   const p = new FakeProcess(); const t = new RpcTransport(p); const request = t.request('a', {}); const assertion = expect(request).rejects.toThrow('truncated');
   p.push('{"secret":"private-token'); p.end(); await assertion;
+});
+it('times out an optional request without breaking a main request and ignores its late response', async () => {
+  vi.useFakeTimers(); const p = new FakeProcess(); const t = new RpcTransport(p, { maxPending: 2 });
+  let optionalFailure: unknown = null;
+  const optional = t.requestOptional('optional', {}, 20).catch(error => { optionalFailure = error; });
+  try {
+    await vi.advanceTimersByTimeAsync(21); expect(optionalFailure).toBeInstanceOf(Error);
+    const main = t.request('main', {}); await flush();
+    p.emit({ id: 1, result: 'Late optional data' }); p.emit({ id: 2, result: 'Main response' });
+    expect(await main).toBe('Main response'); expect(p.terminated).toBe(false);
+  } finally { await t.close(); await optional; vi.useRealTimers(); }
+});
+it('keeps the main request hard timeout after introducing optional requests', async () => {
+  vi.useFakeTimers(); const p = new FakeProcess(); const t = new RpcTransport(p);
+  try {
+    const waiting = t.request('required', {}); const rejected = expect(waiting).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(60000); await rejected;
+    await expect(t.request('next', {})).rejects.toThrow('timed out');
+  } finally { await t.close(); vi.useRealTimers(); }
+});
+it('accepts an exact bounded frame and rejects a valid JSON frame one character too large', async () => {
+  const line = JSON.stringify({ method: 'synthetic/image', params: { result: 'a'.repeat(20) } }) + '\n';
+  const p = new FakeProcess(); const t = new RpcTransport(p, { maxLineChars: line.length }); const notices: unknown[] = [];
+  t.subscribe(notice => notices.push(notice)); p.push(line.slice(0, 10)); p.push(line.slice(10)); await flush();
+  expect(notices).toHaveLength(1);
+  const waiting = t.request('pending', {}); const failed = expect(waiting).rejects.toThrow('Protocol');
+  p.push(line.slice(0, -1) + ' \n'); await failed; await t.close();
 });

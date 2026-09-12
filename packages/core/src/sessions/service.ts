@@ -1,4 +1,4 @@
-import { ReaderError, paperId, type Conversation, type ErrorCode, type GenerationSettings, type Message, type PaperScope, type ReaderEvent, type RequestState, type SendInput, type SendReceipt, type ShareableDiagnostics, type UUID } from '../../../contracts/src/index.ts';
+import { ReaderError, paperId, type Conversation, type ErrorCode, type GenerationSettings, type ImageAttachment, type Message, type PaperScope, type ReaderEvent, type RequestState, type SendInput, type SendReceipt, type ShareableDiagnostics, type UUID } from '../../../contracts/src/index.ts';
 import { shareableDiagnostics } from './diagnostics.ts';
 import { clone } from '../../../contracts/src/clone.ts';
 import { documentSummary } from '../../../contracts/src/document.ts';
@@ -6,6 +6,7 @@ import { RuntimeFailure, type ModelOption } from '../../../contracts/src/runtime
 import { validatePaperScope, validateSendInput, validateSettings } from '../../../contracts/src/validation.ts';
 import { record } from '../codex/transport.ts';
 import { string } from '../codex/models.ts';
+import { parseThreadUsage } from '../codex/model-capabilities.ts';
 import { describeTurnError, type TurnFailure } from '../codex/errors.ts';
 import { parseThreadHistory, type HistoryTurn } from '../codex/history.ts';
 import { readingInput, resolveSettings, resumeParams, threadParams, turnParams, validateThread, type ResolvedSettings } from '../codex/reader-policy.ts';
@@ -20,7 +21,7 @@ export interface ServiceUpstream {
   /** Reader policy breach: the runtime must stop; the service has already marked the request. */
   breach(): void;
 }
-export interface ServiceOptions { cwd: string; uuid: () => string; now: () => string; deltaFlushMs?: number }
+export interface ServiceOptions { cwd: string; uuid: () => string; now: () => string; deltaFlushMs?: number; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment> }
 interface Run {
   conversationId: UUID; requestId: UUID; input: SendInput; resolved: ResolvedSettings;
   threadId: string | null; turnId: string | null; cancelWanted: boolean; interrupted: boolean; submitted: boolean; settled: boolean;
@@ -33,8 +34,8 @@ type Change = (conversation: StoredConversation, emit: (event: Pending) => void)
 const ACTIVE: RequestState[] = ['accepted', 'dispatching', 'running'];
 const HARMLESS_ITEMS = ['userMessage', 'reasoning', 'plan', 'contextCompaction'];
 const ANSWER_LIMIT = 1024 * 1024;
-async function hashInput(input: SendInput): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}) }));
+async function hashInput(input: SendInput, version: 1 | 2 = 2): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version === 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -43,8 +44,14 @@ function toPublic(conversation: StoredConversation): Conversation {
     id: conversation.id,
     paper: clone(conversation.paper),
     title: conversation.title,
+    ...(conversation.paperIdentity ? { paperIdentity: clone(conversation.paperIdentity) } : {}),
+    ...(conversation.titleCustomized ? { titleCustomized: true } : {}),
+    ...(conversation.parentConversationId ? { parentConversationId: conversation.parentConversationId, forkMessageId: conversation.forkMessageId } : {}),
+    ...(conversation.usage ? { usage: clone(conversation.usage) } : {}),
     settings: clone(conversation.settings),
     activeRequestId: conversation.activeRequestId,
+    queuedRequestIds: conversation.requests.filter(request => request.state === 'accepted' && request.requestId !== conversation.activeRequestId).map(request => request.requestId),
+    ...(conversation.activeBatchId ? { activeBatchId: conversation.activeBatchId } : {}),
     messages: clone(conversation.messages),
     lastSeq: conversation.lastSeq,
     createdAt: conversation.createdAt,
@@ -63,6 +70,7 @@ export class ReaderService {
   private runsByThread = new Map<string, Run>();
   private knownThreads = new Set<string>();
   private knownDocuments = new Map<string, string>();
+  private usageRoutes = new Map<string, { conversationId: UUID; requestId: UUID; model: string }>();
   private listeners = new Set<(event: ReaderEvent) => void>();
   private recovered = new Set<UUID>();
   private recovering = new Set<UUID>();
@@ -134,6 +142,28 @@ export class ReaderService {
     });
     return this.current(scope, title || 'PDF attachment');
   }
+  async renameConversation(conversationId: string, title: string): Promise<Conversation> {
+    if (typeof title !== 'string' || !title.trim() || title.trim().length > 1024) throw new ReaderError('INVALID_REQUEST', 'Enter a chat name between 1 and 1024 characters.');
+    await this.mutate(conversationId, c => { c.title = title.trim(); c.titleCustomized = true; });
+    return toPublic(await this.load(conversationId));
+  }
+  async branchConversation(conversationId: string, messageId: string): Promise<Conversation> {
+    const source = await this.load(conversationId);
+    const position = source.messages.findIndex(message => message.id === messageId);
+    if (position < 0) throw new ReaderError('NOT_FOUND', 'Unknown message');
+    // Editing starts before the selected question; regenerating starts before its question too.
+    const requestId = source.messages[position]!.requestId;
+    const first = source.messages.findIndex(message => message.requestId === requestId);
+    const kept = source.messages.slice(0, first).filter(message => message.status === 'completed');
+    const created = await this.store.create(source.paper, source.paperIdentity?.title ?? source.title, source.settings);
+    created.parentConversationId = source.id; created.forkMessageId = messageId;
+    if (source.paperIdentity) created.paperIdentity = clone(source.paperIdentity);
+    created.messages = clone(kept);
+    const sources = new Set(kept.flatMap(message => [message.document?.id, ...(message.referenceDocuments?.map(ref => ref.document.id) ?? [])]).filter((id): id is string => !!id));
+    created.documents = Object.fromEntries(Object.entries(source.documents ?? {}).filter(([id]) => sources.has(id)));
+    await this.store.save(created); this.loaded.set(created.id, created);
+    return toPublic(created);
+  }
   /** Loads once. Leftover dispatching/running becomes uncertain; leftover accepted is redelivered once after recover. */
   private async load(id: UUID, fetched?: StoredConversation): Promise<StoredConversation> {
     const live = this.loaded.get(id); if (live) return live;
@@ -167,19 +197,25 @@ export class ReaderService {
   /** Accepted leftover is dispatched once. Uncertain leftover: resume the thread, then match `thread/read` history. */
   private async recover(conversationId: UUID): Promise<Run | null> {
     const live = await this.load(conversationId);
-    const accepted = live.requests.find(r => r.state === 'accepted');
-    if (accepted) return this.redeliver(live, accepted);
     const uncertain = [...live.requests].reverse().find(r => r.state === 'uncertain');
+    if (!uncertain) {
+      const accepted = this.nextAccepted(live);
+      if (accepted && (!live.activeRequestId || live.activeRequestId === accepted.requestId)) return this.redeliver(live, accepted);
+      return null;
+    }
     const threadId = live.upstream.threadId;
     if (!uncertain || !threadId) return null;
     const settings = live.messages.find(m => m.requestId === uncertain.requestId && m.role === 'user')?.settings ?? live.settings;
+    const original = live.messages.find(message => message.requestId === uncertain.requestId && message.role === 'user');
+    const diagram = original?.workflow?.skill?.workflow === 'diagram' && original.batch?.phase !== 'map';
     const model = this.upstream.models().find(m => m.id === settings.model);
     if (!model) return null;
     try {
       if (!this.knownThreads.has(threadId)) {
         const resolved = resolveSettings(settings, model);
-        const response = await this.upstream.request('thread/resume', resumeParams(this.options.cwd, threadId, resolved));
+        const response = await this.upstream.request('thread/resume', resumeParams(this.options.cwd, threadId, resolved, diagram));
         validateThread(response, this.options.cwd, resolved, { ephemeral: false, emptyHistory: false });
+        if (diagram || live.upstream.permissionMode === 'diagram') await this.verifyImagePermission(threadId, diagram);
         this.knownThreads.add(threadId);
       }
     } catch { return null; }
@@ -188,7 +224,22 @@ export class ReaderService {
     catch { return null; }
     const matched = [...history].reverse().find(turn => turn.requestIds.includes(uncertain.requestId));
     if (!matched) return null;
+    if (matched.unsupportedItemTypes.length || (!diagram && matched.imageGenerations.length)) {
+      await this.commit(conversationId, (c, emit) => {
+        const request = c.requests.find(request => request.requestId === uncertain.requestId)!;
+        request.state = 'failed'; request.updatedAt = this.options.now(); this.releaseActive(c, request.requestId);
+        for (const message of c.messages) if (message.requestId === request.requestId && message.role === 'assistant') message.status = 'failed';
+        emit({ type: 'failed', requestId: request.requestId, code: 'UNSUPPORTED_INTERACTION', message: 'Unexpected tool activity in saved history; the reader connection has been stopped.' });
+      });
+      this.upstream.breach(); return null;
+    }
     await this.applyHistory(live, uncertain, matched);
+    if (original?.batch && matched.status !== 'inProgress' && (matched.status !== 'completed' || original.batch.phase === 'reduce')) await this.commit(conversationId, c => { if (c.activeBatchId === original.batch!.id) delete c.activeBatchId; });
+    const reconciled = await this.load(conversationId);
+    if (!reconciled.activeRequestId && !reconciled.requests.some(request => request.state === 'uncertain')) {
+      const next = this.nextAccepted(reconciled);
+      if (next) return this.redeliver(reconciled, next);
+    }
     return null;
   }
   private async redeliver(conversation: StoredConversation, request: RequestRecord): Promise<Run | null> {
@@ -203,23 +254,35 @@ export class ReaderService {
       return null;
     }
     const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId: conversation.upstream.threadId, turnId: request.turnId, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null };
+    await this.commit(conversation.id, c => { c.activeRequestId = request.requestId; if (input.batch) c.activeBatchId = input.batch.id; });
     this.runs.set(run.requestId, run);
     return run;
   }
   private async reconstructInput(conversation: StoredConversation, request: RequestRecord): Promise<SendInput | null> {
     const user = conversation.messages.find(m => m.requestId === request.requestId && m.role === 'user');
     if (!user) return null;
-    const paper = user.paper ?? (user.citations[0]
+    const paper = user.paper ?? (request.hashVersion === 2 ? undefined : user.citations[0]
       ? { title: user.citations[0].title, authors: user.citations[0].authors, ...(user.citations[0].year ? { year: user.citations[0].year } : {}), ...(user.citations[0].doi ? { doi: user.citations[0].doi } : {}) }
       : conversation.title.trim() ? { title: conversation.title, authors: [] } : undefined);
     const document = user.document ? conversation.documents?.[user.document.id] : undefined;
     if (user.document && !document) return null;
-    const images = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}) };
-    if (request.action) return { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
+    const references = user.references?.map(reference => {
+      const source = user.referenceDocuments?.find(source => source.referenceId === reference.id);
+      const document = source ? conversation.documents?.[source.document.id] : undefined;
+      return { ...reference, ...(document ? { document } : {}) };
+    });
+    if (user.referenceDocuments?.some(source => !conversation.documents?.[source.document.id])) return null;
+    const images = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}) };
+    if (request.action) {
+      const restored = { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
+      if ((request.hashVersion === 2 || user.workflow || user.references || user.batch || user.contextReport) && await hashInput(restored, request.hashVersion ?? 1) !== request.hash) return null;
+      return restored;
+    }
     for (const action of ['explain', 'ask'] as const) {
       const input: SendInput = { requestId: request.requestId, conversationId: conversation.id, action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
-      if (await hashInput(input) === request.hash) return input;
+      if (await hashInput(input, request.hashVersion ?? 1) === request.hash) return input;
     }
+    if (request.hashVersion === 2) return null;
     return { requestId: request.requestId, conversationId: conversation.id, action: user.citations.length > 0 ? 'explain' : 'ask', question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
   }
   private async applyHistory(conversation: StoredConversation, request: RequestRecord, turn: HistoryTurn): Promise<void> {
@@ -235,12 +298,21 @@ export class ReaderService {
         for (const message of c.messages) if (message.requestId === request.requestId && message.role === 'assistant' && message.status === 'uncertain') message.status = 'streaming';
       });
       const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId, turnId: turn.id, cancelWanted: false, interrupted: false, submitted: true, settled: false, items: new Map(), pending: new Map(), flushTimer: null };
+      const assistants = (await this.load(conversation.id)).messages.filter(message => message.requestId === request.requestId && message.role === 'assistant');
+      for (const message of assistants) if (message.upstreamItemId) run.items.set(message.upstreamItemId, message.id);
+      // Legacy snapshots had no native item ids. Reconcile their reported order once.
+      for (const [index, item] of turn.agentMessages.entries()) { const message = assistants[index]; if (message && !message.upstreamItemId && !run.items.has(item.itemId)) run.items.set(item.itemId, message.id); }
       this.runs.set(run.requestId, run);
       this.runsByThread.set(threadId, run);
+      this.usageRoutes.set(threadId, { conversationId: conversation.id, requestId: request.requestId, model: input.settings.model });
       this.knownThreads.add(threadId);
       return;
     }
     if (turn.status === 'completed') {
+      const user = conversation.messages.find(message => message.requestId === request.requestId && message.role === 'user');
+      const diagram = user?.workflow?.skill?.workflow === 'diagram' && user.batch?.phase !== 'map';
+      if (diagram) { await this.recoverImages(conversation, request, turn); return; }
+      if (turn.imageGenerations.length) throw new ReaderError('READER_POLICY_UNAVAILABLE', 'Unexpected image generation in a reading request.');
       await this.commit(conversation.id, (c, emit) => {
         this.releaseActive(c, request.requestId);
         const rec = c.requests.find(r => r.requestId === request.requestId);
@@ -258,12 +330,12 @@ export class ReaderService {
         for (let i = 0; i < turn.agentMessages.length; i++) {
           const agent = turn.agentMessages[i]!;
           const phase = phaseOf(agent.phase);
-          const message = existing[i];
+          const message = existing.find(message => message.upstreamItemId === agent.itemId) ?? existing[i];
           if (message) {
-            message.text = agent.text; message.phase = phase; message.status = 'completed'; lastId = message.id;
+            message.text = agent.text; message.phase = phase; message.status = 'completed'; message.upstreamItemId = agent.itemId; lastId = message.id;
             emit({ type: 'messageCompleted', requestId: request.requestId, messageId: message.id, finalText: agent.text, phase });
           } else {
-            const created: Message = { id: this.options.uuid(), requestId: request.requestId, role: 'assistant', phase, settings, text: agent.text, citations: [], status: 'completed' };
+            const created: Message = { id: this.options.uuid(), upstreamItemId: agent.itemId, requestId: request.requestId, role: 'assistant', phase, settings, text: agent.text, citations: [], status: 'completed' };
             c.messages.push(created); lastId = created.id;
             emit({ type: 'messageCompleted', requestId: request.requestId, messageId: created.id, finalText: agent.text, phase });
           }
@@ -294,6 +366,38 @@ export class ReaderService {
       emit({ type: 'failed', requestId: request.requestId, code: failure.code, message: failure.message });
     });
   }
+  private async recoverImages(conversation: StoredConversation, request: RequestRecord, turn: HistoryTurn): Promise<void> {
+    const settings = conversation.messages.find(message => message.requestId === request.requestId && message.role === 'user')?.settings ?? conversation.settings;
+    let images: ImageAttachment[] = [];
+    try {
+      if (turn.imageGenerations.length) {
+        for (const item of turn.imageGenerations) {
+          const persisted = conversation.messages.find(message => message.requestId === request.requestId && message.upstreamItemId === item.id)?.generatedImages;
+          if (persisted?.length) images.push(...persisted);
+          else { if (!this.options.generatedImage) throw new Error('No image output adapter'); images.push(await this.options.generatedImage(item, settings.model)); }
+        }
+      } else images = conversation.messages.filter(message => message.requestId === request.requestId).flatMap(message => message.generatedImages ?? []);
+    } catch { images = []; }
+    const caption = turn.agentMessages.filter(message => message.phase !== 'commentary').map(message => message.text).join('\n\n');
+    await this.commit(conversation.id, (c, emit) => {
+      this.releaseActive(c, request.requestId);
+      const record = c.requests.find(record => record.requestId === request.requestId)!;
+      record.turnId = turn.id; record.updatedAt = this.options.now();
+      if (!images.length || caption.length > ANSWER_LIMIT) {
+        record.state = 'failed';
+        for (const message of c.messages) if (message.role === 'assistant' && message.requestId === request.requestId && ['pending', 'streaming', 'uncertain'].includes(message.status)) message.status = 'failed';
+        emit({ type: 'failed', requestId: request.requestId, code: 'INTERNAL_ERROR', message: 'The completed image task has no recoverable verified image. It was not sent again.' });
+        return;
+      }
+      const messageId = c.messages.find(message => message.requestId === request.requestId && message.role === 'assistant')?.id ?? this.options.uuid();
+      c.messages = c.messages.filter(message => message.requestId !== request.requestId || message.role !== 'assistant');
+      c.messages.push({ id: messageId, requestId: request.requestId, role: 'assistant', phase: 'final', settings, text: caption, citations: [], status: 'completed', generatedImages: images });
+      record.state = 'completed';
+      for (const image of images) emit({ type: 'image', requestId: request.requestId, messageId, image });
+      emit({ type: 'messageCompleted', requestId: request.requestId, messageId, finalText: caption, phase: 'final' });
+      emit({ type: 'completed', requestId: request.requestId, messageId, finalText: caption });
+    });
+  }
   private releaseActive(conversation: StoredConversation, requestId: UUID): void {
     if (conversation.activeRequestId === requestId) conversation.activeRequestId = null;
   }
@@ -316,44 +420,80 @@ export class ReaderService {
   private publish(event: ReaderEvent): void { for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* views must not affect the service */ } } }
   private receipt(request: RequestRecord, replay: boolean): SendReceipt { return { requestId: request.requestId, state: request.state, replay }; }
   // ---- requests --------------------------------------------------------------------------------
-  async send(raw: unknown): Promise<SendReceipt> {
+  enqueue(raw: unknown): Promise<SendReceipt> { return this.send(raw, true); }
+  async releaseBatch(conversationId: UUID, batchId: UUID): Promise<void> {
+    await this.mutate(conversationId, c => {
+      if (!c.activeBatchId) return;
+      if (c.activeBatchId !== batchId) throw new ReaderError('REQUEST_CONFLICT', 'A different reading batch owns this conversation.');
+      if (c.activeRequestId || c.requests.some(request => request.state === 'uncertain')) throw new ReaderError('BUSY', 'Confirm the current request before releasing the reading batch.');
+      delete c.activeBatchId;
+    });
+    void this.startQueued(conversationId);
+  }
+  async send(raw: unknown, allowQueue = false): Promise<SendReceipt> {
     const input = validateSendInput(raw);
     const hash = await hashInput(input);
-    let recoveredRun: Run | null = null;
+    await this.ensureRecovered(input.conversationId);
     const outcome = await this.serial(input.conversationId, async (): Promise<{ receipt: SendReceipt; run: Run | null }> => {
-      recoveredRun = await this.recoverOnce(input.conversationId);
       const live = await this.load(input.conversationId);
       const existing = live.requests.find(r => r.requestId === input.requestId);
       if (existing) {
-        if (existing.hash !== hash) throw new ReaderError('REQUEST_CONFLICT', 'This request ID was already used for different content.');
+        if (existing.hash !== (existing.hashVersion === 2 ? hash : await hashInput(input, 1))) throw new ReaderError('REQUEST_CONFLICT', 'This request ID was already used for different content.');
         return { receipt: this.receipt(existing, true), run: null };
       }
       if (this.closed || !this.upstream.ready()) throw new ReaderError('RUNTIME_UNAVAILABLE', 'Codex is not available; retry the connection first.', true);
       if (!this.upstream.signedIn()) throw new ReaderError('AUTH_REQUIRED', 'Sign in with ChatGPT before sending.');
       if (input.citations.some(c => paperId(c.paper) !== paperId(live.paper))) throw new ReaderError('INVALID_REQUEST', 'Citations must come from the attachment of this conversation.');
       if (input.document && paperId(input.document.paper) !== paperId(live.paper)) throw new ReaderError('INVALID_REQUEST', 'PDF context must come from the attachment of this conversation.');
+      if (input.document && input.citations.some(citation => citation.documentRevision && JSON.stringify(citation.documentRevision) !== JSON.stringify(input.document!.revision))) throw new ReaderError('INVALID_REQUEST', 'A selection belongs to a different PDF version. Select the passage again before combining it with this document.');
+      const inputSources = new Map<string, string>();
+      for (const source of [input.document, ...(input.references?.map(reference => reference.document) ?? [])]) {
+        if (!source) continue;
+        const body = JSON.stringify(source);
+        if (inputSources.has(source.id) && inputSources.get(source.id) !== body) throw new ReaderError('REQUEST_CONFLICT', 'Two sources in this request use the same identity for different content.');
+        inputSources.set(source.id, body);
+      }
       if (input.document && live.documents?.[input.document.id] && JSON.stringify(live.documents[input.document.id]) !== JSON.stringify(input.document)) throw new ReaderError('REQUEST_CONFLICT', 'This PDF snapshot identity already refers to different content.');
+      for (const ref of input.references ?? []) {
+        if (ref.paper && ref.paper.clientId !== live.paper.clientId) throw new ReaderError('INVALID_REQUEST', 'A reference belongs to a different profile.');
+        if (ref.document && live.documents?.[ref.document.id] && JSON.stringify(live.documents[ref.document.id]) !== JSON.stringify(ref.document)) throw new ReaderError('REQUEST_CONFLICT', 'A referenced snapshot identity already refers to different content.');
+      }
       const model = this.upstream.models().find(m => m.id === input.settings.model);
       if (!model) throw new ReaderError('MODEL_UNAVAILABLE', 'The selected model is not in the current catalog.');
+      if (input.images?.length && !model.inputModalities?.includes('image')) throw new ReaderError('MODEL_UNAVAILABLE', 'This model has not reported support for image input. Choose an image-capable model.');
       if (input.settings.effort !== null && !model.supportedReasoningEfforts.some(e => e.id === input.settings.effort)) throw new ReaderError('INVALID_REQUEST', 'The selected reasoning effort is not supported by this model.');
       if (input.settings.serviceTier !== null && !model.serviceTiers.some(t => t.id === input.settings.serviceTier)) throw new ReaderError('INVALID_REQUEST', 'The selected speed is not supported by this model.');
       if (live.requests.some(r => r.state === 'uncertain')) throw new ReaderError('BUSY', 'An earlier request in this conversation could not be confirmed; start a new conversation to continue.');
-      if (live.activeRequestId) throw new ReaderError('BUSY', 'This conversation is still answering; wait for it or stop it first.');
+      const otherBatch = live.activeBatchId && input.batch?.id !== live.activeBatchId;
+      if ((live.activeRequestId || otherBatch) && !allowQueue) throw new ReaderError('BUSY', 'This conversation is still answering; wait for it or stop it first.');
+      if (live.requests.filter(request => request.state === 'accepted').length >= 10) throw new ReaderError('BUSY', 'This chat already has ten waiting questions.');
+      const waiting = !!live.activeRequestId || !!otherBatch;
       const now = this.options.now();
-      const request: RequestRecord = { requestId: input.requestId, hash, state: 'accepted', turnId: null, createdAt: now, updatedAt: now, action: input.action };
+      const request: RequestRecord = { requestId: input.requestId, hash, hashVersion: 2, state: 'accepted', turnId: null, createdAt: now, updatedAt: now, action: input.action };
       await this.commit(input.conversationId, (c, emit) => {
         c.requests.push(request);
-        if (input.document) { c.schemaVersion = 2; c.documents = { ...c.documents, [input.document.id]: input.document }; }
-        c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action, ...(input.images?.length ? { images: input.images } : {}), ...(input.document ? { document: documentSummary(input.document), ...(input.paper ? { paper: input.paper } : {}) } : {}) });
-        c.activeRequestId = input.requestId; c.settings = input.settings;
+        c.schemaVersion = 3;
+        if (input.document) c.documents = { ...c.documents, [input.document.id]: input.document };
+        const references = input.references?.map(({ document, ...reference }) => {
+          if (document) c.documents = { ...c.documents, [document.id]: document };
+          return reference;
+        });
+        if (input.paper) c.paperIdentity = input.paper;
+        c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action,
+          ...(input.images?.length ? { images: input.images } : {}), ...(input.paper ? { paper: input.paper } : {}), ...(input.document ? { document: documentSummary(input.document) } : {}),
+          ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}),
+          ...(references ? { references, referenceDocuments: input.references!.flatMap(ref => ref.document ? [{ referenceId: ref.id, document: documentSummary(ref.document) }] : []) } : {}),
+        });
+        if (!waiting) { c.activeRequestId = input.requestId; if (input.batch) c.activeBatchId = input.batch.id; }
+        c.settings = input.settings;
         emit({ type: 'accepted', requestId: input.requestId });
       });
+      if (waiting) return { receipt: this.receipt(request, false), run: null };
       const run: Run = { conversationId: input.conversationId, requestId: input.requestId, input, resolved: resolveSettings(input.settings, model), threadId: null, turnId: null, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null };
       this.runs.set(input.requestId, run);
       return { receipt: this.receipt(request, false), run };
     });
     if (outcome.run) void this.dispatch(outcome.run);
-    if (recoveredRun && recoveredRun !== outcome.run) void this.dispatch(recoveredRun);
     return outcome.receipt;
   }
   private async dispatch(run: Run): Promise<void> {
@@ -363,27 +503,37 @@ export class ReaderService {
       await this.mutate(conversationId, c => { this.setState(c, requestId, 'dispatching'); });
       if (run.settled) return;
       if (this.closed || !this.upstream.ready()) throw new ReaderError('RUNTIME_UNAVAILABLE', 'Codex is not available; nothing was submitted.', true);
-      let threadId = (await this.load(conversationId)).upstream.threadId;
-      if (threadId && !this.knownThreads.has(threadId)) {
+      const conversation = await this.load(conversationId);
+      const diagram = run.input.workflow?.skill?.workflow === 'diagram' && run.input.batch?.phase !== 'map';
+      const mode = diagram ? 'diagram' : 'read';
+      const oldMode = conversation.upstream.permissionMode ?? 'read';
+      let threadId = run.input.batch ? null : conversation.upstream.threadId;
+      const fresh = !threadId;
+      if (threadId && (!this.knownThreads.has(threadId) || mode !== oldMode)) {
         let response: unknown;
-        try { response = await this.upstream.request('thread/resume', resumeParams(cwd, threadId, resolved)); }
+        try { response = await this.upstream.request('thread/resume', resumeParams(cwd, threadId, resolved, diagram)); }
         catch { throw new ReaderError('HISTORY_UNAVAILABLE', 'The earlier Codex conversation could not be resumed; start a new conversation to continue.'); }
         validateThread(response, cwd, resolved, { ephemeral: false, emptyHistory: false });
         this.knownThreads.add(threadId);
       } else if (!threadId) {
-        const response = await this.upstream.request('thread/start', threadParams(cwd, resolved));
+        const response = await this.upstream.request('thread/start', threadParams(cwd, resolved, diagram));
         const created = validateThread(response, cwd, resolved, { ephemeral: false, emptyHistory: true });
         threadId = created; this.knownThreads.add(created);
-        await this.mutate(conversationId, c => { c.upstream.threadId = created; });
       }
+      if (diagram || oldMode === 'diagram') await this.verifyImagePermission(threadId, diagram);
+      await this.mutate(conversationId, c => { c.upstream.threadId = threadId; c.upstream.permissionMode = mode; });
       if (run.settled) return;
       run.threadId = threadId; this.runsByThread.set(threadId, run);
+      this.usageRoutes.set(threadId, { conversationId, requestId, model: resolved.model });
       if (run.cancelWanted) { await this.settle(run, { kind: 'cancelled' }); return; }
-      run.submitted = true;
       const documentKey = run.input.document ? `${run.input.document.id}:${resolved.model}` : null;
       const reuse = documentKey !== null && this.knownDocuments.get(threadId) === documentKey;
       if (documentKey) this.knownDocuments.set(threadId, documentKey);
-      const result = record(await this.upstream.request('turn/start', turnParams(threadId, requestId, readingInput(run.input, reuse), cwd, resolved, run.input.images ?? [])));
+      const history = fresh && !run.input.batch ? conversation.messages.filter(message => message.requestId !== requestId && message.status === 'completed') : [];
+      const text = readingInput(run.input, reuse, history);
+      if (history.length && new TextEncoder().encode(text).length > 2 * 1024 * 1024) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The saved conversation is too large to restore in one turn. Reference selected messages in a new chat.');
+      run.submitted = true;
+      const result = record(await this.upstream.request('turn/start', turnParams(threadId, requestId, text, cwd, resolved, run.input.images ?? [])));
       const turnId = string(record(result.turn).id);
       if (run.turnId && run.turnId !== turnId) throw new Error('turn mismatch');
       run.turnId = turnId;
@@ -397,6 +547,18 @@ export class ReaderService {
         : { code: 'RUNTIME_UNAVAILABLE', message: 'Codex did not accept the request; nothing was submitted.', retryable: true };
       await this.settle(run, { kind: 'failed', failure });
     }
+  }
+  private async verifyImagePermission(threadId: string, enabled: boolean): Promise<void> {
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page++) {
+      const result = record(await this.upstream.request('experimentalFeature/list', { threadId, limit: 200, ...(cursor ? { cursor } : {}) }));
+      if (!Array.isArray(result.data)) break;
+      const feature = result.data.find(value => value && typeof value === 'object' && (value as Record<string, unknown>).name === 'image_generation') as Record<string, unknown> | undefined;
+      if (feature) { if (feature.enabled === enabled) return; break; }
+      cursor = typeof result.nextCursor === 'string' ? result.nextCursor : null;
+      if (!cursor) break;
+    }
+    throw new ReaderError('READER_POLICY_UNAVAILABLE', 'Codex did not confirm the image generation permission for this request.');
   }
   private setState(conversation: StoredConversation, requestId: UUID, state: RequestState): RequestRecord | undefined {
     const request = conversation.requests.find(r => r.requestId === requestId);
@@ -423,10 +585,21 @@ export class ReaderService {
   /** Before any turn was submitted the request is cancelled at once; afterwards only the terminal event confirms it. */
   async cancel(conversationId: string, requestId: string): Promise<SendReceipt> {
     const run = this.runs.get(requestId);
+    if (run && run.conversationId !== conversationId) throw new ReaderError('NOT_FOUND', 'Unknown request in this conversation');
     if (run && !run.settled) {
       run.cancelWanted = true;
       if (!run.submitted) await this.settle(run, { kind: 'cancelled' });
       else await this.maybeInterrupt(run);
+    } else {
+      await this.mutate(conversationId, (c, emit) => {
+        const request = c.requests.find(request => request.requestId === requestId);
+        if (request?.state === 'accepted') {
+          request.state = 'cancelled'; request.updatedAt = this.options.now();
+          for (const message of c.messages) if (message.requestId === requestId && message.role === 'user') message.status = 'cancelled';
+          if (c.activeRequestId === requestId) c.activeRequestId = null;
+          emit({ type: 'cancelled', requestId, messageId: null });
+        }
+      });
     }
     return this.request(conversationId, requestId);
   }
@@ -440,6 +613,16 @@ export class ReaderService {
   /** Thread-scoped notifications routed from the runtime session. Unknown threads are ignored. */
   handleNotice(method: string, params: Record<string, unknown>): void {
     if (typeof params.threadId !== 'string') return;
+    if (method === 'thread/tokenUsage/updated') {
+      const usage = parseThreadUsage(params); const route = this.usageRoutes.get(params.threadId);
+      if (usage && route) void this.mutate(route.conversationId, (c, emit) => {
+        const request = [...c.requests].reverse().find(request => request.turnId || request.requestId === c.activeRequestId);
+        if (!request || request.requestId !== route.requestId || (request.turnId && request.turnId !== usage.turnId)) return;
+        c.usage = { model: route.model, contextWindow: usage.modelContextWindow, last: usage.last, total: usage.total };
+        emit({ type: 'usage', requestId: route.requestId, usage: c.usage });
+      }).catch(() => undefined);
+      return;
+    }
     if (method === 'thread/compacted' || ((method === 'item/started' || method === 'item/completed') && params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction')) this.knownDocuments.delete(params.threadId);
     const run = this.runsByThread.get(params.threadId);
     if (!run || run.settled) return;
@@ -467,6 +650,21 @@ export class ReaderService {
   }
   private async applyItem(run: Run, item: Record<string, unknown>, completed: boolean): Promise<void> {
     const type = string(item.type);
+    if (type === 'imageGeneration' && run.input.workflow?.skill?.workflow === 'diagram' && run.input.batch?.phase !== 'map') {
+      if (!completed) return;
+      const messageId = await this.ensureMessage(run, string(item.id));
+      if ((await this.load(run.conversationId)).messages.find(message => message.id === messageId)?.generatedImages?.length) return;
+      try {
+        if (!this.options.generatedImage) throw new Error('No output adapter');
+        const image = await this.options.generatedImage(item, run.resolved.model);
+        await this.commit(run.conversationId, (c, emit) => {
+          const message = c.messages.find(message => message.id === messageId)!;
+          message.generatedImages = [image]; message.status = 'completed';
+          emit({ type: 'image', requestId: run.requestId, messageId, image });
+        });
+      } catch { await this.finish(run, { kind: 'failed', failure: { code: 'INTERNAL_ERROR', message: 'The generated image could not be verified or saved. No image result is available.', retryable: false } }); }
+      return;
+    }
     if (type !== 'agentMessage') {
       if (HARMLESS_ITEMS.includes(type)) return;
       await this.finish(run, { kind: 'failed', failure: { code: 'UNSUPPORTED_INTERACTION', message: 'Unexpected tool activity; the reader connection has been stopped.', retryable: false } });
@@ -488,7 +686,7 @@ export class ReaderService {
     const existing = run.items.get(itemId); if (existing) return existing;
     const messageId = this.options.uuid(); run.items.set(itemId, messageId);
     const live = await this.load(run.conversationId);
-    live.messages.push({ id: messageId, requestId: run.requestId, role: 'assistant', phase: null, settings: run.input.settings, text: '', citations: [], status: 'streaming' });
+    live.messages.push({ id: messageId, upstreamItemId: itemId, requestId: run.requestId, role: 'assistant', phase: null, settings: run.input.settings, text: '', citations: [], status: 'streaming' });
     return messageId;
   }
   private async bufferDelta(run: Run, itemId: string, delta: string): Promise<void> {
@@ -526,10 +724,14 @@ export class ReaderService {
       const last = assistant.at(-1);
       const mark = (state: RequestState, status: Message['status']) => { if (request) { request.state = state; request.updatedAt = this.options.now(); } for (const m of assistant) if (m.status === 'streaming' || m.status === 'pending') m.status = status; };
       if (c.activeRequestId === run.requestId) c.activeRequestId = null;
+      if (run.input.batch && c.activeBatchId === run.input.batch.id && outcome.kind !== 'uncertain' && (outcome.kind !== 'completed' || run.input.batch.phase === 'reduce')) delete c.activeBatchId;
       if (outcome.kind === 'completed') {
-        if (!last || !last.text.trim()) {
+        const generated = assistant.some(message => message.generatedImages?.length);
+        const diagram = run.input.workflow?.skill?.workflow === 'diagram' && run.input.batch?.phase !== 'map';
+        if (!last || (!last.text.trim() && !generated) || (diagram && !generated)) {
+          if (run.input.batch && c.activeBatchId === run.input.batch.id) delete c.activeBatchId;
           this.lastErrorCodes.set(run.conversationId, 'INTERNAL_ERROR');
-          mark('failed', 'failed'); emit({ type: 'failed', requestId: run.requestId, code: 'INTERNAL_ERROR', message: 'The model completed without an answer.' }); return;
+          mark('failed', 'failed'); emit({ type: 'failed', requestId: run.requestId, code: 'INTERNAL_ERROR', message: diagram ? 'The model completed without generating an image.' : 'The model completed without an answer.' }); return;
         }
         mark('completed', 'completed'); emit({ type: 'completed', requestId: run.requestId, messageId: last.id, finalText: last.text });
       } else if (outcome.kind === 'cancelled') { mark('cancelled', 'cancelled'); emit({ type: 'cancelled', requestId: run.requestId, messageId: last?.id ?? null }); }
@@ -539,6 +741,21 @@ export class ReaderService {
       }
       else { mark('uncertain', 'uncertain'); emit({ type: 'uncertain', requestId: run.requestId, message: outcome.message }); }
     }, true);
+    if (!this.closed && outcome.kind !== 'uncertain') void this.startQueued(run.conversationId);
+  }
+  private async startQueued(conversationId: UUID): Promise<void> {
+    try {
+      const run = await this.serial(conversationId, async () => {
+        const c = await this.load(conversationId);
+        if (this.closed || c.activeRequestId || c.requests.some(request => request.state === 'uncertain')) return null;
+        const next = this.nextAccepted(c);
+        return next ? this.redeliver(c, next) : null;
+      });
+      if (run) await this.dispatch(run);
+    } catch { /* The durable accepted record remains available for reconnect. */ }
+  }
+  private nextAccepted(c: StoredConversation): RequestRecord | undefined {
+    return c.requests.find(request => request.state === 'accepted' && (!c.activeBatchId || c.messages.find(message => message.requestId === request.requestId && message.role === 'user')?.batch?.id === c.activeBatchId));
   }
   /** Transport loss or shutdown: every unsettled request becomes uncertain; nothing is resent. */
   settleAll(reason: string): Promise<void> {

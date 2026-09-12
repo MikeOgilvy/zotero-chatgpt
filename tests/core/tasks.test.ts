@@ -1,0 +1,206 @@
+import { expect, it } from 'vitest';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeAgentError, type NativeAgentPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata } from '../../packages/contracts/src/agent.ts';
+import { AgentTaskController, parseAnnotationCandidates } from '../../packages/core/src/tasks/controller.ts';
+import { MemoryStorage, flush } from './doubles.ts';
+import { paperA } from '../contracts/factories.ts';
+const revision = { fingerprint: 'synthetic', size: 1024, modifiedAt: 1000 };
+const metadata: NativeMetadata = { itemType: 'journalArticle', title: 'A synthetic article', DOI: '10.1234/example', creators: [] };
+const target = { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' };
+function fixture() {
+  let id = 0; let key = 0;
+  const storage = new MemoryStorage(); const annotations = new Map<string, NativeAnnotationSnapshot>(); const items = new Map<string, NativeItemSnapshot>();
+  const attachments = new Map<string, NativeAttachmentSnapshot>();
+  const clock = { now: () => '2026-09-12T10:00:00.000Z', uuid: () => `12345678-0000-4000-8000-${String(++id).padStart(12, '0')}`, key: () => `K${String(++key).padStart(7, '0')}` };
+  let creates = 0; let afterAnnotation: (() => Promise<void>) | null = null; let downloadFails = true;
+  const native: NativeAgentPort = {
+    resolveQuote: input => Promise.resolve({ status: 'resolved', candidate: { source: structuredClone(input), text: input.quote, pageLabel: '1', sortIndex: '00000|000000|00000', position: { pageIndex: input.pageIndexes?.[0] ?? 0, rects: [[0, 0, 100, 10]] } } }),
+    createAnnotation: async input => {
+      creates++;
+      if (annotations.has(input.key)) throw new NativeAgentError('CONFLICT', 'Already exists');
+      const saved: NativeAnnotationSnapshot = { paper: input.candidate.source.paper, key: input.key, type: input.type, text: input.candidate.text, comment: NATIVE_ANNOTATION_PROVENANCE + (input.comment ? '\n' + input.comment : ''), color: input.color, pageLabel: input.candidate.pageLabel, sortIndex: input.candidate.sortIndex, position: input.candidate.position, authorName: '', isExternal: false, tags: [], dateModified: '2026-09-12 10:00:00' };
+      annotations.set(input.key, structuredClone(saved)); if (afterAnnotation) await afterAnnotation(); return saved;
+    },
+    inspectAnnotation: input => Promise.resolve(structuredClone(annotations.get(input.key) ?? null)),
+    deleteAnnotation: input => { const current = annotations.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict', current }); annotations.delete(input.expected.key); return Promise.resolve({ status: 'deleted' }); },
+    previewMetadata: input => Promise.resolve({ identifier: input.identifier, source: 'identifier', candidates: [structuredClone(metadata)] }),
+    findDuplicateDOI: () => Promise.resolve([...items.values()].map(item => structuredClone(item))),
+    inspectItem: input => Promise.resolve(structuredClone(items.get(input.key) ?? null)),
+    createItem: input => {
+      const saved: NativeItemSnapshot = { clientId: input.target.clientId, libraryId: input.target.libraryId, key: input.key, metadata: structuredClone(input.metadata), collectionKeys: [input.target.collectionKey], attachmentKeys: [], dateModified: '2026-09-12 10:00:00', contentSignature: 'unchanged' };
+      items.set(input.key, structuredClone(saved)); return Promise.resolve(saved);
+    },
+    addItemToCollection: input => {
+      const before = items.get(input.expected.key)!; const after = { ...structuredClone(before), collectionKeys: [...new Set([...before.collectionKeys, input.target.collectionKey])] };
+      items.set(after.key, after); return Promise.resolve({ before: structuredClone(before), after: structuredClone(after), collectionKey: input.target.collectionKey, added: !before.collectionKeys.includes(input.target.collectionKey) });
+    },
+    undoCollectionAddition: input => {
+      const item = items.get(input.expected.after.key); if (!item) return Promise.resolve({ status: 'absent' });
+      if (JSON.stringify(item) !== JSON.stringify(input.expected.after)) return Promise.resolve({ status: 'conflict' });
+      item.collectionKeys = item.collectionKeys.filter(key => key !== input.expected.collectionKey); return Promise.resolve({ status: 'removed' });
+    },
+    undoCreatedItem: input => { const current = items.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict' }); items.delete(input.expected.key); return Promise.resolve({ status: 'trashed' }); },
+    acquireOpenAccessPDF: input => {
+      if (downloadFails) return Promise.resolve({ status: 'unavailable', reason: 'download-failed' });
+      const attachment: NativeAttachmentSnapshot = { clientId: input.item.clientId, libraryId: input.item.libraryId, key: 'ATTACHED', parentKey: input.item.key, url: 'https://example.com/paper.pdf', contentType: 'application/pdf', sha256: 'a'.repeat(64), contentSignature: 'unchanged' };
+      attachments.set(attachment.key, attachment); items.get(input.item.key)!.attachmentKeys.push(attachment.key);
+      return Promise.resolve({ status: 'attached', attachment, articleVersion: 'acceptedVersion', checkedPages: 1, totalPages: 4 });
+    },
+    inspectAttachment: ref => Promise.resolve(structuredClone(attachments.get(ref.key) ?? null)),
+    undoAttachment: input => { const current = attachments.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict' }); attachments.delete(current.key); const parent = items.get(current.parentKey)!; parent.attachmentKeys = parent.attachmentKeys.filter(key => key !== current.key); return Promise.resolve({ status: 'trashed' }); },
+  };
+  const controller = new AgentTaskController(storage, native, clock);
+  const plan = (count = 1) => controller.planAnnotations({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definitions.', candidates: Array.from({ length: count }, (_, i) => ({ quote: `Definition ${i + 1}`, pageIndex: i, reason: 'Definition' })) });
+  return { storage, native, clock, controller, annotations, items, attachments, plan, creates: () => creates, afterAnnotation: (callback: (() => Promise<void>) | null) => { afterAnnotation = callback; }, setDownloadFails: (value: boolean) => { downloadFails = value; } };
+}
+it('parses a bounded annotation proposal without accepting model-selected permissions or write fields', () => {
+  expect(parseAnnotationCandidates('{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition"}]}')).toEqual([{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }]);
+  for (const text of ['```json\n{"candidates":[]}\n```', '{"candidates":[],"approved":true}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition","key":"HOSTILE1"}]}']) expect(() => parseAnnotationCandidates(text)).toThrow();
+});
+it('persists candidate review and source validation without native writes before approval', async () => {
+  const f = fixture(); const task = await f.plan();
+  expect(task).toMatchObject({ kind: 'annotations', state: 'review', question: 'Mark the definitions.', items: [{ status: 'candidate', resolution: { status: 'resolved' } }] });
+  expect(f.annotations.size).toBe(0); expect(f.items.size).toBe(0);
+  const restored = new AgentTaskController(f.storage, f.native, f.clock);
+  expect(await restored.get(task.id)).toEqual(task); expect(await restored.list('conversation-a')).toHaveLength(1); expect(await restored.list('conversation-b')).toEqual([]);
+});
+it('a duplicate approval writes an annotation only once and persists its exact native output', async () => {
+  const f = fixture(); const task = await f.plan(); const selected = task.items.map(item => item.id);
+  await Promise.all([f.controller.approve(task.id, selected), f.controller.approve(task.id, selected)]);
+  expect(f.creates()).toBe(1); expect(f.annotations.size).toBe(1);
+  expect(await f.controller.get(task.id)).toMatchObject({ state: 'completed', items: [{ status: 'applied', annotation: { key: task.items[0]!.reservedKey } }] });
+});
+it('reserves and durably writes native intent before invoking the host', async () => {
+  const f = fixture(); const task = await f.plan(); let observed = false;
+  f.afterAnnotation(async () => { const raw = await f.storage.read(`tasks/${task.id}.json`); const text = new TextDecoder().decode(raw!); observed = text.includes('"status":"writing"') && text.includes('"operation":"annotation-create"'); });
+  await f.controller.approve(task.id, task.items.map(item => item.id)); expect(observed).toBe(true);
+});
+it('storage failure before writing intent prevents every native mutation', async () => {
+  const f = fixture(); const task = await f.plan(); f.storage.fail = true;
+  await expect(f.controller.approve(task.id, task.items.map(item => item.id))).rejects.toThrow(); expect(f.creates()).toBe(0);
+});
+it('reconciles a host commit followed by lost ledger persistence without resubmitting the write', async () => {
+  const f = fixture(); const task = await f.plan(); f.afterAnnotation(() => { f.storage.fail = true; return Promise.resolve(); });
+  await expect(f.controller.approve(task.id, task.items.map(item => item.id))).rejects.toThrow();
+  f.storage.fail = false; f.afterAnnotation(null);
+  const restored = new AgentTaskController(f.storage, f.native, f.clock);
+  expect(await restored.get(task.id)).toMatchObject({ state: 'uncertain' });
+  expect(await restored.reconcile(task.id)).toMatchObject({ state: 'completed', items: [{ status: 'applied' }] });
+  await restored.approve(task.id, task.items.map(item => item.id)); expect(f.creates()).toBe(1);
+});
+it('an unknown native write is never automatically replayed when inspection finds no output', async () => {
+  const f = fixture(); const task = await f.plan();
+  f.native.createAnnotation = () => Promise.reject(new Error('private-native-error'));
+  expect(await f.controller.approve(task.id, task.items.map(item => item.id))).toMatchObject({ state: 'uncertain' });
+  const result = await f.controller.reconcile(task.id);
+  expect(result.state).not.toBe('completed'); expect(f.annotations.size).toBe(0); expect(JSON.stringify(result)).not.toContain('private-native-error');
+});
+it('cancellation after a committed annotation retains that result and leaves the next item unexecuted', async () => {
+  const f = fixture(); const task = await f.plan(2); let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }); f.afterAnnotation(() => gate);
+  const approving = f.controller.approve(task.id, task.items.map(item => item.id)); await flush();
+  expect(f.annotations.size).toBe(1);
+  const cancelling = f.controller.cancel(task.id); release(); await approving; const cancelled = await cancelling;
+  expect(cancelled.state).toBe('cancelled'); expect(f.annotations.size).toBe(1); expect(cancelled.items[0]!.status).toBe('applied');
+});
+it('undo uses exact saved outputs and preserves a later human annotation edit', async () => {
+  const f = fixture(); const task = await f.plan(2); await f.controller.approve(task.id, task.items.map(item => item.id));
+  f.annotations.get(task.items[0]!.reservedKey)!.comment = 'Human edit';
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'conflict' });
+  expect(f.annotations.size).toBe(1); expect(f.annotations.get(task.items[0]!.reservedKey)!.comment).toBe('Human edit');
+});
+it('acquisition review performs metadata lookup and duplicate checks without importing anything', async () => {
+  const f = fixture(); const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });
+  expect(task).toMatchObject({ state: 'review', items: [{ preview: { candidates: [metadata] } }] }); expect(f.items.size).toBe(0);
+});
+it('a failed PDF download retains correct metadata and reports partial completion', async () => {
+  const f = fixture(); const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });
+  const result = await f.controller.approve(task.id, task.items.map(item => item.id));
+  expect(result).toMatchObject({ state: 'partial', items: [{ status: 'metadata-only', created: true, acquisition: { status: 'unavailable', reason: 'download-failed' } }] });
+  expect(f.items.size).toBe(1);
+  await f.controller.approve(task.id, task.items.map(item => item.id)); expect(f.items.size).toBe(1);
+});
+it('duplicate imports add only collection membership and undo that exact addition', async () => {
+  const f = fixture(); f.items.set('EXISTING', { clientId: paperA.clientId, libraryId: paperA.libraryId, key: 'EXISTING', metadata, collectionKeys: [], attachmentKeys: [], dateModified: '2026-09-12 10:00:00', contentSignature: 'unchanged' });
+  const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });
+  await f.controller.approve(task.id, task.items.map(item => item.id), { [task.items[0]!.id]: { downloadPDF: false } });
+  expect(f.items.size).toBe(1); expect(f.items.get('EXISTING')!.collectionKeys).toEqual(['COLLECT1']);
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' }); expect(f.items.get('EXISTING')!.collectionKeys).toEqual([]);
+});
+it('task records with an unknown schema remain untouched and cannot authorize writes', async () => {
+  const f = fixture(); const task = await f.plan(); const path = `tasks/${task.id}.json`; const bytes = new TextEncoder().encode('{"schemaVersion":99}'); f.storage.files.set(path, bytes);
+  await expect(f.controller.get(task.id)).rejects.toThrow(); await expect(f.controller.approve(task.id, [])).rejects.toThrow(); expect(f.storage.files.get(path)).toEqual(bytes); expect(f.creates()).toBe(0);
+});
+it('approval rejects item IDs not present in the frozen review', async () => {
+  const f = fixture(); const task = await f.plan();
+  await expect(f.controller.approve(task.id, ['not-in-review'])).rejects.toThrow(); expect(f.creates()).toBe(0);
+});
+it('undoing an acquired PDF on an existing item only removes the task attachment and collection addition', async () => {
+  const f = fixture(); f.setDownloadFails(false); f.items.set('EXISTING', { clientId: paperA.clientId, libraryId: paperA.libraryId, key: 'EXISTING', metadata, collectionKeys: [], attachmentKeys: [], dateModified: '2026-09-12 10:00:00', contentSignature: 'unchanged' });
+  const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });
+  expect(await f.controller.approve(task.id, task.items.map(item => item.id))).toMatchObject({ state: 'completed' });
+  expect(await f.controller.undo(task.id)).toMatchObject({ state: 'undone' });
+  expect(f.attachments.size).toBe(0); expect(f.items.get('EXISTING')).toMatchObject({ collectionKeys: [], attachmentKeys: [] });
+});
+it('an immediate stop cancels an approval still waiting to start', async () => {
+  const f = fixture(); const task = await f.plan();
+  const approving = f.controller.approve(task.id, task.items.map(item => item.id));
+  const cancelling = f.controller.cancel(task.id);
+  await approving; expect(await cancelling).toMatchObject({ state: 'cancelled' }); expect(f.creates()).toBe(0);
+});
+it('metadata reconciliation never adopts later human fields into an undoable task snapshot', async () => {
+  const f = fixture(); const task = await f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get this paper', identifiers: ['10.1234/example'] });
+  const create = f.native.createItem.bind(f.native);
+  f.native.createItem = async input => { const item = await create(input); f.storage.fail = true; return item; };
+  await expect(f.controller.approve(task.id, task.items.map(item => item.id))).rejects.toThrow();
+  f.storage.fail = false; f.items.get(task.items[0]!.reservedKey)!.contentSignature = 'Later human notes and tags';
+  const restored = new AgentTaskController(f.storage, f.native, f.clock);
+  const result = await restored.reconcile(task.id); expect(['uncertain', 'conflict']).toContain(result.state);
+  await expect(restored.undo(task.id)).rejects.toThrow(); expect(f.items.size).toBe(1);
+});
+it('reuses one persisted annotation plan for concurrent calls with the same model request', async () => {
+  const f = fixture(); const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }] };
+  const [first, second] = await Promise.all([f.controller.planAnnotations(input), f.controller.planAnnotations(input)]);
+  expect(second.id).toBe(first.id); expect(second.items.map(item => item.reservedKey)).toEqual(first.items.map(item => item.reservedKey));
+  expect(await f.controller.list('conversation-a')).toHaveLength(1);
+  expect(await new AgentTaskController(f.storage, f.native, f.clock).planAnnotations(input)).toEqual(first);
+});
+it('rejects conflicting content for a reused model request instead of replacing its task', async () => {
+  const f = fixture(); const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }] };
+  const original = await f.controller.planAnnotations(input);
+  for (const changed of [{ ...input, question: 'Different task' }, { ...input, candidates: [{ quote: 'Different definition', pageIndex: 0, reason: 'Definition' }] }, { ...input, conversationId: 'conversation-b' }]) await expect(f.controller.planAnnotations(changed)).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+  expect(await f.controller.get(original.id)).toEqual(original); expect(f.creates()).toBe(0);
+});
+it('coordinates concurrent recovered controller instances over the same storage port', async () => {
+  const f = fixture(); const other = new AgentTaskController(f.storage, f.native, f.clock);
+  const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }] };
+  const tasks = await Promise.all([f.controller.planAnnotations(input), other.planAnnotations(input)]);
+  expect(tasks[0].id).toBe(tasks[1].id); expect(await other.list('conversation-a')).toHaveLength(1);
+});
+it('stops a preparing annotation plan promptly and ignores a late native quote result', async () => {
+  const f = fixture(); const resolveQuote = f.native.resolveQuote.bind(f.native); let release!: () => void; let taskID = '';
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  f.native.resolveQuote = async input => { await gate; return resolveQuote(input); };
+  f.controller.subscribe(task => { taskID = task.id; });
+  const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }] };
+  const planning = f.controller.planAnnotations(input); await flush();
+  let stopped = false; const cancelling = f.controller.cancel(taskID).then(task => { stopped = true; return task; });
+  await flush(); const stoppedBeforeNativeReturned = stopped; release(); await planning;
+  expect(stoppedBeforeNativeReturned).toBe(true); expect(await cancelling).toMatchObject({ state: 'cancelled' }); await flush();
+  expect(await f.controller.get(taskID)).toMatchObject({ state: 'cancelled' }); expect(await f.controller.planAnnotations(input)).toMatchObject({ id: taskID, state: 'cancelled' }); expect(f.creates()).toBe(0);
+});
+it('stops a preparing acquisition plan without allowing late metadata to revive review', async () => {
+  const f = fixture(); const preview = f.native.previewMetadata.bind(f.native); let release!: () => void; let taskID = '';
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  f.native.previewMetadata = async input => { await gate; return preview(input); };
+  f.controller.subscribe(task => { taskID = task.id; });
+  const planning = f.controller.planAcquisition({ conversationId: 'conversation-a', target, question: 'Get paper', identifiers: ['10.1234/example'] }); await flush();
+  let stopped = false; const cancelling = f.controller.cancel(taskID).then(task => { stopped = true; return task; });
+  await flush(); const stoppedBeforeNativeReturned = stopped; release(); await planning; await cancelling; await flush();
+  expect(stoppedBeforeNativeReturned).toBe(true); expect(await f.controller.get(taskID)).toMatchObject({ state: 'cancelled' }); expect(f.items.size).toBe(0);
+});
+it('lists all validated tasks when no conversation filter is supplied', async () => {
+  const f = fixture(); const first = await f.plan();
+  const second = await f.controller.planAcquisition({ conversationId: 'conversation-b', target, question: 'Get paper', identifiers: ['10.1234/example'] });
+  expect((await f.controller.list()).map(task => task.id).sort()).toEqual([first.id, second.id].sort());
+  expect(await f.controller.list('conversation-b')).toHaveLength(1);
+});

@@ -18,6 +18,8 @@ export interface StoragePort {
   append(relativePath: string, bytes: Uint8Array): Promise<void>;
   /** Deletes a stored relative path. Must fail rather than overwrite the file with empty bytes. */
   remove(relativePath: string): Promise<void>;
+  /** Bare regular-file names in a plugin-owned directory; never absolute paths. */
+  list?(relativeDirectory: string): Promise<string[]>;
 }
 export interface AccountStatus {
   state: 'signedOut' | 'signingIn' | 'signedIn' | 'expired';
@@ -37,6 +39,7 @@ export interface ModelOption {
   defaultReasoningEffort: string | null;
   serviceTiers: Array<{ id: string; name: string; description: string }>;
   defaultServiceTier: string | null;
+  inputModalities?: Array<'text' | 'image'>;
 }
 /** Reactive runtime/account state shared by every view; conversations use ReaderEvent instead. */
 export interface RuntimeSnapshot {
@@ -46,6 +49,8 @@ export interface RuntimeSnapshot {
   login: LoginStatus | null;
   models: ModelOption[];
   error: string | null;
+  capabilities?: { imageGeneration: boolean; namespaceTools: boolean; webSearch: boolean };
+  rateLimits?: Array<{ label: string; usedPercent: number; resetsAt: number | null; windowMinutes: number | null }>;
 }
 /**
  * A deliberate failure whose message is safe to show users: constant text chosen by
@@ -71,9 +76,13 @@ export interface ReaderClient {
   get(conversationId: string): Promise<Conversation>;
   select(paper: PaperScope, conversationId: string): Promise<Conversation>;
   send(input: SendInput): Promise<SendReceipt>;
+  enqueue?(input: SendInput): Promise<SendReceipt>;
+  releaseBatch?(conversationId: string, batchId: string): Promise<void>;
   request(conversationId: string, requestId: string): Promise<SendReceipt>;
   cancel(conversationId: string, requestId: string): Promise<SendReceipt>;
   deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation>;
+  renameConversation?(conversationId: string, title: string): Promise<Conversation>;
+  branchConversation?(conversationId: string, messageId: string): Promise<Conversation>;
   diagnostics(conversationId: string): Promise<ShareableDiagnostics>;
   subscribe(listener: (event: ReaderEvent) => void): () => void;
   close(): Promise<void>;

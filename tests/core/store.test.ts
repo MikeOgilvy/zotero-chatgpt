@@ -4,12 +4,67 @@ import { ReaderError } from '../../packages/contracts/src/index.ts';
 import { MemoryStorage } from './doubles.ts';
 import { citationA, imageA, paperA, paperB, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
+import { documentSummary } from '../../packages/contracts/src/document.ts';
 let counter = 0;
 function store(storage = new MemoryStorage()) {
   counter = 0;
   return { storage, store: new ConversationStore(storage, { uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`, now: () => '2026-09-09T08:00:00.000Z' }) };
 }
 describe('conversation store', () => {
+  it('peeks validated summaries and request logs without loading sources or weakening a later full read', async () => {
+    class ObservedStorage extends MemoryStorage {
+      reads: string[] = [];
+      override read(path: string) { this.reads.push(path); return super.read(path); }
+    }
+    const storage = new ObservedStorage(); const s = store(storage).store; const c = await s.create(paperA, 'Metadata only', settings);
+    c.documents = { [documentA.id]: documentA };
+    c.messages.push({ id: 'm1', upstreamItemId: 'opaque-item', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'Recorded answer', citations: [], status: 'streaming', document: documentSummary(documentA) });
+    c.requests.push({ requestId: 'r1', hash: 'h', hashVersion: 2, state: 'running', turnId: 't1', createdAt: 'now', updatedAt: 'now' }, { requestId: 'r2', hash: 'h2', state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now' });
+    c.activeRequestId = 'r1'; c.activeBatchId = '11223344-0000-4000-8000-000000000001'; await s.save(c);
+    const snapshot = await s.get(c.id);
+    await storage.append(`conversations/${c.id}.jsonl`, new TextEncoder().encode(`${JSON.stringify({ schemaVersion: 1, n: snapshot.logSeq + 1, requestId: 'r1', state: 'completed', turnId: 't1', at: 'later' })}\n{"truncated":`));
+    const sourcePath = `conversations/${c.id}.${documentA.id}.source.json`; storage.files.delete(sourcePath); storage.reads = [];
+    const fresh = store(storage).store; const metadata = await fresh.peek(c.id);
+    expect(metadata).not.toHaveProperty('documents');
+    expect(metadata).toMatchObject({ activeRequestId: null, activeBatchId: c.activeBatchId, queuedRequestIds: ['r2'], requests: [{ hashVersion: 2, state: 'completed' }, { state: 'accepted' }], messages: [{ upstreamItemId: 'opaque-item', document: documentSummary(documentA), status: 'completed' }] });
+    expect(storage.reads).toEqual([`conversations/${c.id}.json`, `conversations/${c.id}.jsonl`]);
+    await expect(fresh.get(c.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' });
+    storage.files.set(sourcePath, new TextEncoder().encode(JSON.stringify(documentA)));
+    expect((await fresh.get(c.id)).documents?.[documentA.id]).toEqual(documentA);
+  });
+  it.each([
+    ['page outside its document', (raw: Record<string, unknown>) => { raw.messages = [{ ...((raw.messages as object[])[0]), document: { ...documentSummary(documentA), pages: [{ pageIndex: 2, pageLabel: '3', status: 'text' }] } }]; }],
+    ['unregistered source id', (raw: Record<string, unknown>) => { raw.documentIds = []; }],
+    ['unsupported hash version', (raw: Record<string, unknown>) => { raw.requests = [{ requestId: 'r1', hash: 'h', hashVersion: 3, state: 'completed', turnId: null, createdAt: 'now', updatedAt: 'now' }]; }],
+    ['invalid upstream item id', (raw: Record<string, unknown>) => { raw.messages = [{ ...((raw.messages as object[])[0]), upstreamItemId: '' }]; }],
+  ])('refuses corrupt metadata: %s', async (_label, corrupt) => {
+    const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings); c.documents = { [documentA.id]: documentA };
+    c.messages.push({ id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'q', citations: [], status: 'completed', document: documentSummary(documentA) }); await s.save(c);
+    const path = `conversations/${c.id}.json`; const raw = JSON.parse(new TextDecoder().decode(storage.files.get(path))) as Record<string, unknown>; corrupt(raw);
+    const bytes = new TextEncoder().encode(JSON.stringify(raw)); storage.files.set(path, bytes);
+    await expect(store(storage).store.peek(c.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' }); expect(storage.files.get(path)).toEqual(bytes);
+  });
+  it('refuses a corrupt complete request log during peek while leaving the original untouched', async () => {
+    const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings);
+    const path = `conversations/${c.id}.jsonl`; const bytes = new TextEncoder().encode('{"schemaVersion":99}\n'); storage.files.set(path, bytes);
+    await expect(s.peek(c.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' }); expect(storage.files.get(path)).toEqual(bytes);
+  });
+  it('ignores an interrupted UTF-8 character in the final journal append during peek', async () => {
+    const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings);
+    const path = `conversations/${c.id}.jsonl`; const partial = new Uint8Array([123, 34, 97, 116, 34, 58, 34, 0xe4, 0xb8]); storage.files.set(path, partial);
+    expect(await s.peek(c.id)).toMatchObject({ id: c.id }); expect(storage.files.get(path)).toEqual(partial);
+  });
+  it('rejects contradictory paper bindings for the same source summary without opening sources', async () => {
+    const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings); c.documents = { [documentA.id]: documentA };
+    c.messages.push({ id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Compare two papers', citations: [], status: 'completed', document: documentSummary(documentA), references: [{ id: '11223344-0000-4000-8000-000000000001', kind: 'article', label: 'Other attachment', paper: paperB, identity: { title: 'Other attachment', authors: [] }, capturedAt: '2026-09-12T10:00:00.000Z' }], referenceDocuments: [{ referenceId: '11223344-0000-4000-8000-000000000001', document: documentSummary(documentA) }] });
+    await s.save(c); await expect(store(storage).store.peek(c.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' });
+  });
+  it('rejects a mismatched persisted conversation id before any derived log/source access', async () => {
+    const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings);
+    storage.files.set(`conversations/${c.id}.json`, new TextEncoder().encode(JSON.stringify({ ...c, id: '../foreign' })));
+    const fresh = store(storage).store;
+    await expect(fresh.get(c.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' });
+  });
   it('stores immutable PDF text once outside streaming snapshots and restores schema 2 sources', async () => {
     const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings);
     c.schemaVersion = 2; c.documents = { [documentA.id]: documentA };

@@ -8,12 +8,16 @@ export function server() {
   const p = new FakeProcess();
   const handlers = new Map<string, (params: Record<string, unknown>, id: unknown) => unknown>();
   let threads = 0; let turns = 0;
+  const imagePermissions = new Map<string, boolean>();
   handlers.set('initialize', () => ({ userAgent: 'codex/0.144.1', codexHome: '/isolated/auth', platformFamily: 'unix', platformOs: 'macos' }));
   handlers.set('config/read', () => configResponse());
   handlers.set('account/read', () => ({ account: { type: 'chatgpt', email: 'private@example.test', planType: 'plus' }, requiresOpenaiAuth: true }));
   handlers.set('model/list', () => ({ data: [model], nextCursor: null }));
-  handlers.set('thread/start', () => { threads++; const id = threads === 1 ? 'thread-1' : `thread-${threads}`; return { ...threadResponse, thread: { ...thread, id } }; });
-  handlers.set('thread/resume', params => ({ ...threadResponse, thread: { ...thread, id: params.threadId as string, turns: [{ id: 'earlier' }] } }));
+  handlers.set('modelProvider/capabilities/read', () => ({ imageGeneration: true, namespaceTools: true, webSearch: true }));
+  handlers.set('account/rateLimits/read', () => ({ rateLimits: null, rateLimitsByLimitId: {} }));
+  handlers.set('experimentalFeature/list', params => ({ data: [{ name: 'image_generation', enabled: imagePermissions.get(String(params.threadId)) ?? false }], nextCursor: null }));
+  handlers.set('thread/start', params => { threads++; const id = threads === 1 ? 'thread-1' : `thread-${threads}`; imagePermissions.set(id, (params.config as Record<string, unknown>)['features.image_generation'] === true); return { ...threadResponse, thread: { ...thread, id } }; });
+  handlers.set('thread/resume', params => { imagePermissions.set(String(params.threadId), (params.config as Record<string, unknown>)['features.image_generation'] === true); return { ...threadResponse, thread: { ...thread, id: params.threadId as string, turns: [{ id: 'earlier' }] } }; });
   handlers.set('thread/read', params => ({ thread: { ...thread, id: params.threadId as string, turns: [] } }));
   handlers.set('turn/start', params => { turns++; return { turn: { ...turn, id: turns === 1 ? 'turn-1' : `turn-${turns}`, threadId: params.threadId } }; });
   handlers.set('turn/interrupt', () => ({}));

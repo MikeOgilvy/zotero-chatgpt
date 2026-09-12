@@ -1,19 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createReaderClient } from '../../packages/core/src/index.ts';
+import { createReaderClient, type ReaderOptions } from '../../packages/core/src/index.ts';
 import type { ReaderClient } from '../../packages/contracts/src/runtime.ts';
 import type { ReaderEvent, SendInput } from '../../packages/contracts/src/index.ts';
 import { MemoryStorage, flush } from './doubles.ts';
 import { server, model, methods, threadResponse, turn, configResponse } from './fixtures.ts';
-import { citationA, citationB, paperA, paperB, settings } from '../contracts/factories.ts';
+import { citationA, citationB, imageA, paperA, paperB, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
+import { builtinSkills, DEFAULT_PREFERENCES } from '../../packages/core/src/workspace/skills.ts';
 const clients: ReaderClient[] = [];
 let ids = 0;
 afterEach(async () => { for (const c of clients.splice(0)) await c.close().catch(() => undefined); vi.useRealTimers(); });
 const uuid = () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`;
 const requestId = (n: number) => `11111111-0000-4000-8000-${String(n).padStart(12, '0')}`;
-async function setup(configure?: (s: ReturnType<typeof server>) => void, storage = new MemoryStorage()) {
+async function setup(configure?: (s: ReturnType<typeof server>) => void, storage = new MemoryStorage(), options: Pick<ReaderOptions, 'generatedImage'> = {}) {
   const s = server(); configure?.(s);
-  const c = await createReaderClient(s.p, storage, { codexVersion: '0.144.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z' }); clients.push(c);
+  const c = await createReaderClient(s.p, storage, { codexVersion: '0.144.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...options }); clients.push(c);
   const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
   return { ...s, storage, c, events };
 }
@@ -77,6 +78,152 @@ it('rejects PDF context from a different attachment without dispatching', async 
   const { c, p, explain } = await signedIn();
   await expect(c.send({ ...explain(504), document: { ...documentA, paper: paperB } })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
   expect(methods(p)).not.toContain('turn/start');
+});
+it('renames without losing the original title and branches before an old question without replaying it', async () => {
+  const { c, p, conversation, explain } = await signedIn();
+  await c.send(explain(701)); await tick(); complete(p, 'thread-1', 'turn-1', 'reply', 'Previous answer'); await tick();
+  const renamed = await c.renameConversation!(conversation.id, 'My discussion');
+  expect(renamed).toMatchObject({ title: 'My discussion', paperIdentity: { title: 'Synthetic Paper A' }, titleCustomized: true });
+  const user = renamed.messages.find(m => m.role === 'user')!;
+  const branch = await c.branchConversation!(conversation.id, user.id);
+  expect(branch.id).not.toBe(conversation.id); expect(branch.messages).toEqual([]); expect(branch.parentConversationId).toBe(conversation.id);
+  expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(1);
+});
+it('sends referenced sources and frozen workflow instructions, then preserves them on disk', async () => {
+  const { c, p, storage, conversation, explain } = await signedIn();
+  const workflow = { skill: builtinSkills().find(s => s.id === 'builtin-derive')!, preferences: { ...DEFAULT_PREFERENCES, language: 'zh' }, profileId: null };
+  const ref = { id: 'paper-b', kind: 'article' as const, label: 'Second article', paper: paperB, capturedAt: '2026-09-12T10:00:00.000Z', document: { ...documentA, paper: paperB, pages: [{ ...documentA.pages[0]!, text: 'Reference-only finding 91.' }] } };
+  await c.send(explain(702, { workflow, references: [ref] })); await tick();
+  const line = p.writes.map(line => JSON.parse(line) as { method: string; params: { input: Array<{ text: string }> } }).find(line => line.method === 'turn/start');
+  expect(line?.params.input[0]?.text).toContain('Reference-only finding 91'); expect(line?.params.input[0]?.text).toContain('builtin-derive');
+  const saved = JSON.parse(new TextDecoder().decode(storage.files.get(`conversations/${conversation.id}.json`))) as { schemaVersion: number; messages: Array<{ workflow: unknown; referenceDocuments: unknown[] }> };
+  expect(saved.schemaVersion).toBe(3); expect(saved.messages[0]?.workflow).toMatchObject({ preferences: { language: 'zh' } }); expect(saved.messages[0]?.referenceDocuments).toHaveLength(1);
+});
+it('persists real usage separately from cumulative history and emits it to views', async () => {
+  const { c, p, events, conversation, explain } = await signedIn(); await c.send(explain(703)); await tick();
+  const usage = { inputTokens: 100, cachedInputTokens: 20, outputTokens: 10, reasoningOutputTokens: 2, totalTokens: 110 };
+  p.emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'turn-1', tokenUsage: { last: usage, total: { ...usage, totalTokens: 900 }, modelContextWindow: 12345 } } }); await tick();
+  expect((await c.get(conversation.id)).usage).toMatchObject({ contextWindow: 12345, last: { totalTokens: 110 }, total: { totalTokens: 900 } });
+  expect(events.some(event => event.type === 'usage')).toBe(true);
+});
+it('starts every multi-pass step in a fresh thread without replaying previous raw inputs', async () => {
+  const { c, p, explain } = await signedIn();
+  await c.send(explain(710, { document: documentA, batch: { id: requestId(711), index: 0, total: 3, phase: 'map', question: 'Read all pages' } })); await tick();
+  complete(p, 'thread-1', 'turn-1', 'part-1', 'First part findings'); await tick();
+  await c.send(explain(712, { batch: { id: requestId(711), index: 2, total: 3, phase: 'reduce', question: 'Read all pages', summaries: [{ index: 0, pages: [0, 1], text: 'First part findings' }] } })); await tick();
+  expect(methods(p).filter(method => method === 'thread/start')).toHaveLength(2);
+  const last = p.writes.map(line => JSON.parse(line) as { method: string; params: { input: Array<{ text: string }> } }).filter(line => line.method === 'turn/start').at(-1)!;
+  expect(last.params.input[0]?.text).toContain('First part findings'); expect(last.params.input[0]?.text).not.toContain('hidden state');
+});
+it('requires an enabled image generation capability and actual image output for the diagram workflow', async () => {
+  const { c, p, explain } = await signedIn();
+  const workflow = { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null };
+  await c.send(explain(720, { workflow })); await tick();
+  expect(methods(p)).toContain('experimentalFeature/list');
+  complete(p, 'thread-1', 'turn-1', 'text-only', 'I would draw a diagram'); await tick();
+  expect((await c.request(explain(720).conversationId, requestId(720))).state).toBe('failed');
+});
+it('durably queues a frozen question, runs it after completion and can cancel a waiting question', async () => {
+  const { c, p, explain, conversation, storage } = await signedIn();
+  await c.send(explain(730)); await tick();
+  const queued = explain(731, { question: 'Frozen queued question' });
+  await c.enqueue!(queued); queued.question = 'Changed draft';
+  await c.enqueue!(explain(732, { question: 'Cancel this question' }));
+  expect((await c.get(conversation.id)).queuedRequestIds).toEqual([requestId(731), requestId(732)]);
+  expect(new TextDecoder().decode(storage.files.get(`conversations/${conversation.id}.json`))).toContain('Frozen queued question');
+  await c.cancel(conversation.id, requestId(732));
+  expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(1);
+  complete(p, 'thread-1', 'turn-1', 'current', 'Finished current question'); await tick(20);
+  expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(2);
+  expect((await c.get(conversation.id)).activeRequestId).toBe(requestId(731));
+  expect((await c.request(conversation.id, requestId(732))).state).toBe('cancelled');
+});
+it('stores one verified image per native item and disables generation on the next ordinary question', async () => {
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const decode = vi.fn(() => Promise.resolve(generated));
+  const { c, p, events } = await setup(undefined, undefined, { generatedImage: decode }); await c.refreshAccount();
+  const conversation = await c.current(paperA, 'Diagram example');
+  const input: SendInput = { requestId: requestId(750), conversationId: conversation.id, action: 'ask', question: 'Draw the paper mechanism', citations: [], settings, workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } };
+  await c.send(input); await tick();
+  const output = { type: 'imageGeneration', id: 'rendered-image', status: 'completed', result: imageA.dataUrl };
+  p.emit({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: output } });
+  p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { ...turn, status: 'completed', items: [output] } } }); await tick();
+  expect((await c.request(conversation.id, input.requestId)).state).toBe('completed');
+  expect((await c.get(conversation.id)).messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
+  expect(decode).toHaveBeenCalledTimes(1); expect(events.filter(event => event.type === 'image')).toHaveLength(1);
+  const { workflow: _workflow, ...ordinary } = input; void _workflow;
+  await c.send({ ...ordinary, requestId: requestId(751), question: 'Explain the diagram' }); await tick();
+  const resume = p.writes.map(line => JSON.parse(line) as { method: string; params: { config: Record<string, unknown> } }).find(line => line.method === 'thread/resume');
+  expect(resume?.params.config['features.image_generation']).toBe(false);
+});
+it('reconciles a completed image task from native history after restart without resending', async () => {
+  const storage = new MemoryStorage();
+  const first = await signedIn(undefined, storage);
+  const input = first.explain(760, { workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } });
+  await first.c.send(input); await tick(); await first.c.close();
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'imageGeneration', id: 'recovered-output', status: 'completed', result: imageA.dataUrl }] }] } })), storage, { generatedImage: () => Promise.resolve(generated) });
+  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Synthetic Paper A');
+  expect((await next.c.request(restored.id, input.requestId)).state).toBe('completed');
+  expect(restored.messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
+  expect(methods(next.p)).not.toContain('turn/start');
+});
+it('keeps queued questions behind the complete reading batch, including the gaps between passes', async () => {
+  const { c, p, explain, conversation } = await signedIn(); const batch = requestId(771);
+  await c.send(explain(770, { batch: { id: batch, index: 0, total: 3, phase: 'map', question: 'Read all' } })); await tick();
+  await c.enqueue!(explain(772, { question: 'Question after the complete reading task' }));
+  complete(p, 'thread-1', 'turn-1', 'part-0', 'First findings'); await tick(15);
+  expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(1);
+  expect((await c.get(conversation.id)).activeBatchId).toBe(batch);
+  await c.send(explain(773, { batch: { id: batch, index: 1, total: 3, phase: 'map', question: 'Read all' } })); await tick();
+  complete(p, 'thread-2', 'turn-2', 'part-1', 'Second findings'); await tick();
+  await c.send(explain(774, { batch: { id: batch, index: 2, total: 3, phase: 'reduce', question: 'Read all' } })); await tick();
+  complete(p, 'thread-3', 'turn-3', 'synthesis', 'Complete synthesis'); await tick(15);
+  expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(4);
+  expect((await c.get(conversation.id)).activeBatchId).toBeUndefined();
+  expect((await c.get(conversation.id)).activeRequestId).toBe(requestId(772));
+});
+it('never interrupts another conversation when cancel receives a mismatched conversation id', async () => {
+  const { c, p, explain } = await signedIn(); await c.send(explain(780)); await tick();
+  const other = await c.newConversation(paperB, 'Other PDF');
+  await expect(c.cancel(other.id, requestId(780))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(methods(p)).not.toContain('turn/interrupt');
+});
+it('reconstructs an accepted document workflow without inventing an omitted paper identity', async () => {
+  const { c, p, explain, conversation } = await signedIn(); await c.send(explain(781)); await tick();
+  await c.enqueue!(explain(782, { document: documentA, workflow: { skill: null, preferences: DEFAULT_PREFERENCES, profileId: null } }));
+  complete(p, 'thread-1', 'turn-1', 'first', 'Finished'); await tick(15);
+  expect((await c.request(conversation.id, requestId(782))).state).toBe('running');
+  expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(2);
+});
+it('updates the same assistant item after in-progress recovery instead of retaining a duplicate partial answer', async () => {
+  const storage = new MemoryStorage(); const first = await signedIn(undefined, storage);
+  const input = first.explain(783); await first.c.send(input); await tick();
+  stream(first.p, 'thread-1', 'turn-1', 'same-item', 'Partial'); await tick(); await first.c.close();
+  const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'agentMessage', id: 'same-item', text: 'Partial', phase: 'final_answer' }] }] } })), storage);
+  await next.c.refreshAccount(); await next.c.current(paperA, 'Synthetic Paper A');
+  complete(next.p, 'thread-1', 'turn-1', 'same-item', 'Partial followed by complete answer'); await tick();
+  const assistants = (await next.c.get(input.conversationId)).messages.filter(message => message.role === 'assistant');
+  expect(assistants).toHaveLength(1); expect(assistants[0]?.text).toBe('Partial followed by complete answer');
+});
+it('rejects forbidden native tool activity during history recovery just as it does live', async () => {
+  const storage = new MemoryStorage(); const first = await signedIn(undefined, storage);
+  const input = first.explain(784); await first.c.send(input); await tick(); await first.c.close();
+  const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'commandExecution', id: 'forbidden' }, { type: 'agentMessage', id: 'answer', text: 'Untrusted result', phase: 'final_answer' }] }] } })), storage);
+  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Synthetic Paper A');
+  expect((await next.c.request(restored.id, input.requestId)).state).not.toBe('completed');
+  expect(next.c.snapshot().runtime).toBe('error'); expect(methods(next.p)).not.toContain('turn/start');
+});
+it('retains an already persisted image when its temporary native output path has expired during recovery', async () => {
+  const storage = new MemoryStorage(); const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const first = await setup(undefined, storage, { generatedImage: () => Promise.resolve(generated) }); await first.c.refreshAccount(); const conversation = await first.c.current(paperA, 'Diagram');
+  const input: SendInput = { requestId: requestId(785), conversationId: conversation.id, question: 'Draw', action: 'ask', citations: [], settings, workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } };
+  const item = { type: 'imageGeneration', id: 'saved-image', status: 'completed', result: '', savedPath: '/expired.png' };
+  await first.c.send(input); await tick(); first.p.emit({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item } }); await tick(); await first.c.close();
+  const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, item] }] } })), storage, { generatedImage: () => Promise.reject(new Error('Expired')) });
+  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Diagram');
+  expect((await next.c.request(restored.id, input.requestId)).state).toBe('completed');
+  expect(restored.messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
 });
 
 describe('runtime handshake and policy', () => {
@@ -326,7 +473,7 @@ describe('attachment conversations', () => {
     expect(events.at(-1)?.type).toBe('accepted');
     const report = await c.diagnostics(explain(1).conversationId);
     expect(report).toMatchObject({
-      pluginVersion: '0.3.0-alpha.1',
+      pluginVersion: '0.4.0-alpha.1',
       runtimeVersion: '0.144.1',
       errorCode: null,
       requestCount: 1,

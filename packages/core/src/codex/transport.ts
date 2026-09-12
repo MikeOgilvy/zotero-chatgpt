@@ -17,18 +17,29 @@ export class RpcTransport {
   private failures = new Set<() => void>();
   constructor(private process: ManagedProcess, options: { maxLineChars?: number; maxPending?: number } = {}) {
     this.failureSignal = new Promise(resolve => { this.signalFailure = resolve; });
-    this.maxLine = options.maxLineChars ?? 4 * 1024 * 1024;
+    // A supported 16 MiB image expands to roughly 22 MiB of base64 plus JSON.
+    this.maxLine = options.maxLineChars ?? 32 * 1024 * 1024;
     this.maxPending = options.maxPending ?? 64;
     void this.read();
   }
   subscribe(listener: (message: Record<string, unknown>) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   onFailure(listener: () => void) { this.failures.add(listener); return () => { this.failures.delete(listener); }; }
-  request(method: string, params: unknown): Promise<unknown> {
+  /** Read-only capability/status queries only; a missed deadline does not poison the main channel. */
+  requestOptional(method: string, params: unknown, timeoutMs = 10000): Promise<unknown> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) return Promise.reject(new Error('Invalid optional request deadline'));
+    return this.requestWithDeadline(method, params, timeoutMs, false);
+  }
+  request(method: string, params: unknown): Promise<unknown> { return this.requestWithDeadline(method, params, 60000, true); }
+  private requestWithDeadline(method: string, params: unknown, timeoutMs: number, fatal: boolean): Promise<unknown> {
     if (this.failure) return Promise.reject(this.failure);
     if (this.pending.size >= this.maxPending) return Promise.reject(new Error('Protocol capacity exceeded'));
     const id = ++this.nextId;
     const result = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new Error('Protocol response timed out')), 60_000);
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        if (fatal) this.fail(new Error('Protocol response timed out'));
+        else { this.pending.delete(id); reject(new Error('Optional protocol response timed out')); }
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
     });
     void this.send({ id, method, params }).catch(() => { /* send fails all pending requests */ });

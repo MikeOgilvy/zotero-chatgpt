@@ -25,6 +25,7 @@ export class MemoryStorage implements StoragePort {
   writes: string[] = [];
   fail = false;
   read(path: string) { return Promise.resolve(this.files.get(path) ?? null); }
+  list(directory: string) { return Promise.resolve([...this.files.keys()].filter(path => path.startsWith(directory + '/') && !path.slice(directory.length + 1).includes('/')).map(path => path.slice(directory.length + 1))); }
   writeAtomic(path: string, bytes: Uint8Array) { if (this.fail) return Promise.reject(new Error('private-storage-path')); this.files.set(path, bytes); this.writes.push(new TextDecoder().decode(bytes)); return Promise.resolve(); }
   append(path: string, bytes: Uint8Array) {
     if (this.fail) return Promise.reject(new Error('private-storage-path'));

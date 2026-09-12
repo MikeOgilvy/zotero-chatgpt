@@ -5,6 +5,8 @@ export interface HistoryTurn {
   status: 'inProgress' | 'completed' | 'interrupted' | 'failed';
   requestIds: string[];
   agentMessages: Array<{ itemId: string; text: string; phase: string | null }>;
+  imageGenerations: Record<string, unknown>[];
+  unsupportedItemTypes: string[];
   error: unknown;
 }
 const TURN_STATUS = ['inProgress', 'completed', 'interrupted', 'failed'] as const;
@@ -15,17 +17,21 @@ function parseTurn(value: unknown): HistoryTurn {
   const requestIds: string[] = [];
   if (typeof turn.clientUserMessageId === 'string') requestIds.push(turn.clientUserMessageId);
   const agentMessages: HistoryTurn['agentMessages'] = [];
+  const imageGenerations: HistoryTurn['imageGenerations'] = [];
+  const unsupportedItemTypes: string[] = [];
   const items = Array.isArray(turn.items) ? turn.items : [];
   for (const item of items) {
     const row = record(item);
     const type = string(row.type);
+    if (!['userMessage', 'agentMessage', 'reasoning', 'plan', 'contextCompaction', 'imageGeneration'].includes(type)) unsupportedItemTypes.push(type);
     if (type === 'userMessage') {
       if (typeof row.clientId === 'string') requestIds.push(row.clientId);
       if (typeof row.clientUserMessageId === 'string') requestIds.push(row.clientUserMessageId);
     }
     if (type === 'agentMessage') agentMessages.push({ itemId: string(row.id), text: typeof row.text === 'string' ? row.text : '', phase: typeof row.phase === 'string' ? row.phase : null });
+    if (type === 'imageGeneration') { if (imageGenerations.length >= 4) throw new Error('Too many generated images'); imageGenerations.push(row); }
   }
-  return { id: string(turn.id), status: status as HistoryTurn['status'], requestIds, agentMessages, error: turn.error };
+  return { id: string(turn.id), status: status as HistoryTurn['status'], requestIds, agentMessages, imageGenerations, unsupportedItemTypes, error: turn.error };
 }
 /** `thread/read` history used only for restart reconciliation; never exposed to the sidebar. */
 export function parseThreadHistory(value: unknown): HistoryTurn[] {
