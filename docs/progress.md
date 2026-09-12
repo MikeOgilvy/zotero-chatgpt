@@ -22,6 +22,7 @@
 | `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **631 PASS / 57 files**；新增契约/上下文/任务/工作区/原生/图像/来源链接回归；仅为单元证据 |
 | `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，`dist/zotero-codex-reader-0.4.0a1-dev.xpi`（含固定 runtime 与项目 MIT LICENSE） |
 | `npm run verify:artifacts` | 76 files PASS | **77 files PASS**，hash/白名单/许可/无私有记录与 Node 导入；digest 读 `dist/SHA256SUMS` |
+| 临时 `git worktree` + `npm ci` 的 clean HEAD 重建 | 未执行 | **PASS**：typecheck PASS；`test:unit` 631（无 `dist/` 时 629+2 skip）；`package:dev` → 0.4.0a1 XPI；`verify:artifacts` 77 files，digest 与主树一致；复用本地固定 runtime 缓存，未重新下载 |
 | `npm run verify:install -- build-info … --json` | 未作为基线执行 | PASS，实际本地 XPI 身份；不等于宿主升级/回退验收 |
 | `npm run release:dry-run` | 旧版曾执行 | PASS，githubRelease=null，没有公开上传；脚本说明改指 development |
 | `node scripts/prepare-host-test.mjs --context` + 专用 Zotero | 未执行 | **16/16 PASS**，下述宿主范围；signedOut，0 请求记录 |
@@ -74,7 +75,7 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | 统一 @文章/@chat、/skill、personalization | WorkspaceStore、@article 元数据先行/选定后读取、@chat 有界快照、SKILL.md 解析与 revision 冲突、偏好/研究配置已有代码与单元；第三方 skill 仍不能授予权限。真实库接线与 UI 目视未验 | C |
 | 模型/多模态/上下文 | 固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴图片、生成图 16 MiB 校验与导出、diagram 线程能力已有代码与单元；真实档位/多图/真实图像生成、文件拖拽/截图排序、精确用量与完整已发送/已引用面板仍未测 | C |
 | 标注 / 获取整理 agent | 候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验已有代码与单元；真实库原生写入/撤销、网络预览与合法全文核对未在宿主验证 | D/E |
-| 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；本轮实测 `package:dev`/`verify:artifacts`。官方新登录、真实输出/停止/在途恢复、干净 checkout（本提交范围）/无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成 | F |
+| 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；本轮实测 `package:dev`/`verify:artifacts`。官方新登录、真实输出/停止/在途恢复、无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成；本轮已复现 clean HEAD 重建（见上） | F |
 
 **下一条可执行任务**：在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”和真实图像生成；随后用真实宿主复核最终 0.4 XPI 的原生任务/获取 UI，再按 F 的门槛处理升级/回退、无 Node 安装与公开签名发行。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。
 
@@ -107,6 +108,6 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 - [x] E（代码+单元）：DOI/链接/列表未保存元数据、查重、指定 collection、OA PDF 校验与恢复；原生适配与 ledger 共用；网络/真实库未验。
 - [x] 多模态/能力（代码+单元）：模型目录/usage/上下文预算来源；粘贴/截图多图；固定 runtime 图像生成能力与 16 MiB 生成图校验；真实模型图像生成未验。
 - [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、版本升级回退；Node-free/公开下载仅在对应条件成立时验收。需要隔离官方登录、真实模型、真实宿主、签名 XPI 与公开发布授权。
-- [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建、产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
+- [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
