@@ -62,7 +62,14 @@ const COPY = {
   yesterday: 'Yesterday',
   older: 'Older',
   page: (label: string) => `p. ${label}`,
+  actionFailed: 'This action could not be completed.',
+  sourceOpenFailed: 'The source could not be opened.',
+  imageSaveFailed: 'The image could not be saved.',
+  imageClipboardFailed: 'The clipboard image could not be attached.',
+  imageDropFailed: 'The dropped image could not be attached.',
+  collectionsFailed: 'Collections could not be loaded.',
 } as const;
+const VIEW_ACTION_FAILED = COPY.actionFailed;
 const ICONS = {
   send: 'M8 13V3M4.5 6.5 8 3l3.5 3.5',
   stop: 'M5 5h6v6H5z',
@@ -158,7 +165,14 @@ export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentit
 export function mountChatView(root: HTMLElement, presenter: ConversationPresenter, hooks: ChatViewHooks = {}): () => void {
   const doc = root.ownerDocument;
   let latestViewState = presenter.snapshot();
-  const reportViewError = (error: unknown) => { const status = root.querySelector<HTMLElement>('.zcr-error'); if (status) { status.textContent = error instanceof Error ? error.message : 'This action could not be completed.'; status.hidden = false; } };
+  // View actions own a slot separate from `state.message`: a presenter update must not erase a
+  // view failure, and a view failure must never be reported as conversation state. The raw error
+  // is deliberately discarded so host paths or internal text cannot reach the UI.
+  const reportViewMessage = (message: string) => {
+    const status = root.querySelector<HTMLElement>('[data-zcr-view-error]');
+    if (status) { status.textContent = message; status.hidden = false; }
+  };
+  const reportViewError = () => reportViewMessage(VIEW_ACTION_FAILED);
   const viewId = `zcr-chat-${++viewSerial}`;
   // A cited page re-opens through the same frozen-revision navigation as the PDF context panel.
   // Without an opener, bound citations stay inert (no external launch) and surface a constant status.
@@ -261,6 +275,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const retry = button(COPY.retry, 'retry', () => { void presenter.retry(); });
   auth.append(login, cancelLogin, retry);
   const alert = el('p', 'zcr-error'); alert.setAttribute('role', 'alert'); alert.hidden = true;
+  const viewError = el('p', 'zcr-error zcr-view-error'); viewError.dataset.zcrViewError = ''; viewError.setAttribute('role', 'alert'); viewError.hidden = true;
   const transcript = el('div', 'zcr-transcript');
   transcript.dataset.zcrTranscript = '';
   const messages = el('div', 'zcr-messages'); messages.setAttribute('aria-live', 'polite'); messages.dataset.zcrMessages = '';
@@ -336,7 +351,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   composer.append(composerContext, input, bar, menu);
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
-  main.append(historyPanel, status, auth, alert, transcript, draft);
+  main.append(historyPanel, status, auth, alert, viewError, transcript, draft);
   chat.append(chrome, settingsMenu, documentPanel, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
@@ -373,7 +388,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     header.append(el('span', '', caption), close);
     const full = el('img'); full.src = image.dataUrl; full.alt = caption;
     const exportButton = button('Save image…', 'export-image', () => {
-      if (hooks.exportImage) void hooks.exportImage(image).catch(error => { alert.textContent = error instanceof Error ? error.message : 'The image could not be saved.'; alert.hidden = false; });
+      if (hooks.exportImage) void hooks.exportImage(image).catch(() => reportViewMessage(COPY.imageSaveFailed));
     });
     exportButton.hidden = !hooks.exportImage;
     imagePreview.replaceChildren(header, full, exportButton); imagePreview.hidden = false; close.focus();
@@ -451,13 +466,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     event.preventDefault();
     void (hasDom ? imagesFromClipboard(clipboard, nextImageId) : imagesFromGeckoClipboard(host, nextImageId)).then(images => {
       for (const image of images) presenter.addImage(image);
-    }).catch(() => { alert.textContent = 'The clipboard image could not be attached.'; alert.hidden = false; });
+    }).catch(() => reportViewMessage(COPY.imageClipboardFailed));
   };
   composer.addEventListener('dragover', event => { if (clipboardHasImage(event.dataTransfer)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; } });
   composer.addEventListener('drop', event => {
     if (!clipboardHasImage(event.dataTransfer)) return;
     event.preventDefault();
-    void imagesFromClipboard(event.dataTransfer, nextImageId).then(images => { for (const image of images) presenter.addImage(image); }).catch(() => { alert.textContent = 'The dropped image could not be attached.'; alert.hidden = false; });
+    void imagesFromClipboard(event.dataTransfer, nextImageId).then(images => { for (const image of images) presenter.addImage(image); }).catch(() => reportViewMessage(COPY.imageDropFailed));
   });
   composer.addEventListener('paste', onPaste);
   input.addEventListener('paste', onPaste);
@@ -525,7 +540,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (isComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
     event.preventDefault(); open(); focusMenu(panel, event.key === 'ArrowUp');
   });
-  historySearch.addEventListener('input', () => { if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value); else applyHistoryFilter(); });
+  historySearch.addEventListener('input', () => { if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value).catch(reportViewError); else applyHistoryFilter(); });
   const onDocumentClick = (event: Event) => {
     const target = event.target as Node | null;
     if (!menu.hidden && target && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
@@ -582,7 +597,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }).catch(reportViewError);
     });
     branch.classList.add('zcr-message-action'); header.append(branch);
-    if (message.role === 'user') { const cancelQueued = button('Cancel queued question', 'cancel-queued', () => { void presenter.cancelQueuedRequest(message.requestId); }); cancelQueued.hidden = true; header.append(cancelQueued); }
+    if (message.role === 'user') { const cancelQueued = button('Cancel queued question', 'cancel-queued', () => { void presenter.cancelQueuedRequest(message.requestId).catch(reportViewError); }); cancelQueued.hidden = true; header.append(cancelQueued); }
     const text = el('div', 'zcr-message-text'); text.dataset.zcrText = '';
     text.addEventListener('click', event => {
       const target = event.target as Element | null;
@@ -618,7 +633,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       else {
         const line = el('div', 'zcr-context-citation');
         line.append(el('span', '', COPY.page(pageLabel(citation))));
-        if (hooks.openCitation) line.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation); }, 'source'));
+        if (hooks.openCitation) line.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(() => reportViewMessage(COPY.sourceOpenFailed)); }, 'source'));
         contextSource.replaceChildren(line);
       }
     }
@@ -784,7 +799,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       if (doc.activeElement !== scaleInput) { scaleInput.value = String(Math.round(state.workspace.textScale * 100)); scaleValue.textContent = `${scaleInput.value}%`; applyChatTextScale(root, state.workspace.textScale); }
       language.value = state.workspace.uiLanguage;
       const acquire = state.workspace.skills.find(skill => skill.id === state.draft.skillId)?.workflow === 'acquire'; acquisition.hidden = !acquire;
-      if (acquire && !requestedCollections) { requestedCollections = true; void presenter.collections().catch(() => {}); }
+      if (acquire && !requestedCollections) { requestedCollections = true; void presenter.collections().catch(() => { requestedCollections = false; reportViewMessage(COPY.collectionsFailed); }); }
       const collectionKey = JSON.stringify(state.collectionOptions);
       if (collection.dataset.options !== collectionKey) {
         collection.dataset.options = collectionKey; const empty = el('option', '', 'Choose a collection…'); empty.value = '';

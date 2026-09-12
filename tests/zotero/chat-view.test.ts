@@ -6,7 +6,7 @@ import { ConversationPresenter, type DocumentServices } from '../../packages/zot
 import { documentA } from '../contracts/document-fixture.ts';
 import { mountChatView, renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
+import { SHAREABLE_STORAGE_LOCATION, type Citation, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
 import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
@@ -38,6 +38,7 @@ async function mountReadyChat(options: {
   uuid?: () => string;
   document?: DocumentServices;
   openDocumentPage?: (document: { paper: PaperScope; revision: DocumentRevision }, pageIndex: number) => Promise<void>;
+  openCitation?: (citation: Citation) => Promise<void>;
   openLink?: (url: string) => void;
 } = {}) {
   let conversation: Conversation = {
@@ -128,7 +129,7 @@ async function mountReadyChat(options: {
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   const scale = options.textScale ?? { value: 1 };
   mountChatView(root, presenter, {
-    openCitation: () => Promise.resolve(),
+    openCitation: options.openCitation ?? (() => Promise.resolve()),
     readTextScale: () => scale.value,
     writeTextScale: value => { scale.value = value; },
     confirm: options.confirm ?? (() => true),
@@ -292,6 +293,27 @@ it('surfaces a constant failure when the frozen source cannot be opened, without
   await vi.waitFor(() => expect(text.querySelector('[role="status"]')?.textContent).toBe('The source could not be opened. Reopen the PDF and try again.'));
   expect(text.textContent).not.toContain('/private');
   expect(openLink).not.toHaveBeenCalled();
+});
+
+it('reports a failed view action in a dedicated slot without leaking the raw error', async () => {
+  const { root, presenter } = await mountReadyChat();
+  vi.spyOn(presenter, 'cancelQueuedRequest').mockRejectedValue(new Error('/private/library/file.pdf'));
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]')!.click();
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(viewError.hidden).toBe(false));
+  expect(viewError.textContent).toBe('This action could not be completed.');
+  expect(root.textContent).not.toContain('/private');
+  expect(root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')?.hidden).toBe(true);
+});
+
+it('reports a rejected citation open without clobbering the presenter message slot', async () => {
+  const openCitation = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
+  const { root } = await mountReadyChat({ draftCitations: [citationA], openCitation });
+  root.querySelector<HTMLButtonElement>('[data-zcr-context-source] [data-zcr-action="open-citation"]')!.click();
+  await vi.waitFor(() => expect(openCitation).toHaveBeenCalled());
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(viewError.textContent).toBe('The source could not be opened.'));
+  expect(root.textContent).not.toContain('/private');
 });
 
 it('keeps the offline composer editable while preventing model submission', async () => {
