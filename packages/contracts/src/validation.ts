@@ -1,5 +1,6 @@
 import { ReaderError, type Citation, type GenerationSettings, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect, type SendInput } from './index.ts';
-import { validateDocument } from './document.ts';
+import { validateDocument, validateRevision } from './document.ts';
+import { validateBatch, validateContextReport, validateReferenceInput, validateWorkflow } from './workspace-validation.ts';
 // Limits are first-version engineering choices from the contracts appendix.
 export const LIMITS = { payloadBytes: 256 * 1024, citationCodePoints: 8000, citationsPerRequest: 4, questionCodePoints: 4000, titleChars: 1024, authors: 50, authorChars: 256, rectsPerPage: 512, imagesPerRequest: 4, imageBytes: 2 * 1024 * 1024 } as const;
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
@@ -39,7 +40,7 @@ function rect(value: unknown): Rect {
   return [value[0] as number, value[1] as number, value[2] as number, value[3] as number];
 }
 export function validateCitation(value: unknown): Citation {
-  const citation = record(value, ['id', 'paper', 'text', 'title', 'authors', 'year', 'doi', 'pageLabel', 'positions', 'capturedAt', 'contextScope', 'sourceRevision'], 'citation');
+  const citation = record(value, ['id', 'paper', 'text', 'title', 'authors', 'year', 'doi', 'pageLabel', 'positions', 'capturedAt', 'contextScope', 'sourceRevision', 'documentRevision'], 'citation');
   if (!Array.isArray(citation.authors) || citation.authors.length > LIMITS.authors) invalid('citation.authors is out of range');
   if (!Array.isArray(citation.positions) || citation.positions.length !== 1) invalid('citation must cover exactly one page');
   const position = record(citation.positions[0], ['pageIndex', 'rects'], 'citation.positions[0]');
@@ -65,10 +66,13 @@ export function validateCitation(value: unknown): Citation {
     if (typeof revision.size !== 'number' || !Number.isSafeInteger(revision.size) || revision.size < 0) invalid('citation.sourceRevision.size must be a non-negative integer');
     result.sourceRevision = { size: revision.size, modifiedAt: text(revision.modifiedAt, 'citation.sourceRevision.modifiedAt', 64, 1) };
   }
+  if (citation.documentRevision !== undefined) result.documentRevision = validateRevision(citation.documentRevision);
   return result;
 }
-export function validateImageAttachment(value: unknown): ImageAttachment {
-  const image = record(value, ['id', 'name', 'mime', 'dataUrl'], 'image');
+export function validateImageAttachment(value: unknown): ImageAttachment { return checkedImage(value, LIMITS.imageBytes); }
+export function validateOutputImage(value: unknown): ImageAttachment { return checkedImage(value, 16 * 1024 * 1024); }
+function checkedImage(value: unknown, maxBytes: number): ImageAttachment {
+  const image = record(value, ['id', 'name', 'mime', 'dataUrl', 'origin'], 'image');
   const name = text(image.name, 'image.name', 256, 1);
   if (/[/\\]|\.\./u.test(name) || name.toLowerCase().endsWith('.pdf')) invalid('image.name must be a bare image filename');
   if (typeof image.mime !== 'string' || !IMAGE_MIME.includes(image.mime as typeof IMAGE_MIME[number])) invalid('image.mime must be png, jpeg, webp, or gif');
@@ -79,8 +83,17 @@ export function validateImageAttachment(value: unknown): ImageAttachment {
   const encoded = image.dataUrl.slice(image.dataUrl.indexOf(',') + 1);
   const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
   const bytes = Math.floor(encoded.length * 3 / 4) - padding;
-  if (bytes <= 0 || bytes > LIMITS.imageBytes) invalid('image is larger than the reader accepts');
-  return { id: uuid(image.id, 'image.id'), name, mime, dataUrl: image.dataUrl };
+  if (bytes <= 0 || bytes > maxBytes) invalid('image is larger than the reader accepts');
+  const result: ImageAttachment = { id: uuid(image.id, 'image.id'), name, mime, dataUrl: image.dataUrl };
+  if (image.origin !== undefined) {
+    const origin = record(image.origin, ['kind', 'model', 'paper', 'pageIndex', 'revision'], 'image.origin');
+    if (origin.kind === 'generated') result.origin = { kind: 'generated', ...(origin.model !== undefined ? { model: text(origin.model, 'image model', 128, 1) } : {}) };
+    else if (origin.kind === 'paper') {
+      if (typeof origin.pageIndex !== 'number' || !Number.isSafeInteger(origin.pageIndex) || origin.pageIndex < 0) invalid('Invalid image page');
+      result.origin = { kind: 'paper', paper: validatePaperScope(origin.paper), pageIndex: origin.pageIndex, revision: validateRevision(origin.revision) };
+    } else invalid('Unknown image origin');
+  }
+  return result;
 }
 export function validateSettings(value: unknown): GenerationSettings {
   const settings = record(value, ['model', 'serviceTier', 'effort'], 'settings');
@@ -96,12 +109,13 @@ export function validateSendInput(value: unknown): SendInput {
     const rest = { ...(value as Record<string, unknown>) };
     delete rest.images;
     delete rest.document;
+    if (Array.isArray(rest.references)) rest.references = rest.references.map((ref: unknown) => { if (!ref || typeof ref !== 'object') return ref; const result = { ...(ref as Record<string, unknown>) }; delete result.document; return result; });
     withoutImages = rest;
   }
   let serialized: string;
   try { serialized = JSON.stringify(withoutImages) ?? ''; } catch { invalid('request is not serializable'); }
   if (new TextEncoder().encode(serialized).length > LIMITS.payloadBytes) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The request is larger than the reader accepts; select less text.');
-  const input = record(value, ['requestId', 'conversationId', 'action', 'question', 'citations', 'settings', 'paper', 'images', 'document'], 'request');
+  const input = record(value, ['requestId', 'conversationId', 'action', 'question', 'citations', 'settings', 'paper', 'images', 'document', 'workflow', 'references', 'batch', 'contextReport'], 'request');
   if (input.action !== 'explain' && input.action !== 'ask') invalid('request.action must be explain or ask');
   if (!Array.isArray(input.citations) || input.citations.length > LIMITS.citationsPerRequest) invalid('request.citations is out of range');
   const question = text(input.question, 'request.question', LIMITS.questionCodePoints);
@@ -112,6 +126,14 @@ export function validateSendInput(value: unknown): SendInput {
   const result: SendInput = { requestId: uuid(input.requestId, 'request.requestId'), conversationId: uuid(input.conversationId, 'request.conversationId'), action: input.action, question, citations, settings: validateSettings(input.settings) };
   if (input.paper !== undefined) result.paper = validatePaperIdentity(input.paper);
   if (input.document !== undefined) result.document = validateDocument(input.document);
+  if (input.workflow !== undefined) result.workflow = validateWorkflow(input.workflow);
+  if (input.batch !== undefined) result.batch = validateBatch(input.batch);
+  if (input.contextReport !== undefined) result.contextReport = validateContextReport(input.contextReport);
+  if (input.references !== undefined) {
+    if (!Array.isArray(input.references) || input.references.length > 16) invalid('Too many references');
+    result.references = input.references.map(validateReferenceInput);
+    if (new Set(result.references.map(ref => ref.id)).size !== result.references.length) invalid('Repeated reference identity');
+  }
   if (input.images !== undefined) {
     if (!Array.isArray(input.images) || input.images.length > LIMITS.imagesPerRequest) invalid('request.images is out of range');
     const images = input.images.map(validateImageAttachment);

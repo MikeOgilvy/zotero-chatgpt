@@ -32,6 +32,7 @@ export interface Citation {
   capturedAt: string;    // ISO 8601
   contextScope: 'selection';
   sourceRevision?: { size: number; modifiedAt: string };
+  documentRevision?: DocumentRevision;
 }
 
 export type RequestState = 'accepted' | 'dispatching' | 'running' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
@@ -44,7 +45,7 @@ export interface PaperIdentity {
   doi?: string;
 }
 
-export interface DocumentRevision { fingerprint: string; size: number; modifiedAt: number }
+export interface DocumentRevision { fingerprint: string; size: number; modifiedAt: number; sha256?: string }
 export interface DocumentPage { pageIndex: number; pageLabel: string; text: string; status: 'text' | 'empty' | 'error'; partial?: true }
 /** Locally extracted text. No filesystem path or claim that figures were read. */
 export interface DocumentContext {
@@ -54,6 +55,7 @@ export interface DocumentContext {
   parserVersion: string;
   totalPages: number;
   pages: DocumentPage[];
+  sourceId?: UUID;
 }
 export interface DocumentSummary {
   id: UUID;
@@ -62,6 +64,23 @@ export interface DocumentSummary {
   totalPages: number;
   pages: Array<Pick<DocumentPage, 'pageIndex' | 'pageLabel' | 'status' | 'partial'>>;
   textBytes: number;
+  sourceId?: UUID;
+}
+export interface ContextBatch {
+  id: UUID; index: number; total: number; phase: 'map' | 'reduce'; question: string;
+  summaries?: Array<{ index: number; pages: number[]; pageLabels?: string[]; text: string; paper?: PaperScope; title?: string }>;
+}
+export interface UsageReport {
+  model: string;
+  contextWindow: number | null;
+  last: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number };
+  total: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number };
+}
+export interface ContextReport {
+  mode: 'full' | 'focused' | 'multi-pass';
+  capacity: number | null; provenance: 'runtime-reported' | 'pinned-catalog' | 'unknown';
+  reservedTokens: number | null; textBudgetTokens: number | null;
+  selectedPages: number[]; totalPages: number; reason: string;
 }
 
 /** User-attached image for `turn/start` UserInput::Image `{ type: "image", url }` (rust-v0.144.1). */
@@ -70,10 +89,13 @@ export interface ImageAttachment {
   name: string;
   mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
   dataUrl: string;
+  origin?: { kind: 'generated'; model?: string } | { kind: 'paper'; paper: PaperScope; pageIndex: number; revision: DocumentRevision };
 }
 
 export interface Message {
   id: UUID;
+  /** Opaque native item identity for restart reconciliation; never a filesystem path. */
+  upstreamItemId?: string;
   requestId: UUID;
   role: 'user' | 'assistant';
   phase: 'commentary' | 'final' | null;
@@ -87,6 +109,12 @@ export interface Message {
   images?: ImageAttachment[];
   document?: DocumentSummary;
   paper?: PaperIdentity;
+  workflow?: import('./workspace.ts').WorkflowSnapshot;
+  references?: import('./workspace.ts').ReaderReference[];
+  referenceDocuments?: Array<{ referenceId: string; document: DocumentSummary }>;
+  batch?: ContextBatch;
+  contextReport?: ContextReport;
+  generatedImages?: ImageAttachment[];
 }
 
 export interface Conversation {
@@ -95,10 +123,17 @@ export interface Conversation {
   title: string;
   settings: GenerationSettings;
   activeRequestId: UUID | null;
+  queuedRequestIds?: UUID[];
+  activeBatchId?: UUID;
   messages: Message[];
   lastSeq: number;
   createdAt: string;
   updatedAt: string;
+  paperIdentity?: PaperIdentity;
+  titleCustomized?: boolean;
+  parentConversationId?: UUID;
+  forkMessageId?: UUID;
+  usage?: UsageReport;
 }
 
 export interface SendInput {
@@ -113,6 +148,10 @@ export interface SendInput {
   /** Optional image parts for rust-v0.144.1 `{ type: "image", url: dataUrl }`. */
   images?: ImageAttachment[];
   document?: DocumentContext;
+  workflow?: import('./workspace.ts').WorkflowSnapshot;
+  references?: import('./workspace.ts').ReferenceInput[];
+  batch?: ContextBatch;
+  contextReport?: ContextReport;
 }
 
 export interface SendReceipt {
@@ -134,6 +173,8 @@ export type ReaderEvent = {
   | { type: 'cancelled'; messageId: UUID | null }
   | { type: 'failed'; code: ErrorCode; message: string }
   | { type: 'uncertain'; message: string }
+  | { type: 'usage'; usage: UsageReport }
+  | { type: 'image'; messageId: UUID; image: ImageAttachment }
 );
 
 export type ErrorCode =
