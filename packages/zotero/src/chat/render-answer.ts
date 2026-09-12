@@ -27,7 +27,9 @@ function thawDelimiters(source: string): string {
 }
 function renderMath(source: string, display: boolean): string {
   try {
-    return katex.renderToString(source, { output: 'html', displayMode: display, throwOnError: true, trust: false, maxSize: 10, maxExpand: 1000, strict: 'error' });
+    // `strict: 'ignore'` keeps Unicode that KaTeX only warns about (for example CJK subscripts in
+    // $T_{误差}$) renderable; `throwOnError` still turns genuinely broken TeX into escaped text.
+    return katex.renderToString(source, { output: 'html', displayMode: display, throwOnError: true, trust: false, maxSize: 10, maxExpand: 1000, strict: 'ignore' });
   } catch {
     return `<span class="zcr-math-fallback">${escapeHtml(source)}</span>`;
   }
@@ -36,20 +38,31 @@ function mathPlugin(md: MarkdownIt): void {
   md.inline.ruler.before('escape', 'zcr_math', (state, silent) => {
     const src = state.src;
     const pos = state.pos;
-    const take = (open: string, close: string, display: boolean): boolean => {
+    const take = (open: string, close: string, display: boolean, accept?: (content: string, after: string) => boolean): boolean => {
       if (!src.startsWith(open, pos)) return false;
       const end = src.indexOf(close, pos + open.length);
-      if (end === -1 || (!display && src.slice(pos + open.length, end).includes('\n'))) return false;
+      if (end === -1) return false;
+      const content = src.slice(pos + open.length, end);
+      if (!display && content.includes('\n')) return false;
+      if (accept && !accept(content, src.slice(end + close.length, end + close.length + 1))) return false;
       if (!silent) {
         const token = state.push('zcr_math', display ? 'div' : 'span', 0);
-        token.content = src.slice(pos + open.length, end);
+        token.content = content;
         token.markup = open;
         token.meta = { display };
       }
       state.pos = end + close.length;
       return true;
     };
-    return take('$$', '$$', true) || take('\\[', '\\]', true) || take('\\(', '\\)', false) || take('$', '$', false);
+    // `$$`, `\[` and `\(` are unambiguous TeX delimiters. A single `$` follows the common
+    // Pandoc-style guards so currency such as `$5 and $10` is left as text instead of being
+    // silently rewritten into one formula spanning the digits in between.
+    const inlineDollar = (content: string, after: string): boolean =>
+      content.length > 0 && !/^\s/u.test(content) && !/\s$/u.test(content) && !/^[0-9]/u.test(after);
+    return take('$$', '$$', true, content => content.length > 0)
+      || take('\\[', '\\]', true, content => content.trim().length > 0)
+      || take('\\(', '\\)', false, content => content.trim().length > 0)
+      || take('$', '$', false, inlineDollar);
   });
   md.renderer.rules.zcr_math = (tokens, idx) => {
     const token = tokens[idx]!;
