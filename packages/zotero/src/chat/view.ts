@@ -1,18 +1,23 @@
-import type { Citation, Conversation, DocumentContext, Message } from '../../../contracts/src/index.ts';
+import type { Citation, Conversation, ImageAttachment, Message } from '../../../contracts/src/index.ts';
 import { mountDocumentContext } from './context-view.ts';
+import { mountWorkspaceView } from './workspace-view.ts';
+import { mountTaskView } from './task-view.ts';
+import { mountUILocale } from './ui-locale.ts';
 import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
   applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
 } from './generation-settings.ts';
 import { copyableAnswerText, followAnswerScroll, renderAnswer } from './render-answer.ts';
+import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
 import { clipboardHasImage, geckoClipboardHasImage, imagesFromClipboard, imagesFromGeckoClipboard, resolveGeckoClipboardAccess, type GeckoClipboardAccess } from './pick-images.ts';
 export interface AttachmentIdentity { title: string; key: string; libraryID: number }
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
-  openDocumentPage?(document: DocumentContext, pageIndex: number): Promise<void>;
+  openDocumentPage?(document: DocumentPageTarget, pageIndex: number): Promise<void>;
   copyText?(text: string): void;
+  exportImage?(image: ImageAttachment): Promise<void>;
   openLink?(url: string): void;
   confirm?(message: string): boolean;
   readTextScale?(): number;
@@ -24,6 +29,7 @@ export interface ChatViewHooks {
 }
 const HTML = 'http://www.w3.org/1999/xhtml';
 const SVG = 'http://www.w3.org/2000/svg';
+let viewSerial = 0;
 const COPY = {
   paneLabel: 'Codex',
   login: 'Sign in with ChatGPT',
@@ -40,7 +46,8 @@ const COPY = {
   question: 'Question',
   send: 'Send',
   stop: 'Stop',
-  chromeSettings: 'Settings',
+  chromeSettings: 'More',
+  chatOptions: 'Chat options',
   returnToSource: 'Return to source',
   remove: 'Remove',
   you: 'You',
@@ -87,13 +94,9 @@ const STATUS_LABEL: Record<Message['status'], string> = {
 function pageLabel(citation: Citation): string {
   return citation.pageLabel || String(citation.positions[0]!.pageIndex + 1);
 }
-/** Filenames and generic attachment labels stay off the chrome; real paper titles stay muted. */
+/** Keep source titles intact; the compact header truncates only their visual presentation. */
 export function compactPaperTitle(title: string): string {
-  const text = title.trim();
-  if (!text) return '';
-  if (/^(pdf|pdf attachment|untitled|attachment)$/iu.test(text)) return '';
-  if (/\.pdf$/iu.test(text) && !/\s/u.test(text)) return '';
-  return text;
+  return title.trim();
 }
 function latestCitation(state: PresenterState): Citation | undefined {
   const draft = state.draft.citations.at(-1);
@@ -154,6 +157,15 @@ export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentit
 /** Conversation view: assistant Markdown is sanitized; user text stays textContent. */
 export function mountChatView(root: HTMLElement, presenter: ConversationPresenter, hooks: ChatViewHooks = {}): () => void {
   const doc = root.ownerDocument;
+  let latestViewState = presenter.snapshot();
+  const reportViewError = (error: unknown) => { const status = root.querySelector<HTMLElement>('.zcr-error'); if (status) { status.textContent = error instanceof Error ? error.message : 'This action could not be completed.'; status.hidden = false; } };
+  const viewId = `zcr-chat-${++viewSerial}`;
+  // A cited page re-opens through the same frozen-revision navigation as the PDF context panel.
+  // Without an opener, bound citations stay inert (no external launch) and surface a constant status.
+  const openAnswerSource = async (source: AnswerSource, pageIndex: number): Promise<void> => {
+    if (!hooks.openDocumentPage) throw new Error('The source could not be opened.');
+    await hooks.openDocumentPage({ paper: source.paper, revision: source.revision }, pageIndex);
+  };
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] => { const node = doc.createElementNS(HTML, tag) as HTMLElementTagNameMap[K]; if (className) node.className = className; if (text) node.textContent = text; return node; };
   const icon = (name: keyof typeof ICONS) => {
     const svg = doc.createElementNS(SVG, 'svg');
@@ -183,31 +195,53 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const chrome = el('div', 'zcr-chrome');
   const context = el('div', 'zcr-chrome-main');
   context.dataset.zcrContext = '';
-  const pills = el('div', 'zcr-chat-pills');
-  pills.dataset.zcrPills = '';
-  pills.setAttribute('role', 'tablist');
-  pills.setAttribute('aria-label', COPY.history);
+  const currentTitle = el('span', 'zcr-current-title');
+  currentTitle.dataset.zcrCurrentTitle = '';
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
-  context.append(pills, contextSource);
+  context.append(currentTitle);
   const actions = el('div', 'zcr-chrome-actions');
   const fresh = button(COPY.newChat, 'new-conversation', () => { void presenter.newConversation(); }, 'plus');
   const historyBtn = button(COPY.history, 'history', () => { toggleHistory(); }, 'clock');
-  historyBtn.setAttribute('aria-haspopup', 'true');
+  historyBtn.setAttribute('aria-haspopup', 'dialog');
   historyBtn.setAttribute('aria-expanded', 'false');
+  historyBtn.setAttribute('aria-controls', `${viewId}-history`);
   const overflow = button(COPY.chromeSettings, 'settings', () => { toggleSettings(); }, 'more');
-  overflow.setAttribute('aria-haspopup', 'true');
+  overflow.setAttribute('aria-haspopup', 'dialog');
   overflow.setAttribute('aria-expanded', 'false');
+  overflow.setAttribute('aria-controls', `${viewId}-options`);
   actions.append(fresh, historyBtn, overflow);
   chrome.append(context, actions);
   const settingsMenu = el('div', 'zcr-settings-menu');
+  settingsMenu.id = `${viewId}-options`;
   settingsMenu.dataset.zcrSettingsMenu = '';
   settingsMenu.hidden = true;
-  settingsMenu.setAttribute('role', 'menu');
-  settingsMenu.setAttribute('aria-label', COPY.chromeSettings);
+  settingsMenu.setAttribute('role', 'dialog');
+  settingsMenu.setAttribute('aria-label', COPY.chatOptions);
+  const conversationActions = el('div', 'zcr-conversation-actions');
+  conversationActions.dataset.zcrConversationActions = '';
+  const deleteCurrent = button(COPY.deleteChat, 'delete-conversation', () => {
+    const id = presenter.snapshot().conversation?.id;
+    if (!id || !confirmDelete()) return;
+    toggleSettings(false);
+    void presenter.deleteConversation(id);
+  });
+  conversationActions.append(deleteCurrent);
+  const renameForm = el('div', 'zcr-rename-form'); renameForm.hidden = true;
+  const renameInput = el('input'); renameInput.type = 'text'; renameInput.maxLength = 1024; renameInput.setAttribute('aria-label', 'Chat name');
+  const rename = button('Rename chat', 'rename-conversation', () => { renameForm.hidden = !renameForm.hidden; renameInput.value = presenter.snapshot().conversation?.title ?? ''; if (!renameForm.hidden) { renameInput.focus(); renameInput.select(); } });
+  renameForm.append(renameInput, button('Save name', 'save-conversation-name', () => { const id = presenter.snapshot().conversation?.id; if (id) void presenter.renameConversation(id, renameInput.value).then(() => { renameForm.hidden = true; }).catch(reportViewError); }));
+  conversationActions.prepend(rename); conversationActions.append(renameForm);
+  const settingsContent = el('div', 'zcr-settings-content');
+  settingsContent.dataset.zcrSettingsContent = '';
+  settingsMenu.append(conversationActions, settingsContent);
+  const accountUsage = el('p', 'zcr-account-usage'); accountUsage.dataset.zcrAccountUsage = ''; settingsContent.append(accountUsage);
   const documentPanel = el('div', 'zcr-document-panel');
-  const documentView = mountDocumentContext(documentPanel, settingsMenu, presenter, hooks.openDocumentPage ? (document, pageIndex) => hooks.openDocumentPage!(document, pageIndex) : undefined);
+  documentPanel.dataset.zcrContextSummary = '';
+  const documentView = mountDocumentContext(documentPanel, settingsContent, presenter, hooks.openDocumentPage ? (document, pageIndex) => hooks.openDocumentPage!(document, pageIndex) : undefined);
+  documentPanel.append(contextSource);
   const historyPanel = el('div', 'zcr-history-panel');
+  historyPanel.id = `${viewId}-history`;
   historyPanel.dataset.zcrHistory = '';
   historyPanel.hidden = true;
   historyPanel.setAttribute('role', 'dialog');
@@ -228,10 +262,26 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   auth.append(login, cancelLogin, retry);
   const alert = el('p', 'zcr-error'); alert.setAttribute('role', 'alert'); alert.hidden = true;
   const transcript = el('div', 'zcr-transcript');
+  transcript.dataset.zcrTranscript = '';
   const messages = el('div', 'zcr-messages'); messages.setAttribute('aria-live', 'polite'); messages.dataset.zcrMessages = '';
-  const newContent = button(COPY.newContent, 'new-content', () => { messages.scrollTop = messages.scrollHeight; newContent.hidden = true; });
+  const taskPanel = el('div', 'zcr-tasks'); taskPanel.dataset.zcrTasks = '';
+  const taskView = mountTaskView(taskPanel, {
+    approveSelected: (id, selected, choices) => presenter.approveTask(id, selected, choices),
+    cancel: id => presenter.cancelTask(id), reconcile: id => presenter.reconcileTask(id), undo: id => presenter.undoTask(id),
+    openSource: (id, itemId) => presenter.openTaskSource(id, itemId), openOutput: (id, itemId) => presenter.openTaskOutput(id, itemId),
+    cancelReading: id => presenter.cancelReading(id), reconcileReading: id => presenter.reconcileReading(id), openReadingOutput: (id, step) => presenter.openReadingOutput(id, step),
+    describeReading: id => presenter.describeReading(id),
+    collectionLabel: target => latestViewState.collectionOptions.find(item => item.clientId === target.clientId && item.libraryId === target.libraryId && item.collectionKey === target.collectionKey)?.name ?? `Library ${target.libraryId} · ${target.collectionKey}`,
+  });
+  const isNearBottom = () => messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
+  let hasNewContent = false;
+  const newContent = button(COPY.newContent, 'new-content', () => { hasNewContent = false; messages.scrollTop = messages.scrollHeight; newContent.hidden = true; });
   newContent.hidden = true;
   newContent.classList.add('zcr-new-content');
+  messages.addEventListener('scroll', () => {
+    if (isNearBottom()) { hasNewContent = false; newContent.hidden = true; }
+    presenter.setScrollTop(messages.scrollTop);
+  });
   const emptyMark = el('div', 'zcr-empty-mark');
   emptyMark.dataset.zcrEmpty = '';
   emptyMark.setAttribute('aria-hidden', 'true');
@@ -256,12 +306,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   mark.append(cloud, prompt);
   emptyMark.append(mark);
   transcript.append(emptyMark, messages, newContent);
-  const draft = el('div', 'zcr-draft zcr-draft-float');
+  const draft = el('div', 'zcr-draft');
   const draftCitations = el('div', 'zcr-draft-citations'); draftCitations.dataset.zcrDraftCitations = '';
   const draftImages = el('div', 'zcr-draft-images'); draftImages.dataset.zcrDraftImages = '';
   const composer = el('div', 'zcr-composer'); composer.dataset.zcrComposer = '';
-  const input = el('textarea', 'zcr-input'); input.rows = 3; input.placeholder = COPY.askPlaceholder; input.setAttribute('aria-label', COPY.question); input.dataset.zcrInput = '';
+  const composerContext = el('div', 'zcr-composer-context'); composerContext.dataset.zcrComposerContext = '';
+  composerContext.append(draftCitations, draftImages);
+  const input = el('textarea', 'zcr-input'); input.rows = 2; input.placeholder = COPY.askPlaceholder; input.setAttribute('aria-label', COPY.question); input.dataset.zcrInput = '';
   const bar = el('div', 'zcr-composer-bar');
+  const leading = el('div', 'zcr-composer-leading'); leading.dataset.zcrComposerLeading = '';
   const trailing = el('div', 'zcr-composer-trailing');
   const picker = el('button', 'zcr-picker');
   picker.type = 'button';
@@ -269,19 +322,80 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   picker.dataset.zcrPicker = '';
   picker.setAttribute('aria-label', COPY.settings);
   picker.title = COPY.settings;
-  picker.setAttribute('aria-haspopup', 'true');
+  picker.setAttribute('aria-haspopup', 'menu');
   picker.setAttribute('aria-expanded', 'false');
+  picker.setAttribute('aria-controls', `${viewId}-models`);
   picker.addEventListener('click', () => { togglePicker(); });
   const send = button(COPY.send, 'send', () => { void presenter.send(); }, 'send', 'zcr-icon-button zcr-send');
   const stop = button(COPY.stop, 'stop', () => { void presenter.cancel(); }, 'stop', 'zcr-icon-button zcr-send');
-  trailing.append(picker, send, stop);
-  bar.append(trailing);
+  const queue = button('Queue question', 'queue', () => { void presenter.queueDraft(); }, 'plus'); queue.hidden = true;
+  trailing.append(picker, queue, send, stop);
+  bar.append(leading, trailing);
   const menu = el('div', 'zcr-picker-menu'); menu.dataset.zcrPickerMenu = ''; menu.hidden = true; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', COPY.settings);
-  composer.append(draftCitations, draftImages, input, bar, menu);
+  menu.id = `${viewId}-models`;
+  composer.append(composerContext, input, bar, menu);
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, auth, alert, transcript, draft);
   chat.append(chrome, settingsMenu, documentPanel, main); root.append(chat);
+  const localizer = mountUILocale(root);
+  let lastLanguage: 'en' | 'zh' | null = null;
+  let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
+  let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
+  const appearance = el('details', 'zcr-appearance'); appearance.hidden = true; appearance.append(el('summary', '', 'Appearance'));
+  const scaleLabel = el('label', '', 'Chat text size'); const scaleInput = el('input'); scaleInput.type = 'range'; scaleInput.min = '50'; scaleInput.max = '300'; scaleInput.step = '5'; scaleInput.setAttribute('aria-label', 'Chat text size');
+  const scaleValue = el('output', '', '100%'); scaleLabel.append(scaleInput, scaleValue);
+  scaleInput.addEventListener('input', () => { const scale = applyChatTextScale(root, Number(scaleInput.value) / 100); scaleValue.textContent = `${Math.round(scale * 100)}%`; });
+  scaleInput.addEventListener('change', () => { hooks.writeTextScale?.(Number(scaleInput.value) / 100); void presenter.saveAppearance({ textScale: Number(scaleInput.value) / 100 }).catch(reportViewError); });
+  const languageLabel = el('label', '', 'Interface language'); const language = el('select'); language.setAttribute('aria-label', 'Interface language');
+  for (const [value, label] of [['en', 'English'], ['zh', '简体中文']] as const) { const option = el('option', '', label); option.value = value; language.append(option); }
+  languageLabel.append(language); language.addEventListener('change', () => { void presenter.saveAppearance({ uiLanguage: language.value === 'zh' ? 'zh' : 'en' }).catch(reportViewError); });
+  appearance.append(scaleLabel, languageLabel); settingsContent.append(appearance);
+  const inputActions = el('div', 'zcr-input-actions'); inputActions.hidden = true;
+  const attachmentMenu = el('details', 'zcr-attachment-menu'); attachmentMenu.append(el('summary', '', 'Attach'));
+  attachmentMenu.append(button('Choose images…', 'pick-images', () => { void presenter.pickImages().catch(reportViewError); attachmentMenu.open = false; }), button('Capture selected region', 'capture-region', () => { void presenter.captureRegion().catch(reportViewError); attachmentMenu.open = false; }));
+  const pageNumber = el('input'); pageNumber.type = 'number'; pageNumber.min = '1'; pageNumber.value = '1'; pageNumber.setAttribute('aria-label', 'PDF page to capture');
+  attachmentMenu.append(pageNumber, button('Capture page', 'capture-page', () => { void presenter.capturePage(Number(pageNumber.value) - 1).catch(reportViewError); attachmentMenu.open = false; })); inputActions.append(attachmentMenu); leading.append(inputActions);
+  const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;
+  const collection = el('select'); collection.dataset.zcrCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
+  collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });
+  let requestedCollections = false;
+  const imagePreview = el('div', 'zcr-image-preview'); imagePreview.dataset.zcrImagePreview = ''; imagePreview.hidden = true;
+  imagePreview.setAttribute('role', 'dialog'); imagePreview.setAttribute('aria-modal', 'true'); imagePreview.setAttribute('aria-label', 'Image preview');
+  chat.append(imagePreview);
+  let imageTrigger: HTMLElement | null = null;
+  const closeImage = () => { imagePreview.hidden = true; imagePreview.replaceChildren(); imageTrigger?.focus(); };
+  const previewImage = (image: ImageAttachment, trigger?: HTMLElement) => {
+    imageTrigger = trigger ?? doc.activeElement as HTMLElement | null;
+    const header = el('div', 'zcr-image-preview-header');
+    const caption = image.origin?.kind === 'generated' ? `Generated image${image.origin.model ? ` · requested with ${image.origin.model}` : ''}` : image.name;
+    const close = button('Close image preview', 'close-image-preview', closeImage, 'remove');
+    header.append(el('span', '', caption), close);
+    const full = el('img'); full.src = image.dataUrl; full.alt = caption;
+    const exportButton = button('Save image…', 'export-image', () => {
+      if (hooks.exportImage) void hooks.exportImage(image).catch(error => { alert.textContent = error instanceof Error ? error.message : 'The image could not be saved.'; alert.hidden = false; });
+    });
+    exportButton.hidden = !hooks.exportImage;
+    imagePreview.replaceChildren(header, full, exportButton); imagePreview.hidden = false; close.focus();
+  };
+  imagePreview.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeImage(); }
+    if (event.key === 'Tab') {
+      const buttons = [...imagePreview.querySelectorAll<HTMLButtonElement>('button:not([hidden])')];
+      if (!buttons.length) return;
+      const current = buttons.indexOf(doc.activeElement as HTMLButtonElement);
+      event.preventDefault(); buttons[(current + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+    }
+  });
+  const imageCard = (image: ImageAttachment) => {
+    const card = el('figure', 'zcr-image-card'); card.dataset.zcrImage = image.id;
+    const open = button('Preview image', 'preview-image', () => previewImage(image, open));
+    const thumbnail = el('img'); thumbnail.src = image.dataUrl; thumbnail.alt = image.name; thumbnail.loading = 'lazy';
+    open.replaceChildren(thumbnail); card.append(open);
+    card.append(el('figcaption', '', image.origin?.kind === 'generated' ? 'Generated image' : image.name));
+    return card;
+  };
+  applyChatTextScale(root, hooks.readTextScale?.());
   const unbindZoom = hooks.readerZoom
     ? bindUnifiedReaderZoom(root, hooks.readerZoom, hooks.zoomTargets ?? [doc, root])
     : (() => {
@@ -321,6 +435,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const geckoAccess = (): GeckoClipboardAccess | null => resolveGeckoClipboardAccess(doc.defaultView);
   const seenPaste = new WeakSet<Event>();
   const onPaste = (event: Event) => {
+    const target = event.target as Node | null;
+    const inComposer = !!target && 'nodeType' in target && composer.contains(target);
+    // Gecko can dispatch paste at the chrome document. Accept that route only
+    // while this composer owns focus; another editor's event stays untouched.
+    const documentTarget = !target || !('nodeType' in target) || target.nodeType === 9;
+    if (!inComposer && !(documentTarget && doc.hasFocus() && composer.contains(doc.activeElement))) return;
     if (seenPaste.has(event)) return;
     seenPaste.add(event);
     const clipboard = (event as ClipboardEvent).clipboardData;
@@ -331,8 +451,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     event.preventDefault();
     void (hasDom ? imagesFromClipboard(clipboard, nextImageId) : imagesFromGeckoClipboard(host, nextImageId)).then(images => {
       for (const image of images) presenter.addImage(image);
-    });
+    }).catch(() => { alert.textContent = 'The clipboard image could not be attached.'; alert.hidden = false; });
   };
+  composer.addEventListener('dragover', event => { if (clipboardHasImage(event.dataTransfer)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; } });
+  composer.addEventListener('drop', event => {
+    if (!clipboardHasImage(event.dataTransfer)) return;
+    event.preventDefault();
+    void imagesFromClipboard(event.dataTransfer, nextImageId).then(images => { for (const image of images) presenter.addImage(image); }).catch(() => { alert.textContent = 'The dropped image could not be attached.'; alert.hidden = false; });
+  });
   composer.addEventListener('paste', onPaste);
   input.addEventListener('paste', onPaste);
   chat.addEventListener('paste', onPaste);
@@ -347,20 +473,59 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let composing = false;
   input.addEventListener('compositionstart', () => { composing = true; });
   input.addEventListener('compositionend', () => { composing = false; });
-  input.addEventListener('input', () => { presenter.setQuestion(input.value); });
+  const resizeInput = () => {
+    input.style.height = 'auto';
+    if (input.scrollHeight > 0) input.style.height = `${input.scrollHeight}px`;
+  };
+  input.addEventListener('input', () => { presenter.setQuestion(input.value); resizeInput(); });
+  const isComposing = (event: KeyboardEvent) => composing || event.isComposing || event.keyCode === 229;
   input.addEventListener('keydown', event => {
+    if (isComposing(event)) return;
     if (event.key === 'Escape' && !settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); return; }
     if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); togglePicker(false); return; }
-    if (event.key !== 'Enter' || event.shiftKey || composing || event.isComposing) return;
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    // An open chooser owns Enter. Closing it must never submit the draft.
+    if (!menu.hidden || !settingsMenu.hidden || !historyPanel.hidden) {
+      event.preventDefault(); togglePicker(false); toggleSettings(false); toggleHistory(false); return;
+    }
     event.preventDefault(); void presenter.send();
   });
-  historySearch.addEventListener('input', () => { applyHistoryFilter(); });
-  historySearch.addEventListener('keydown', event => {
-    if (event.key === 'Escape') { event.preventDefault(); toggleHistory(false); historyBtn.focus(); }
+  const menuItems = (panel: HTMLElement) => [...panel.querySelectorAll<HTMLElement>('button:not(:disabled):not([hidden]), input:not(:disabled):not([hidden])')]
+    .filter(node => !node.closest('[hidden]'));
+  const focusMenu = (panel: HTMLElement, last = false) => {
+    const items = menuItems(panel);
+    (last ? items.at(-1) : items[0])?.focus();
+  };
+  const bindMenuKeys = (panel: HTMLElement, trigger: HTMLElement, close: () => void) => {
+    panel.addEventListener('keydown', event => {
+      if (isComposing(event)) return;
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); close(); trigger.focus(); return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      // Home/End continue editing text in the history search field.
+      if (event.target === historySearch && (event.key === 'Home' || event.key === 'End')) return;
+      const target = event.target as Element | null;
+      if (target !== historySearch && target?.matches('input, textarea, select')) return;
+      const items = menuItems(panel); if (!items.length) return;
+      const current = items.indexOf(doc.activeElement as HTMLElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      event.preventDefault(); items[next]?.focus();
+    });
+  };
+  bindMenuKeys(menu, picker, () => togglePicker(false));
+  bindMenuKeys(settingsMenu, overflow, () => toggleSettings(false));
+  bindMenuKeys(historyPanel, historyBtn, () => toggleHistory(false));
+  for (const [trigger, panel, open] of [
+    [picker, menu, () => togglePicker(true)],
+    [overflow, settingsMenu, () => toggleSettings(true)],
+    [historyBtn, historyPanel, () => toggleHistory(true)],
+  ] as const) trigger.addEventListener('keydown', event => {
+    if (isComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+    event.preventDefault(); open(); focusMenu(panel, event.key === 'ArrowUp');
   });
-  menu.addEventListener('keydown', event => {
-    if (event.key === 'Escape') { event.preventDefault(); togglePicker(false); picker.focus(); }
-  });
+  historySearch.addEventListener('input', () => { if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value); else applyHistoryFilter(); });
   const onDocumentClick = (event: Event) => {
     const target = event.target as Node | null;
     if (!menu.hidden && target && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
@@ -368,10 +533,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!settingsMenu.hidden && target && !settingsMenu.contains(target) && !overflow.contains(target)) toggleSettings(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape') return;
-    if (!menu.hidden) { event.preventDefault(); togglePicker(false); }
-    else if (!settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); }
-    else if (!historyPanel.hidden) { event.preventDefault(); toggleHistory(false); }
+    if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
+    if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
+    else if (!settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); overflow.focus(); }
+    else if (!historyPanel.hidden) { event.preventDefault(); toggleHistory(false); historyBtn.focus(); }
   };
   doc.addEventListener('click', onDocumentClick);
   doc.addEventListener('keydown', onDocumentKey);
@@ -393,7 +558,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const quote = el('blockquote', 'zcr-citation-text', citation.text.length > 240 ? `${[...citation.text].slice(0, 240).join('')}…` : citation.text);
     const meta = el('div', 'zcr-citation-meta');
     meta.append(el('span', '', COPY.page(pageLabel(citation))));
-    if (hooks.openCitation) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation); }, 'source'));
+    if (hooks.openCitation) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(error => { alert.textContent = error instanceof Error ? error.message : 'The source could not be opened.'; alert.hidden = false; }); }, 'source'));
     if (removable) meta.append(button(COPY.remove, 'remove-citation', () => { presenter.removeCitation(citation.id); }, 'remove'));
     card.append(quote, meta); return card;
   };
@@ -410,6 +575,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         else void doc.defaultView?.navigator.clipboard?.writeText(source);
       }, 'copy'));
     }
+    const branch = button(message.role === 'assistant' ? 'Regenerate in new chat' : 'Edit in new chat', 'branch-message', () => {
+      const previous = presenter.snapshot().conversation?.id;
+      void presenter.branchConversation(message.id).then(async () => {
+        if (message.role === 'assistant' && presenter.snapshot().conversation?.id !== previous) await presenter.send();
+      }).catch(reportViewError);
+    });
+    branch.classList.add('zcr-message-action'); header.append(branch);
+    if (message.role === 'user') { const cancelQueued = button('Cancel queued question', 'cancel-queued', () => { void presenter.cancelQueuedRequest(message.requestId); }); cancelQueued.hidden = true; header.append(cancelQueued); }
     const text = el('div', 'zcr-message-text'); text.dataset.zcrText = '';
     text.addEventListener('click', event => {
       const target = event.target as Element | null;
@@ -419,42 +592,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       const href = link.getAttribute('href'); if (href) hooks.openLink?.(href);
     });
     const meta = el('div', 'zcr-message-meta'); meta.dataset.zcrMeta = '';
-    article.append(header, text, meta); return article;
+    const attachments = el('div', 'zcr-message-attachments'); attachments.dataset.zcrMessageAttachments = '';
+    const taskSummary = button('Review annotation suggestions', 'review-annotations', () => {
+      const task = latestViewState.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId);
+      const card = task && [...taskPanel.querySelectorAll<HTMLDetailsElement>('[data-zcr-task-id]')].find(card => card.dataset.zcrTaskId === task.id);
+      if (card) { card.open = true; card.scrollIntoView?.({ block: 'nearest' }); }
+    }); taskSummary.hidden = true;
+    article.append(header, text, taskSummary, attachments, meta); return article;
   };
-  const isNearBottom = () => messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
-  let renderedIds = ''; let focusToken = 0; let contentKey = ''; let chromeKey = '';
-  const renderPills = (state: PresenterState) => {
-    const nodes = state.conversations.map(conversation => {
-      const pill = el('div', 'zcr-chat-pill');
-      pill.dataset.zcrChatPill = '';
-      pill.dataset.zcrConversationId = conversation.id;
-      if (conversation.id === state.conversation?.id) pill.dataset.current = '';
-      pill.setAttribute('role', 'tab');
-      pill.setAttribute('aria-selected', String(conversation.id === state.conversation?.id));
-      const label = el('button', 'zcr-chat-pill-label', conversationLabel(conversation, state.conversations));
-      label.type = 'button';
-      label.dataset.zcrAction = 'open-conversation';
-      label.dataset.zcrConversationId = conversation.id;
-      label.setAttribute('aria-label', conversation.title || label.textContent || COPY.untitled);
-      label.title = conversation.title;
-      label.addEventListener('click', () => { void presenter.openConversation(conversation.id); });
-      const close = button(COPY.deleteChat, 'delete-conversation', () => {
-        if (confirmDelete()) void presenter.deleteConversation(conversation.id);
-      }, 'remove');
-      close.dataset.zcrConversationId = conversation.id;
-      pill.append(label, close);
-      return pill;
-    });
-    pills.replaceChildren(...nodes);
-    if (!nodes.length) { const title = el('span', 'zcr-initial-title', state.paperTitle); title.title = state.paperTitle; pills.append(title); }
-    pills.hidden = false;
-  };
+  let renderedConversationId: string | null = null;
+  const messageNodes = new Map<string, HTMLElement>();
+  const renderedMessages = new Map<string, { text: string; status: Message['status']; action: Message['action'] }>();
+  let focusToken = 0; let contentKey = ''; let chromeKey = '';
   const updateContext = (state: PresenterState) => {
-    const pillKey = state.conversations.map(c => `${c.id}:${c.title}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
-    if (pills.dataset.options !== pillKey) {
-      pills.dataset.options = pillKey;
-      renderPills(state);
-    }
+    const title = state.conversation ? conversationLabel(state.conversation, state.conversations) : state.paperTitle || COPY.untitled;
+    if (currentTitle.textContent !== title) currentTitle.textContent = title;
+    currentTitle.title = state.conversation?.title || state.paperTitle || COPY.untitled;
+    conversationActions.hidden = !state.conversation;
+    deleteCurrent.disabled = !state.conversation;
     const citation = latestCitation(state);
     const sourceKey = citation ? `${citation.id}:${pageLabel(citation)}` : '';
     if (contextSource.dataset.rendered !== sourceKey) {
@@ -467,9 +622,22 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         contextSource.replaceChildren(line);
       }
     }
-    context.hidden = pills.hidden && !citation;
+    contextSource.hidden = !citation;
   };
   const renderHistory = (state: PresenterState) => {
+    if (state.workspace) {
+      const nodes: HTMLElement[] = [];
+      for (const entry of state.history) {
+        const row = el('div', 'zcr-history-row'); row.setAttribute('role', 'listitem'); row.dataset.zcrHistoryLabel = `${entry.title} ${entry.identity.title} ${entry.preview}`;
+        const choice = el('button', 'zcr-history-item'); choice.type = 'button'; choice.dataset.zcrConversationId = entry.id;
+        choice.append(el('span', '', entry.title), el('small', 'zcr-history-preview', entry.preview || entry.identity.title));
+        choice.setAttribute('aria-label', entry.title); choice.addEventListener('click', () => { void presenter.openHistoryEntry(entry.id); toggleHistory(false); });
+        row.append(choice); if (entry.id === state.conversation?.id) row.dataset.current = '';
+        nodes.push(row);
+      }
+      if (!nodes.length) nodes.push(el('p', 'zcr-history-empty', 'No saved chats match this search.'));
+      historyList.replaceChildren(...nodes); return;
+    }
     const groups: Record<'Today' | 'Yesterday' | 'Older', Conversation[]> = { Today: [], Yesterday: [], Older: [] };
     const ordered = [...state.conversations].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt) || a.id.localeCompare(b.id));
     for (const conversation of ordered) groups[historyGroup(conversation.updatedAt || conversation.createdAt)].push(conversation);
@@ -533,6 +701,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'effort', option.value));
+        togglePicker(false); picker.focus();
       });
       effortSection.append(row);
     }
@@ -551,11 +720,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       const on = current?.serviceTier === fast.id;
       toggle.setAttribute('aria-checked', String(on));
       toggle.disabled = !signedIn;
-      toggle.addEventListener('click', () => {
+      toggle.addEventListener('click', event => {
+        event.stopPropagation();
         const latest = presenter.snapshot();
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'speed', on ? '' : fast.id));
+        menu.querySelector<HTMLButtonElement>('[data-zcr-setting="speed"]')?.focus();
       });
       row.append(toggle);
       optionsSection.append(row);
@@ -580,6 +751,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'model', option.value));
+        togglePicker(false); picker.focus();
       });
       modelSection.append(row);
     }
@@ -587,17 +759,55 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     menu.replaceChildren(...sections);
   };
   const update = (state: PresenterState) => {
+    latestViewState = state;
+    const uiLanguage = state.workspace?.uiLanguage ?? 'en';
+    if (lastLanguage !== uiLanguage) { lastLanguage = uiLanguage; localizer.update(uiLanguage); }
     documentView.update(state);
-    const list = state.conversation?.messages ?? [];
+    const quotas = state.runtime?.rateLimits;
+    accountUsage.textContent = quotas ? quotas.map(quota => `${quota.label}: ${quota.usedPercent === null ? 'usage unknown' : `${quota.usedPercent}% used`}${quota.resetsAt === null ? '' : ` · resets ${new Date(quota.resetsAt * 1000).toLocaleString()}`}`).join('\n') || 'Account usage: no limits reported.' : 'Account usage: unavailable.';
+    if (state.workspace) {
+      if (!workspaceView) workspaceView = mountWorkspaceView({ input, context: composerContext, leading, settings: settingsContent }, {
+        searchReferences: (query, kind, signal) => presenter.searchReferences(query, kind, signal), previewReference: (reference, signal) => presenter.previewReference(reference, signal),
+        addReference: async reference => { await presenter.addReference(reference); }, removeReference: async id => { await presenter.removeReference(id); },
+        selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id), savePreferences: value => presenter.savePreferences(value),
+        saveSkill: edit => presenter.saveSkill(edit), duplicateSkill: id => presenter.duplicateSkill(id), setSkillEnabled: (id, enabled) => presenter.setSkillEnabled(id, enabled),
+        deleteSkill: id => presenter.deleteSkill(id), importSkill: () => presenter.importSkill(), exportSkill: id => presenter.exportSkill(id),
+        saveProfile: value => presenter.saveProfile(value), deleteProfile: id => presenter.deleteProfile(id), setOverrides: value => presenter.setOverrides(value),
+        setReferenceRange: (id, range) => presenter.setReferenceRange(id, range), exportPreferences: () => presenter.exportPreferences(),
+      });
+      const nextDraftKey = `${state.draft.references.map(reference => `${reference.id}:${reference.range?.join('-') ?? ''}:${reference.capturedAt}`).join(',')}:${state.draft.skillId}:${state.draft.profileId}:${JSON.stringify(state.draft.overrides)}`;
+      if (lastWorkspace !== state.workspace || nextDraftKey !== workspaceDraftKey) {
+        lastWorkspace = state.workspace; workspaceDraftKey = nextDraftKey;
+        workspaceView.update({ settings: state.workspace, draft: { references: state.draft.references, skillId: state.draft.skillId, profileId: state.draft.profileId, overrides: state.draft.overrides } });
+      }
+      appearance.hidden = false; inputActions.hidden = false;
+      if (doc.activeElement !== scaleInput) { scaleInput.value = String(Math.round(state.workspace.textScale * 100)); scaleValue.textContent = `${scaleInput.value}%`; applyChatTextScale(root, state.workspace.textScale); }
+      language.value = state.workspace.uiLanguage;
+      const acquire = state.workspace.skills.find(skill => skill.id === state.draft.skillId)?.workflow === 'acquire'; acquisition.hidden = !acquire;
+      if (acquire && !requestedCollections) { requestedCollections = true; void presenter.collections().catch(() => {}); }
+      const collectionKey = JSON.stringify(state.collectionOptions);
+      if (collection.dataset.options !== collectionKey) {
+        collection.dataset.options = collectionKey; const empty = el('option', '', 'Choose a collection…'); empty.value = '';
+        collection.replaceChildren(empty, ...state.collectionOptions.map(item => { const option = el('option', '', item.name); option.value = `${item.libraryId}:${item.collectionKey}`; return option; }));
+      }
+      collection.value = state.acquisitionTarget ? `${state.acquisitionTarget.libraryId}:${state.acquisitionTarget.collectionKey}` : '';
+    }
+    const nextTasks = `${state.tasks.map(task => `${task.id}:${task.revision}`).join(',')}/${state.readingJobs.map(job => `${job.id}:${job.revision}`).join(',')}`;
+    if (nextTasks !== tasksKey) { tasksKey = nextTasks; taskView.update({ tasks: state.tasks, readingJobs: state.readingJobs }); }
+    const allMessages = state.conversation?.messages ?? [];
+    const intermediateRequests = new Set(allMessages.filter(message => message.role === 'user' && message.batch?.phase === 'map').map(message => message.requestId));
+    const list = allMessages.filter(message => !intermediateRequests.has(message.requestId) || state.messageFocus?.messageId === message.id);
     const nextChrome = [
       state.connection, state.runtime?.revision ?? 0, state.runtime?.account.state ?? '', state.runtime?.login?.state ?? '',
       state.generating, state.message ?? '', state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
       state.conversation?.activeRequestId ?? '', state.conversations.map(c => `${c.id}:${c.title}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}`).join('\n'),
       state.draft.citations.map(c => c.id).join('\n'), state.draft.images.map(image => image.id).join('\n'), JSON.stringify(state.draft.settings), state.focusToken,
-      list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text}`).join('\n'),
+      state.draft.question.trim().length > 0,
+      state.history.map(item => `${item.id}:${item.title}:${item.updatedAt}:${item.preview}`).join('\n'), state.tasks.map(task => `${task.id}:${task.revision}`).join(','), state.readingJobs.map(job => `${job.id}:${job.revision}`).join(','), state.queueing, state.conversation?.queuedRequestIds?.join(','), state.messageFocus?.token,
+      list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text.length}:${m.images?.map(image => image.id).join(',') ?? ''}:${m.generatedImages?.map(image => image.id).join(',') ?? ''}`).join('\n'),
     ].join('\0');
     if (nextChrome === chromeKey) {
-      if (input.value !== state.draft.question) input.value = state.draft.question;
+      if (!composing && input.value !== state.draft.question) { input.value = state.draft.question; resizeInput(); }
       return;
     }
     chromeKey = nextChrome;
@@ -611,36 +821,63 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     login.hidden = account === 'signedIn' || pendingLogin || state.connection !== 'ready'; cancelLogin.hidden = !pendingLogin;
     retry.hidden = state.connection !== 'error';
     auth.hidden = login.hidden && cancelLogin.hidden && retry.hidden;
-    const ready = state.connection === 'ready' && account === 'signedIn';
-    fresh.hidden = !state.conversation || state.generating;
-    historyBtn.hidden = !ready;
+    fresh.hidden = !state.conversation;
+    historyBtn.hidden = false;
     alert.textContent = state.message ?? ''; alert.hidden = !state.message;
     updateContext(state);
-    const historyKey = state.conversations.map(c => `${c.id}:${c.title}:${c.createdAt}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
+    const historyKey = state.workspace ? JSON.stringify(state.history) : state.conversations.map(c => `${c.id}:${c.title}:${c.createdAt}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
     if (historyList.dataset.options !== historyKey) {
       historyList.dataset.options = historyKey;
       renderHistory(state);
     }
-    transcript.dataset.empty = String(list.length === 0);
-    if (list.length === 0) {
+    const empty = list.length === 0 && state.tasks.length === 0 && state.readingJobs.length === 0;
+    transcript.dataset.empty = String(empty);
+    if (empty) {
       if (!emptyMark.isConnected) transcript.prepend(emptyMark);
     } else emptyMark.remove();
-    const ids = list.map(m => m.id).join('\n');
-    if (ids !== renderedIds) { renderedIds = ids; messages.replaceChildren(...list.map(messageNode)); }
-    const nextKey = list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text}`).join('\n');
+    const nearBottom = isNearBottom();
+    const conversationChanged = renderedConversationId !== (state.conversation?.id ?? null);
+    if (conversationChanged) {
+      renderedConversationId = state.conversation?.id ?? null;
+      messageNodes.clear(); renderedMessages.clear(); messages.replaceChildren(); contentKey = ''; hasNewContent = false;
+    }
+    const ids = new Set(list.map(message => message.id));
+    for (const [id, node] of messageNodes) {
+      if (!ids.has(id)) { node.remove(); messageNodes.delete(id); renderedMessages.delete(id); }
+    }
+    let cursor = messages.firstElementChild;
+    for (const message of list) {
+      let node = messageNodes.get(message.id);
+      if (!node) { node = messageNode(message); messageNodes.set(message.id, node); }
+      if (node !== cursor) messages.insertBefore(node, cursor);
+      cursor = node.nextElementSibling;
+    }
+    if (messages.lastElementChild !== taskPanel) messages.append(taskPanel);
+    taskPanel.hidden = !state.tasks.length && !state.readingJobs.length;
+    const nextKey = list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text.length}:${m.generatedImages?.map(image => image.id).join(',') ?? ''}`).join('\n');
     const contentChanged = nextKey !== contentKey;
-    const follow = followAnswerScroll(isNearBottom(), contentChanged && contentKey !== '');
+    const follow = followAnswerScroll(nearBottom, contentChanged && contentKey !== '');
     contentKey = nextKey;
     for (const message of list) {
-      const node = messages.querySelector<HTMLElement>(`[data-zcr-message="${message.id}"]`); if (!node) continue;
+      const node = messageNodes.get(message.id); if (!node) continue;
       node.dataset.status = message.status;
+      const queued = state.conversation?.queuedRequestIds?.includes(message.requestId) === true;
+      const cancelQueued = node.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]'); if (cancelQueued) cancelQueued.hidden = !queued;
       const text = node.querySelector<HTMLElement>('[data-zcr-text]')!;
-      const rendered = `${message.status}:${message.action ?? ''}:${message.text}`;
-      if (text.dataset.rendered !== rendered) {
-        text.dataset.rendered = rendered;
+      const annotationTask = message.role === 'assistant' ? state.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId) : undefined;
+      const taskSummary = node.querySelector<HTMLButtonElement>('[data-zcr-action="review-annotations"]')!;
+      taskSummary.hidden = !annotationTask;
+      if (annotationTask) taskSummary.textContent = `Review ${annotationTask.items.length} annotation suggestions`;
+      const previous = renderedMessages.get(message.id);
+      if (!previous || previous.text !== message.text || previous.status !== message.status || previous.action !== message.action) {
+        renderedMessages.set(message.id, { text: message.text, status: message.status, action: message.action });
         if (message.role === 'assistant' && message.text) {
           text.classList.add('zcr-rendered');
-          text.replaceChildren(renderAnswer(doc, message.text, { deferMath: message.status === 'streaming' || message.status === 'pending' }));
+          const fragment = renderAnswer(doc, message.text, { deferMath: message.status === 'streaming' || message.status === 'pending' });
+          // Always run the pass, even with no sources: reserved citation links must be neutralized
+          // rather than left as external `zcr.invalid` URLs for the generic link handler to launch.
+          linkAnswerSources(fragment, state.conversation ? answerSources(state.conversation, message) : [], openAnswerSource);
+          text.replaceChildren(fragment);
         } else if (hiddenExplainText(message)) {
           text.classList.remove('zcr-rendered');
           text.textContent = '';
@@ -649,14 +886,26 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
           text.textContent = message.text;
         }
       }
+      text.hidden = hiddenExplainText(message) || !!annotationTask;
       const meta = node.querySelector<HTMLElement>('[data-zcr-meta]')!;
-      const statusLabel = message.role === 'assistant' ? STATUS_LABEL[message.status] : '';
+      const attachments = node.querySelector<HTMLElement>('[data-zcr-message-attachments]')!;
+      const attachmentKey = [...message.citations.map(citation => citation.id), ...(message.images ?? []).map(image => image.id), ...(message.generatedImages ?? []).map(image => image.id), message.workflow?.skill?.revision ?? '', ...(message.references ?? []).map(reference => reference.id)].join(':');
+      if (attachments.dataset.rendered !== attachmentKey) {
+        attachments.dataset.rendered = attachmentKey;
+        attachments.replaceChildren(...message.citations.map(citation => citationCard(citation, false)), ...[...(message.images ?? []), ...(message.generatedImages ?? [])].map(imageCard));
+        if (message.workflow?.skill) attachments.append(el('span', 'zcr-message-reference', `/${message.workflow.skill.name} · v${message.workflow.skill.version}`));
+        for (const reference of message.references ?? []) attachments.append(el('span', 'zcr-message-reference', `${reference.kind === 'chat' ? '@chat' : '@article'} · ${reference.label}`));
+      }
+      const statusLabel = queued ? 'Queued' : message.role === 'assistant' ? STATUS_LABEL[message.status] : message.status === 'cancelled' ? 'Cancelled before sending' : '';
       const caption = settingsCaption(message.settings, state.runtime?.models ?? []);
       const label = [statusLabel, caption].filter(Boolean).join(' · ');
       if (meta.textContent !== label) meta.textContent = label;
     }
-    if (follow.stick) messages.scrollTop = messages.scrollHeight;
-    newContent.hidden = !follow.showNewContent;
+    if (conversationChanged) { messages.scrollTop = state.scrollTop || messages.scrollHeight; hasNewContent = false; }
+    else if (contentChanged && follow.stick) {
+      messages.scrollTop = messages.scrollHeight; hasNewContent = false;
+    } else if (follow.showNewContent) hasNewContent = true;
+    newContent.hidden = !hasNewContent;
     const draftIds = state.draft.citations.map(c => c.id).join('\n');
     if (draftCitations.dataset.rendered !== draftIds) { draftCitations.dataset.rendered = draftIds; draftCitations.replaceChildren(...state.draft.citations.map(c => citationCard(c, true))); }
     const imageIds = state.draft.images.map(image => image.id).join('\n');
@@ -668,11 +917,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const thumb = el('img', 'zcr-draft-thumb');
         thumb.setAttribute('src', image.dataUrl);
         thumb.setAttribute('alt', image.name);
-        chip.append(thumb, button(COPY.remove, 'remove-image', () => { presenter.removeImage(image.id); }, 'remove'));
+        const open = button('Preview image', 'preview-image', () => previewImage(image, open)); open.replaceChildren(thumb);
+        chip.append(open, button('Move image earlier', 'move-image-earlier', () => { presenter.moveImage(image.id, -1); }, 'source'), button(COPY.remove, 'remove-image', () => { presenter.removeImage(image.id); }, 'remove'));
         return chip;
       }));
     }
-    if (input.value !== state.draft.question) input.value = state.draft.question;
+    if (!composing && input.value !== state.draft.question) { input.value = state.draft.question; resizeInput(); }
     const signedIn = account === 'signedIn' && state.connection === 'ready';
     const pickerKey = `${JSON.stringify(state.draft.settings ?? state.conversation?.settings ?? null)}\n${state.runtime?.models.map(entry => entry.id).join(',')}\n${signedIn}`;
     if (menu.dataset.rendered !== pickerKey) {
@@ -685,14 +935,17 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       picker.replaceChildren(doc.createTextNode(summary));
     }
     picker.disabled = !signedIn;
-    const canSend = state.connection === 'ready' && account === 'signedIn' && !state.generating;
+    const hasInput = state.draft.question.trim().length > 0;
+    const canSend = state.connection === 'ready' && account === 'signedIn' && !state.generating && hasInput;
     send.disabled = !canSend; send.hidden = state.generating; stop.hidden = !state.generating;
-    input.disabled = state.connection === 'error';
+    queue.hidden = !state.generating; queue.disabled = !signedIn || state.queueing || !hasInput;
+    input.disabled = false;
     if (state.focusToken !== focusToken) { focusToken = state.focusToken; input.focus(); }
+    if (state.messageFocus && messages.dataset.focusToken !== String(state.messageFocus.token)) { messages.dataset.focusToken = String(state.messageFocus.token); messageNodes.get(state.messageFocus.messageId)?.scrollIntoView?.({ block: 'center' }); }
   };
   const unbind = presenter.bind(update);
   return () => {
-    unbindZoom(); unbind();
+    presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose();
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKey);
     for (const target of pasteDocuments) target.removeEventListener('paste', onPaste, true);

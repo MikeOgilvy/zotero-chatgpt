@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { access, chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile, open } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile, open } from 'node:fs/promises';
 import { lstatSync } from 'node:fs';
 import path from 'node:path';
 import type { FileHost, FileAPI } from '../../packages/zotero/src/runtime/storage.ts';
@@ -22,6 +22,7 @@ export function nodeFiles(): FileHost & { writes: Array<{ path: string; options:
     remove: (p, options) => rm(p, { force: options.ignoreAbsent, recursive: options.recursive ?? false }),
     move: async (from, to) => { try { await access(to); } catch { await rename(from, to); return; } throw new Error('exists'); },
     computeHexDigest: async p => createHash('sha256').update(await readFile(p)).digest('hex'),
+    getChildren: async p => (await readdir(p)).map(name => path.join(p, name)),
   };
   return { io, join: path.join, isSymlink: p => { try { return lstatSync(p).isSymbolicLink(); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false; throw e; } }, uuid: randomUUID, writes };
 }

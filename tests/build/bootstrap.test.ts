@@ -59,7 +59,7 @@ async function loadBootstrap(): Promise<LoadedBootstrap> {
     Services: services,
     Zotero: zotero,
     ChromeUtils: { importESModule: () => ({}) }, IOUtils: {}, PathUtils: {},
-    Components: { classes: {}, interfaces: {}, utils: { importGlobalProperties: (names: string[]) => { if (names.includes('AbortController')) scope.AbortController = AbortController; } } },
+    Components: { classes: {}, interfaces: {}, utils: { importGlobalProperties: (names: string[]) => { for (const name of names) { if (name === 'AbortController') scope.AbortController = AbortController; if (name === 'atob') scope.atob = atob; if (name === 'btoa') scope.btoa = btoa; } } } },
     fetch, crypto, TextDecoder, TextEncoder, URL, setTimeout, clearTimeout,
   };
   vm.createContext(scope);
@@ -97,6 +97,8 @@ describe("Zotero bootstrap lifecycle", () => {
     const decode = new (bundle.TextDecoder as typeof TextDecoder)();
     expect(decode.decode(new Uint8Array([228, 184, 173]))).toBe("中");
     const abort = new (bundle.AbortController as typeof AbortController)(); abort.abort(); expect(abort.signal.aborted).toBe(true);
+    const encodeImage = bundle.btoa as typeof btoa; const decodeImage = bundle.atob as typeof atob;
+    expect(decodeImage(encodeImage('PNG binary bytes'))).toBe('PNG binary bytes');
   });
 
   it("waits for Zotero initialization before loading and starting existing windows", async () => {

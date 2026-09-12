@@ -1,0 +1,248 @@
+import type { AcquisitionChoice, AcquisitionTaskItem, AgentTaskChoices, AgentTaskRecord } from '../../../contracts/src/tasks.ts';
+import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
+import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
+
+export interface TaskViewState { tasks: AgentTaskRecord[]; readingJobs?: ReadingJob[] }
+export interface TaskViewActions {
+  approveSelected: (taskId: string, selectedItemIds: string[], choices: AgentTaskChoices) => Promise<unknown>;
+  cancel: (taskId: string) => Promise<unknown>;
+  reconcile: (taskId: string) => Promise<unknown>;
+  undo: (taskId: string) => Promise<unknown>;
+  openSource: (taskId: string, itemId: string) => Promise<unknown>;
+  openOutput: (taskId: string, itemId: string) => Promise<unknown>;
+  collectionLabel: (target: NativeCollectionTarget) => string;
+  cancelReading: (jobId: string) => Promise<unknown>;
+  reconcileReading: (jobId: string) => Promise<unknown>;
+  openReadingOutput: (jobId: string, stepIndex: number) => Promise<unknown>;
+  availability?: (taskId: string) => { approve: boolean; undo: boolean; reason?: string; downloadPDF?: boolean };
+  describeReading?: (jobId: string) => Promise<{ question: string; scopeLabel: string } | null>;
+}
+
+type TaskItem = AgentTaskRecord['items'][number];
+const TASK_LABEL = { preparing: 'Preparing', review: 'Review', running: 'Running', completed: 'Completed', partial: 'Partly completed', cancelled: 'Cancelled', uncertain: 'Unconfirmed', undone: 'Undone', conflict: 'Conflict', failed: 'Failed' } as const;
+const ITEM_LABEL = { candidate: 'Ready', unresolved: 'Unresolved', skipped: 'Skipped', writing: 'Writing…', applied: 'Applied', 'metadata-only': 'Metadata saved', failed: 'Failed', uncertain: 'Unconfirmed', undoing: 'Undoing…', undone: 'Undone', conflict: 'Changed output preserved' } as const;
+const STYLES = `
+.zcr-task-view { display:flex; flex-direction:column; gap:8px; min-width:0; font:inherit; font-size:12px; }
+.zcr-task-view [hidden] { display:none!important; }
+.zcr-task-card { min-width:0; border:1px solid var(--zcr-border,GrayText); border-radius:8px; background:var(--material-background,Canvas); }
+.zcr-task-card > summary { min-height:28px; padding:6px 8px; box-sizing:border-box; cursor:pointer; font-size:12px; overflow-wrap:anywhere; }
+.zcr-task-body { padding:0 8px 8px; min-width:0; }
+.zcr-task-question { margin:4px 0 8px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.45; }
+.zcr-task-muted,.zcr-task-scope { margin:4px 0; color:var(--fill-secondary,GrayText); font-size:11px; line-height:16px; overflow-wrap:anywhere; }
+.zcr-task-row { padding:8px 0; border-top:1px solid var(--zcr-border,GrayText); min-width:0; }
+.zcr-task-row-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.zcr-task-check { display:flex; align-items:center; gap:6px; min-height:28px; font:inherit; }
+.zcr-task-check input { flex:0 0 auto; }
+.zcr-task-quote { margin:4px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.5; }
+.zcr-task-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:6px; }
+.zcr-task-button { appearance:none; min-height:28px; padding:4px 8px; border:1px solid var(--zcr-border,GrayText); border-radius:5px; background:transparent; color:inherit; font:inherit; line-height:18px; cursor:pointer; box-sizing:border-box; }
+.zcr-task-button:hover { background:var(--fill-quinary,ButtonFace); }
+.zcr-task-button:disabled { opacity:.5; cursor:default; }
+.zcr-task-view :focus-visible { outline:2px solid AccentColor; outline-offset:1px; }
+.zcr-task-field { display:flex; flex-direction:column; align-items:stretch; gap:4px; margin:6px 0; }
+.zcr-task-field select { max-width:100%; min-width:0; min-height:28px; padding:4px; border:1px solid var(--zcr-border,GrayText); border-radius:5px; background:var(--material-background,Field); color:inherit; font:inherit; }
+.zcr-task-error { margin:6px 0; overflow-wrap:anywhere; font-size:12px; }
+.zcr-task-counts { font-variant-numeric:tabular-nums; }
+`;
+function eligible(item: TaskItem): boolean { return item.status === 'candidate' && (item.kind === 'annotation' ? item.resolution?.status === 'resolved' : !!item.preview?.candidates.length); }
+function hasOutput(item: TaskItem): boolean { return item.status !== 'undone' && (item.kind === 'annotation' ? !!item.annotation : !!item.item); }
+function itemOutcome(item: TaskItem): string {
+  if (item.kind !== 'acquisition' || !item.item || item.status === 'undone' || item.status === 'conflict' || item.status === 'uncertain') return ITEM_LABEL[item.status];
+  if (item.attachmentUndone) return 'Metadata saved; PDF removed';
+  if (item.acquisition?.status === 'attached') return 'PDF attached';
+  if (item.acquisition?.status === 'unavailable') return `Metadata saved; PDF unavailable (${item.acquisition.reason.replace(/-/gu, ' ')})`;
+  if (item.acquisition?.status === 'uncertain') return 'Metadata saved; PDF result unconfirmed';
+  if (item.choice?.downloadPDF === false) return 'Metadata saved; PDF not requested';
+  return item.status === 'metadata-only' ? 'Metadata saved; PDF not attempted' : 'Metadata saved';
+}
+function placeChildren(parent: HTMLElement, nodes: HTMLElement[]): void {
+  const wanted = new Set(nodes);
+  for (const child of [...parent.children]) if (!wanted.has(child as HTMLElement)) child.remove();
+  let cursor = parent.firstElementChild;
+  for (const node of nodes) { if (node !== cursor) parent.insertBefore(node, cursor); cursor = node.nextElementSibling; }
+}
+
+/** A read-only projection of task ledgers. Buttons call the controller; they never simulate a result. */
+export function mountTaskView(container: HTMLElement, actions: TaskViewActions): { update(state: TaskViewState): void; dispose(): void } {
+  const doc = container.ownerDocument;
+  const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
+  const style = create('style'); style.textContent = STYLES; doc.head.append(style);
+  const root = create('section', '', 'zcr-task-view'); root.setAttribute('aria-label', 'Tasks'); container.append(root);
+  const button = (label: string, action: string, click: () => void) => { const node = create('button', label, 'zcr-task-button'); node.type = 'button'; node.dataset.zcrTaskAction = action; node.setAttribute('aria-label', label); node.addEventListener('click', click); return node; };
+  const cards = new Map<string, { node: HTMLDetailsElement; update(task: AgentTaskRecord): void; dispose(): void }>();
+  const readingCards = new Map<string, { node: HTMLDetailsElement; update(job: ReadingJob): void; dispose(): void }>();
+  let disposed = false;
+  const createTask = (initial: AgentTaskRecord) => {
+    let task = initial; let previousState = initial.state; let userToggled = false; let removed = false;
+    const node = create('details', '', 'zcr-task-card'); node.dataset.zcrTaskId = task.id; node.open = !['completed', 'undone'].includes(task.state);
+    const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
+    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-scope');
+    const counts = create('p', '', 'zcr-task-muted zcr-task-counts'); counts.setAttribute('role', 'status');
+    const rows = create('div'); const guidance = create('p', '', 'zcr-task-muted'); const error = create('p', '', 'zcr-task-error'); error.setAttribute('role', 'alert'); error.hidden = true;
+    const controls = create('div', '', 'zcr-task-actions'); body.append(question, scope, counts, rows, guidance, error, controls); node.append(summary, body);
+    const selected = new Map<string, boolean>(); const choices = new Map<string, AcquisitionChoice>(); const pending = new Set<string>();
+    const rowViews = new Map<string, { node: HTMLElement; update(item: TaskItem): void }>();
+    const mutating = () => ['approve', 'reconcile', 'undo'].some(name => pending.has(name));
+    const execute = (name: string, run: () => Promise<unknown>, control: HTMLButtonElement) => {
+      if (removed || control.disabled || pending.has(name)) return;
+      const focused = doc.activeElement === control; pending.add(name); error.hidden = true; refresh();
+      void (async () => {
+        try { await run(); }
+        catch (failure) { if (!removed) { error.textContent = failure instanceof Error ? failure.message : 'This task action could not be completed.'; error.hidden = false; } }
+        finally {
+          pending.delete(name); if (removed) return; refresh();
+          if (focused && doc.activeElement === doc.body) (node.open && !control.hidden ? control : summary).focus();
+        }
+      })();
+    };
+    const choiceFor = (item: AcquisitionTaskItem) => {
+      let choice = choices.get(item.id);
+      if (!choice) { choice = { ...item.choice, downloadPDF: item.choice?.downloadPDF ?? true }; choices.set(item.id, choice); }
+      const candidates = item.preview?.candidates ?? [];
+      if (candidates.length === 1 && choice.metadataIndex === undefined) choice.metadataIndex = 0;
+      if (choice.metadataIndex !== undefined && !candidates[choice.metadataIndex]) delete choice.metadataIndex;
+      const metadata = choice.metadataIndex === undefined ? undefined : candidates[choice.metadataIndex];
+      const duplicates = item.duplicates.filter(duplicate => duplicate.metadata.DOI && duplicate.metadata.DOI.toLowerCase() === metadata?.DOI?.toLowerCase());
+      if (choice.duplicateKey && !duplicates.some(duplicate => duplicate.key === choice.duplicateKey)) delete choice.duplicateKey;
+      if (duplicates.length === 1 && !choice.duplicateKey) choice.duplicateKey = duplicates[0]!.key;
+      if (actions.availability?.(task.id).downloadPDF === false) choice.downloadPDF = false;
+      return { choice, metadata, duplicates, valid: !!metadata && (duplicates.length < 2 || !!choice.duplicateKey) };
+    };
+    const approve = button('Approve selected', 'approve', () => {
+      const items = task.items.filter(item => eligible(item) && selected.get(item.id)); const frozen: AgentTaskChoices = {};
+      for (const item of items) if (item.kind === 'acquisition') frozen[item.id] = { ...choiceFor(item).choice };
+      execute('approve', () => actions.approveSelected(task.id, items.map(item => item.id), frozen), approve);
+    });
+    const cancel = button('Cancel task', 'cancel', () => execute('cancel', () => actions.cancel(task.id), cancel));
+    const reconcile = button('Reconcile task', 'reconcile', () => execute('reconcile', () => actions.reconcile(task.id), reconcile));
+    const undo = button('Undo task', 'undo', () => execute('undo', () => actions.undo(task.id), undo)); controls.append(approve, cancel, reconcile, undo);
+    const rowFor = (initialItem: TaskItem) => {
+      let item = initialItem;
+      const row = create('article', '', 'zcr-task-row'); row.dataset.zcrTaskItemId = item.id;
+      const header = create('div', '', 'zcr-task-row-header'); const include = create('label', 'Include', 'zcr-task-check'); const check = create('input'); check.type = 'checkbox'; check.dataset.zcrTaskSelect = item.id; check.setAttribute('aria-label', 'Include this candidate'); include.prepend(check);
+      const itemStatus = create('span', '', 'zcr-task-muted'); header.append(include, itemStatus);
+      const quote = create('blockquote', '', 'zcr-task-quote'); const reason = create('p', '', 'zcr-task-muted'); const page = create('p', '', 'zcr-task-muted'); const itemError = create('p', '', 'zcr-task-muted');
+      const fields = create('div');
+      const field = (label: string, select: HTMLSelectElement) => { const node = create('label', label, 'zcr-task-field'); node.append(select); fields.append(node); return node; };
+      const metadata = create('select'); metadata.dataset.zcrMetadataChoice = item.id; field('Verified metadata', metadata);
+      const duplicate = create('select'); duplicate.dataset.zcrDuplicateChoice = item.id; const duplicateField = field('Existing item', duplicate);
+      const metadataDetail = create('p', '', 'zcr-task-muted'); fields.append(metadataDetail);
+      const pdfLabel = create('label', 'Obtain a verified PDF', 'zcr-task-check'); const pdf = create('input'); pdf.type = 'checkbox'; pdf.dataset.zcrDownloadPdf = item.id; pdfLabel.prepend(pdf); fields.append(pdfLabel);
+      const rowControls = create('div', '', 'zcr-task-actions');
+      const source = button('Open source', 'source', () => execute(`source:${item.id}`, () => actions.openSource(task.id, item.id), source));
+      const output = button('Open saved output', 'output', () => execute(`output:${item.id}`, () => actions.openOutput(task.id, item.id), output)); rowControls.append(source, output);
+      row.append(header, quote, reason, page, fields, itemError, rowControls);
+      check.addEventListener('change', () => { selected.set(item.id, check.checked); refresh(); });
+      metadata.addEventListener('change', () => {
+        if (item.kind !== 'acquisition') return; const { choice } = choiceFor(item);
+        if (metadata.value === '') delete choice.metadataIndex; else choice.metadataIndex = Number(metadata.value);
+        delete choice.duplicateKey; refresh();
+      });
+      duplicate.addEventListener('change', () => { if (item.kind !== 'acquisition') return; const { choice } = choiceFor(item); if (duplicate.value) choice.duplicateKey = duplicate.value; else delete choice.duplicateKey; refresh(); });
+      pdf.addEventListener('change', () => { if (item.kind === 'acquisition') { choiceFor(item).choice.downloadPDF = pdf.checked; refresh(); } });
+      let metadataKey = ''; let duplicateKey = '';
+      return { node: row, update: (next: TaskItem) => {
+        item = next;
+        if (!selected.has(item.id)) selected.set(item.id, item.selected ?? true);
+        if (task.state !== 'review' && item.selected !== undefined) selected.set(item.id, item.selected);
+        if (item.kind === 'acquisition' && task.state !== 'review' && item.choice) choices.set(item.id, { ...item.choice });
+        const canReview = task.state === 'review' && !task.approvedAt && !mutating() && actions.availability?.(task.id).approve !== false;
+        include.hidden = !['review', 'preparing'].includes(task.state); check.disabled = !canReview || !eligible(item); check.checked = eligible(item) ? !!selected.get(item.id) : !!item.selected;
+        itemStatus.textContent = itemOutcome(item); itemError.textContent = item.errorCode ? `Error: ${item.errorCode}` : ''; itemError.hidden = !itemError.textContent;
+        source.hidden = item.kind !== 'annotation' || item.resolution?.status !== 'resolved'; source.disabled = pending.has(`source:${item.id}`);
+        output.hidden = !hasOutput(item); output.disabled = pending.has(`output:${item.id}`);
+        fields.hidden = item.kind !== 'acquisition' || task.state !== 'review';
+        if (item.kind === 'annotation') {
+          quote.textContent = item.proposal.quote; reason.textContent = item.proposal.reason;
+          page.textContent = item.resolution?.status === 'resolved' ? `p. ${item.resolution.candidate.pageLabel}` : `Proposed p. ${item.proposal.pageIndex + 1} · ${item.resolution?.status === 'ambiguous' ? `${item.resolution.matches} matching passages` : 'Source not resolved'}`;
+        } else {
+          const resolved = choiceFor(item); const candidates = item.preview?.candidates ?? [];
+          quote.textContent = item.item?.metadata.title ?? resolved.metadata?.title ?? item.identifier; reason.textContent = item.identifier; page.textContent = '';
+          const nextMetadata = JSON.stringify(candidates);
+          if (nextMetadata !== metadataKey) { metadataKey = nextMetadata; const prompt = create('option', 'Choose metadata'); prompt.value = ''; metadata.replaceChildren(prompt, ...candidates.map((candidate, index) => { const option = create('option', candidate.title); option.value = String(index); return option; })); }
+          metadata.value = resolved.choice.metadataIndex === undefined ? '' : String(resolved.choice.metadataIndex); metadata.disabled = !canReview || candidates.length < 2;
+          const nextDuplicates = JSON.stringify(resolved.duplicates.map(item => [item.key, item.metadata.title]));
+          if (nextDuplicates !== duplicateKey) { duplicateKey = nextDuplicates; const prompt = create('option', 'Choose existing item'); prompt.value = ''; duplicate.replaceChildren(prompt, ...resolved.duplicates.map(item => { const option = create('option', `${item.metadata.title} · ${item.key}`); option.value = item.key; return option; })); }
+          duplicateField.hidden = !resolved.duplicates.length; duplicate.value = resolved.choice.duplicateKey ?? ''; duplicate.disabled = !canReview || resolved.duplicates.length < 2;
+          metadataDetail.textContent = resolved.metadata ? [resolved.metadata.DOI, resolved.metadata.date, resolved.duplicates.length ? `${resolved.duplicates.length} existing match(es)` : 'Create a new item'].filter(Boolean).join(' · ') : 'Choose the metadata to review existing matches.';
+          pdf.checked = resolved.choice.downloadPDF !== false; pdf.disabled = !canReview || actions.availability?.(task.id).downloadPDF === false;
+        }
+      } };
+    };
+    const refresh = () => {
+      if (removed) return;
+      question.textContent = task.question;
+      if (task.kind === 'annotations') scope.textContent = `PDF ${task.paper.attachmentKey} · candidate pages ${[...new Set(task.items.map(item => item.proposal.pageIndex + 1))].join(', ') || 'none'}`;
+      else { let label = ''; try { label = actions.collectionLabel(task.target); } catch { /* Keep the recorded key available. */ } scope.textContent = `Target collection: ${label || task.target.collectionKey}`; }
+      const itemNodes = task.items.map(item => { let row = rowViews.get(item.id); if (!row) { row = rowFor(item); rowViews.set(item.id, row); } row.update(item); return row.node; }); placeChildren(rows, itemNodes);
+      const ids = new Set(task.items.map(item => item.id)); for (const id of rowViews.keys()) if (!ids.has(id)) { rowViews.delete(id); selected.delete(id); choices.delete(id); }
+      const ready = task.items.filter(eligible); const selectedItems = ready.filter(item => selected.get(item.id));
+      const validChoices = selectedItems.every(item => item.kind !== 'acquisition' || choiceFor(item).valid);
+      const outputs = task.items.filter(hasOutput); const metadataOnly = task.items.filter(item => item.kind === 'acquisition' && item.item && item.status !== 'undone' && (item.acquisition?.status !== 'attached' || item.attachmentUndone)).length;
+      const done = task.items.filter(item => ['applied', 'metadata-only'].includes(item.status)).length;
+      const outcome = task.state === 'review' ? `${selectedItems.length}/${ready.length} selected` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : `${metadataOnly} metadata item(s) · ${task.items.filter(item => item.acquisition?.status === 'attached' && !item.attachmentUndone && item.status === 'applied').length} PDFs attached`;
+      summary.textContent = `${task.kind === 'annotations' ? 'Annotations' : 'Acquire literature'} · ${TASK_LABEL[task.state]} · ${outcome}`;
+      const stateCounts = new Map<string, number>(); for (const item of task.items) stateCounts.set(ITEM_LABEL[item.status], (stateCounts.get(ITEM_LABEL[item.status]) ?? 0) + 1);
+      counts.textContent = [...stateCounts].map(([name, count]) => `${count} ${name.toLowerCase()}`).join(' · ');
+      const uncertain = task.state === 'uncertain' || task.items.some(item => ['writing', 'uncertain', 'undoing'].includes(item.status));
+      const available = actions.availability?.(task.id);
+      approve.hidden = task.state !== 'review' || !!task.approvedAt; approve.disabled = mutating() || !selectedItems.length || !validChoices || available?.approve === false;
+      approve.textContent = pending.has('approve') ? 'Approving…' : 'Approve selected';
+      cancel.hidden = !['preparing', 'review', 'running', 'uncertain'].includes(task.state); cancel.disabled = pending.has('cancel') || !!task.cancelRequested; cancel.textContent = task.cancelRequested || pending.has('cancel') ? 'Cancellation requested' : 'Cancel task';
+      reconcile.hidden = !uncertain; reconcile.disabled = mutating();
+      undo.hidden = !task.approvedAt || !outputs.length || task.state === 'undone'; undo.disabled = mutating() || uncertain || task.state === 'running' || available?.undo === false;
+      guidance.textContent = available?.reason || (uncertain ? 'Reconcile unconfirmed writes before undoing. They will not be resent automatically.' : task.state === 'conflict' ? 'Changed outputs and human changes are preserved. Undo checks the recorded version again.' : available?.downloadPDF === false && task.kind === 'acquisition' ? 'PDF download is unavailable for this target; approval saves metadata only.' : ''); guidance.hidden = !guidance.textContent;
+    };
+    return { node, update: (next: AgentTaskRecord) => {
+      if (next.revision < task.revision) return;
+      if (next.revision > task.revision) { error.textContent = ''; error.hidden = true; }
+      task = next; node.dataset.state = task.state;
+      if (!userToggled && previousState !== task.state) node.open = !['completed', 'undone'].includes(task.state);
+      previousState = task.state; refresh();
+    }, dispose: () => { removed = true; node.remove(); } };
+  };
+  const createReading = (initial: ReadingJob) => {
+    let job = initial; let removed = false; let userToggled = false; let previousStatus = job.status; let actionError: string | null = null;
+    const node = create('details', '', 'zcr-task-card'); node.dataset.zcrReadingJob = job.id; node.open = job.status !== 'completed';
+    const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
+    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-scope'); question.hidden = true; scope.hidden = true;
+    const steps = create('div'); const error = create('p', '', 'zcr-task-error'); error.setAttribute('role', 'status'); error.hidden = true; const controls = create('div', '', 'zcr-task-actions'); body.append(question, scope, steps, error, controls); node.append(summary, body);
+    const pending = new Set<string>(); const stepViews = new Map<number, { row: HTMLElement; label: HTMLElement; excerpt: HTMLElement; scope: HTMLElement; output?: HTMLButtonElement }>();
+    const execute = (name: string, run: () => Promise<unknown>, control: HTMLButtonElement) => {
+      if (removed || control.disabled || pending.has(name)) return; pending.add(name); actionError = null; refresh();
+      void (async () => { try { await run(); } catch (failure) { if (!removed) actionError = failure instanceof Error ? failure.message : 'The reading action failed.'; } finally { pending.delete(name); if (!removed) refresh(); } })();
+    };
+    const cancel = button('Cancel reading', 'reading-cancel', () => execute('cancel', () => actions.cancelReading(job.id), cancel));
+    const reconcile = button('Reconcile reading', 'reading-reconcile', () => execute('reconcile', () => actions.reconcileReading(job.id), reconcile)); controls.append(cancel, reconcile);
+    if (actions.describeReading) void actions.describeReading(job.id).then(description => { if (!removed && description) { question.textContent = description.question; scope.textContent = description.scopeLabel; question.hidden = false; scope.hidden = false; } }).catch(() => {});
+    const refresh = () => {
+      if (removed) return;
+      summary.textContent = `Reading · ${job.status} · ${job.steps.filter(step => step.status === 'completed').length}/${job.steps.length} passes`;
+      const nodes = job.steps.map(step => {
+        let view = stepViews.get(step.index);
+        if (!view) { const row = create('div', '', 'zcr-task-row'); const label = create('p'); const scope = create('p', '', 'zcr-task-muted'); const excerpt = create('p', '', 'zcr-task-quote'); row.append(label, scope, excerpt); view = { row, label, scope, excerpt }; stepViews.set(step.index, view); }
+        view.label.textContent = `${step.phase === 'reduce' ? 'Synthesis' : step.phase === 'map' ? `Reading pass ${step.index + 1}` : 'Read selected sources'} · ${step.status}`;
+        view.scope.textContent = step.result ? [step.result.title, step.result.pageLabels.length ? `p. ${step.result.pageLabels.join(', ')}` : ''].filter(Boolean).join(' · ') : '';
+        view.excerpt.textContent = step.result?.text ? `${step.result.text.slice(0, 240)}${step.result.text.length > 240 ? '…' : ''}` : '';
+        if (step.status === 'completed' && step.result?.text && step.result.messageIds.length) {
+          if (!view.output) { const output = button('Open reading result', 'reading-output', () => execute(`output:${step.index}`, () => actions.openReadingOutput(job.id, step.index), output)); view.output = output; view.row.append(output); }
+          view.output.disabled = pending.has(`output:${step.index}`);
+        } else { view.output?.remove(); delete view.output; }
+        return view.row;
+      }); placeChildren(steps, nodes);
+      error.textContent = actionError ?? job.error?.message ?? (job.persistence === 'unconfirmed' ? 'Reading task persistence is unconfirmed.' : ''); error.hidden = !error.textContent;
+      cancel.hidden = ['completed', 'cancelled', 'failed'].includes(job.status); cancel.disabled = pending.has('cancel') || job.cancelRequested || job.status === 'cancelling';
+      reconcile.hidden = !['uncertain', 'paused'].includes(job.status) && job.persistence !== 'unconfirmed'; reconcile.disabled = pending.has('reconcile');
+    };
+    return { node, update: (next: ReadingJob) => { if (next.revision < job.revision) return; if (next.revision > job.revision) actionError = null; job = next; if (!userToggled && previousStatus !== job.status) node.open = job.status !== 'completed'; previousStatus = job.status; refresh(); }, dispose: () => { removed = true; node.remove(); } };
+  };
+  return { update: state => {
+    if (disposed) return;
+    const taskIds = new Set(state.tasks.map(task => task.id)); for (const [id, view] of cards) if (!taskIds.has(id)) { view.dispose(); cards.delete(id); }
+    const jobs = state.readingJobs ?? []; const jobIds = new Set(jobs.map(job => job.id)); for (const [id, view] of readingCards) if (!jobIds.has(id)) { view.dispose(); readingCards.delete(id); }
+    const nodes: HTMLDetailsElement[] = [];
+    for (const task of state.tasks) { let view = cards.get(task.id); if (!view) { view = createTask(task); cards.set(task.id, view); } view.update(task); nodes.push(view.node); }
+    for (const job of jobs) { let view = readingCards.get(job.id); if (!view) { view = createReading(job); readingCards.set(job.id, view); } view.update(job); nodes.push(view.node); }
+    placeChildren(root, nodes); root.hidden = nodes.length === 0;
+  }, dispose: () => { if (disposed) return; disposed = true; for (const view of cards.values()) view.dispose(); for (const view of readingCards.values()) view.dispose(); root.remove(); style.remove(); } };
+}

@@ -39,7 +39,7 @@ function paintDockColumn(dock: HTMLElement, width?: number): void {
   pin('box-sizing', 'border-box');
   pin('background', 'var(--material-background, var(--color-background, #fff))');
   pin('color', 'var(--fill-primary, CanvasText)');
-  pin('font-family', 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+  pin('font-family', 'inherit');
   pin('font-size', '13px');
   pin('line-height', '1.4');
 }

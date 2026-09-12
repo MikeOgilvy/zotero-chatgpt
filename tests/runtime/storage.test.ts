@@ -8,6 +8,17 @@ const roots: string[] = [];
 async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zcr-storage-')); roots.push(root); const host = nodeFiles(); return { root, host, storage: new GeckoStorage(host, root) }; }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 describe('private Gecko storage', () => {
+  it('lists only direct regular files and rejects traversal or symlink directories', async () => {
+    const { root, storage, host } = await setup();
+    await storage.writeAtomic('records/a.json', new Uint8Array([1]));
+    await storage.writeAtomic('records/sub/b.json', new Uint8Array([2]));
+    expect(await storage.list('records')).toEqual(['a.json']);
+    expect(await storage.list('missing')).toEqual([]);
+    await expect(storage.list('../escape')).rejects.toThrow();
+    await symlink(root, path.join(root, 'link'));
+    await expect(storage.list('link')).rejects.toThrow();
+    await expect(new GeckoStorage(host, path.join(root, 'link')).list('records')).rejects.toThrow();
+  });
   it('persists atomic replacement and ordered append with explicit flush and private permissions', async () => {
     const { root, host, storage } = await setup(); const bytes = new TextEncoder();
     await storage.writeAtomic('nested/state.json', bytes.encode('first'));

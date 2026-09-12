@@ -1,4 +1,4 @@
-import type { DocumentRevision, PaperScope } from '../../../contracts/src/index.ts';
+import type { Conversation, DocumentContext, DocumentRevision, DocumentSummary, Message, PaperScope } from '../../../contracts/src/index.ts';
 
 export interface AnswerSource {
   id: string;
@@ -6,6 +6,9 @@ export interface AnswerSource {
   revision: DocumentRevision;
   pages: Array<{ pageIndex: number; pageLabel: string }>;
 }
+
+/** Frozen document identity needed to re-open a page: scope plus the exact revision to verify. */
+export type DocumentPageTarget = Pick<DocumentContext, 'paper' | 'revision'>;
 
 const INTERNAL_HOST = 'zcr.invalid';
 const UNAVAILABLE_TEXT = 'This source is not available in this answer.';
@@ -139,6 +142,37 @@ function unbind(anchor: HTMLAnchorElement): void {
   bindings.delete(anchor);
   anchor.removeAttribute('data-zcr-source');
   anchor.removeAttribute('data-zcr-page');
+}
+
+/**
+ * Citation authority for one rendered answer: the frozen document summaries that the matching
+ * request actually supplied. Derived only from persisted message data (`document`, `references`
+ * and `referenceDocuments`); no live cache or current-viewer text is consulted, so a stored answer
+ * keeps the exact paper scopes and revisions it was answered against.
+ *
+ * A document without a resolvable `PaperScope` (for example a chat snapshot reference) is omitted.
+ * `linkAnswerSources` then reports that citation's link as unavailable instead of dropping it.
+ */
+export function answerSources(conversation: Conversation, message: Message): AnswerSource[] {
+  if (message.role !== 'assistant') return [];
+  const byId = new Map<string, AnswerSource>();
+  const record = (summary: DocumentSummary, paper: PaperScope | undefined) => {
+    if (!paper || byId.has(summary.id)) return;
+    byId.set(summary.id, {
+      id: summary.id,
+      paper: { ...paper },
+      revision: { ...summary.revision },
+      pages: summary.pages.map(page => ({ pageIndex: page.pageIndex, pageLabel: page.pageLabel })),
+    });
+  };
+  for (const request of conversation.messages) {
+    if (request.role !== 'user' || request.requestId !== message.requestId) continue;
+    if (request.document) record(request.document, conversation.paper);
+    for (const source of request.referenceDocuments ?? []) {
+      record(source.document, request.references?.find(reference => reference.id === source.referenceId)?.paper);
+    }
+  }
+  return [...byId.values()];
 }
 
 /**

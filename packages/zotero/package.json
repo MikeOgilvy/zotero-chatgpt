@@ -1,11 +1,11 @@
 {
   "name": "@zotero-codex-reader/zotero",
-  "version": "0.3.0-alpha.1",
+  "version": "0.4.0-alpha.1",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@zotero-codex-reader/contracts": "0.3.0-alpha.1",
-    "@zotero-codex-reader/core": "0.3.0-alpha.1",
+    "@zotero-codex-reader/contracts": "0.4.0-alpha.1",
+    "@zotero-codex-reader/core": "0.4.0-alpha.1",
     "dompurify": "3.2.6",
     "katex": "0.16.22",
     "markdown-it": "14.1.0"

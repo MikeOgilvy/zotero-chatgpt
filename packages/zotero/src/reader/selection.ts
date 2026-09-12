@@ -1,6 +1,7 @@
 import { ReaderError, type Citation, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
 import { validateCitation } from '../../../contracts/src/validation.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
+import { nativeDocumentSource } from './document.ts';
 /** Zotero 9.0.6 `renderTextSelectionPopup` payload (reader.js:25427-25433, 70462-70484). */
 export interface SelectionAnnotation {
   type?: string; color?: string | undefined; sortIndex?: string; pageLabel?: string | undefined;
@@ -52,16 +53,27 @@ export function captureSelection(event: SelectionPopupEvent, paper: PaperScope, 
   if (metadata.doi) citation.doi = metadata.doi;
   return validateCitation(citation);
 }
-/** Jumps to a citation's page position in the open reader of that attachment, or opens the attachment first. */
+/** Start this at selection time; waiting for a later click must not change the source version. */
+export async function freezeCitationVersion(zotero: ZoteroHost, reader: HostReader, citation: Citation): Promise<Citation> {
+  const snapshot = validateCitation(citation);
+  const source = await nativeDocumentSource(zotero, () => reader, snapshot.paper).capture();
+  return { ...snapshot, documentRevision: source.revision };
+}
+/** Opens the right attachment and validates the loaded bytes before using saved coordinates. */
 export async function openCitation(zotero: ZoteroHost, citation: Citation, currentClientId: string): Promise<void> {
   if (citation.paper.clientId !== currentClientId) throw new ReaderError('NOT_FOUND', 'This citation belongs to another reading environment and cannot be opened here.');
   const position = citation.positions[0]!;
-  const location = { position: { pageIndex: position.pageIndex, rects: position.rects.map(r => [...r]) } };
-  const open = zotero.Reader._readers.find(reader => { const item = zotero.Items.get(reader.itemID); return item?.libraryID === citation.paper.libraryId && item.key === citation.paper.attachmentKey; });
-  if (open) { await open.navigate(location); return; }
-  const item = zotero.Items.getByLibraryAndKey?.(citation.paper.libraryId, citation.paper.attachmentKey);
-  if (!item || typeof item.id !== 'number' || !zotero.Reader.open) throw new ReaderError('NOT_FOUND', 'The attachment for this citation could not be found.');
-  await zotero.Reader.open(item.id, location);
+  let open = zotero.Reader._readers.find(reader => { const item = zotero.Items.get(reader.itemID); return item?.libraryID === citation.paper.libraryId && item.key === citation.paper.attachmentKey; });
+  if (!open) {
+    const item = zotero.Items.getByLibraryAndKey?.(citation.paper.libraryId, citation.paper.attachmentKey);
+    if (!item || typeof item.id !== 'number' || !zotero.Reader.open) throw new ReaderError('NOT_FOUND', 'The attachment for this citation could not be found.');
+    open = await zotero.Reader.open(item.id) || undefined;
+  }
+  if (!open) throw new ReaderError('NOT_FOUND', 'The citation reader could not be opened.');
+  if (!citation.documentRevision) { await open.navigate({ pageIndex: position.pageIndex }); return; }
+  const current = await nativeDocumentSource(zotero, () => open, citation.paper).capture();
+  if (JSON.stringify(current.revision) !== JSON.stringify(citation.documentRevision)) throw new ReaderError('INVALID_REQUEST', 'The cited PDF version changed. Reopen and select the passage again.');
+  await open.navigate({ position: { pageIndex: position.pageIndex, rects: position.rects.map(r => [...r]) } });
 }
 /** Declared metadata of the paper: the parent item when the PDF is attached to one, else the attachment itself. */
 export function paperMetadata(zotero: ZoteroHost, reader: HostReader): PaperMetadata | undefined {

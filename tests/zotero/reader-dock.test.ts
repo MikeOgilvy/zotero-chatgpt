@@ -146,7 +146,6 @@ it('attaches the dock stylesheet to the reader iframe document and keeps a compo
   const sheet = doc.querySelector('style[data-zcr-sidebar-css]');
   expect(sheet?.ownerDocument).toBe(doc);
   expect(sheet?.textContent ?? '').toMatch(/writing-mode:\s*horizontal-tb/u);
-  expect(sheet?.textContent ?? '').toMatch(/\.zcr-dock[\s\S]*font-family:\s*system-ui/u);
   expect(sheet?.textContent ?? '').toMatch(/#split-view[\s\S]*\.zcr-dock[\s\S]*flex:\s*0 0/u);
   expect(sheet?.textContent ?? '').toMatch(/\.zcr-dock[\s\S]*min-width:\s*320px/u);
   expect(sheet?.textContent ?? '').not.toMatch(/min-width:\s*var\(--zcr-dock-width/u);
@@ -167,7 +166,7 @@ it('attaches the dock stylesheet to the reader iframe document and keeps a compo
   expect(dock.style.getPropertyPriority('flex-shrink')).toBe('important');
   expect(dock.style.getPropertyPriority('min-width')).toBe('important');
   expect(dock.style.getPropertyPriority('writing-mode')).toBe('important');
-  expect(dock.style.fontFamily).toMatch(/system-ui/u);
+  expect(dock.style.fontFamily).toBe('inherit');
   expect(dock.style.background).toMatch(/material-background|#fff/u);
   expect(dock.getAttribute('style') ?? '').not.toMatch(/min-width:\s*0(?:px)?(?:;|$)/u);
 

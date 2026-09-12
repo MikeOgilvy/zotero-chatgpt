@@ -6,13 +6,22 @@ import type { HostReader, ZoteroHost } from './host-types.ts';
 export interface TextPdf {
   numPages: number;
   fingerprints: string[];
+  getData?(): Promise<Uint8Array | ArrayBuffer>;
   getPageLabels2(): Promise<string[] | null>;
   getPageData(options: { pageIndex: number }): Promise<{ partial?: boolean; chars: Array<{ c: string; ignorable?: boolean; spaceAfter?: boolean; lineBreakAfter?: boolean; paragraphBreakAfter?: boolean }> }>;
 }
 export interface DocumentSource { pdf: TextPdf; revision: DocumentRevision }
 export interface DocumentProgress { done: number; total: number }
 export type PageRange = readonly [number, number]; // physical PDF pages, 1-based and inclusive
-const PARSER = 'zotero-native-text-v1';
+const PARSER = 'zotero-native-text-v2';
+const loadedHashes = new WeakMap<TextPdf, Promise<string>>();
+async function digestBytes(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+async function digest(text: string): Promise<string> {
+  return digestBytes(new TextEncoder().encode(text));
+}
+function identifier(hash: string): string { return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`; }
 export function cancelled(): ReaderError { return new ReaderError('INVALID_REQUEST', 'PDF preparation cancelled. Your question is kept.'); }
 function checkSignal(signal: AbortSignal): void { if (signal.aborted) throw cancelled(); }
 /** Stop waiting for a worker without destroying the PDF document owned by Zotero. */
@@ -28,7 +37,7 @@ async function interruptible<T>(work: Promise<T>, signal: AbortSignal): Promise<
 export class ReaderDocumentCache {
   private entries = new Map<string, DocumentContext>();
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(private options: { uuid(): string; yield(): Promise<void>; maxEntries?: number }) {}
+  constructor(private options: { yield(): Promise<void>; maxEntries?: number }) {}
   read(paper: PaperScope, source: DocumentSource, signal: AbortSignal, progress: (p: DocumentProgress) => void, range?: PageRange): Promise<DocumentContext> {
     const revision = { ...source.revision }; const scope = { ...paper };
     const selected = range ? [...range] as [number, number] : undefined;
@@ -42,7 +51,7 @@ export class ReaderDocumentCache {
       if (cached) { this.entries.delete(key); this.entries.set(key, cached); progress({ done: cached.pages.length, total: last - first + 1 }); return clone(cached); }
       progress({ done: 0, total: last - first + 1 });
       const labels = await interruptible(source.pdf.getPageLabels2().catch(() => null), signal);
-      const pages: DocumentPage[] = []; let bytes = 0;
+      const pages: DocumentPage[] = []; const hashes: string[] = []; let bytes = 0;
       for (let number = first; number <= last; number++) {
         checkSignal(signal); await this.options.yield(); checkSignal(signal);
         let text = ''; let status: DocumentPage['status'] = 'empty'; let partial = false;
@@ -54,11 +63,13 @@ export class ReaderDocumentCache {
         } catch { checkSignal(signal); status = 'error'; }
         bytes += new TextEncoder().encode(text).length;
         if (bytes > DOCUMENT_BYTES) throw new ReaderError('PAYLOAD_TOO_LARGE', 'This PDF exceeds the local text limit. Nothing was truncated or sent. Choose a page range in Context.');
-        pages.push({ pageIndex: number - 1, pageLabel: labels?.[number - 1] || String(number), text, status, ...(partial ? { partial: true } : {}) });
+        const page: DocumentPage = { pageIndex: number - 1, pageLabel: labels?.[number - 1] || String(number), text, status, ...(partial ? { partial: true } : {}) };
+        pages.push(page);
+        hashes.push(await digest(JSON.stringify(page)));
         progress({ done: pages.length, total: last - first + 1 });
       }
       checkSignal(signal);
-      const document = validateDocument({ id: this.options.uuid(), paper: scope, revision, parserVersion: PARSER, totalPages: total, pages });
+      const document = validateDocument({ id: identifier(await digest(JSON.stringify([key, hashes]))), paper: scope, revision, parserVersion: PARSER, totalPages: total, pages });
       // Retry transient extraction failures; an empty/scanned page is a stable, explicit gap.
       if (!pages.some(p => p.status === 'error' || p.partial)) {
         this.entries.set(key, document);
@@ -86,9 +97,19 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
       const pdf = view?._iframeWindow?.PDFViewerApplication?.pdfDocument;
       const path = await item.getFilePathAsync?.();
       if (!pdf || !path) throw new Error();
-      const io = (globalThis as unknown as { IOUtils: { stat(path: string): Promise<{ size: number; lastModified: number }> } }).IOUtils;
+      const io = (globalThis as unknown as { IOUtils: { stat(path: string): Promise<{ size: number; lastModified: number }>; computeHexDigest(path: string, algorithm: 'sha256'): Promise<string> } }).IOUtils;
       const stat = await io.stat(path);
-      const revision = { fingerprint: pdf.fingerprints.filter(Boolean).join(':'), size: stat.size, modifiedAt: stat.lastModified };
+      if (!pdf.getData || !io.computeHexDigest) throw new ReaderError('INVALID_REQUEST', 'The host cannot verify this loaded PDF version. Reopen the PDF before asking.');
+      let loadedHash = loadedHashes.get(pdf);
+      if (!loadedHash) {
+        // Native reader promises do not accept privileged callbacks passed directly to .then().
+        // Await the native promise first; attach cache cleanup only to our own realm's promise.
+        loadedHash = (async () => digestBytes(new Uint8Array(await pdf.getData!())))().catch(error => { loadedHashes.delete(pdf); throw error; });
+        loadedHashes.set(pdf, loadedHash);
+      }
+      const [loadedSha, diskSha] = await Promise.all([loadedHash, io.computeHexDigest(path, 'sha256')]);
+      if (loadedSha !== diskSha) throw new ReaderError('INVALID_REQUEST', 'The PDF file changed while this reader was open. Reopen it to load the current version.');
+      const revision = { fingerprint: pdf.fingerprints.filter(Boolean).join(':'), size: stat.size, modifiedAt: stat.lastModified, sha256: diskSha };
       const key = JSON.stringify(revision);
       const loaded = loadedVersions.get(pdf);
       if (loaded && loaded !== key) throw new ReaderError('INVALID_REQUEST', 'The PDF file changed. Reopen this PDF before asking again.');
@@ -99,7 +120,16 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
       return { revision, pdf: {
         numPages: pdf.numPages, fingerprints: [...pdf.fingerprints],
         getPageLabels2: () => pdf.getPageLabels2(),
-        getPageData: (options: { pageIndex: number }) => pdf.getPageData(cu.cloneInto(options, nativeWindow)),
+        getPageData: async (options: { pageIndex: number }) => {
+          const raw = await pdf.getPageData(cu.cloneInto(options, nativeWindow));
+          if (!raw || !Array.isArray(raw.chars)) throw new ReaderError('INVALID_REQUEST', 'The PDF page text could not be extracted.');
+          // Zotero 9.0.6 GetPageData unconditionally sets partial=true for basic data before
+          // citation/overlay enrichment. Its character extraction is complete (worker module.js).
+          // Keep generic text-provider partial failures meaningful; do not forward this different flag.
+          const bounds = (raw as typeof raw & { viewBox?: unknown }).viewBox;
+          const viewBox = Array.isArray(bounds) ? Array.from(bounds) as unknown[] : [];
+          return { chars: Array.from(raw.chars), ...(viewBox.length === 4 && viewBox.every(value => typeof value === 'number' && Number.isFinite(value)) ? { viewBox: viewBox as number[] } : {}) };
+        },
       } };
     } catch (error) {
       if (error instanceof ReaderError) throw error;
@@ -110,7 +140,7 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
   };
   return {
     capture,
-    validate: async (document: DocumentContext) => {
+    validate: async (document: { revision: DocumentRevision }) => {
       const fresh = await capture();
       if (JSON.stringify(fresh.revision) !== JSON.stringify(document.revision)) throw new ReaderError('INVALID_REQUEST', 'The PDF changed during preparation. Reopen it and send again.');
     },

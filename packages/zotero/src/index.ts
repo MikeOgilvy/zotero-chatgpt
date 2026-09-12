@@ -1,18 +1,20 @@
 import { mountChatView, renderReaderShell, type AttachmentIdentity } from './chat/view.ts';
 import { ConversationPresenter } from './chat/presenter.ts';
 import { createRuntimeSupervisor } from './runtime/supervisor.ts';
+import { createLocalServices } from './runtime/local-services.ts';
+import { geckoHost } from './runtime/gecko.ts';
 import { injectReaderStyles } from './reader/dock.ts';
 import { NativeReaderPane, attachmentIdentity, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
-import { captureSelection, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
+import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
-export interface PluginContext { rootURI: string; pluginID: string }
-interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar }
+export interface PluginContext { rootURI: string; pluginID: string; version?: string }
+interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string }
 const CLIENT_ID_PREF = 'extensions.zcr.clientId';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 let context: PluginContext | undefined;
@@ -21,12 +23,14 @@ let active = false;
 let notifierID: string | undefined;
 let runtime: ReturnType<typeof createRuntimeSupervisor> | undefined;
 let documentCache: ReaderDocumentCache | undefined;
+let localServices: ReturnType<typeof createLocalServices> | undefined;
 const AUTO_PDF_PREF = 'extensions.zcr.automaticPdfText';
 const PDF_DISCLOSURE_PREF = 'extensions.zcr.pdfTextDisclosureSeen';
 const readers = new Map<HostReader, ReaderEntry>();
 const windows = new Map<ZoteroWindow, () => void>();
 /** Presenters outlive views: drafts and conversation copies stay while a sidebar is closed. */
 const presenters = new Map<string, ConversationPresenter>();
+const citationVersions = new WeakMap<Citation, Promise<Citation>>();
 
 /** Persistent random namespace of this Zotero profile; it never changes across restarts or upgrades. */
 function clientId(): string {
@@ -53,6 +57,28 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
       openAuthorization: url => Zotero.launchURL(url),
       uuid: () => crypto.randomUUID(),
       now: () => new Date().toISOString(),
+      ...(localServices ? {
+        getWorkspace: localServices.getWorkspace,
+        getTasks: localServices.getTasks,
+        getReading: localServices.getReading,
+        library: localServices.library,
+        openCitation: citation => openCitation(Zotero, citation, clientId()),
+        openItem: async (reference: import('../../contracts/src/agent.ts').NativeItemRef) => {
+          if (reference.clientId !== clientId()) throw new ReaderError('NOT_FOUND', 'The output belongs to another profile.');
+          const item = Zotero.Items.getByLibraryAndKey?.(reference.libraryId, reference.key);
+          const win = Zotero.getMainWindows()[0] as (ZoteroWindow & { ZoteroPane?: { selectItem(id: number): Promise<void> } }) | undefined;
+          if (!item || !item.id || !win?.ZoteroPane) throw new ReaderError('NOT_FOUND', 'The saved output could not be opened.');
+          await win.ZoteroPane.selectItem(item.id);
+        },
+        openHistory: async (scope: PaperScope, conversationId: string) => {
+          await localServices?.library.open(scope);
+          const target = Zotero.Reader._readers.find(reader => { const item = Zotero.Items.get(reader.itemID); return item?.key === scope.attachmentKey && item.libraryID === scope.libraryId; });
+          const identity = target && attachmentIdentity(Zotero, target);
+          if (!target || !identity) throw new ReaderError('NOT_FOUND', 'The saved chat attachment could not be opened.');
+          await entry(target).pane.controller.open();
+          const next = presenterFor(identity, target); await next.activate(); await next.openConversation(conversationId);
+        },
+      } : {}),
       document: {
         readEnabled: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
         writeEnabled: value => Zotero.Prefs.set(AUTO_PDF_PREF, value, true),
@@ -78,6 +104,10 @@ const hooks = {
     else void globalThis.navigator?.clipboard?.writeText(text);
   },
   openLink: (url: string) => { Zotero.launchURL(url); },
+  exportImage: async (image: import('../../contracts/src/index.ts').ImageAttachment) => {
+    if (!localServices) throw new Error('Image export is unavailable.');
+    await localServices.library.exportImage(image);
+  },
 };
 function readerAssets(): { stylesheet?: string; katex?: string } {
   if (!context) return {};
@@ -117,14 +147,15 @@ function entry(reader: HostReader): ReaderEntry {
       return unmount;
     }, readerAssets());
     // Both selection actions only show the sidebar; the citation copy was taken before the click.
-    const act = async (citation: Citation, run: (presenter: ConversationPresenter) => void) => {
+    const act = async (citation: Citation, run: (presenter: ConversationPresenter, frozen: Citation) => void) => {
       const identity = attachmentIdentity(Zotero, reader); if (!identity || !active) return;
+      const frozen = await (citationVersions.get(citation) ?? freezeCitationVersion(Zotero, reader, citation));
       await pane.controller.open();
-      const presenter = presenterFor(identity, reader); await presenter.activate(); run(presenter);
+      const presenter = presenterFor(identity, reader); await presenter.activate(); run(presenter, frozen);
     };
     const bar = new SelectionActionBar({
-      explain: citation => { void act(citation, presenter => { void presenter.explain(citation); }).catch(error => Zotero.logError(error)); },
-      ask: citation => { void act(citation, presenter => { presenter.addCitation(citation); presenter.focusInput(); }).catch(error => Zotero.logError(error)); },
+      explain: citation => { void act(citation, (presenter, frozen) => { void presenter.explain(frozen); }).catch(error => Zotero.logError(error)); },
+      ask: citation => { void act(citation, (presenter, frozen) => { presenter.addCitation(frozen); presenter.focusInput(); }).catch(error => Zotero.logError(error)); },
     });
     current = { buttons, pane, bar };
     readers.set(reader, current);
@@ -139,6 +170,10 @@ function onSelectionPopup(event: SelectionPopupEvent): void {
   if (!identity || !metadata) return;
   try {
     const citation = captureSelection(event, paperOf(identity), metadata, { uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() });
+    const version = freezeCitationVersion(Zotero, event.reader, citation);
+    current.latestSelectionId = citation.id;
+    citationVersions.set(citation, version);
+    void version.catch(() => { if (active && current.latestSelectionId === citation.id) current.bar.showNotice(event, 'This PDF version could not be verified. Reopen the PDF and select the passage again.'); });
     current.bar.show(event, citation);
   } catch (error) {
     // Limits (for example a cross-page selection) are stated in place; nothing is sent.
@@ -170,9 +205,11 @@ function reconcile(): void {
 }
 export function startup(options: PluginContext): void {
   if (active) return;
+  if (runtime) throw new Error('The previous Codex process has not stopped. Retry shutdown before enabling the plugin.');
   context = options; active = true;
-  runtime = createRuntimeSupervisor(options.rootURI);
-  documentCache = new ReaderDocumentCache({ uuid: () => crypto.randomUUID(), yield: () => new Promise(resolve => setTimeout(resolve, 0)) });
+  runtime = createRuntimeSupervisor(options.rootURI, options.version);
+  documentCache = new ReaderDocumentCache({ yield: () => new Promise(resolve => setTimeout(resolve, 0)) });
+  localServices = createLocalServices(geckoHost().host, Zotero, clientId(), documentCache);
   paneID = Zotero.ItemPaneManager.registerSection({
     paneID: 'codex-reader', pluginID: options.pluginID,
     header: { l10nID: 'zcr-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
@@ -248,9 +285,12 @@ export async function shutdown(): Promise<void> {
   notifierID = undefined;
   if (paneID) Zotero.ItemPaneManager.unregisterSection(paneID);
   paneID = ''; context = undefined;
-  for (const presenter of presenters.values()) presenter.dispose();
+  for (const presenter of presenters.values()) { await presenter.flushDraft?.().catch(() => Zotero.logError(new Error('A chat draft could not be saved during shutdown.'))); presenter.dispose(); }
   presenters.clear();
   documentCache?.clear(); documentCache = undefined;
-  const stopping = runtime; runtime = undefined;
-  await stopping?.stop();
+  const stopping = runtime;
+  const local = localServices; localServices = undefined;
+  const results = await Promise.allSettled([local?.stop(), stopping?.stop()]);
+  if (results[1]?.status === 'fulfilled' && runtime === stopping) runtime = undefined;
+  if (results.some(result => result.status === 'rejected')) throw new Error('Plugin shutdown could not complete every cleanup operation. Retrying preserves ownership of any remaining Codex process.');
 }

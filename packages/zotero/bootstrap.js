@@ -7,26 +7,26 @@ var registeredWindows = new Set();
 
 function install() {}
 
-async function startup({ id, rootURI }) {
+async function startup({ id, rootURI, version }) {
   shutdownRequested = false;
   registeredWindows.clear();
-  startupTask = initialize({ id, rootURI });
+  startupTask = initialize({ id, rootURI, version });
   await startupTask;
 }
 
-async function initialize({ id, rootURI }) {
+async function initialize({ id, rootURI, version }) {
   await Zotero.initializationPromise;
   if (shutdownRequested) {
     return;
   }
 
   // loadSubScript's target does not inherit the plugin sandbox capabilities.
-  Components.utils.importGlobalProperties(['AbortController']);
+  Components.utils.importGlobalProperties(['AbortController', 'atob', 'btoa']);
   scriptScope = {
     Zotero, ChromeUtils, IOUtils, PathUtils, Services,
     Cc: Components.classes, Ci: Components.interfaces,
     Cu: Components.utils,
-    fetch, crypto, TextDecoder, TextEncoder, URL, AbortController, setTimeout, clearTimeout,
+    fetch, crypto, TextDecoder, TextEncoder, URL, AbortController, atob, btoa, setTimeout, clearTimeout,
   };
   Services.scriptloader.loadSubScript(
     `${rootURI}content/zcr.js`,
@@ -34,7 +34,7 @@ async function initialize({ id, rootURI }) {
   );
   ZoteroCodexReader = scriptScope.ZoteroCodexReader;
 
-  await ZoteroCodexReader.startup({ rootURI, pluginID: id });
+  await ZoteroCodexReader.startup({ rootURI, pluginID: id, ...(version ? { version } : {}) });
   if (shutdownRequested) {
     return;
   }

@@ -10,6 +10,7 @@ export interface FileAPI {
   remove(path: string, options: { recursive?: boolean; ignoreAbsent: true }): Promise<void>;
   move(from: string, to: string, options: { noOverwrite: true }): Promise<void>;
   computeHexDigest(path: string, algorithm: 'sha256'): Promise<string>;
+  getChildren?(path: string): Promise<string[]>;
 }
 export interface FileHost { io: FileAPI; join(...paths: string[]): string; isSymlink(path: string): boolean; uuid(): string }
 export function relativeParts(path: string): string[] {
@@ -57,6 +58,26 @@ export class GeckoStorage implements StoragePort {
     return this.serial(async () => {
       try { const target = await this.resolve(path, false); return target && await this.host.io.exists(target) ? await this.host.io.read(target) : null; }
       catch { throw new Error('Storage read failed'); }
+    });
+  }
+  list(relativeDirectory: string): Promise<string[]> {
+    return this.serial(async () => {
+      try {
+        let directory = this.root;
+        if (!await checkPath(this.host, directory, 'directory')) throw new Error('Storage root unavailable');
+        for (const part of relativeParts(relativeDirectory)) {
+          directory = this.host.join(directory, part);
+          if (!await checkPath(this.host, directory, 'directory')) return [];
+        }
+        if (!this.host.io.getChildren) throw new Error('Listing unavailable');
+        const result: string[] = [];
+        for (const child of await this.host.io.getChildren(directory)) {
+          const name = child.split(/[\\/]/u).at(-1)!;
+          if (relativeParts(name).length !== 1 || this.host.join(directory, name) !== child || this.host.isSymlink(child)) throw new Error('Unsafe storage entry');
+          if ((await this.host.io.stat(child)).type === 'regular') result.push(name);
+        }
+        return result.sort();
+      } catch { throw new Error('Storage read failed'); }
     });
   }
   writeAtomic(path: string, bytes: Uint8Array): Promise<void> { return this.write(path, bytes, false); }

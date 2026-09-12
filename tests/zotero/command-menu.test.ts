@@ -1,0 +1,71 @@
+import { Window } from 'happy-dom';
+import { expect, it, vi } from 'vitest';
+import { mountCommandMenu } from '../../packages/zotero/src/chat/command-menu.ts';
+
+function setup(choose = vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined)) {
+  const document = new Window().document as unknown as Document;
+  const pane = document.createElement('div');
+  pane.dataset.zcrSidebar = '';
+  const input = document.createElement('textarea');
+  pane.append(input); document.body.append(pane);
+  const menu = mountCommandMenu(input, pane, choose);
+  const key = (key: string, options: KeyboardEventInit = {}) => input.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options }));
+  return { document, input, menu, key, choose };
+}
+
+it('keeps keyboard selection in the composer and consumes Enter before the send handler', async () => {
+  const { input, menu, key, choose } = setup();
+  const send = vi.fn(); input.addEventListener('keydown', event => { if (event.key === 'Enter') send(); });
+  menu.update({ heading: 'References', items: [{ id: 'a', label: 'First paper' }, { id: 'disabled', label: 'Unavailable', disabled: true }, { id: 'b', label: 'Second paper' }] });
+  input.focus(); key('ArrowDown');
+  expect(menu.element.querySelector('[aria-selected="true"]')?.textContent).toContain('Second paper');
+  key('Enter');
+  await vi.waitFor(() => expect(choose).toHaveBeenCalledWith('b'));
+  expect(send).not.toHaveBeenCalled();
+  expect(menu.isOpen()).toBe(false);
+  expect(input.ownerDocument.activeElement).toBe(input);
+});
+
+it('leaves IME confirmation alone and Escape closes only after composition finishes', () => {
+  const { input, menu, key, choose, document } = setup();
+  const send = vi.fn(); input.addEventListener('keydown', event => { if (event.key === 'Enter') send(); });
+  menu.update({ heading: 'Workflows', items: [{ id: 'one', label: '/derive' }] });
+  input.dispatchEvent(new document.defaultView!.Event('compositionstart'));
+  expect(key('Enter')).toBe(true); key('Escape');
+  expect(choose).not.toHaveBeenCalled(); expect(menu.isOpen()).toBe(true);
+  expect(send).not.toHaveBeenCalled();
+  input.dispatchEvent(new document.defaultView!.Event('compositionend'));
+  key('Enter', { isComposing: true });
+  expect(choose).not.toHaveBeenCalled();
+  key('Escape'); expect(menu.isOpen()).toBe(false);
+});
+
+it('renders untrusted labels as text and does not select the same pending item twice', async () => {
+  let release!: () => void;
+  const choose = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
+  const { menu, key } = setup(choose);
+  menu.update({ heading: 'References', items: [{ id: 'a', label: '<img src=x onerror=alert(1)>', description: '<svg onload=alert(2)>' }] });
+  expect(menu.element.querySelector('img, svg')).toBeNull();
+  expect(menu.element.textContent).toContain('<svg onload=alert(2)>');
+  key('Enter'); key('Enter');
+  expect(choose).toHaveBeenCalledTimes(1);
+  release(); await vi.waitFor(() => expect(menu.isOpen()).toBe(false));
+});
+
+it('keeps failed choices reviewable and removes its listeners on disposal', async () => {
+  const { menu, key, choose, input } = setup(vi.fn().mockRejectedValue(new Error('Source changed')));
+  menu.update({ heading: 'References', items: [{ id: 'a', label: 'A' }] }); key('Enter');
+  await vi.waitFor(() => expect(menu.element.textContent).toContain('Source changed'));
+  expect(menu.isOpen()).toBe(true);
+  menu.dispose(); key('Enter');
+  expect(choose).toHaveBeenCalledTimes(1);
+  expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+  expect(menu.element.isConnected).toBe(false);
+});
+
+it('closes when keyboard focus leaves both the input and its chooser', () => {
+  const { menu, input, document } = setup();
+  input.focus(); menu.update({ heading: 'References', items: [{ id: 'a', label: 'A' }] });
+  const outside = document.createElement('button'); document.body.append(outside); outside.focus();
+  expect(menu.isOpen()).toBe(false);
+});

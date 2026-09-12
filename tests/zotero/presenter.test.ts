@@ -56,7 +56,7 @@ function fixture(options: { signedIn?: boolean } = {}) {
   const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
-  const emit = (event: Pending) => { const full: ReaderEvent = { ...event, seq: ++seq, conversationId: conversation.id, at: 'now' }; conversation = { ...conversation, lastSeq: seq }; for (const l of listeners) l(full); };
+  const emit = (event: Pending) => { const full: ReaderEvent = { ...event, seq: ++seq, conversationId: conversation.id, at: 'now' }; conversation = { ...conversation, lastSeq: seq, ...(['completed', 'cancelled', 'failed', 'uncertain'].includes(event.type) ? { activeRequestId: null } : {}) }; for (const l of listeners) l(full); };
   const setRuntime = (patch: Partial<RuntimeSnapshot>) => { runtime = { ...runtime, ...patch, revision: runtime.revision + 1 }; for (const o of observers) o(structuredClone(runtime)); };
   return { presenter, states, sent, cancelled, client, services, emit, setRuntime, listeners, unbind, last: () => states.at(-1)!, conversation: () => conversation, setConversation: (c: Conversation) => {
     conversation = c;

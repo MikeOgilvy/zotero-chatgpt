@@ -77,7 +77,7 @@ export class RuntimeSupervisor {
       await this.starting?.catch(() => undefined);
       const owned = this.owned;
       if (owned) { try { await this.release(owned); } catch { throw new Error('Unable to stop owned Codex process'); } }
-    })();
+    })().catch(error => { this.stopping = null; throw error; });
     return this.stopping;
   }
 }
@@ -86,10 +86,15 @@ import { createReaderClient } from '../../../core/src/index.ts';
 import { GeckoProcessPort } from './process.ts';
 import { geckoHost } from './gecko.ts';
 import { prepareRuntime } from './prepare.ts';
+import { createGeneratedImageLoader } from './generated-image.ts';
 /** Bootstrap creates one supervisor per plugin lifetime; views borrow its client.
  * Zotero owns the profile lock. No cross-profile singleton or shared CLI is used.
  */
-export function createRuntimeSupervisor(rootURI: string): RuntimeSupervisor {
+export function createRuntimeSupervisor(rootURI: string, pluginVersion?: string): RuntimeSupervisor {
   const { host, subprocess } = geckoHost();
-  return new RuntimeSupervisor({ prepare: () => prepareRuntime(host, rootURI), process: new GeckoProcessPort(subprocess), connect: createReaderClient, uuid: () => host.uuid() });
+  return new RuntimeSupervisor({ prepare: () => prepareRuntime(host, rootURI), process: new GeckoProcessPort(subprocess), connect: (process, storage, options) => createReaderClient(process, storage, {
+    ...options,
+    ...(pluginVersion ? { pluginVersion } : {}),
+    generatedImage: createGeneratedImageLoader({ host, allowedOutputDirectories: [options.cwd, host.join(options.codexHome!, 'generated_images')] }),
+  }), uuid: () => host.uuid() });
 }

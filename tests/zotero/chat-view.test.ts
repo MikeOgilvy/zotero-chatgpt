@@ -5,11 +5,12 @@ import { expect, it, vi } from 'vitest';
 import { ConversationPresenter, type DocumentServices } from '../../packages/zotero/src/chat/presenter.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 import { mountChatView, renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
-import type { ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, type Conversation, type SendInput } from '../../packages/contracts/src/index.ts';
-import { citationA, imageA, paperA, settings, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
+import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
+import { SHAREABLE_STORAGE_LOCATION, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
+import { documentSummary } from '../../packages/contracts/src/document.ts';
+import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
-const model = {
+const model: ModelOption = {
   id: 'catalog-default', displayName: 'Catalog Default', isDefault: true,
   supportedReasoningEfforts: [
     { id: 'low', description: '' }, { id: 'medium', description: '' },
@@ -18,6 +19,7 @@ const model = {
   defaultReasoningEffort: 'medium',
   serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }],
   defaultServiceTier: 'priority',
+  inputModalities: ['text', 'image'],
 };
 
 function documentOf(): Document {
@@ -35,6 +37,8 @@ async function mountReadyChat(options: {
   confirm?: (message: string) => boolean;
   uuid?: () => string;
   document?: DocumentServices;
+  openDocumentPage?: (document: { paper: PaperScope; revision: DocumentRevision }, pageIndex: number) => Promise<void>;
+  openLink?: (url: string) => void;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -51,8 +55,10 @@ async function mountReadyChat(options: {
   };
   const listed = options.conversations ?? [conversation];
   if (!listed.some(entry => entry.id === conversation.id)) listed.unshift(conversation);
+  let onRuntime: (snapshot: RuntimeSnapshot) => void = () => undefined;
+  let onEvent: (event: ReaderEvent) => void = () => undefined;
   const client: ReaderClient = {
-    snapshot: () => structuredClone(runtime), observe: l => { l(structuredClone(runtime)); return () => undefined; },
+    snapshot: () => structuredClone(runtime), observe: l => { onRuntime = l; l(structuredClone(runtime)); return () => undefined; },
     refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
     current: () => Promise.resolve(structuredClone(conversation)),
     newConversation: () => {
@@ -102,7 +108,7 @@ async function mountReadyChat(options: {
       pluginVersion: '0.3.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {},
       storageLocation: SHAREABLE_STORAGE_LOCATION,
     })),
-    subscribe: () => () => undefined, close: async () => {},
+    subscribe: listener => { onEvent = listener; return () => undefined; }, close: async () => {},
   };
   const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined,
@@ -118,6 +124,7 @@ async function mountReadyChat(options: {
   await presenter.activate();
   const doc = documentOf();
   const body = doc.createElement('div');
+  doc.body.append(body);
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   const scale = options.textScale ?? { value: 1 };
   mountChatView(root, presenter, {
@@ -126,6 +133,8 @@ async function mountReadyChat(options: {
     writeTextScale: value => { scale.value = value; },
     confirm: options.confirm ?? (() => true),
     uuid: options.uuid ?? (() => imageA.id),
+    ...(options.openDocumentPage ? { openDocumentPage: options.openDocumentPage } : {}),
+    ...(options.openLink ? { openLink: options.openLink } : {}),
     ...(options.readerZoom ? {
       readerZoom: {
         zoomIn: () => { options.readerZoom!.ins += 1; options.readerZoom!.factor = Math.round((options.readerZoom!.factor + 0.25) * 100) / 100; },
@@ -135,7 +144,16 @@ async function mountReadyChat(options: {
       },
     } : {}),
   });
-  return { root, presenter, scale, client };
+  await Promise.resolve();
+  return { root, presenter, scale, client, emit: (event: ReaderEvent) => onEvent(event), updateRuntime: (patch: Partial<RuntimeSnapshot>) => { Object.assign(runtime, patch); onRuntime(structuredClone(runtime)); } };
+}
+
+function applySidebarStyles(root: HTMLElement): CSSStyleDeclaration {
+  const doc = root.ownerDocument;
+  const style = doc.createElement('style');
+  style.textContent = readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/sidebar.css'), 'utf8');
+  doc.head.append(style);
+  return doc.defaultView!.getComputedStyle(root);
 }
 
 it('uses an in-pane sidebar without impersonating the reader toolbar or adding a close control', () => {
@@ -160,14 +178,15 @@ it('keeps attachment identity on the root but puts paper context outside the mes
   const thread = root.querySelector('[data-zcr-messages]')!;
   expect(thread.textContent).not.toContain('Library 1');
   expect(thread.textContent).not.toContain('Attachment PDFONE01');
-  expect(thread.querySelector('[data-zcr-citation]')).toBeNull();
+  expect(thread.querySelectorAll('[data-zcr-citation]')).toHaveLength(1);
   expect(thread.textContent).not.toContain(citationA.title);
   const chrome = root.querySelector('.zcr-chrome');
-  const pill = root.querySelector('[data-zcr-chat-pill]');
-  expect(chrome?.contains(pill)).toBe(true);
-  expect(thread.contains(pill)).toBe(false);
-  expect(pill?.textContent).toContain('Synthetic Paper A');
-  expect(pill?.textContent).not.toContain(`Library ${paperA.libraryId}`);
+  const title = root.querySelector('[data-zcr-current-title]');
+  expect(chrome?.contains(title)).toBe(true);
+  expect(thread.contains(title)).toBe(false);
+  expect(title?.textContent).toBe('Synthetic Paper A');
+  expect(title?.getAttribute('title')).toBe('Synthetic Paper A');
+  expect(title?.textContent).not.toContain(`Library ${paperA.libraryId}`);
   const back = root.querySelector('[data-zcr-action="open-citation"]');
   expect(back?.getAttribute('aria-label')).toBe('Return to source');
   expect(back?.textContent?.trim()).toBe('');
@@ -180,6 +199,105 @@ it('keeps pending citations in the composer, not in the transcript', async () =>
   const remove = root.querySelector('[data-zcr-draft-citations] [data-zcr-action="remove-citation"]');
   expect(remove?.getAttribute('aria-label')).toBe('Remove');
   expect(remove?.textContent?.trim()).toBe('');
+});
+it('shows persisted source selections and generated image outputs with a usable preview', async () => {
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const { root } = await mountReadyChat({ messages: [
+    { id: 'source', requestId: 'r1', role: 'user', phase: null, settings, text: 'Explain', citations: [citationA], status: 'completed', images: [imageA] },
+    { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
+  ] });
+  expect(root.querySelector('[data-zcr-message="source"] [data-zcr-citation]')).not.toBeNull();
+  expect(root.querySelectorAll('[data-zcr-message] [data-zcr-image]')).toHaveLength(2);
+  const preview = root.querySelector<HTMLButtonElement>('[data-zcr-message="image-output"] [data-zcr-action="preview-image"]')!;
+  preview.click();
+  expect(root.querySelector('[data-zcr-image-preview]')?.hasAttribute('hidden')).toBe(false);
+});
+it('opens a cited answer page through the frozen document navigation and leaves external links to openLink', async () => {
+  const openDocumentPage = vi.fn(() => Promise.resolve());
+  const openLink = vi.fn();
+  const { root } = await mountReadyChat({
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What is defined?', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
+        text: `Definition [page](https://zcr.invalid/source/${documentA.id}/1) and [external](https://example.com/paper).` },
+    ],
+    openDocumentPage, openLink,
+  });
+  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const [cited, external] = [...text.querySelectorAll<HTMLAnchorElement>('a')];
+  expect(cited?.hasAttribute('href')).toBe(false);
+  expect(cited?.textContent).toBe('p. ii');
+  expect(cited?.dataset.zcrSource).toBe(documentA.id);
+  expect(cited?.dataset.zcrPage).toBe('1');
+  cited?.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: documentA.paper, revision: documentA.revision }, 1));
+  expect(openLink).not.toHaveBeenCalled();
+  external?.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
+  expect(openLink).toHaveBeenCalledWith('https://example.com/paper');
+});
+
+it('resolves a citation into a persisted referenced document with that reference paper scope', async () => {
+  const referenced = { ...documentSummary(documentA), id: 'bbbbbbbb-0000-4000-8000-000000000002' };
+  const openDocumentPage = vi.fn(() => Promise.resolve());
+  const { root } = await mountReadyChat({
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Compare the supplement.', citations: [], status: 'completed',
+        references: [{ id: 'ref-1', kind: 'article', label: 'Supplement', paper: paperB, capturedAt: 'now' }],
+        referenceDocuments: [{ referenceId: 'ref-1', document: referenced }] },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
+        text: `See [page](https://zcr.invalid/source/${referenced.id}/0).` },
+    ],
+    openDocumentPage,
+  });
+  const anchor = root.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
+  expect(anchor.textContent).toBe('p. i');
+  anchor.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: paperB, revision: documentA.revision }, 0));
+});
+
+it('degrades an unresolvable answer citation without launching it externally', async () => {
+  const openLink = vi.fn();
+  const { root } = await mountReadyChat({
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Q', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
+        text: '[page](https://zcr.invalid/source/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/0)' },
+    ],
+    openLink,
+  });
+  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const anchor = text.querySelector<HTMLAnchorElement>('a')!;
+  expect(anchor.hasAttribute('href')).toBe(false);
+  expect(anchor.getAttribute('aria-disabled')).toBe('true');
+  expect(text.textContent).toContain('This source is not available in this answer.');
+  const event = new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true });
+  anchor.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(openLink).not.toHaveBeenCalled();
+});
+
+it('surfaces a constant failure when the frozen source cannot be opened, without launching it', async () => {
+  const openDocumentPage = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
+  const openLink = vi.fn();
+  const { root } = await mountReadyChat({
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Q', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
+        text: `[page](https://zcr.invalid/source/${documentA.id}/0)` },
+    ],
+    openDocumentPage, openLink,
+  });
+  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  text.querySelector<HTMLAnchorElement>('a')!.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(text.querySelector('[role="status"]')?.textContent).toBe('The source could not be opened. Reopen the PDF and try again.'));
+  expect(text.textContent).not.toContain('/private');
+  expect(openLink).not.toHaveBeenCalled();
+});
+
+it('keeps the offline composer editable while preventing model submission', async () => {
+  const f = await mountReadyChat(); f.updateRuntime({ runtime: 'error', error: 'Connection ended' });
+  expect(f.root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.disabled).toBe(false);
+  expect(f.root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')?.disabled).toBe(true);
 });
 
 it('does not show copy-diagnostics in the default sidebar', async () => {
@@ -196,7 +314,7 @@ it('opens a custom model popover instead of three always-visible selects', async
   expect(picker).toBeTruthy();
   expect(picker?.getAttribute('aria-expanded')).toBe('false');
   expect(menu?.hasAttribute('hidden')).toBe(true);
-  expect(root.querySelectorAll('select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
   expect(root.querySelectorAll('[data-zcr-composer] > select, .zcr-settings > select')).toHaveLength(0);
   (picker as HTMLButtonElement).click();
   expect(picker?.getAttribute('aria-expanded')).toBe('true');
@@ -210,7 +328,7 @@ it('opens a custom model popover instead of three always-visible selects', async
   expect(fast?.getAttribute('aria-label')).toMatch(/Fast/u);
   expect(menu?.querySelector('[data-zcr-picker-section="model"]')?.textContent).toMatch(/Model/u);
   expect(menu?.querySelectorAll('[data-zcr-setting="model"]').length).toBeGreaterThan(0);
-  expect(root.querySelectorAll('select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
 });
 
 it('defaults visible sidebar copy to English', async () => {
@@ -226,7 +344,7 @@ it('defaults visible sidebar copy to English', async () => {
   expect(root.textContent).not.toMatch(/对话历史|新对话|输入问题|发送|复制诊断|返回原文|开发预览/u);
 });
 
-it('does not show a generic PDF filename as a hero title', async () => {
+it('keeps an attachment fallback title available in compact chrome without a hero title', async () => {
   const conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'PDF', settings,
     activeRequestId: null, messages: [], lastSeq: 0, createdAt: 'now', updatedAt: 'now',
@@ -257,9 +375,10 @@ it('does not show a generic PDF filename as a hero title', async () => {
   const body = doc.createElement('div');
   const root = renderReaderShell(body, { title: 'PDF', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   mountChatView(root, presenter);
-  const pill = root.querySelector('[data-zcr-chat-pill]');
-  expect(pill?.textContent).not.toMatch(/\bPDF\b/u);
-  expect(pill?.textContent).toMatch(/Untitled/u);
+  const title = root.querySelector('[data-zcr-current-title]');
+  expect(title?.textContent).toBe('PDF');
+  expect(title?.getAttribute('title')).toBe('PDF');
+  expect(root.querySelector('h1, h2')).toBeNull();
 });
 
 it('keeps title, New chat, and history inside the sidebar pane below the native toolbar', async () => {
@@ -268,11 +387,11 @@ it('keeps title, New chat, and history inside the sidebar pane below the native 
   const historyButton = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]');
   const panel = root.querySelector<HTMLElement>('[data-zcr-history]');
   const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]');
-  const pill = root.querySelector('[data-zcr-chat-pill]');
+  const title = root.querySelector('[data-zcr-current-title]');
   expect(root.contains(chrome)).toBe(true);
   expect(chrome?.contains(historyButton)).toBe(true);
   expect(chrome?.contains(fresh)).toBe(true);
-  expect(chrome?.contains(pill)).toBe(true);
+  expect(chrome?.contains(title)).toBe(true);
   expect(root.style.getPropertyValue('--zcr-reader-toolbar-height')).toBe('');
   expect(historyButton?.hidden).toBe(false);
   expect(fresh?.hidden).toBe(false);
@@ -280,7 +399,7 @@ it('keeps title, New chat, and history inside the sidebar pane below the native 
   expect(fresh?.textContent?.trim()).toBe('');
   expect(chrome?.textContent).not.toMatch(/New chat/u);
   expect(panel?.tagName).not.toBe('SELECT');
-  expect(root.querySelectorAll('select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
   expect(panel?.hasAttribute('hidden')).toBe(true);
   historyButton?.click();
   expect(panel?.hasAttribute('hidden')).toBe(false);
@@ -306,7 +425,7 @@ it('changes the actual full-PDF default from Settings without submitting a quest
   const settings = root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]');
   const menu = root.querySelector<HTMLElement>('[data-zcr-settings-menu]');
   expect(chrome?.contains(settings)).toBe(true);
-  expect(settings?.getAttribute('aria-label')).toBe('Settings');
+  expect(settings?.getAttribute('aria-label')).toBe('More');
   expect(settings?.textContent?.trim()).toBe('');
   expect(menu?.hasAttribute('hidden')).toBe(true);
   settings?.click();
@@ -328,28 +447,21 @@ it('shows local PDF coverage and extraction gaps without claiming transmission o
   expect(root.querySelector('[data-zcr-context-disclosure]')?.textContent).toMatch(/PDF text/iu);
 });
 
-it('floats the composer as an inset card over the transcript without a hairline split', async () => {
-  const { root } = await mountReadyChat({ messages: [] });
-  const draft = root.querySelector('.zcr-draft');
-  const composer = root.querySelector('[data-zcr-composer]');
-  expect(draft?.classList.contains('zcr-draft-float')).toBe(true);
-  expect(composer).toBeTruthy();
+it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  applySidebarStyles(root);
+  const draft = root.querySelector<HTMLElement>('.zcr-draft')!;
+  const transcript = root.querySelector<HTMLElement>('.zcr-transcript')!;
+  const messages = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  const styles = (node: HTMLElement) => root.ownerDocument.defaultView!.getComputedStyle(node);
+  expect(['absolute', 'fixed']).not.toContain(styles(draft).position);
+  expect(draft.previousElementSibling).toBe(transcript);
+  expect(styles(messages).paddingBottom).toBe('12px');
+  presenter.addCitation(citationA);
+  presenter.addImage(imageA);
+  expect(draft.querySelectorAll('[data-zcr-citation], [data-zcr-draft-image]')).toHaveLength(2);
+  expect(['absolute', 'fixed']).not.toContain(styles(draft).position);
   expect(root.querySelector('[data-zcr-action="attach"]')).toBeNull();
-  const css = readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/sidebar.css'), 'utf8');
-  expect(css).toMatch(/\.zcr-draft-float[\s\S]{0,200}position:\s*absolute/u);
-  expect(css).toMatch(/\.zcr-composer[\s\S]{0,240}box-shadow/u);
-  expect(css).not.toMatch(/\.zcr-draft[^{]*\{[^}]*border-top/u);
-  expect(css).not.toMatch(/\.zcr-composer[^{]*\{[^}]*border:\s*1px/u);
-  expect(css).not.toMatch(/\.zcr-chrome[^{]*\{[^}]*border-bottom/u);
-  expect(css).not.toMatch(/#split-view[^{]*\.zcr-dock[^{]*\{[^}]*border-inline-start/u);
-  expect(css).toMatch(/--zcr-dock-inset:\s*16px/u);
-  expect(css).toMatch(/--zcr-toolbar-button-size:\s*28px/u);
-  expect(css).toMatch(/--zcr-toolbar-icon-size:\s*20px/u);
-  expect(css).toMatch(/\.zcr-send[^{]*\{[^}]*background:\s*#111/u);
-  expect(css).toMatch(/\.zcr-send[^{]*\{[^}]*color:\s*#fff/u);
-  expect(css).not.toMatch(/\.zcr-composer:focus-within[^{]*\{[^}]*AccentColor/u);
-  expect(css).toMatch(/\.zcr-composer:focus-within[^{]*\{[^}]*outline:\s*none/u);
-  expect(css).toMatch(/\.zcr-input:focus(?:-visible)?[^{]*\{[^}]*outline:\s*none/u);
 });
 
 it('keeps the composer as one card: textarea, footer chip, and circular arrow send', async () => {
@@ -370,7 +482,7 @@ it('keeps the composer as one card: textarea, footer chip, and circular arrow se
   expect(send?.classList.contains('zcr-send')).toBe(true);
   expect(root.querySelector('.zcr-footnote')).toBeNull();
   expect(root.getAttribute('aria-label')).toBe('Codex');
-  expect(root.querySelectorAll('select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
 });
 
 it('uses icon-only New chat, Copy, and history-row delete actions with accessible names', async () => {
@@ -502,7 +614,7 @@ it('pastes a clipboard screenshot into the composer and includes it on send', as
   }]);
 });
 
-it('pastes a screenshot from the reader chrome document when Gecko items are empty', async () => {
+it('pastes a screenshot from the reader chrome document only while the composer owns focus', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const png = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
   const view = root.ownerDocument.defaultView as unknown as Window & {
@@ -541,6 +653,7 @@ it('pastes a screenshot from the reader chrome document when Gecko items are emp
   Object.defineProperty(event, 'clipboardData', {
     value: { items: [], files: [], types: [] },
   });
+  root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.focus();
   root.ownerDocument.dispatchEvent(event);
   await vi.waitFor(() => {
     expect(presenter.snapshot().draft.images).toHaveLength(1);
@@ -581,7 +694,7 @@ it('keeps dock type at 1 when the open PDF zooms', async () => {
   expect(root.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
 });
 
-it('shows chats as side-by-side pills with an X that deletes after confirm', async () => {
+it('shows one current title and deletes only the current chat from More after confirmation', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
     activeRequestId: null, messages: [], lastSeq: 0,
@@ -591,27 +704,119 @@ it('shows chats as side-by-side pills with an X that deletes after confirm', asy
     ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
+  const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
   const { root, presenter } = await mountReadyChat({
     messages: [],
     conversations: [first, second],
-    confirm: () => true,
+    confirm,
   });
   const chrome = root.querySelector('.zcr-chrome')!;
-  const pills = [...root.querySelectorAll<HTMLElement>('[data-zcr-chat-pill]')];
-  expect(pills).toHaveLength(2);
-  expect(chrome.contains(pills[0]!)).toBe(true);
-  expect(pills[0]?.dataset.zcrConversationId).toBe(first.id);
-  expect(pills[1]?.dataset.zcrConversationId).toBe(second.id);
-  expect(pills.some(pill => pill.hasAttribute('data-current'))).toBe(true);
-  expect(root.querySelectorAll('.zcr-chrome [data-zcr-action="delete-conversation"]')).toHaveLength(2);
-  const css = readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/sidebar.css'), 'utf8');
-  expect(css).toMatch(/\.zcr-chat-pills[\s\S]{0,160}flex-direction:\s*row|\.zcr-chat-pills[\s\S]{0,160}display:\s*flex/u);
-  const drop = root.querySelector<HTMLButtonElement>(`[data-zcr-chat-pill][data-zcr-conversation-id="${second.id}"] [data-zcr-action="delete-conversation"]`);
-  drop?.click();
+  expect(chrome.querySelectorAll('[data-zcr-current-title]')).toHaveLength(1);
+  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
+  expect(chrome.querySelectorAll('[data-zcr-chat-pill], [data-zcr-action="delete-conversation"]')).toHaveLength(0);
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
+  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A · 2');
+  const more = root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]')!;
+  more.click();
+  const drop = root.querySelector<HTMLButtonElement>('[data-zcr-settings-menu] [data-zcr-action="delete-conversation"]')!;
+  expect(drop).toBeTruthy();
+  drop.click();
+  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
+  if (root.querySelector<HTMLElement>('[data-zcr-settings-menu]')!.hidden) more.click();
+  drop.click();
   await vi.waitFor(() => {
     expect(presenter.snapshot().conversations.map(entry => entry.id)).not.toContain(second.id);
   });
-  expect(root.querySelectorAll('[data-zcr-chat-pill]')).toHaveLength(1);
+  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(first.id);
+  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
+});
+
+it('keeps local history reachable when the account signs out and the runtime becomes unavailable', async () => {
+  const { root, updateRuntime } = await mountReadyChat();
+  updateRuntime({ account: { state: 'signedOut' }, models: [], runtime: 'error' });
+  const history = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!;
+  expect(history.hidden).toBe(false);
+  expect(history.disabled).toBe(false);
+  history.click();
+  expect(root.querySelector<HTMLElement>('[data-zcr-history]')!.hidden).toBe(false);
+  expect(root.querySelector('[data-zcr-history]')!.textContent).toContain('Synthetic Paper A');
+});
+
+it('preserves existing message nodes and a persistent unread indicator across unrelated updates', async () => {
+  const { root, presenter, emit } = await mountReadyChat();
+  const messages = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  const originalMessage = messages.querySelector('[data-zcr-message="m1"]')!;
+  const originalText = originalMessage.querySelector('[data-zcr-text]')!;
+  Object.defineProperties(messages, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
+  messages.scrollTop = 100;
+  const event = { conversationId: presenter.snapshot().conversation!.id, requestId: 'r2', messageId: 'm2', at: '2026-09-12T00:00:00Z' };
+  emit({ ...event, seq: 1, type: 'delta', text: 'A new answer' });
+  expect(messages.querySelector('[data-zcr-message="m1"]')).toBe(originalMessage);
+  expect(originalMessage.querySelector('[data-zcr-text]')).toBe(originalText);
+  expect(messages.scrollTop).toBe(100);
+  const unread = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-content"]')!;
+  expect(unread.hidden).toBe(false);
+  presenter.addImage(imageA);
+  presenter.setSettings({ ...settings, effort: 'low' });
+  expect(unread.hidden).toBe(false);
+  expect(messages.scrollTop).toBe(100);
+  unread.click();
+  expect(unread.hidden).toBe(true);
+  expect(messages.scrollTop).toBe(messages.scrollHeight);
+  messages.scrollTop = 100;
+  emit({ ...event, seq: 2, type: 'delta', text: ' with more detail' });
+  expect(unread.hidden).toBe(false);
+  messages.scrollTop = 800;
+  messages.dispatchEvent(new root.ownerDocument.defaultView!.Event('scroll'));
+  expect(unread.hidden).toBe(true);
+});
+
+it('does not intercept a screenshot pasted into another editor in the reader document', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const view = root.ownerDocument.defaultView!;
+  const outside = root.ownerDocument.createElement('textarea');
+  root.ownerDocument.body.append(outside); outside.focus();
+  const png = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
+  const file = new view.File([png], 'screenshot.png', { type: 'image/png' });
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], files: [file] } });
+  outside.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  await Promise.resolve();
+  expect(presenter.snapshot().draft.images).toHaveLength(0);
+});
+
+it('navigates model options with the keyboard, returns focus, and ignores Escape during IME composition', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const view = root.ownerDocument.defaultView!;
+  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-picker]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const send = vi.spyOn(presenter, 'send');
+  picker.focus();
+  picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(false);
+  expect(menu.contains(root.ownerDocument.activeElement)).toBe(true);
+  const first = root.ownerDocument.activeElement;
+  first!.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  expect(root.ownerDocument.activeElement).not.toBe(first);
+  root.ownerDocument.activeElement!.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(true);
+  expect(root.ownerDocument.activeElement).toBe(picker);
+  picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="low"]')!.click();
+  expect(presenter.snapshot().draft.settings?.effort).toBe('low');
+  expect(menu.hidden).toBe(true);
+  expect(root.ownerDocument.activeElement).toBe(picker);
+  expect(send).not.toHaveBeenCalled();
+  picker.click(); input.focus();
+  input.dispatchEvent(new view.Event('compositionstart', { bubbles: true }));
+  input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(false);
+  input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  expect(send).not.toHaveBeenCalled();
 });
 
 it('closes the model popover on Escape and click outside', async () => {

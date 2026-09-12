@@ -11,8 +11,8 @@ export interface ReaderZoomHost {
   readZoom(): number;
 }
 
-export function clampChatTextScale(): number {
-  return CHAT_TEXT_SCALE_DEFAULT;
+export function clampChatTextScale(value = CHAT_TEXT_SCALE_DEFAULT): number {
+  return Number.isFinite(value) ? Math.min(CHAT_TEXT_SCALE_MAX, Math.max(CHAT_TEXT_SCALE_MIN, value)) : CHAT_TEXT_SCALE_DEFAULT;
 }
 
 /** PDF zoom must never drive dock type. Window resize / page-width stay at the UI default. */
@@ -20,9 +20,10 @@ export function chatScaleFromReaderZoom(): number {
   return CHAT_TEXT_SCALE_DEFAULT;
 }
 
-export function applyChatTextScale(root: HTMLElement): number {
-  root.style.setProperty(CHAT_TEXT_SCALE_VAR, String(CHAT_TEXT_SCALE_DEFAULT));
-  return CHAT_TEXT_SCALE_DEFAULT;
+export function applyChatTextScale(root: HTMLElement, value?: number): number {
+  const scale = clampChatTextScale(value ?? (Number(root.style.getPropertyValue(CHAT_TEXT_SCALE_VAR)) || CHAT_TEXT_SCALE_DEFAULT));
+  root.style.setProperty(CHAT_TEXT_SCALE_VAR, String(scale));
+  return scale;
 }
 
 function zoomAction(event: KeyboardEvent): 'in' | 'out' | 'reset' | null {

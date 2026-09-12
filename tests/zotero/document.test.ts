@@ -8,8 +8,7 @@ function source(texts = ['Definition: x = 3.', 'Theorem: y = x + 7.']): { source
     getPageData: ({ pageIndex }) => { calls.push(pageIndex + 1); if (texts[pageIndex] === 'FAIL') return Promise.reject(new Error('/private/path must not leak')); return Promise.resolve({ partial: false, chars: [{ c: texts[pageIndex]!, paragraphBreakAfter: true }] }); },
   } } };
 }
-let ids = 0;
-const cache = (maxEntries = 3) => new ReaderDocumentCache({ uuid: () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`, yield: async () => {}, maxEntries });
+const cache = (maxEntries = 3) => new ReaderDocumentCache({ yield: async () => {}, maxEntries });
 it('extracts every page with page labels, retains real gaps and never caches failed pages as complete text', async () => {
   const f = source(['Definition: x.', '', 'FAIL']);
   const progress: number[] = [];
@@ -29,6 +28,15 @@ it('reuses a bounded cache, separates attachments and invalidates replaced files
   f.source.revision = { ...f.source.revision, modifiedAt: 2000 };
   expect((await read()).id).not.toBe(original.id); expect(f.calls).toHaveLength(4);
   await read(paperB); await read(); expect(f.calls).toHaveLength(8);
+});
+it('keeps the source identity after cache eviction and changes it for a different extraction result', async () => {
+  const f = source(); const c = cache(1); const signal = new AbortController().signal;
+  const original = await c.read(paperA, f.source, signal, () => {});
+  await c.read(paperB, f.source, signal, () => {});
+  const reread = await c.read(paperA, f.source, signal, () => {});
+  expect(reread.id).toBe(original.id);
+  c.clear(); const partial = source(['Definition: x = 3.', 'FAIL']);
+  expect((await c.read(paperA, partial.source, signal, () => {})).id).not.toBe(original.id);
 });
 it('explicit page ranges do not claim that omitted pages were extracted', async () => {
   const f = source();

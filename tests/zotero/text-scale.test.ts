@@ -5,6 +5,7 @@ import {
   CHAT_TEXT_SCALE_PREF,
   applyChatTextScale,
   bindUnifiedReaderZoom,
+  clampChatTextScale,
 } from '../../packages/zotero/src/chat/text-scale.ts';
 
 function documentOf(): Document {
@@ -49,4 +50,14 @@ it('forwards Command zoom from the dock to the reader without changing dock type
   expect(doc.dispatchEvent(key({ key: '0', code: 'Digit0', metaKey: true }))).toBe(false);
   expect(reader.resets).toBe(1);
   expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+});
+it('keeps an explicit chat scale independent of native PDF zoom and clamps invalid preferences', () => {
+  const doc = documentOf(); const sidebar = doc.createElement('section'); doc.body.append(sidebar);
+  expect(applyChatTextScale(sidebar, 1.5)).toBe(1.5);
+  let zoomed = 0;
+  const unbind = bindUnifiedReaderZoom(sidebar, { zoomIn: () => { zoomed++; }, zoomOut: () => {}, zoomReset: () => {}, readZoom: () => 4 }, [doc]);
+  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent('keydown', { key: '+', metaKey: true, cancelable: true }));
+  expect(zoomed).toBe(1); expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1.5');
+  expect(clampChatTextScale(Number.NaN)).toBe(1); expect(clampChatTextScale(99)).toBe(3); expect(clampChatTextScale(0.1)).toBe(0.5);
+  unbind();
 });

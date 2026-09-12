@@ -85,3 +85,10 @@ it('explicit retry after a process failure replaces the dead client without subm
   expect(await supervisor.ensureStarted()).toBe(replacement); expect(f.dependencies.process.spawn).toHaveBeenCalledTimes(2);
   expect(f.client.close).toHaveBeenCalledTimes(1); expect(replacement.send).not.toHaveBeenCalled(); await supervisor.stop();
 });
+it('retains ownership after a failed shutdown and retries termination on the next stop', async () => {
+  const f = fixture(); const supervisor = new RuntimeSupervisor(f.dependencies); await supervisor.ensureStarted();
+  let attempts = 0; f.process.terminate = vi.fn(() => ++attempts === 1 ? Promise.reject(new Error('Native stop failed')) : Promise.resolve());
+  await expect(supervisor.stop()).rejects.toThrow('Unable to stop');
+  await expect(supervisor.stop()).resolves.toBeUndefined();
+  expect(f.process.terminate).toHaveBeenCalledTimes(2); expect(f.dependencies.process.spawn).toHaveBeenCalledTimes(1);
+});

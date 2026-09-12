@@ -38,7 +38,8 @@ describe('release dry-run without publishing', () => {
     expect(result.githubRelease).toBeNull();
     expect(result.published).toBe(false);
     const plan = JSON.parse(await readFile(output, 'utf8')) as Record<string, unknown>;
-    expect(plan.tag).toBe('v0.3.0a1-dev');
+    const manifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/zotero/manifest.json'), 'utf8')) as { version: string };
+    expect(plan.tag).toBe(`v${manifest.version}-dev`);
     expect(plan.githubRelease).toBeNull();
     expect(JSON.stringify(plan)).not.toMatch(/github\.com\/.+\/releases/i);
   });
