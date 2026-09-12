@@ -1,6 +1,6 @@
 # 开发、测试与发行
 
-从仓库根目录执行，Node **24.x** / npm **11.6.1**，版本以 package.json、.nvmrc、manifest 为准。macOS Apple Silicon 是当前宿主验证目标。编辑器可用 Cursor + 官方 Codex 扩展；同一文件单一写入负责人，不自动提交或推送。
+从仓库根目录执行，Node **24.x** / npm **11.6.1**，版本以 package.json、.nvmrc、manifest 为准。macOS Apple Silicon 是当前宿主验证目标。编辑器可用 Cursor + 官方 Codex 扩展；同一文件单一写入负责人，用户已授权本地小提交；推送和公开发布需另行授权。
 
 ## 从 checkout 构建
 
@@ -79,3 +79,5 @@ node scripts/prepare-host-test.mjs --context
 发行前必须：干净 checkout 重建 → verify:artifacts 与 SHA256SUMS → 正式许可/平台资产审查 → 从真实下载包在无 Node/CLI 机器原生安装登录提问 → 下载隔离属性/签名、更新保留任务与数据、回退/损坏、多窗口、压力及隐私验收。未提交工作树副本重建不叫 clean HEAD；本地 XPI 安装不叫公开下载验收。Intel/Windows/Linux 未经同等宿主验证不能进支持表。
 
 `npm run release:dry-run` 仅可审查本地计划。push、公开上传、Release 和付费新服务必须另有明确授权；本次授权止于可逆本地开发/测试。
+
+开发分支使用 `codex/` 前缀。当前全量迭代在 `codex/product-agent-v0.4`，整合基线为 `38b047c`。先观察失败回归再实现，功能通过后以小提交记录；文档只维护当前四份权威职责。删除旧文档前保存有效约束/证据，历史以 Git 为准。人工模型测试优先使用目录中实际存在的 Spark（用户先前偏好）；不得为测试静默改产品默认模型或推理档位。

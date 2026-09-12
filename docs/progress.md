@@ -1,6 +1,8 @@
 # 当前进度与验收
 
-2026-09-12。本轮交付：**A 的可授权清理与基础修复，以及 B 的本地全文/会话/请求链路开发预览**。A 中受保护的未提交旧资料仍保留；B 的真实模型回答与完整预算/恢复门槛未通过，C–F 尚未交付。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
+2026-09-12 全量迭代进行中，分支 `codex/product-agent-v0.4`。先前整合状态已重新验证 325 tests 并保存为本地基线 `38b047c`；用户已授权继续全量实施、小提交及彻底删除旧文档/实现。下列旧迭代证据仍保留其原始范围。
+
+前轮交付：**A 的可授权清理与基础修复，以及 B 的本地全文/会话/请求链路开发预览**。A 中受保护的未提交旧资料仍保留；B 的真实模型回答与完整预算/恢复门槛未通过，C–F 尚未交付。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
 
 ## 实际交付路径
 
@@ -51,12 +53,11 @@ Apple M5 / 16 GB / macOS 26.6.2 (25G83)，Zotero 9.0.6，1000×600 CSS px，DPR 
 
 保留特殊项：runtime/manifest.ts 与 runtime/licenses、bootstrap/manifest/locale、合成 PDF fixture、S 名称宿主驱动、故障恢复/构建/发行测试和 CI 均仍有维护用途；host-types 是必要类型边界。`.zcr-dev` profile/data/account 和既有私有内容不作为临时垃圾删除。
 
-受保护而暂留：`docs/project-decisions.md` 改为短入口；已有未提交修改的 `docs/qa/s3.md`、`s4.md` 和未跟踪的 `feedback-2026-09-10-mvp-ui.md` 保留原内容，仅加历史标识和修复链接。新规格不引用其旧行为为要求。未获得这些未提交内容的删除授权，**不能宣称全仓冗余已清理干净**。
+已按本次新授权删除剩余 `project-decisions.md` 短入口和 qa/ 下三份旧资料；有效 UI/安全要求在规格和架构中，旧证据在本页，原文可从基线提交 `38b047c` 查看。
 
 ```text
 README.md / AGENTS.md / CONTRIBUTING.md / CHANGELOG.md
 docs/  zotero-codex-user-flow.md  module-design.md  development.md  progress.md
-       project-decisions.md（短入口）  qa/（3 份受保护资料）
 packages/  contracts/  core/  zotero/
 runtime/   manifest.ts  licenses/
 scripts/   tests/   .github/
@@ -87,11 +88,25 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | --- | --- | --- |
 | S1 外壳/启停 | 2026-09-08 的早期 shell 开发包，27/27；不继承到新 dock | 当前样式、模型或发行 |
 | S2 原生 runtime | 2026-09-09 XPI；12/12 executed，3 NOT RUN；真实 turn 被 typed quota 拒绝 | 流式非空回答/停止、完整点击登录/取消/网络失败 |
-| S3 选区 | 旧包，23/23 executed，2 NOT RUN；Ask 草稿/来源/A-B恢复 | 真实回答/追问停止；详见保留的 s3 |
-| S4 交互 | `c1b898ac4e35de49a65c96ce56e08db6949071b62618ff7c34a01672b942a0db`，40/40，5 NOT RUN，无模型发送 | 新 in-reader dock，主题/800px/底边/发送组合；详见保留的 s4 |
+| S3 选区 | 旧包，23/23 executed，2 NOT RUN；Ask 草稿/来源/A-B恢复 | 真实回答/追问停止；原始记录见 Git 基线 |
+| S4 交互 | `c1b898ac4e35de49a65c96ce56e08db6949071b62618ff7c34a01672b942a0db`，40/40，5 NOT RUN，无模型发送 | 新 in-reader dock，主题/800px/底边/发送组合；原始记录见 Git 基线 |
 | S5 恢复 | 同 c1b898ac 包，17/17，1 NOT RUN；自有进程 TERM 与 fixture uncertain 隔离 | 在途 turn resume、掉电持久性 |
 | S6 virgin/升级 | 同 a1 包：15/15；a1→a2→a1：19/19（各2 NOT RUN），a2 `445f47243bb4108a0fc73c0e7c179702cc5c1068bbefb38b96d2a2a43c7b0309` | 公开下载/Gatekeeper、无 Node、真实模型、新 schema 回退 |
 | 工作树副本重建 | 旧工作树 npm ci 后复现 c1b898ac；release dry-run githubRelease=null | 不等于 clean git HEAD，不等于发布；项目 LICENSE 待作者决定 |
 | 2026-09-10 UI | 最新工作树曾 306 tests /39 files，XPI 196f0dc… 装到专用 acceptance profile，无 driver | 当时 screenshot paste、新样式真实目视、图像模型发送未完成；基线今日发现跨日失败 |
 
 历史限额“约 2026-09-15”只是旧报告，当前账户可用性未读取，不作为当前结果。真实库不用于验证，不读旧认证或模型日志来猜状态。
+
+## 当前全量执行计划
+
+- [x] 重新验证整合基线，建立功能分支与本地 checkpoint；收敛剩余旧文档。
+- [ ] B：稳定文件/来源身份，预算与长文覆盖，草稿/滚动持久化、全局历史/改名/分支/排队、离线历史；代码在 contracts、core/sessions、reader/document、chat/presenter。
+- [ ] C：实现可持久化 WorkspaceStore（偏好/研究配置/skills/引用）、统一 @文章/@chat 与 /skill；冻结本轮版本和权限。
+- [ ] UI：单标题/四区、自然布局 composer、统一候选键盘交互、稳定消息 DOM、主题/字号/焦点/图像预览；view.ts/sidebar.css 单一写入负责人。
+- [ ] D：原生 quote 定位适配＋持久化任务 ledger；模型产生候选，用户批量审批后真实标注，冲突检测与撤销。
+- [ ] E：明确 DOI/链接/列表的未保存元数据预览、查重、指定 collection、合法 PDF 验证、可靠报告和恢复；原生适配与 ledger 共用。
+- [ ] 多模态/能力：准确模型目录/usage/上下文预算来源；文件/拖拽/截图/多图；核验固定 runtime 图像生成能力并实际接通或报告真实阻塞。
+- [ ] F：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、版本升级回退；Node-free/公开下载仅在对应条件成立时验收。
+- [ ] 收尾：版本升级、小提交、干净 checkout 重建、产物/隐私/文档链接复查，只留必要测试/运行资产和当前证据。
+
+UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
