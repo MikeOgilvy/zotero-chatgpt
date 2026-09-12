@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,7 +12,8 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const script = path.join(repositoryRoot, 'scripts/install-lifecycle.mjs');
 const subjectID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
-const packagedXpi = path.join(repositoryRoot, 'dist/zotero-codex-reader-0.3.0a1-dev.xpi');
+const currentManifest = JSON.parse(readFileSync(path.join(repositoryRoot, 'packages/zotero/manifest.json'), 'utf8')) as { version: string };
+const packagedXpi = path.join(repositoryRoot, `dist/zotero-codex-reader-${currentManifest.version}-dev.xpi`);
 const packagedXpiPresent = existsSync(packagedXpi);
 const temporaryDirectories: string[] = [];
 let fixtureSource = '';
@@ -291,7 +292,7 @@ describe('packaged development XPI without rebuilding', () => {
     const root = await makeTemporaryDirectory();
     const result = await run(['prepare', '--root', path.join(root, 'profile'), '--data', path.join(root, 'data'), '--xpi', packagedXpi]);
     expect(result.ok).toBe(true);
-    expect(result.version).toBe('0.3.0a1');
+    expect(result.version).toBe(currentManifest.version);
     expect(result.records).toEqual([]);
     const expected = (await readFile(path.join(repositoryRoot, 'dist/SHA256SUMS'), 'utf8')).slice(0, 64);
     expect(result.sha256).toBe(expected);
