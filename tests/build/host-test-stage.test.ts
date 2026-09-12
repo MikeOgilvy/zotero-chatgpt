@@ -32,6 +32,17 @@ describe('dedicated host-test stage selection', () => {
   it('can stage the context profile for human use without auto-running tests', async () => {
     await expect(select(['--context', '--acceptance'])).resolves.toEqual({ stage: 'context', driver: null, installDriver: false });
   });
+  it('requires the dedicated context driver for live model checks', async () => {
+    await expect(select(['--live'])).rejects.toThrow();
+    await expect(select(['--context', '--acceptance', '--live'])).rejects.toThrow();
+    await expect(select(['--context', '--live'])).resolves.toMatchObject({ stage: 'context', installDriver: true });
+  });
+  it('isolates native task checks and forbids combining their automatic driver with live or manual mode', async () => {
+    await expect(select(['--context', '--native'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/native-agent-driver.ts' });
+    await expect(select(['--native'])).rejects.toThrow();
+    await expect(select(['--context', '--native', '--live'])).rejects.toThrow();
+    await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();
+  });
   it('defaults to the S1 driver', async () => {
     await expect(select([])).resolves.toEqual({ stage: 's1', driver: 'tests/host/driver.js', installDriver: true });
   });

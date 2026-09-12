@@ -12,7 +12,7 @@ const requiredLicenses = [
   'content/assets/licenses/markdown-it.LICENSE',
   'content/assets/licenses/dompurify.LICENSE',
 ];
-const requiredFiles = ['bootstrap.js', 'content/zcr.js', 'manifest.json', ...requiredLicenses];
+const requiredFiles = ['bootstrap.js', 'content/zcr.js', 'manifest.json', 'LICENSE', ...requiredLicenses];
 const forbiddenNames = ['auth.json', 'auth.json.enc', 'credentials.json', '.zcr-dev'];
 const textSuffixes = ['.js', '.json', '.css', '.html', '.ftl', '.md', '.txt', '.toml'];
 
@@ -142,7 +142,8 @@ async function main() {
       console.log(`Verified XPI (${result.files.length} files${result.checksums.checked ? `; SHA256SUMS ${result.checksums.digest}` : ''})`);
     return;
   }
-  const defaultXpi = path.join(repositoryRoot, 'dist/zotero-codex-reader-0.3.0a1-dev.xpi');
+  const manifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/zotero/manifest.json'), 'utf8'));
+  const defaultXpi = path.join(repositoryRoot, `dist/zotero-codex-reader-${manifest.version}-dev.xpi`);
   const defaultSource = path.join(repositoryRoot, 'build/dev');
   try {
     if ((await stat(defaultXpi)).isFile()) {

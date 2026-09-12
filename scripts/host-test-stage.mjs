@@ -20,6 +20,8 @@ const EXCLUSIVE = ['s2', 's3', 's4', 's5', 's6', 'context'];
 export function selectHostStage(argv) {
   const acceptance = argv.includes('--acceptance');
   const selected = EXCLUSIVE.filter(name => argv.includes(`--${name}`));
+  if (argv.includes('--native') && (acceptance || argv.includes('--live') || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--native requires only the dedicated --context driver');
+  if (argv.includes('--live') && (acceptance || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--live requires only the dedicated --context driver');
   const manualContext = acceptance && selected.length === 1 && selected[0] === 'context';
   if (acceptance && ((selected.length > 0 && !manualContext) || argv.includes('--login'))) {
     throw new Error('Pass --acceptance without --s2, --s3, --s4, --s5, --s6, or --login');
@@ -27,7 +29,7 @@ export function selectHostStage(argv) {
   if (selected.length > 1) throw new Error('Pass only one of --s2, --s3, --s4, --s5, --s6');
   if (acceptance) return { stage: manualContext ? 'context' : 'acceptance', driver: null, installDriver: false };
   const stage = selected[0] ?? 's1';
-  return { stage, driver: HOST_DRIVERS[stage], installDriver: true };
+  return { stage, driver: argv.includes('--native') ? 'tests/host/native-agent-driver.ts' : HOST_DRIVERS[stage], installDriver: true };
 }
 
 /**

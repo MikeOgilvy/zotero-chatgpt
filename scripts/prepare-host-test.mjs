@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { ZipFile } from 'yazl';
+import { build } from 'esbuild';
 import { createFixturePdf } from '../tests/fixtures/create-pdf.mjs';
 import { selectHostStage, selectHostTree } from './host-test-stage.mjs';
 import { assertIsolatedRoot, assertNotRegularProfile, readXpiIdentity, requireLocalXpi } from './install-lifecycle.mjs';
@@ -90,6 +91,8 @@ await mkdir(join(profile, 'extensions'), { recursive: true });
 await mkdir(dataDir, { recursive: true });
 await mkdir(join(pdfPath, '..'), { recursive: true });
 await writeFile(pdfPath, createFixturePdf());
+const supplementPdfPath = tree.stage === 'context' ? join(pdfPath, '..', 'supplement.pdf') : undefined;
+if (supplementPdfPath) await writeFile(supplementPdfPath, createFixturePdf('ZCR synthetic supplement fixture', 'BAMBOO-19'));
 const prefs = {
   'extensions.zotero.useDataDir': true,
   'extensions.zotero.dataDir': dataDir,
@@ -118,6 +121,7 @@ if (twoVersion) {
   await copyFile(rollbackXpi, rollbackInProfile);
 }
 const config = {
+  live: argumentsList.includes('--live'),
   interactiveLogin,
   subjectID,
   subjectVersion: twoVersion ? rollbackIdentity.version : subjectManifest.version,
@@ -128,6 +132,7 @@ const config = {
   installedXpi: join(profile, 'extensions', `${subjectID}.xpi`),
   reportPath,
   pdfPath,
+  ...(supplementPdfPath ? { supplementPdfPath } : {}),
   ...(twoVersion ? {
     upgradeXpi: upgradeInProfile,
     rollbackXpi: rollbackInProfile,
@@ -146,7 +151,8 @@ if (installDriver) {
   };
   const bootstrap = `function startup(data) {
   Zotero.initializationPromise.then(async () => {
-    const scope = { Zotero, ChromeUtils, PathUtils, IOUtils, TextDecoder, Cu: Components.utils };
+    Components.utils.importGlobalProperties(['AbortController', 'atob', 'btoa']);
+    const scope = { Zotero, ChromeUtils, PathUtils, IOUtils, Services, TextDecoder, TextEncoder, crypto, URL, fetch, AbortController, atob, btoa, setTimeout, clearTimeout, Cu: Components.utils, Cc: Components.classes, Ci: Components.interfaces };
     Services.scriptloader.loadSubScript(data.rootURI + "driver.js", scope);
     await scope.runHostSmoke(${JSON.stringify(config)});
   }).catch(error => Zotero.logError(error));
@@ -155,11 +161,13 @@ function shutdown() {}
 function install() {}
 function uninstall() {}
 `;
+  const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZcrHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
+  const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZcrHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
   const zip = new ZipFile();
   for (const [name, contents] of [
     ['manifest.json', JSON.stringify(manifest)],
     ['bootstrap.js', bootstrap],
-    ['driver.js', await readFile(join(root, driverPath))],
+    ['driver.js', driverContents],
   ]) zip.addBuffer(Buffer.isBuffer(contents) ? contents : Buffer.from(contents), name);
   const written = pipeline(zip.outputStream, createWriteStream(driverOut));
   zip.end();

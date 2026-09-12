@@ -63,7 +63,7 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
     mkdir(path.join(sourceDirectory, "docs"), { recursive: true }),
   ]);
 
-  const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
+  const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json", "LICENSE"];
   await cp(path.join(builtExtension, "content/runtime"), path.join(sourceDirectory, "content/runtime"), { recursive: true });
   await Promise.all(
     requiredFiles.map(async (file) => {
@@ -96,6 +96,7 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
     "content/runtime/licenses/WEZTERM-LICENSE",
     "locale/en-US/example.ftl",
     "manifest.json",
+    "LICENSE",
   ];
   const expectedFiles = new Map(
     await Promise.all(

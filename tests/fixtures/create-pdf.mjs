@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const escapePdf = (text) => text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
 
-export function createFixturePdf(title = 'ZCR synthetic reading fixture') {
+export function createFixturePdf(title = 'ZCR synthetic reading fixture', verificationToken = 'ORCHID-72') {
   const streams = [0, 1].map((page) => {
     const lines = [
       title,
       `Synthetic page ${page + 1} - development testing only`,
+      page === 1 ? `Hidden verification token on this page: ${verificationToken}.` : 'Calibration constant for this synthetic example: 37.',
       '',
       'A prior describes beliefs before a measurement is observed.',
       'A likelihood describes the measurement under each candidate state.',

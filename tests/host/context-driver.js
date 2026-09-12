@@ -1,5 +1,5 @@
 /* global Zotero, ChromeUtils, PathUtils, IOUtils */
-// Native PDF text/coverage, attachment identity and UI performance. Never sends a model request.
+// Native PDF text/coverage, attachment identity and UI performance. Only --live sends bounded synthetic requests.
 async function runHostSmoke(config) {
   const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash } };
   const delay = ms => Zotero.Promise.delay(ms);
@@ -25,7 +25,7 @@ async function runHostSmoke(config) {
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
     const queue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue: queue });
     const a = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Main synthetic PDF', saveOptions: { notifierQueue: queue } });
-    const b = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Supplement synthetic PDF', saveOptions: { notifierQueue: queue } });
+    const b = await Zotero.Attachments.importFromFile({ file: config.supplementPdfPath ?? config.pdfPath, parentItemID: parent.id, title: 'Supplement synthetic PDF', saveOptions: { notifierQueue: queue } });
     await Promise.all([parent.loadAllData(), a.loadAllData(), b.loadAllData()]); await Zotero.Notifier.commit(queue);
     win.Zotero_Tabs.closeAll(); await until(() => Zotero.Reader._readers.length === 0, 'close-only-this-profile-tabs');
     Zotero.Prefs.set('extensions.zcr.automaticPdfText', true, true);
@@ -53,7 +53,7 @@ async function runHostSmoke(config) {
     await until(() => context().querySelectorAll('pre').length === 2, 'source-preview');
     await check('text-from-both-pages-and-page-labels', context().textContent.includes('Synthetic page 1') && context().textContent.includes('Synthetic page 2') && rows[0].textContent.includes('p. i') && rows[1].textContent.includes('p. 1'));
     await until(() => panel()?.dataset.zcrRuntime === 'ready' && panel()?.dataset.zcrConversation, 'native-runtime-and-local-conversation', 60000);
-    await check('signed-out-local-conversation', panel().dataset.zcrAuth === 'signedOut');
+    await check('local-conversation-independent-of-login', ['signedIn', 'signedOut'].includes(panel().dataset.zcrAuth));
     const conversationA = panel().dataset.zcrConversation;
     input().value = 'Unsent synthetic question about the current PDF'; input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
     const pdf = () => reader()._internalReader._primaryView._iframeWindow.PDFViewerApplication;
@@ -98,7 +98,45 @@ async function runHostSmoke(config) {
     const records = PathUtils.join(config.profile, 'zotero-codex-reader', 'v1', 'records', 'conversations');
     let requests = 0;
     for (const file of await IOUtils.getChildren(records)) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
-    await check('no-model-request-recorded', requests === 0);
+    if (!config.live) await check('no-model-request-in-this-conversation', JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`))).requests.length === 0);
+    if (config.live) {
+      report.notRun = report.notRun.filter(name => !['real-model-answer', 'in-flight-model-stop'].includes(name));
+      await check('live-account-signed-in', panel().dataset.zcrAuth === 'signedIn');
+      const picker = panel().querySelector('[data-zcr-picker]'); picker.click();
+      const spark = [...panel().querySelectorAll('[data-zcr-setting="model"]')].find(node => /spark/i.test(node.textContent));
+      if (spark) spark.click();
+      if (picker.getAttribute('aria-expanded') === 'true') picker.click();
+      report.liveModel = picker.textContent;
+      input().value = 'What is the hidden verification token on the second physical page of this synthetic PDF, and what combines prior beliefs and likelihood? Cite the page label. Answer briefly.';
+      input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
+      const started = win.performance.now(); panel().querySelector('[data-zcr-action="send"]').click();
+      await until(() => panel()?.dataset.zcrGenerating === 'true', 'live-request-accepted');
+      await until(() => panel()?.dataset.zcrGenerating === 'false', 'live-answer-terminal', 120000);
+      const record = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
+      const last = record.requests.at(-1);
+      const answer = record.messages.filter(m => m.role === 'assistant' && m.requestId === last?.requestId).map(m => m.text).join('\n');
+      report.live = { state: last?.state, latencyMs: win.performance.now() - started, answer: answer.slice(0, 1600), inputDocumentId: record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.document?.id };
+      await check('real-model-answer', last?.state === 'completed' && answer.trim().length > 0, { state: last?.state, characters: answer.length });
+      await check('model-used-second-page-source', answer.includes('ORCHID-72') && !answer.includes('BAMBOO-19'));
+      await check('full-document-in-live-request', Boolean(report.live.inputDocumentId));
+      input().value = 'Explain this synthetic example in depth with ten worked examples and detailed reasoning for a beginner.';
+      input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
+      panel().querySelector('[data-zcr-action="send"]').click();
+      await until(() => panel()?.dataset.zcrGenerating === 'true', 'live-followup-started');
+      await until(() => panel()?.querySelector('[data-status="streaming"] [data-zcr-text]')?.textContent?.length > 0 || panel()?.dataset.zcrGenerating === 'false', 'live-followup-output', 120000);
+      const stop = panel().querySelector('[data-zcr-action="stop"]'); if (panel().dataset.zcrGenerating === 'true') stop.click();
+      await until(() => panel()?.dataset.zcrGenerating === 'false', 'live-followup-stopped', 30000);
+      const afterStop = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
+      const terminal = afterStop.requests.at(-1)?.state;
+      report.live.stopState = terminal;
+      await check('live-stop-confirmed-or-completion-race', terminal === 'cancelled' || terminal === 'completed', { state: terminal });
+      if (terminal === 'completed') report.notRun.push('stop-during-stream-completed-too-fast');
+    }
+    try {
+      const doc = pdf().pdfDocument;
+      const data = typeof doc.getData === 'function' ? await doc.getData() : null;
+      report.loadedDocumentBytes = { supported: !!data?.byteLength, bytes: data?.byteLength ?? 0 };
+    } catch { report.loadedDocumentBytes = { supported: false }; }
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
   } catch (error) { report.status = 'failed'; report.failedStep = step; report.finishedAt = new Date().toISOString(); await save(); Zotero.logError(error); }
 }

@@ -46,6 +46,8 @@ export async function copyStaticFiles(outputDirectory) {
   await Promise.all([
     cp(path.join(zoteroPackage, "manifest.json"), path.join(outputDirectory, "manifest.json")),
     cp(path.join(zoteroPackage, "bootstrap.js"), path.join(outputDirectory, "bootstrap.js")),
+    // The project's own MIT license must ship with the extension; it is not a third-party asset.
+    cp(path.join(repositoryRoot, "LICENSE"), path.join(outputDirectory, "LICENSE")),
     copyIfPresent(
       path.join(zoteroPackage, "assets"),
       path.join(outputDirectory, "content/assets"),

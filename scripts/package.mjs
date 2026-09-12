@@ -9,7 +9,7 @@ import { PINNED_RUNTIME, validatePackagedRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
-const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json"];
+const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json", "LICENSE"];
 const requiredManifestFields = [
   ["name"],
   ["version"],
@@ -60,6 +60,7 @@ function isRuntimeFile(filePath, runtimeManifest) {
   return (
     filePath === "bootstrap.js" ||
     filePath === "manifest.json" ||
+    filePath === "LICENSE" ||
     filePath.startsWith("content/") ||
     filePath.startsWith("locale/") ||
     filePath.startsWith("locales/")
