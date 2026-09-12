@@ -79,6 +79,7 @@ export class ConversationPresenter {
   private connecting: Promise<ReaderClient> | null = null;
   private unobserve: (() => void) | null = null;
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeClient: ReaderClient | null = null;
   private buffered: ReaderEvent[] = [];
   private syncing = false;
   private syncGeneration = 0;
@@ -544,7 +545,7 @@ export class ConversationPresenter {
     try { return await waitPreparation(prepared, signal); }
     finally { if (job) { job.consumers--; if (signal.aborted && job.consumers === 0) job.controller.abort(); } }
   }
-  async retry(): Promise<void> { this.client = null; if (this.state.persistence === 'error') this.localFlight = null; await this.activate(); }
+  async retry(): Promise<void> { this.client = null; this.unobserve?.(); this.unobserve = null; if (this.state.persistence === 'error') this.localFlight = null; await this.activate(); }
   private connect(): Promise<ReaderClient> {
     if (this.client && this.client.snapshot().runtime === 'ready') return Promise.resolve(this.client);
     if (this.connecting) return this.connecting;
@@ -614,7 +615,11 @@ export class ConversationPresenter {
   }
   // ---- events -----------------------------------------------------------------------------------
   private listen(client: ReaderClient): void {
-    if (this.unsubscribe) return;
+    // A restarted runtime yields a new per-instance listener set; the old subscription would
+    // never deliver another event, so re-subscribe whenever the client identity changes.
+    if (this.unsubscribe && this.unsubscribeClient === client) return;
+    this.unsubscribe?.(); this.unsubscribe = null;
+    this.unsubscribeClient = client;
     this.unsubscribe = client.subscribe(event => {
       if (!this.state.conversation || event.conversationId !== this.state.conversation.id) {
         const known = this.state.conversations.some(conversation => conversation.id === event.conversationId) || this.drafts.has(event.conversationId);
@@ -963,6 +968,6 @@ export class ConversationPresenter {
     if (this.disposed) return;
     this.stageDraft(); void this.flushDraft().catch(() => {}); this.disposed = true;
     this.documentJob?.controller.abort(); for (const controller of this.submissions.values()) controller.abort();
-    this.renders.clear(); this.unsubscribe?.(); this.unsubscribe = null; this.unobserve?.(); this.unobserve = null; this.untasks?.(); this.unreading?.();
+    this.renders.clear(); this.unsubscribe?.(); this.unsubscribe = null; this.unsubscribeClient = null; this.unobserve?.(); this.unobserve = null; this.untasks?.(); this.unreading?.();
   }
 }

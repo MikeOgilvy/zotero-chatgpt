@@ -74,6 +74,16 @@ describe('conversation presenter', () => {
     f.presenter.setQuestion('Both windows'); expect(first).toBe('Both windows'); expect(second).toBe('Both windows');
     unbindFirst(); f.presenter.setQuestion('Second window'); expect(second).toBe('Second window'); expect(first).toBe('Both windows'); unbindSecond();
   });
+  it('re-subscribes to a replaced runtime client after retry and applies its events', async () => {
+    const f = fixture(); await f.presenter.activate(); await f.presenter.explain(citationA); const requestId = f.sent[0]!.requestId;
+    const replacement = new Set<(event: ReaderEvent) => void>();
+    const second: ReaderClient = { ...f.client, subscribe: listener => { replacement.add(listener); return () => { replacement.delete(listener); }; } };
+    f.services.ensureStarted.mockImplementation(() => Promise.resolve(second));
+    await f.presenter.retry();
+    expect(replacement.size).toBe(1);
+    for (const listener of replacement) listener({ type: 'delta', requestId, messageId: 'a1', text: '重连', seq: 50, conversationId: f.conversation().id, at: 'now' });
+    expect(f.last().conversation?.messages.at(-1)?.text).toBe('重连');
+  });
   it('keeps propagating state and never throws when one bound view fails', async () => {
     const f = fixture(); await f.presenter.activate();
     let seen = ''; let calls = 0;
