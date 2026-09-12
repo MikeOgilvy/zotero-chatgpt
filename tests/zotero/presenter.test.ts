@@ -74,6 +74,14 @@ describe('conversation presenter', () => {
     f.presenter.setQuestion('Both windows'); expect(first).toBe('Both windows'); expect(second).toBe('Both windows');
     unbindFirst(); f.presenter.setQuestion('Second window'); expect(second).toBe('Second window'); expect(first).toBe('Both windows'); unbindSecond();
   });
+  it('keeps propagating state and never throws when one bound view fails', async () => {
+    const f = fixture(); await f.presenter.activate();
+    let seen = ''; let calls = 0;
+    f.presenter.bind(() => { if (++calls > 1) throw new Error('/private/library/file.pdf'); });
+    f.presenter.bind(s => { seen = s.draft.question; });
+    expect(() => f.presenter.setQuestion('仍然更新')).not.toThrow();
+    expect(seen).toBe('仍然更新');
+  });
   it('freezes the question, settings and conversation while PDF preparation is pending, and keeps newer input', async () => {
     const f = fixture(); let resolve!: (value: typeof documentA) => void;
     const prepare = () => new Promise<typeof documentA>(r => { resolve = r; });

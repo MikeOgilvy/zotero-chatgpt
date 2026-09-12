@@ -71,6 +71,32 @@ it('opens once with Enter, suppresses alternate navigation and treats labels as 
   expect(external).not.toHaveBeenCalled(); expect(open).toHaveBeenCalledOnce(); expect(anchor.hasAttribute('href')).toBe(false);
 });
 
+it('links a resolvable citation when the host sandbox does not expose structuredClone', () => {
+  vi.stubGlobal('structuredClone', undefined);
+  try {
+    const { fragment, container } = setup(`[page](${href()})`);
+    const open = vi.fn<(_source: AnswerSource, _page: number) => Promise<void>>().mockResolvedValue(undefined);
+    linkAnswerSources(fragment, [source()], open); container.append(fragment);
+    const anchor = container.querySelector('a')!;
+    expect(container.textContent).toContain('p. iv');
+    expect(anchor.dataset.zcrSource).toBe(sourceId);
+    expect(anchor.dataset.zcrPage).toBe('0');
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('degrades one malformed source without blanking the rest of the answer', () => {
+  const { fragment, container } = setup(`[bad](${href(sourceId, 0)}) [good](${href(otherId, 7)})`);
+  const good = { ...source(), id: otherId };
+  const hostile = { ...source(), get pages(): AnswerSource['pages'] { throw new Error('/private/library/file.pdf'); } };
+  const open = vi.fn().mockResolvedValue(undefined);
+  expect(() => linkAnswerSources(fragment, [hostile, good], open)).not.toThrow();
+  container.append(fragment);
+  const anchors = [...container.querySelectorAll<HTMLAnchorElement>('a')];
+  expect(anchors[1]?.dataset.zcrSource).toBe(otherId);
+  expect(anchors[0]?.hasAttribute('href')).toBe(false);
+  expect(container.textContent).not.toContain('/private');
+});
+
 it('deduplicates a pending open and safely rebinds a reused fragment against the current source list', async () => {
   const { fragment, click } = setup(`[page](${href()})`); let finish!: () => void; const open = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
   linkAnswerSources(fragment, [source()], open); const anchor = fragment.querySelector('a')!; click(anchor); click(anchor); expect(open).toHaveBeenCalledOnce();

@@ -122,10 +122,14 @@ export class ConversationPresenter {
   focusInput(): void { this.update({ focusToken: this.state.focusToken + 1 }); }
   snapshot(): PresenterState { return clone(this.state); }
   /** Views are read-only; they must not mutate this object. External callers still use snapshot(). */
-  private notify(): void { for (const render of this.renders) render(this.state); }
+  private render(render: (state: PresenterState) => void): void {
+    // A failing view must never stop propagation to the other views (or abort the caller).
+    try { render(this.state); } catch { /* the view reports its own failure; state stays authoritative */ }
+  }
+  private notify(): void { for (const render of this.renders) this.render(render); }
   /** A view binds to receive state; unbinding releases only the view, never the runtime or the draft. */
   bind(render: (state: PresenterState) => void): () => void {
-    this.renders.add(render); render(this.state);
+    this.renders.add(render); this.render(render);
     if (this.client && this.state.conversation) void this.sync();
     return () => { this.renders.delete(render); if (!this.renders.size) void this.flushDraft().catch(() => {}); };
   }
