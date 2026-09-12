@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ReaderError, type Citation, type SendInput } from '../../packages/contracts/src/index.ts';
 import { validateCitation, validatePaperScope, validateSendInput, validateSettings } from '../../packages/contracts/src/validation.ts';
-import { citationA, makeSend, paperA } from './factories.ts';
+import { citationA, imageA, makeSend, paperA } from './factories.ts';
 
 function expectCode(run: () => unknown, code: string) {
   try { run(); } catch (error) { expect(error).toBeInstanceOf(ReaderError); expect((error as ReaderError).code).toBe(code); return; }
@@ -48,6 +48,10 @@ describe('send input', () => {
     const explain = makeSend(); expect(validateSendInput(explain)).toEqual(explain);
     const ask = makeSend({ action: 'ask', question: '这里的先验指什么？' }); expect(validateSendInput(ask)).toEqual(ask);
     const followUp = makeSend({ action: 'ask', question: '继续', citations: [] }); expect(validateSendInput(followUp).citations).toEqual([]);
+    const withPaper = makeSend({ action: 'ask', question: '这篇在讲什么？', citations: [], paper: { title: 'Synthetic Paper A', authors: ['Ada'] } });
+    expect(validateSendInput(withPaper).paper).toEqual({ title: 'Synthetic Paper A', authors: ['Ada'] });
+    const withImage = makeSend({ action: 'ask', question: '图里是什么？', citations: [], images: [imageA] });
+    expect(validateSendInput(withImage).images).toEqual([imageA]);
   });
   it.each<[string, Partial<SendInput> | Record<string, unknown>, string]>([
     ['explain without citations', { citations: [] }, 'INVALID_REQUEST'],
@@ -57,6 +61,9 @@ describe('send input', () => {
     ['unknown action', { action: 'summarize' }, 'INVALID_REQUEST'],
     ['unknown field', { threadId: 'upstream' }, 'INVALID_REQUEST'],
     ['non-uuid request id', { requestId: 'r1' }, 'INVALID_REQUEST'],
+    ['remote image url', { action: 'ask', question: '图', images: [{ ...imageA, dataUrl: 'https://example.com/x.png' }] }, 'INVALID_REQUEST'],
+    ['pdf bytes as image', { action: 'ask', question: '图', images: [{ ...imageA, mime: 'application/pdf', name: 'paper.pdf', dataUrl: 'data:application/pdf;base64,JVBERi0=' }] }, 'INVALID_REQUEST'],
+    ['five images', { action: 'ask', question: '图', images: Array.from({ length: 5 }, (_, i) => ({ ...imageA, id: `6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b2${i}` })) }, 'INVALID_REQUEST'],
   ])('rejects %s', (_label, overrides, code) => { expectCode(() => validateSendInput({ ...makeSend(), ...overrides }), code); });
   it('rejects a serialized payload above 256 KiB before any field is trusted', () => {
     // Every field is within its own code-point limit; four-byte code points push the UTF-8 size past the cap.

@@ -1,0 +1,114 @@
+import { expect, it } from 'vitest';
+import {
+  clipboardHasImage, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
+  imagesFromClipboardItems, imagesFromGeckoClipboard, resolveGeckoClipboardAccess,
+} from '../../packages/zotero/src/chat/pick-images.ts';
+import { TINY_PNG_DATA_URL } from '../contracts/factories.ts';
+
+const PNG_ID = '6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b20';
+const PNG = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
+const PNG_ATTACHMENT = {
+  id: PNG_ID,
+  name: 'screenshot.png',
+  mime: 'image/png' as const,
+  dataUrl: TINY_PNG_DATA_URL,
+};
+
+function fakeGeckoClipboard(flavors: Record<string, Uint8Array>) {
+  const available = Object.keys(flavors);
+  const Ci = {
+    nsIClipboard: { kGlobalClipboard: 1 },
+    nsITransferable: {},
+    nsIInputStream: {},
+    nsIBinaryInputStream: {},
+    nsISupportsCString: {},
+  };
+  const transferable = {
+    flavors: [] as string[],
+    init() { /* load context unused in tests */ },
+    addDataFlavor(flavor: string) { this.flavors.push(flavor); },
+    getTransferData(flavor: string, data: { value?: unknown }) {
+      const bytes = flavors[flavor];
+      if (!bytes) throw new Error('flavor missing');
+      data.value = {
+        data: String.fromCharCode(...bytes),
+      };
+    },
+  };
+  return {
+    Cc: {
+      '@mozilla.org/widget/transferable;1': { createInstance: () => transferable },
+      '@mozilla.org/widget/clipboard;1': {
+        getService: () => ({
+          kGlobalClipboard: 1,
+          hasDataMatchingFlavors: (list: string[]) => list.some(flavor => available.includes(flavor)),
+          getData: () => undefined,
+        }),
+      },
+    },
+    Ci,
+    Services: {
+      clipboard: {
+        kGlobalClipboard: 1,
+        hasDataMatchingFlavors: (list: string[]) => list.some(flavor => available.includes(flavor)),
+        getData: (trans: typeof transferable) => {
+          trans.getTransferData = transferable.getTransferData.bind(transferable);
+        },
+      },
+    },
+  };
+}
+
+it('accepts PNG bytes as a data-URL image attachment and rejects a PDF', () => {
+  const image = imageFromBytes({
+    id: PNG_ID,
+    name: 'figure.png',
+    bytes: PNG,
+  });
+  expect(image).toEqual({
+    id: PNG_ID,
+    name: 'figure.png',
+    mime: 'image/png',
+    dataUrl: TINY_PNG_DATA_URL,
+  });
+  const pdf = new TextEncoder().encode('%PDF-1.4 fake');
+  expect(imageFromBytes({ id: '6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b21', name: 'paper.pdf', bytes: pdf })).toBeUndefined();
+});
+
+it('turns clipboard image items into the same data-URL attachment', async () => {
+  const file = new File([PNG], 'screenshot.png', { type: 'image/png' });
+  const images = await imagesFromClipboardItems([
+    { kind: 'file', type: 'image/png', getAsFile: () => file },
+    { kind: 'string', type: 'text/plain', getAsFile: () => null },
+  ], () => PNG_ID);
+  expect(images).toEqual([PNG_ATTACHMENT]);
+});
+
+it('treats a macOS public.png flavor as a screenshot even when items are empty', async () => {
+  expect(clipboardHasImage({ items: [], files: [], types: ['public.png'] })).toBe(true);
+  expect(clipboardHasImage({ items: [], files: [], types: ['text/plain'] })).toBe(false);
+  const file = new File([PNG], 'screenshot.png', { type: 'image/png' });
+  const images = await imagesFromClipboard({
+    items: [],
+    files: [],
+    types: ['public.png'],
+    mozItemCount: 1,
+    mozTypesAt: () => ['public.png'],
+    mozGetDataAt: (type: string) => type === 'public.png' ? file : null,
+  }, () => PNG_ID);
+  expect(images).toEqual([PNG_ATTACHMENT]);
+});
+
+it('reads an nsIClipboard transferable image when DOM items are empty', async () => {
+  const host = fakeGeckoClipboard({ 'image/png': PNG, 'public.png': PNG });
+  expect(geckoClipboardHasImage(host)).toBe(true);
+  expect(geckoClipboardHasImage(fakeGeckoClipboard({ 'text/unicode': new Uint8Array([65]) }))).toBe(false);
+  const images = await imagesFromGeckoClipboard(host, () => PNG_ID);
+  expect(images).toEqual([PNG_ATTACHMENT]);
+});
+
+it('resolves Gecko clipboard access from a parent chrome window', () => {
+  const host = fakeGeckoClipboard({ 'image/png': PNG });
+  const iframe = { parent: host } as unknown as Window;
+  expect(resolveGeckoClipboardAccess(iframe)).toBe(host);
+});

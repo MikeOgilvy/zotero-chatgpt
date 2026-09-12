@@ -16,6 +16,8 @@ export interface StoragePort {
   read(relativePath: string): Promise<Uint8Array | null>;
   writeAtomic(relativePath: string, bytes: Uint8Array): Promise<void>;
   append(relativePath: string, bytes: Uint8Array): Promise<void>;
+  /** Deletes a stored relative path. Must fail rather than overwrite the file with empty bytes. */
+  remove(relativePath: string): Promise<void>;
 }
 export interface AccountStatus {
   state: 'signedOut' | 'signingIn' | 'signedIn' | 'expired';
@@ -71,6 +73,7 @@ export interface ReaderClient {
   send(input: SendInput): Promise<SendReceipt>;
   request(conversationId: string, requestId: string): Promise<SendReceipt>;
   cancel(conversationId: string, requestId: string): Promise<SendReceipt>;
+  deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation>;
   diagnostics(conversationId: string): Promise<ShareableDiagnostics>;
   subscribe(listener: (event: ReaderEvent) => void): () => void;
   close(): Promise<void>;

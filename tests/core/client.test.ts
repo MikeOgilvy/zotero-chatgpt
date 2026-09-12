@@ -5,6 +5,7 @@ import type { ReaderEvent, SendInput } from '../../packages/contracts/src/index.
 import { MemoryStorage, flush } from './doubles.ts';
 import { server, model, methods, threadResponse, turn, configResponse } from './fixtures.ts';
 import { citationA, citationB, paperA, paperB, settings } from '../contracts/factories.ts';
+import { documentA } from '../contracts/document-fixture.ts';
 const clients: ReaderClient[] = [];
 let ids = 0;
 afterEach(async () => { for (const c of clients.splice(0)) await c.close().catch(() => undefined); vi.useRealTimers(); });
@@ -28,6 +29,55 @@ const complete = (p: ReturnType<typeof server>['p'], threadId: string, turnId: s
   p.emit({ method: 'item/completed', params: { threadId, turnId, item: { type: 'agentMessage', id: itemId, text, phase: 'final_answer', memoryCitation: null } } });
   p.emit({ method: 'turn/completed', params: { threadId, turn: { ...turn, id: turnId, status: 'completed', items: [{ type: 'agentMessage', id: itemId, text, phase: 'final_answer' }] } } });
 };
+
+it('opening the same attachment concurrently creates one conversation and no model turn', async () => {
+  const { c, p } = await setup(); await c.refreshAccount();
+  const opened = await Promise.all(Array.from({ length: 4 }, () => c.current(paperA, 'Same title')));
+  expect(new Set(opened.map(c => c.id)).size).toBe(1);
+  expect(await c.list(paperA)).toHaveLength(1);
+  expect(methods(p)).not.toContain('turn/start');
+});
+
+it('opens an attachment conversation before login using the public model catalog but refuses generation', async () => {
+  const { c, p } = await setup(s => s.handlers.set('account/read', () => ({ account: null, requiresOpenaiAuth: true })));
+  await c.refreshAccount();
+  const local = await c.current(paperA, 'Full article title');
+  expect(local.title).toBe('Full article title');
+  await expect(c.send({ requestId: requestId(650), conversationId: local.id, action: 'ask', question: 'x?', citations: [], settings })).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+  expect(methods(p)).not.toContain('turn/start');
+});
+
+it('deleting an active chat refuses without cancelling the turn or losing its journal', async () => {
+  const { c, p, conversation, explain } = await signedIn();
+  await c.send(explain(401)); await tick();
+  await expect(c.deleteConversation(paperA, conversation.id)).rejects.toMatchObject({ code: 'BUSY' });
+  expect((await c.get(conversation.id)).activeRequestId).toBe(requestId(401));
+  expect(methods(p)).not.toContain('turn/interrupt');
+});
+
+it('sends the full current PDF once, reuses it on follow-up, and reloads after compaction', async () => {
+  const { c, p, conversation, explain } = await signedIn();
+  const source = structuredClone(documentA);
+  await c.send({ ...explain(501), document: source }); await tick();
+  const payload = () => p.writes.map(line => JSON.parse(line) as { method: string; params: { input: Array<{ text: string }> } }).filter(line => line.method === 'turn/start').at(-1)!.params.input[0]!.text;
+  expect(payload()).toContain('hidden state'); expect(payload()).toContain('y = x + 7');
+  source.pages[0]!.text = 'MUTATED AFTER SEND';
+  expect(payload()).not.toContain('MUTATED');
+  complete(p, 'thread-1', 'turn-1', 'item-1', 'Synthetic protocol test response'); await tick();
+  await c.send({ ...explain(502), document: documentA }); await tick();
+  expect(payload()).not.toContain('hidden state'); expect(payload()).toContain('reuse');
+  complete(p, 'thread-1', 'turn-2', 'item-2', 'Synthetic protocol test response'); await tick();
+  p.emit({ method: 'thread/compacted', params: { threadId: 'thread-1', turnId: 'turn-1' } }); await tick();
+  await c.send({ ...explain(503), document: documentA }); await tick();
+  expect(payload()).toContain('hidden state');
+  expect((await c.get(conversation.id)).messages[0]).toMatchObject({ document: { id: documentA.id, totalPages: 2 } });
+});
+
+it('rejects PDF context from a different attachment without dispatching', async () => {
+  const { c, p, explain } = await signedIn();
+  await expect(c.send({ ...explain(504), document: { ...documentA, paper: paperB } })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  expect(methods(p)).not.toContain('turn/start');
+});
 
 describe('runtime handshake and policy', () => {
   it('handshakes, validates policy before ready, loads paginated model defaults and exposes immutable snapshots', async () => {
@@ -88,7 +138,7 @@ describe('official login', () => {
   });
   it('signed-out refresh stays usable for login and refuses to create conversations without a catalog', async () => {
     const { c, p } = await setup(s => { s.handlers.set('account/read', () => ({ account: null, requiresOpenaiAuth: true })); s.handlers.set('model/list', () => { throw new Error('must not query'); }); });
-    await c.refreshAccount(); expect(c.snapshot().account.state).toBe('signedOut'); expect(methods(p)).not.toContain('model/list');
+    await c.refreshAccount(); expect(c.snapshot().account.state).toBe('signedOut'); expect(methods(p)).toContain('model/list'); expect(methods(p)).not.toContain('turn/start');
     await expect(c.current(paperA, 'Paper A')).rejects.toMatchObject({ code: 'MODEL_UNAVAILABLE' });
     expect(await c.current(paperA, 'Paper A', settings)).toMatchObject({ settings });
   });

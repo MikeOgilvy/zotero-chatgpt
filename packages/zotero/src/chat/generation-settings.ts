@@ -47,15 +47,41 @@ export function applyComposerChoice(models: readonly ModelOption[], current: Gen
   return { ...current, effort: raw === '' ? null : raw };
 }
 
+/** Prefer a catalog tier named Fast; otherwise the first fast-like id/name (flex/turbo/plus). Never invent a missing id. */
+export function resolveFastTier(model: ModelOption | undefined): { id: string; name: string } | undefined {
+  if (!model) return undefined;
+  const named = model.serviceTiers.find(tier => /^fast$/iu.test(tier.id) || /^fast$/iu.test(tier.name));
+  const match = named ?? model.serviceTiers.find(tier => /fast|flex|turbo|plus/iu.test(`${tier.id} ${tier.name}`));
+  return match ? { id: match.id, name: match.name } : undefined;
+}
+
+function speedOptions(model: ModelOption | undefined): ComposerOption[] {
+  const options: ComposerOption[] = [{ value: '', label: 'Default' }];
+  if (!model) return options;
+  const fast = resolveFastTier(model);
+  if (fast) options.push({ value: fast.id, label: 'Fast' });
+  for (const tier of model.serviceTiers) {
+    if (fast && tier.id === fast.id) continue;
+    options.push({ value: tier.id, label: tier.name || tier.id });
+  }
+  return options;
+}
+
+function speedLabel(model: ModelOption | undefined, tier: string | null): string {
+  if (tier === null) return 'Default';
+  const fast = resolveFastTier(model);
+  if (fast && fast.id === tier) return 'Fast';
+  return model?.serviceTiers.find(option => option.id === tier)?.name ?? tier;
+}
+
 export function composerControls(models: readonly ModelOption[], settings: GenerationSettings | null): ComposerControl[] {
   const selected = settings ? modelOf(models, settings.model) : undefined;
   const modelOptions = models.map(model => ({ value: model.id, label: model.displayName }));
-  const speedOptions: ComposerOption[] = [{ value: '', label: 'Default' }, ...(selected?.serviceTiers.map(tier => ({ value: tier.id, label: tier.name || tier.id })) ?? [])];
-  const effortOptions: ComposerOption[] = [{ value: '', label: 'Default' }, ...(selected?.supportedReasoningEfforts.map(effort => ({ value: effort.id, label: effort.id })) ?? [])];
+  const effortOptions: ComposerOption[] = [{ value: '', label: 'Default' }, ...(selected?.supportedReasoningEfforts.map(effort => ({ value: effort.id, label: effortLabel(effort.id) })) ?? [])];
   const ready = models.length > 0 && !!selected;
   return [
     { field: 'model', label: 'Model', value: settings?.model ?? '', options: modelOptions, disabled: !ready },
-    { field: 'speed', label: 'Speed', value: encode(settings?.serviceTier ?? null), options: ready ? speedOptions : [{ value: '', label: 'Default' }], disabled: !ready || (selected?.serviceTiers.length ?? 0) === 0 },
+    { field: 'speed', label: 'Speed', value: encode(settings?.serviceTier ?? null), options: ready ? speedOptions(selected) : [{ value: '', label: 'Default' }], disabled: !ready || (selected?.serviceTiers.length ?? 0) === 0 },
     { field: 'effort', label: 'Reasoning', value: encode(settings?.effort ?? null), options: ready ? effortOptions : [{ value: '', label: 'Default' }], disabled: !ready || (selected?.supportedReasoningEfforts.length ?? 0) === 0 },
   ];
 }
@@ -63,7 +89,32 @@ export function composerControls(models: readonly ModelOption[], settings: Gener
 export function settingsCaption(settings: GenerationSettings, models: readonly ModelOption[]): string {
   const model = modelOf(models, settings.model);
   const modelName = model?.displayName ?? settings.model;
-  const speed = settings.serviceTier === null ? 'Default' : (model?.serviceTiers.find(tier => tier.id === settings.serviceTier)?.name ?? settings.serviceTier);
+  const speed = speedLabel(model, settings.serviceTier);
   const effort = settings.effort === null ? 'Default' : settings.effort;
   return `${modelName} · ${speed} · ${effort}`;
+}
+
+export function effortLabel(id: string | null): string {
+  if (!id) return 'Default';
+  const key = id.toLowerCase().replace(/[_\s-]/gu, '');
+  if (key === 'none') return 'None';
+  if (key === 'low') return 'Low';
+  if (key === 'medium') return 'Medium';
+  if (key === 'high') return 'High';
+  if (key === 'xhigh' || key === 'extrahigh') return 'Extra High';
+  return id;
+}
+
+export function modelChipLabel(settings: GenerationSettings | null, models: readonly ModelOption[]): string {
+  if (!settings) return 'Model';
+  const model = modelOf(models, settings.model);
+  const parts = [model?.displayName ?? settings.model];
+  if (settings.effort) parts.push(effortLabel(settings.effort));
+  const fast = resolveFastTier(model);
+  if (fast && settings.serviceTier === fast.id) parts.push('Fast');
+  return parts.join(' ');
+}
+
+export function pickerSummary(settings: GenerationSettings | null, models: readonly ModelOption[]): string {
+  return modelChipLabel(settings, models);
 }

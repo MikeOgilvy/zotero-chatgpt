@@ -4,7 +4,7 @@ This is a community Zotero plugin. It is not affiliated with Zotero or OpenAI.
 
 ## Development
 
-Read [AGENTS.md](AGENTS.md), [project decisions](docs/project-decisions.md), and [macOS development](docs/development.md).
+Read [AGENTS.md](AGENTS.md), [architecture](docs/module-design.md), and [macOS development](docs/development.md).
 
 ```sh
 npm ci

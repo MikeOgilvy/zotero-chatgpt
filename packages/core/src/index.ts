@@ -85,14 +85,18 @@ class RuntimeSession implements ReaderClient {
   }
   async refreshAccount(): Promise<void> {
     if (this.closing) throw new Error('Runtime stopped');
+    let accountVerified = false;
     try {
       const response = record(await this.rpc.request('account/read', { refreshToken: false }));
       if (this.closing) return;
       if (typeof response.requiresOpenaiAuth !== 'boolean') throw new Error('Protocol account invalid');
-      if (response.account === null) { this.state.account = { state: 'signedOut' }; this.state.models = []; this.state.error = null; this.emit(); return; }
-      const account = record(response.account);
-      if (account.type !== 'chatgpt') throw new Error('Official ChatGPT login required');
-      this.state.account = { state: 'signedIn', displayLabel: 'ChatGPT' };
+      if (response.account === null) this.state.account = { state: 'signedOut' };
+      else {
+        const account = record(response.account);
+        if (account.type !== 'chatgpt') throw new Error('Official ChatGPT login required');
+        this.state.account = { state: 'signedIn', displayLabel: 'ChatGPT' };
+      }
+      accountVerified = true;
       const models: ModelOption[] = []; const cursors = new Set<string>(); let cursor: string | null = null;
       do {
         const page = record(await this.rpc.request('model/list', { cursor, limit: 100, includeHidden: false }));
@@ -106,7 +110,7 @@ class RuntimeSession implements ReaderClient {
       } while (cursor);
       if (new Set(models.map(m => m.id)).size !== models.length) throw new Error('Protocol duplicate model');
       this.state.models = models; this.state.error = null; this.emit();
-    } catch { if (this.closing) return; this.state.models = []; this.state.error = 'Unable to read the official account or model catalog.'; this.emit(); throw new RuntimeFailure(this.state.error); }
+    } catch { if (this.closing) return; this.state.models = []; this.state.error = 'Unable to read the official account or model catalog.'; this.emit(); if (accountVerified && this.state.account.state === 'signedOut') return; throw new RuntimeFailure(this.state.error); }
   }
   startLogin(): Promise<LoginFlow> {
     if (this.closing || this.state.runtime !== 'ready') return Promise.reject(new Error('Runtime unavailable'));
@@ -182,6 +186,7 @@ class RuntimeSession implements ReaderClient {
   list(paper: PaperScope): Promise<Conversation[]> { return this.service.list(paper); }
   get(conversationId: string): Promise<Conversation> { return this.service.get(conversationId); }
   select(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.select(paper, conversationId); }
+  deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.deleteConversation(paper, conversationId); }
   send(input: SendInput): Promise<SendReceipt> { return this.service.send(input); }
   request(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.request(conversationId, requestId); }
   cancel(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.cancel(conversationId, requestId); }

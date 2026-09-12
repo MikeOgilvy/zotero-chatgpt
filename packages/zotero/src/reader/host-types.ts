@@ -1,17 +1,25 @@
 /** Narrow Zotero 9 host surface, isolated from the layout state machine. Source-checked against 9.0.6. */
 export interface PdfEventBus {
-  on(name: string, callback: (event: { presetValue?: string }) => void): void;
-  off(name: string, callback: (event: { presetValue?: string }) => void): void;
+  on(name: string, callback: (event: { presetValue?: string; scale?: number }) => void): void;
+  off(name: string, callback: (event: { presetValue?: string; scale?: number }) => void): void;
 }
 export interface PdfPageView { div: HTMLElement; viewport: { convertToViewportPoint(x: number, y: number): [number, number] } }
 export interface PdfViewer {
+  currentScale: number;
   currentScaleValue: number | string;
   scrollPageIntoView(options: { pageNumber: number; destArray: [number, { name: string }, number, number, null]; allowNegativeOffset: boolean; ignoreDestinationZoom: boolean }): void;
   _location?: { pageNumber: number; left: number; top: number; scale: string | number };
   _pages?: PdfPageView[];
 }
+export interface PdfApplication {
+  pdfDocument?: import('./document.ts').TextPdf;
+  pdfViewer: PdfViewer;
+  eventBus?: PdfEventBus;
+  zoomIn?(): void;
+  zoomOut?(): void;
+}
 export interface PdfView {
-  _iframeWindow?: { PDFViewerApplication?: { pdfViewer: PdfViewer; eventBus?: PdfEventBus } };
+  _iframeWindow?: { PDFViewerApplication?: PdfApplication };
   _iframe?: HTMLIFrameElement;
   initializedPromise?: Promise<void>;
 }
@@ -35,7 +43,7 @@ export interface ZoteroWindow extends Window {
   Zotero_Tabs?: { selectedID: string };
   ZoteroContextPane?: { collapsed: boolean; context: HTMLElement & { mode: 'item' | 'notes' } };
 }
-export interface HostItem { id?: number; key: string; libraryID: number; parentItemID?: number; getField(name: string): string; getCreators?(): Array<{ firstName?: string; lastName?: string; name?: string }> }
+export interface HostItem { id?: number; key: string; libraryID: number; parentItemID?: number; getField(name: string): string; getCreators?(): Array<{ firstName?: string; lastName?: string; name?: string }>; getFilePathAsync?(): Promise<string | false> }
 export interface ToolbarEvent { reader: HostReader; doc: Document; append(...elements: HTMLElement[]): void }
 export interface SectionEvent { doc: Document; body: HTMLElement; tabType: string; setEnabled(this: void, enabled: boolean): void }
 export interface ZoteroHost {

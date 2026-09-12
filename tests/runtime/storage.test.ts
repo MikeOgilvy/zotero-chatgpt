@@ -43,6 +43,13 @@ describe('private Gecko storage', () => {
     await expect(storage.writeAtomic('state', new Uint8Array([2]))).rejects.toThrow('Storage write failed');
     expect(await storage.read('state')).toEqual(new Uint8Array([1]));
   });
+  it('removes a stored file without replacing it with empty bytes', async () => {
+    const { storage } = await setup();
+    await storage.writeAtomic('conversations/gone.json', new TextEncoder().encode('{"keep":false}'));
+    await storage.remove('conversations/gone.json');
+    expect(await storage.read('conversations/gone.json')).toBeNull();
+    await expect(storage.remove('../escape')).rejects.toThrow();
+  });
   it('creates separate private service directories', async () => {
     const { host, root } = await setup(); const result = await privateDirectory(host, root, 'zotero-codex-reader/v1/account');
     expect(result).toBe(path.join(root, 'zotero-codex-reader/v1/account')); expect((await stat(result)).mode & 0o777).toBe(0o700);

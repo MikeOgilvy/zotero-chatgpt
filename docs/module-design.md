@@ -1,130 +1,60 @@
-# Zotero Codex Reader：模块设计
+# 架构与契约
 
-状态：本文描述完整目标设计；S0–S6 开发预览已在专用宿主落地，S7 仅有 dry-run。当前进度见 [progress](progress.md)。技术路线遵循[项目决策](project-decisions.md)，公共类型以 `packages/contracts` 为准，恢复与 Codex 适配语义见[接口约定](superpowers/plans/2026-09-08-zotero-codex-reader-contracts.md)。
+实际架构：Zotero 9 原生扩展 → TypeScript 核心 → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 仅构建/测试，不存在 Node companion、业务 HTTP 端口或通用供应商层。产品行为只见 [规格](zotero-codex-user-flow.md)，当前缺口只见 [progress](progress.md)。
 
-## 1. 从使用流程划分职责
+## 模块与状态归属
 
-一次“选中文字 → 解释”的操作至少包含六种变化：读取 Zotero 当前选区、改变阅读器布局、组织用户请求、调用 Codex、处理异步回复、保存记录。把这些放在一个侧栏脚本中，会使界面重绘影响请求生命周期，也使每次改 Zotero 版本都要触及聊天逻辑。
+| 位置 | 责任与边界 |
+| --- | --- |
+| `packages/contracts/src` | PaperScope、Citation、SendInput、Conversation、ReaderEvent、端口和运行时校验；类型定义以代码为准 |
+| `packages/core/src/codex` | JSONL、握手、模型目录、账户、固定版本策略、上游错误/历史解析 |
+| `packages/core/src/sessions` | 附件会话、请求幂等/串行化、seq、恢复、存储和诊断白名单 |
+| `packages/zotero/src/reader` | Zotero 内部 API、附件元数据/选区、原生 dock、缩放/来源定位、PDF 读取 |
+| `packages/zotero/src/chat` | Presenter 草稿与消息投影、统一输入、净化 Markdown/KaTeX、焦点/滚动 |
+| `packages/zotero/src/runtime` | 随包文件校验、原生进程/文件适配、插件全局监督器 |
+| `scripts`、`runtime`、`tests` | 可复现构建/安装/发行、固定 runtime/许可、合成 fixture 和分层验证 |
 
-因此采用 **六个运行模块，加一个构建发布模块**。模块是职责划分，不等于七个进程或七个独立包。运行时仍只有 Zotero 插件和它管理的 Codex 子进程；Node 只在开发机上构建与测试。
+core 只依赖 contracts，不依赖 DOM/Zotero/Node。bootstrap/index 只组装。视图只借用 ReaderClient，不得到原始管道、凭据或任意路径。监督器 single-flight，只管理自己启动的进程，确认旧进程退出才启动替代；关闭 sidebar 不停任务。
 
-## 2. 模块总表
+ReaderClient 的当前入口是 `snapshot/observe/refreshAccount/startLogin/cancelLogin/current/newConversation/list/get/select/send/request/cancel/deleteConversation/diagnostics/subscribe/close`，不是早期 status/models/S2Client 草案。
 
-| 模块 | 负责什么 | 调用方使用的接口 | 内部隐藏的复杂性 | 完成后如何验证 |
-| --- | --- | --- | --- | --- |
-| M1 阅读器适配 | 当前附件、选区、工具栏入口、原生停靠、PDF 缩放与引用定位 | `captureSelection`、`openCitation`、`ReaderLayoutController` | 父文献/附件区别、PDF/屏幕坐标、宿主 DOM 和版本差异、原生面板恢复 | 在真实 Zotero 捕获正确选区、按钮位置正确、开关后阅读位置保持 |
-| M2 聊天交互 | 引用卡、草稿、输入框、模型设置、回答显示与焦点 | `ConversationPresenter` 的 activate/addCitation/explain/send/cancel/setSettings | 视图渲染、输入法、草稿保存、滚动策略、公式与主题 | 使用可控 ReaderClient，验证两个选区动作和连续界面状态 |
-| M3 会话与请求 | 附件到会话的归属、请求顺序、去重、事件状态与恢复 | `ReaderClient` 的 current/newConversation/send/request/cancel/get/subscribe | 请求日志、并发排他、seq 去重、uncertain 对账、消息状态迁移 | 正文/补充 PDF 不串话，双击不重复请求，恢复不重新提交 |
-| M4 Codex 通信与账户 | App Server 握手、官方登录、模型能力、轮次与事件转换 | 内部 `CodexClient` | JSONL 拆包、request ID、服务端请求、账户通知、模型/速度/推理映射 | 假进程协议测试，再做真实官方登录、输出与取消 |
-| M5 原生运行管理 | 自带 Codex 校验/提取、原生启动、进程退出、插件全局生命周期 | `RuntimeSupervisor.ensureStarted/stop`，注入 `ProcessPort` | 原生句柄、UTF-8 流、stderr 排空、有限重启、平台路径与运行配置 | 一个插件实例只创建一个自有后台；关闭侧栏不丢回答；停用能收尾 |
-| M6 本地记录 | 对话快照、请求日志、草稿、设置与版本化恢复 | `ConversationRepository`、`StoragePort` | 原子替换、日志顺序、坏尾记录、迁移和路径限制 | 强制退出后内容可恢复；损坏文件保留证据，不覆盖为空 |
-| M7 构建与发布 | 编译、开发加载、合成材料、XPI、CI、升级与许可清单 | npm scripts 和构建资产 | 开发/生产配置区别、固定 runtime 获取、平台包、hash、无个人数据 | 干净 checkout 构建，干净 Zotero 从完整 XPI 安装成功 |
+## 身份、请求与恢复
 
-`ReaderClient` 是 M3 对 UI 的统一接口，其中账户和模型读取委托 M4；UI 不需要知道进程何时创建或如何解析 JSON。模块内部可以分多个文件，但不为单行转发建立额外“管理器”。
+- PaperScope = 持久随机 profile `clientId` + libraryId + attachmentKey；数值 itemID 仅当前宿主导航。标题不是键。选区文字/坐标在点击前复制，正文与补充附件隔离。
+- 请求由核心统一负责是否已发送；UI 不维护第二份上游发送记录。requestId + 规范化输入 SHA-256 去重，内容不同的同 ID 拒绝。
+- `accepted` 与用户消息先原子保存；`dispatching` 在写上游前落盘；取得 turnId 后 `running`；完成/取消/失败需真实终态。`uncertain` 先 thread/resume→thread/read 对账，不能因超时、关闭或重连重新发送。
+- 只有已持久化 accepted 且尚无 dispatching 的请求可以接着派发原 ID 一次。取消与完成竞态尊重已确认终态。未确认的旧 thread 隔离，新请求只能显式新对话。
+- 视图先订阅再取一致快照，缓存事件只应用 seq > lastSeq。核心增量约 80ms 合并；关键状态按序持久化，异常断电耐久性未证明。多消息 phase 保留，messageCompleted 不等于整个 turn 完成。
+- GenerationSettings 每轮固定 model/serviceTier/effort；目录验证组合，不通过改 effort 模拟速度；有效参数只在上游报告后记录。
 
-状态唯一负责人：M1 管当前阅读 view 的选区/缩放/布局；M2 管未提交草稿和 UI；M3 管已提交消息、requestId 与事件状态；M5 管原生进程寿命。M2 不能自己维护另一套“上游是否已发送”的记录，也不接触 Codex threadId 或原始文件/进程句柄。
+## 数据与安全
 
-## 3. 代码落点和依赖方向
+生产目录位于 Zotero profile 的 `zotero-codex-reader/v1/`：`records/papers/*.json` 附件索引；`records/conversations/*.json` 快照；同名 `.jsonl` 请求状态日志；`account/` 是独立 Codex home；`home/scratch/tmp` 为运行目录。目录命名 v1 不代表所有文件永久同一 schema。
 
-```text
-packages/
-  contracts/          共享业务类型、能力端口、输入校验
-  core/
-    sessions/         M3 会话与请求、快照/请求日志（store.ts、log.ts）
-    codex/            M4 协议、账户、模型能力
-  zotero/
-    reader/           M1；实际源码位于 src/reader/
-    chat/             M2；实际源码位于 src/chat/（presenter 持有未提交草稿）
-    runtime/          M5 与 M6 Gecko 存储适配；实际源码位于 src/runtime/
-scripts/              M7 开发、编译、打包和验证
-tests/                对应模块的行为与集成测试
-```
+旧会话为 schemaVersion 1；首次接受全文请求升级该会话到 schemaVersion 2，未使用全文的旧会话保持 1。全文只写一次 `conversations/<conversationId>.<documentId>.source.json`，schema 2 快照保存 documentIds 与逐轮来源摘要；加载时核验来源形状和附件一致性，缺失/损坏拒绝而不重置。旧二进制不理解 schema 2，会拒绝打开，不能声称可无缝降级；保留文件、回到新版本才可读取。原子快照与顺序日志同时支撑恢复，坏尾日志有专门测试。任何扩展迁移必须测试旧记录、损坏和回退拒绝写入；不以旧构建的宿主回退记录证明新 schema 可回退。
 
-上述是逻辑分布。会话快照与请求日志在 `core/src/sessions/`，不预先抽出空的 persistence 目录。
+未提交草稿目前在插件寿命内按附件/会话保留，进程重启后的草稿/滚动恢复仍是缺口。已提交状态只走 ConversationStore。退出登录、清缓存、删聊天、删文献和卸载不是同一动作；没有云同步承诺。
 
-```mermaid
-flowchart TD
-  Entry[插件启动入口：组装与清理] --> Runtime[M5 原生运行管理]
-  Entry --> Reader[M1 阅读器适配]
-  Reader -->|不可变选区/附件| UI[M2 聊天交互]
-  UI -->|ReaderClient| Session[M3 会话与请求]
-  Session --> Codex[M4 Codex 通信与账户]
-  Session --> Store[M6 本地记录]
-  Runtime -->|提供 ProcessPort| Codex
-  Runtime -->|提供 StoragePort| Store
-  UI -->|开关/定位| Reader
-```
+资料与模型内容是数据，不授予权限。输入校验上限、未知字段拒绝、图片类型/大小和选区位置约束以 `contracts/src/validation.ts` 为准；这些是传输/资源上限，不是模型上下文容量。HTML 由 DOMPurify 净化，公式由本地 KaTeX 渲染；工具执行不能由模型文本触发。
 
-图中最后一条是业务操作调用；实现时 M1 通过回调向上报告选区，M2 通过注入的阅读器接口请求布局，不建立相互 import。`bootstrap/index` 是组装入口，负责接线，不扩展成另一个业务模块。
+诊断仅版本、常量错误码、请求数/状态和通用存储位置，无正文、图像、账号、路径或原始 stdio/stderr。认证文件不得复制、贴 issue 或跟随普通记录备份。原生 profile/data 永不当普通临时目录清空。
 
-固定依赖规则：
+## 固定 Codex 版本
 
-- core 可以依赖 contracts，不能 import Zotero、DOM、Gecko 或 `node:*`。
-- zotero 可以依赖 core/contracts，具体原生 API 仅出现在其适配文件。
-- tests 可以使用 Node 假进程/临时文件适配器；这些文件不能进入生产 bundle。
-- UI 只通过 ReaderClient 提问和订阅，不直接访问 Codex stdin、进程句柄或认证文件。
-- ProcessPort 与 StoragePort 有真实的两个使用环境：Gecko 生产适配和 Node/内存测试适配，因此有必要保留这两个可替换接口。
+`runtime/manifest.ts` 固定 0.144.1 / darwin arm64、归档和二进制 sha256 及许可证，构建不替换成系统 CLI。2026-09-11 当前缓存二进制 --version 与其生成的 JSON schema 已核验（本地证据路径见 progress）。
 
-## 4. 各模块的关键设计
+- model/list 报告模型、effort、serviceTiers；turn/start 支持每轮 model/serviceTier/effort 与 text/image 输入。
+- `thread/tokenUsage/updated` 的 modelContextWindow 可为 null，model/list 不提供可靠初始上下文容量；不能由型号名称猜数字。contextWindowExceeded 是真实协议错误类型。
+- 官方 account/login/start(type=chatgpt) → 系统浏览器 → 通知后 account/read。重复登录事件不得重复发送。策略不读取其他客户端账户。
+- `app-server --strict-config` 和配置 allowlist 禁止外部工具/MCP/插件/内存/环境继承；environments.toml include_local=false、CODEX_EXEC_SERVER_URL=none 去掉执行环境。config/read 校验有效值与来源，任何意外能力 fail closed。
+- 0.144.1 旧宿主探测曾证实 null tier 回显 default、codexHome 规范化、thread 策略/目录能力不代表账户可生成。具体校验在 reader-policy.ts；新功能不能随意放开该策略。未来 agent/skills 的有限能力需独立契约与测试。
 
-### M1：让 Zotero 的复杂细节停在阅读器适配内
+## Zotero 原生适配
 
-保存的论文身份使用 `clientId + libraryId + attachmentKey`；数值 itemID 只用于当前运行时定位。选区回调立刻复制文字和位置，避免点击按钮或开侧栏后原生选区消失。
+reader 私有 API 均集中在适配器。当前 `#split-view` dock 位于原生 toolbar 下面；Zotero context pane 的注册只保留原生入口，打开助手时协调收起。PDF 锚点用页及 PDF 坐标，固定 scale 暂时 page-width，仅在仍拥有临时缩放时恢复。用户期间打开原生笔记/信息或手调缩放后不抢回。
 
-工具栏开关、选区上方操作条、原生右侧区域的协调都由 M1 处理。M2 只表达“显示聊天”或“回到引用”，不操作宿主的 collapsed 属性或 PDF 缩放变量。
+Zotero 9.0.6 运行时使用 getPageData({pageIndex}) 与 getPageLabels2()；标准 page.getTextContent 并不可用。已在专用合成 PDF 的 Run JavaScript 实测原生字符接口，跨窗口参数经 Cu.cloneInto 转到阅读器 realm。提取逐页调度，保留字符的段落/换行并报告空页/错误/partial 标志；读取正文不等于图像理解，写原生高亮仍需验证坐标。PDF fingerprint 与文件轻量版本不是抗恶意替换的内容哈希；不得据此声称任意同 size/mtime 替换都可识别。
 
-尺寸变化使用当前 PDF 坐标锚点；关闭时保持当前阅读页，不回到打开时的旧页。原生内部接口集中在适配文件，宿主升级时在这里验证和修复。
+宿主只在经过测试的平台/布局声明支持；堆叠布局、独立窗口、下载隔离属性都不能由 API 存在推断通过。
 
-### M2：展示状态和用户意图
-
-把“引用还在草稿”“请求已经接受”“正在输出”“已取消/失败/不确定”做成不同状态。Ask in sidechat 只放入引用；More details 生成一个解释意图，实际发送交给 M3。
-
-模型/速度/推理设置保存在待发送草稿中；每次发送生成不可变快照。已提交消息的设置标签不能被后续菜单修改。早期用纯文本渲染，流式链路正确后加入 Markdown/公式和原生视觉细节。
-
-### M3：一个地方决定“这条问题到底有没有发过”
-
-最小去重和提交记录必须在第一条真实模型请求之前实现。它们不能推迟到最后的“稳定性优化”，否则双击、重连就可能重复提交。
-
-采用 `requestId + 内容 hash`；提交前记录意图，写入上游前记录 dispatching，获得 turnId 后记录 running。无法确认是否执行时保留 uncertain，先对账，不自动新发。详细规则沿用接口文档。
-
-早期仅需支持当前附件的一条对话，但附件身份从第一版就正确。后续增加多对话列表和重启后的恢复，不更换主键设计。
-
-### M4：把 Codex 当作有状态协议，而非一次 HTTP 请求
-
-UI 不拼接原始 JSON-RPC。握手、登录、模型目录、每轮参数、增量与终态在 M4 标准化；普通文字与内部 reasoning 不混合展示。
-
-速度和推理强度分别映射到服务端真实字段。配置一旦冻结到本轮请求，切换控件只作用于下轮。模型目录能显示某型号，不被解释为账户额度一定可用。
-
-### M5：后台寿命独立于侧栏寿命
-
-插件启用时组装全局监督器，视图需要使用时调用 ensureStarted。重复调用复用同一实例；只有停用/卸载/退出或明确进程故障才收尾或重建。
-
-原生运行目录和 Codex 登录状态属于插件，避免污染开发用 Codex。只启动已校验的自带可执行文件；原生启动与平台安全行为从早期就使用真实 XPI 验证，不等到功能完成才首次打包。
-
-### M6：先有最小可靠记录，再扩展历史管理
-
-早期实现必需的请求日志、附件映射和当前对话记录；S5 已补上每附件历史、JSONL 请求日志坏尾恢复和 schema 拒绝写入。核心对“写入成功”的解释必须由 Gecko 适配器实测支持。
-
-正文记录与可分享诊断分开。诊断仅包含允许字段；错误处理不会自动打包原文、账户信息或完整进程输出。
-
-未提交草稿由 `ConversationPresenter` 按附件/会话保存在内存中，关闭侧栏不丢失，也不写入 StoragePort。已提交对话与请求日志只走 M3 的 `ConversationStore`。二者不能分别维护“是否已发送”。UI 不得取得任意文件读写能力。
-
-### M7：开发循环与发行链路同时存在
-
-开发使用 watch 编译和独立 Zotero profile，缩短 UI 调试周期；发行使用完整 XPI 和固定 Codex 资产。前者成功不能替代后者。
-
-CI 的假上游测试可以无账户运行；真实登录/生成和原生宿主测试显式执行，并记录范围。整个开发过程中都保留可构建状态，最终阶段主要扩大验证矩阵和准备公开发行。
-
-## 5. 两条主功能的调用链
-
-**More details：** M1 复制选区 → M2 展开侧栏、冻结引用与设置 → M3 校验和持久化请求 → M4 启动本轮 → M3 保存事件 → M2 显示。若未登录，先完成 M4 官方授权，再恢复同一个尚未提交的意图。
-
-**Ask in sidechat：** M1 复制选区 → M2 展开侧栏、加入草稿并聚焦输入 → 用户发送 → 进入相同的 M3/M4 流程。点击 Ask 本身不产生模型请求。
-
-关闭侧栏只撤销 M2 订阅；M3/M4/M5 继续保存已有请求。重新打开时先订阅缓存事件，再读一致快照，避免重复显示或漏掉增量。
-
-## 6. 当前不提前建设的内容
-
-首版不做通用 AI 提供商框架、整库向量检索、网络中转服务、独立桌面壳或复杂数据库服务。文件只在对应阶段确实需要时创建；保留明确职责，不预先铺满几十个空类。
-
-下一步执行顺序见[分阶段实施计划](superpowers/plans/2026-09-08-zcr-implementation-stages.md)。
+本地提取缓存最多 3 份、每份 2 MiB 文本（资源限制，不是模型预算），只在用户发送时进入请求。超过上限明确阻止发送，可指定物理 PDF 页范围；模型窗口当前显示未知，预算适配/自动长文检索尚待实现。连续轮次按来源 ID/模型复用，上游压缩、恢复或失败后重新带入来源；没有上游永久缓存承诺。

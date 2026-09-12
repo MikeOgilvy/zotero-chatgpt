@@ -24,6 +24,14 @@ function failureMessage(error: unknown): string {
 }
 
 describe('dedicated host-test stage selection', () => {
+  it('isolates full-PDF host validation from every existing profile', async () => {
+    await expect(select(['--context'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/context-driver.js' });
+    const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', `import { selectHostTree } from ${JSON.stringify(stageModule)}; console.log(JSON.stringify(selectHostTree(['--context'], ${JSON.stringify(repositoryRoot)})));`]);
+    expect((JSON.parse(stdout) as { profile: string }).profile).toBe(path.join(repositoryRoot, '.zcr-dev/context/profile'));
+  });
+  it('can stage the context profile for human use without auto-running tests', async () => {
+    await expect(select(['--context', '--acceptance'])).resolves.toEqual({ stage: 'context', driver: null, installDriver: false });
+  });
   it('defaults to the S1 driver', async () => {
     await expect(select([])).resolves.toEqual({ stage: 's1', driver: 'tests/host/driver.js', installDriver: true });
   });

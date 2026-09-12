@@ -1,10 +1,12 @@
 import { mountChatView, renderReaderShell, type AttachmentIdentity } from './chat/view.ts';
 import { ConversationPresenter } from './chat/presenter.ts';
 import { createRuntimeSupervisor } from './runtime/supervisor.ts';
-import { NativeReaderPane, attachmentIdentity } from './reader/reader-pane.ts';
+import { injectReaderStyles } from './reader/dock.ts';
+import { NativeReaderPane, attachmentIdentity, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import { captureSelection, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
+import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
@@ -18,6 +20,9 @@ let paneID = '';
 let active = false;
 let notifierID: string | undefined;
 let runtime: ReturnType<typeof createRuntimeSupervisor> | undefined;
+let documentCache: ReaderDocumentCache | undefined;
+const AUTO_PDF_PREF = 'extensions.zcr.automaticPdfText';
+const PDF_DISCLOSURE_PREF = 'extensions.zcr.pdfTextDisclosureSeen';
 const readers = new Map<HostReader, ReaderEntry>();
 const windows = new Map<ZoteroWindow, () => void>();
 /** Presenters outlive views: drafts and conversation copies stay while a sidebar is closed. */
@@ -30,16 +35,37 @@ function clientId(): string {
   const fresh = crypto.randomUUID(); Zotero.Prefs.set(CLIENT_ID_PREF, fresh, true); return fresh;
 }
 export function paperOf(identity: AttachmentIdentity): PaperScope { return { clientId: clientId(), libraryId: identity.libraryID, attachmentKey: identity.key }; }
-function presenterFor(identity: AttachmentIdentity): ConversationPresenter {
+function paperTitleFor(identity: AttachmentIdentity, reader?: HostReader): { title: string; authors: string[]; year?: string; doi?: string } {
+  const metadata = reader ? paperMetadata(Zotero, reader) : undefined;
+  const title = metadata?.title.trim() || identity.title || 'PDF attachment';
+  return { title, authors: metadata?.authors ?? [], ...(metadata?.year ? { year: metadata.year } : {}), ...(metadata?.doi ? { doi: metadata.doi } : {}) };
+}
+function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
   const paper = paperOf(identity); const key = paperId(paper);
   let presenter = presenters.get(key);
   if (!presenter) {
-    presenter = new ConversationPresenter(paper, identity.title || 'PDF attachment', {
+    const identityMeta = paperTitleFor(identity, reader);
+    const source = nativeDocumentSource(Zotero, () => Zotero.Reader._readers.find(r => {
+      const item = Zotero.Items.get(r.itemID); return item?.key === paper.attachmentKey && item.libraryID === paper.libraryId;
+    }), paper);
+    presenter = new ConversationPresenter(paper, identityMeta.title, {
       ensureStarted: () => runtime ? runtime.ensureStarted() : Promise.reject(new Error('Plugin stopped.')),
       openAuthorization: url => Zotero.launchURL(url),
       uuid: () => crypto.randomUUID(),
       now: () => new Date().toISOString(),
-    });
+      document: {
+        readEnabled: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
+        writeEnabled: value => Zotero.Prefs.set(AUTO_PDF_PREF, value, true),
+        needsDisclosure: () => Zotero.Prefs.get(PDF_DISCLOSURE_PREF, true) !== true,
+        acknowledge: () => Zotero.Prefs.set(PDF_DISCLOSURE_PREF, true, true),
+        prepare: async (signal, progress, range) => {
+          const captured = await source.capture(signal);
+          if (!documentCache) throw new Error('PDF preparation is unavailable.');
+          return documentCache.read(paper, captured, signal, progress, range);
+        },
+        validate: source.validate,
+      },
+    }, identityMeta);
     presenters.set(key, presenter);
   }
   return presenter;
@@ -53,22 +79,48 @@ const hooks = {
   },
   openLink: (url: string) => { Zotero.launchURL(url); },
 };
+function readerAssets(): { stylesheet?: string; katex?: string } {
+  if (!context) return {};
+  return {
+    stylesheet: `${context.rootURI}content/assets/sidebar.css`,
+    katex: `${context.rootURI}content/assets/katex/katex.min.css`,
+  };
+}
+function zoomDocuments(reader: HostReader, root: HTMLElement): Array<Document | HTMLElement> {
+  // Reader chrome iframe only. The nested PDF.js document keeps native zoom.
+  const readerDoc = reader._iframeWindow?.document ?? root.ownerDocument;
+  return [...new Set([readerDoc, root])];
+}
 function entry(reader: HostReader): ReaderEntry {
   let current = readers.get(reader);
   if (!current) {
     const buttons = new Set<HTMLButtonElement>();
     const pane = new NativeReaderPane(Zotero, reader, paneID, buttons, (body, identity, close, opened) => {
       const root = renderReaderShell(body, identity, close);
-      const presenter = presenterFor(identity);
-      const unmount = mountChatView(root, presenter, hooks);
+      const presenter = presenterFor(identity, reader);
+      const unmount = mountChatView(root, presenter, {
+        ...hooks,
+        openDocumentPage: async (document, pageIndex) => {
+          await nativeDocumentSource(Zotero, () => reader, document.paper).validate(document);
+          await reader.navigate({ pageIndex });
+        },
+        zoomTargets: zoomDocuments(reader, root),
+        uuid: () => crypto.randomUUID(),
+        readerZoom: {
+          zoomIn: () => { pane.controller.manualZoom(); zoomReader(reader, 'in'); },
+          zoomOut: () => { pane.controller.manualZoom(); zoomReader(reader, 'out'); },
+          zoomReset: () => { pane.controller.manualZoom(); zoomReader(reader, 'reset'); },
+          readZoom: () => currentReaderZoom(reader),
+        },
+      });
       if (opened) void presenter.activate();
       return unmount;
-    });
+    }, readerAssets());
     // Both selection actions only show the sidebar; the citation copy was taken before the click.
     const act = async (citation: Citation, run: (presenter: ConversationPresenter) => void) => {
       const identity = attachmentIdentity(Zotero, reader); if (!identity || !active) return;
       await pane.controller.open();
-      const presenter = presenterFor(identity); await presenter.activate(); run(presenter);
+      const presenter = presenterFor(identity, reader); await presenter.activate(); run(presenter);
     };
     const bar = new SelectionActionBar({
       explain: citation => { void act(citation, presenter => { void presenter.explain(citation); }).catch(error => Zotero.logError(error)); },
@@ -96,6 +148,7 @@ function onSelectionPopup(event: SelectionPopupEvent): void {
 }
 function attach(event: ToolbarEvent): void {
   if (!active) return;
+  injectReaderStyles(event.doc, readerAssets());
   const current = entry(event.reader);
   if (!current.pane.supported()) return;
   const button = createToolbarButton(event.doc, () => {
@@ -119,20 +172,20 @@ export function startup(options: PluginContext): void {
   if (active) return;
   context = options; active = true;
   runtime = createRuntimeSupervisor(options.rootURI);
+  documentCache = new ReaderDocumentCache({ uuid: () => crypto.randomUUID(), yield: () => new Promise(resolve => setTimeout(resolve, 0)) });
   paneID = Zotero.ItemPaneManager.registerSection({
     paneID: 'codex-reader', pluginID: options.pluginID,
     header: { l10nID: 'zcr-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
     sidenav: { l10nID: 'zcr-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
     onItemChange: ({ tabType, setEnabled }) => { setEnabled(active && tabType === 'reader'); },
-    onRender: ({ body, doc }) => {
+    onRender: ({ body }) => {
       if (!active) return;
-      const win = doc.defaultView as ZoteroWindow | null;
-      const tabID = body.closest<HTMLElement>('[data-tab-id]')?.dataset.tabId;
-      const reader = tabID ? Zotero.Reader.getByTabID(tabID) : undefined;
-      const identity = reader && attachmentIdentity(Zotero, reader);
-      if (!win || !reader || !identity) { body.replaceChildren(); return; }
-      body.closest<HTMLElement>('item-pane-custom-section')?.setAttribute('data-zcr-section', '');
-      entry(reader).pane.render(body);
+      body.replaceChildren();
+      const section = body.closest<HTMLElement>('item-pane-custom-section');
+      if (section) {
+        section.dataset.zcrSection = '';
+        section.hidden = true;
+      }
     },
   });
   // Zotero 9.0.6's unregisterEventListener has an inverted filter. PluginObserver
@@ -197,6 +250,7 @@ export async function shutdown(): Promise<void> {
   paneID = ''; context = undefined;
   for (const presenter of presenters.values()) presenter.dispose();
   presenters.clear();
+  documentCache?.clear(); documentCache = undefined;
   const stopping = runtime; runtime = undefined;
   await stopping?.stop();
 }

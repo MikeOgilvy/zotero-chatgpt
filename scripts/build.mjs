@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -88,6 +88,9 @@ export function bundleOptions(outputDirectory) {
     outfile: path.join(outputDirectory, "content/zcr.js"),
     platform: "browser",
     target: ["firefox128"],
+    define: {
+      __ZCR_SIDEBAR_CSS__: JSON.stringify(readFileSync(path.join(zoteroPackage, "assets/sidebar.css"), "utf8")),
+    },
   };
 }
 

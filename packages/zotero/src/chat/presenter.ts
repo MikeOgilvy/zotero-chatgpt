@@ -1,9 +1,17 @@
 import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runtime.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import type { Citation, Conversation, Draft, GenerationSettings, Message, PaperScope, ReaderEvent } from '../../../contracts/src/index.ts';
-import { addCitation, makeAsk, makeExplain, removeCitation } from './draft.ts';
+import type { Citation, Conversation, DocumentContext, Draft, GenerationSettings, ImageAttachment, Message, PaperIdentity, PaperScope, ReaderEvent } from '../../../contracts/src/index.ts';
+import { addCitation, addImage, makeAsk, makeExplain, removeCitation, removeImage } from './draft.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
-export interface PresenterServices { ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string }
+export interface DocumentServices {
+  prepare(signal: AbortSignal, progress: (p: { done: number; total: number }) => void, range?: readonly [number, number]): Promise<DocumentContext>;
+  validate(document: DocumentContext): Promise<void>;
+  readEnabled(): boolean;
+  writeEnabled(enabled: boolean): void;
+  needsDisclosure?(): boolean;
+  acknowledge?(): void;
+}
+export interface PresenterServices { ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices }
 export interface PresenterState {
   connection: 'idle' | 'starting' | 'ready' | 'error';
   runtime: RuntimeSnapshot | null;
@@ -15,6 +23,8 @@ export interface PresenterState {
   generating: boolean;
   /** Incremented when the view should move focus into the question input. */
   focusToken: number;
+  paperTitle: string;
+  document: { enabled: boolean; disclosure: boolean; phase: 'idle' | 'preparing' | 'ready' | 'error'; prepared: DocumentContext | null; progress: { done: number; total: number }; range: [number, number] | null; error: string | null };
 }
 const LOGIN_HOSTS = ['auth.openai.com', 'chatgpt.com'];
 const UNCERTAIN_ISOLATION = 'An earlier request in this conversation could not be confirmed; start a new conversation to continue.';
@@ -24,30 +34,39 @@ const UNCERTAIN_ISOLATION = 'An earlier request in this conversation could not b
  */
 export class ConversationPresenter {
   private state: PresenterState;
-  private render: ((state: PresenterState) => void) | null = null;
+  private renders = new Set<(state: PresenterState) => void>();
   private client: ReaderClient | null = null;
   private connecting: Promise<ReaderClient> | null = null;
   private unobserve: (() => void) | null = null;
   private unsubscribe: (() => void) | null = null;
   private buffered: ReaderEvent[] = [];
   private syncing = false;
+  private syncGeneration = 0;
   private submitting = false;
   private explainFlights = new Map<string, Promise<void>>();
   private continuing = false;
   private drafts = new Map<string, Draft>();
-  constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: { settings: null, paper, question: '', citations: [] }, pendingExplain: null, message: null, generating: false, focusToken: 0 };
+  private sendFlight: Promise<void> | null = null;
+  private draftVersion = 0;
+  private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext> } | null = null;
+  constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
+    this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: { settings: null, paper, question: '', citations: [], images: [] }, pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
+      document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
+  }
+  private paperIdentity(): PaperIdentity {
+    const title = this.identity.title.trim() || this.title.trim() || this.state.conversation?.title || '';
+    return { title, authors: this.identity.authors, ...(this.identity.year ? { year: this.identity.year } : {}), ...(this.identity.doi ? { doi: this.identity.doi } : {}) };
   }
   /** Ask in sidechat: the citation is already in the draft; the view should focus the question input. */
   focusInput(): void { this.update({ focusToken: this.state.focusToken + 1 }); }
   snapshot(): PresenterState { return clone(this.state); }
   /** Views are read-only; they must not mutate this object. External callers still use snapshot(). */
-  private notify(): void { this.render?.(this.state); }
+  private notify(): void { for (const render of this.renders) render(this.state); }
   /** A view binds to receive state; unbinding releases only the view, never the runtime or the draft. */
   bind(render: (state: PresenterState) => void): () => void {
-    this.render = render; render(this.state);
+    this.renders.add(render); render(this.state);
     if (this.client && this.state.conversation) void this.sync();
-    return () => { if (this.render === render) { this.render = null; this.unsubscribe?.(); this.unsubscribe = null; } };
+    return () => { this.renders.delete(render); if (!this.renders.size) { this.unsubscribe?.(); this.unsubscribe = null; } };
   }
   private update(patch: Partial<PresenterState>): void {
     this.state = { ...this.state, ...patch };
@@ -62,6 +81,12 @@ export class ConversationPresenter {
     if (!current) return null;
     return models.length ? alignSettings(models, current) : current;
   }
+  private contextOptions(): { enabled: boolean; range: [number, number] | null } {
+    // Recheck the shared opt-out at the request boundary, including an already-open second view.
+    const enabled = this.state.document.enabled && (this.services.document?.readEnabled() ?? false);
+    if (enabled !== this.state.document.enabled) this.update({ document: { ...this.state.document, enabled } });
+    return { enabled, range: clone(this.state.document.range) };
+  }
   /** Draft only: never edits an in-flight or already-submitted message snapshot. */
   setSettings(settings: GenerationSettings): void {
     const models = this.state.runtime?.models ?? [];
@@ -70,8 +95,53 @@ export class ConversationPresenter {
   }
   // ---- runtime ----------------------------------------------------------------------------------
   async activate(): Promise<void> {
-    try { await this.connect(); if (this.signedIn()) await this.ensureConversation(); }
+    if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
+    try { await this.connect(); if (this.state.runtime?.models.length) await this.ensureConversation(); }
     catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
+  }
+  setDocumentEnabled(enabled: boolean): void {
+    this.services.document?.writeEnabled(enabled);
+    this.update({ document: { ...this.state.document, enabled } });
+    if (!enabled && !this.submitting) this.documentJob?.controller.abort();
+    if (enabled && !this.submitting) void this.prepareContext().catch(() => {});
+  }
+  setDocumentRange(first: number | null, last: number | null): void {
+    const range: [number, number] | null = first === null && last === null ? null : [first ?? 1, last ?? first ?? 1];
+    this.update({ document: { ...this.state.document, range, prepared: null, phase: 'idle', error: null } });
+    if (!this.submitting) { this.documentJob?.controller.abort(); if (this.state.document.enabled) void this.prepareContext().catch(() => {}); }
+  }
+  acknowledgeContext(): void {
+    this.services.document?.acknowledge?.();
+    this.update({ document: { ...this.state.document, disclosure: false } });
+    const pending = this.state.pendingExplain;
+    if (pending) { this.update({ pendingExplain: null }); void this.explain(pending); }
+  }
+  prepareContext(): Promise<DocumentContext> { return this.prepareDocument(this.state.document.range); }
+  private prepareDocument(range: readonly [number, number] | null): Promise<DocumentContext> {
+    const key = JSON.stringify(range);
+    if (this.documentJob?.range === key && !this.documentJob.controller.signal.aborted) return this.documentJob.promise;
+    const controller = new AbortController();
+    const job = { controller, range: key, promise: Promise.resolve(null as unknown as DocumentContext) };
+    this.documentJob = job;
+    this.update({ document: { ...this.state.document, phase: 'preparing', error: null, progress: { done: 0, total: 0 } } });
+    job.promise = Promise.resolve().then(async () => {
+      if (controller.signal.aborted) throw new Error('PDF preparation cancelled. Your question is kept.');
+      const service = this.services.document;
+      if (!service) throw new Error('Current PDF context is unavailable.');
+      const document = await service.prepare(controller.signal, progress => {
+        if (this.documentJob === job) this.update({ document: { ...this.state.document, progress } });
+      }, range ?? undefined);
+      if (controller.signal.aborted) throw new Error('PDF preparation cancelled. Your question is kept.');
+      await service.validate(document);
+      if (controller.signal.aborted) throw new Error('PDF preparation cancelled. Your question is kept.');
+      if (this.documentJob === job) this.update({ document: { ...this.state.document, prepared: document, phase: 'ready', error: null } });
+      if (!document.pages.some(p => p.status === 'text')) throw new Error('No extractable text was found in this range. Nothing was sent. Use a readable PDF or attach the relevant page image.');
+      return document;
+    }).catch(error => {
+      if (this.documentJob === job) this.update({ document: { ...this.state.document, phase: 'error', error: this.errorText(error) } });
+      throw error;
+    }).finally(() => { if (this.documentJob === job) this.documentJob = null; });
+    return job.promise;
   }
   async retry(): Promise<void> { this.client = null; await this.activate(); }
   private connect(): Promise<ReaderClient> {
@@ -101,7 +171,7 @@ export class ConversationPresenter {
     try {
       await this.ensureConversation();
       const pending = this.state.pendingExplain;
-      if (pending) { this.update({ pendingExplain: null }); await this.submit(c => makeExplain(pending, c.id, this.services.uuid(), this.currentSettings() ?? c.settings)); }
+      if (pending && !this.state.document.disclosure) { this.update({ pendingExplain: null }); await this.submit(c => makeExplain(pending, c.id, this.services.uuid(), this.currentSettings() ?? c.settings, this.paperIdentity())); }
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   private async ensureConversation(): Promise<Conversation> {
@@ -150,14 +220,17 @@ export class ConversationPresenter {
   private async sync(): Promise<void> {
     const client = this.client; const id = this.state.conversation?.id;
     if (!client || !id) return;
+    const generation = ++this.syncGeneration;
     this.listen(client);
     this.syncing = true; this.buffered = [];
     try {
       const conversation = await client.get(id);
+      if (generation !== this.syncGeneration) return;
+      if (this.state.conversation?.id !== id) { this.syncing = false; this.buffered = []; return; }
       const buffered = this.buffered; this.buffered = []; this.syncing = false;
       this.update({ conversation });
       for (const event of buffered) if (event.seq > conversation.lastSeq) this.apply(event);
-    } catch (error) { this.syncing = false; this.buffered = []; this.update({ message: this.errorText(error) }); }
+    } catch (error) { if (generation !== this.syncGeneration) return; this.syncing = false; this.buffered = []; this.update({ message: this.errorText(error) }); }
   }
   private apply(event: ReaderEvent): void {
     const conversation = this.state.conversation;
@@ -185,10 +258,13 @@ export class ConversationPresenter {
     this.update({ conversation: next, message });
   }
   // ---- draft ------------------------------------------------------------------------------------
-  addCitation(citation: Citation): void { this.update({ draft: addCitation(this.state.draft, citation), message: null }); }
-  removeCitation(citationId: string): void { this.update({ draft: removeCitation(this.state.draft, citationId) }); }
+  addCitation(citation: Citation): void { this.draftVersion++; this.update({ draft: addCitation(this.state.draft, citation), message: null }); }
+  removeCitation(citationId: string): void { this.draftVersion++; this.update({ draft: removeCitation(this.state.draft, citationId) }); }
+  addImage(image: ImageAttachment): void { this.draftVersion++; this.update({ draft: addImage(this.state.draft, image), message: null }); }
+  removeImage(imageId: string): void { this.draftVersion++; this.update({ draft: removeImage(this.state.draft, imageId) }); }
   setQuestion(question: string): void {
     if (this.state.draft.question === question) return;
+    this.draftVersion++;
     this.state = { ...this.state, draft: { ...this.state.draft, question } };
     this.notify();
   }
@@ -196,37 +272,52 @@ export class ConversationPresenter {
   /** More details: one explain request per click; when signed out the citation waits for the official login. */
   explain(citation: Citation): Promise<void> {
     const existing = this.explainFlights.get(citation.id); if (existing) return existing;
+    const context = this.contextOptions(); const frozenSettings = this.currentSettings();
+    if (context.enabled && this.state.document.disclosure) { this.update({ pendingExplain: clone(citation) }); return Promise.resolve(); }
     const flight = (async () => {
       const kept = clone(citation);
       try {
         await this.connect();
         if (!this.signedIn()) { this.update({ pendingExplain: kept, message: null }); await this.login(); return; }
         await this.ensureConversation();
-        await this.submit(c => makeExplain(kept, c.id, this.services.uuid(), this.currentSettings() ?? c.settings));
+        await this.submit(c => makeExplain(kept, c.id, this.services.uuid(), frozenSettings ?? c.settings, this.paperIdentity()), context);
       } catch (error) { this.update({ message: this.errorText(error) }); }
     })().finally(() => { this.explainFlights.delete(citation.id); });
     this.explainFlights.set(citation.id, flight);
     return flight;
   }
-  async send(): Promise<void> {
-    if (!this.state.draft.question.trim()) { this.update({ message: 'Enter a question first.' }); return; }
+  send(): Promise<void> {
+    if (this.sendFlight) return this.sendFlight;
+    if (!this.state.draft.question.trim()) { this.update({ message: 'Enter a question first.' }); return Promise.resolve(); }
+    const draft = clone(this.state.draft); const version = this.draftVersion;
+    const settings = this.currentSettings(); const document = this.contextOptions();
+    if (document.enabled) { this.services.document?.acknowledge?.(); this.update({ document: { ...this.state.document, disclosure: false } }); }
+    this.sendFlight = this.sendDraft(draft, version, settings, document).finally(() => { this.sendFlight = null; });
+    return this.sendFlight;
+  }
+  private async sendDraft(draft: Draft, version: number, settings: GenerationSettings | null, document: { enabled: boolean; range: [number, number] | null }): Promise<void> {
     try {
       await this.connect();
       if (!this.signedIn()) { this.update({ message: 'Sign in with ChatGPT first.' }); await this.login(); return; }
       await this.ensureConversation();
-      const draft = this.state.draft;
-      await this.submit(c => makeAsk(draft, c.id, this.services.uuid(), this.currentSettings() ?? c.settings));
-      this.update({ draft: { ...this.state.draft, question: '', citations: [] } });
+      const id = await this.submit(c => makeAsk(draft, c.id, this.services.uuid(), settings ?? c.settings, this.paperIdentity()), document);
+      if (this.state.conversation?.id === id && this.draftVersion === version) this.update({ draft: { ...this.state.draft, question: '', citations: [], images: [] } });
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
-  private async submit(build: (conversation: Conversation) => ReturnType<typeof makeAsk>): Promise<void> {
-    const client = await this.connect(); const conversation = this.state.conversation!;
+  private async submit(build: (conversation: Conversation) => ReturnType<typeof makeAsk>, context = this.contextOptions()): Promise<string> {
+    const conversation = this.state.conversation!;
     if (this.submitting || conversation.activeRequestId) throw new Error('This conversation is still answering; wait for it or stop it first.');
     this.submitting = true; this.update({ message: null });
-    try { await client.send(build(conversation)); await this.sync(); }
+    const input = build(conversation);
+    try {
+      const client = await this.connect();
+      if (context.enabled) input.document = await this.prepareDocument(context.range);
+      await client.send(input); await this.sync(); return conversation.id;
+    }
     finally { this.submitting = false; this.update({}); }
   }
   async cancel(): Promise<void> {
+    if (this.submitting && this.documentJob) { this.documentJob.controller.abort(); return; }
     const client = this.client; const conversation = this.state.conversation;
     if (!client || !conversation?.activeRequestId) return;
     try { await client.cancel(conversation.id, conversation.activeRequestId); } catch (error) { this.update({ message: this.errorText(error) }); }
@@ -236,7 +327,24 @@ export class ConversationPresenter {
       const client = await this.connect();
       this.stashDraft();
       const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
-      this.update({ conversation, message: null }); await this.sync(); await this.refreshList();
+      this.update({ conversation, draft: { settings: this.state.draft.settings, paper: this.paper, question: '', citations: [], images: [] }, message: null }); await this.sync(); await this.refreshList();
+    } catch (error) { this.update({ message: this.errorText(error) }); }
+  }
+  async deleteConversation(id: string): Promise<void> {
+    try {
+      const client = await this.connect();
+      this.stashDraft();
+      const conversation = await client.deleteConversation(this.paper, id);
+      this.drafts.delete(id);
+      const empty: Draft = { settings: this.state.draft.settings, paper: this.paper, question: '', citations: [], images: [] };
+      const stored = this.drafts.get(conversation.id) ?? empty;
+      this.update({
+        conversation,
+        draft: { ...clone(stored), images: stored.images ?? [] },
+        message: await this.isolationNote(client, conversation),
+      });
+      await this.sync();
+      await this.refreshList();
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   async openConversation(id: string): Promise<void> {
@@ -245,8 +353,9 @@ export class ConversationPresenter {
       const client = await this.connect();
       this.stashDraft();
       const conversation = await client.select(this.paper, id);
-      const empty: Draft = { settings: this.state.draft.settings, paper: this.paper, question: '', citations: [] };
-      this.update({ conversation, draft: clone(this.drafts.get(id) ?? empty), message: await this.isolationNote(client, conversation) });
+      const empty: Draft = { settings: this.state.draft.settings, paper: this.paper, question: '', citations: [], images: [] };
+      const stored = this.drafts.get(id) ?? empty;
+      this.update({ conversation, draft: { ...clone(stored), images: stored.images ?? [] }, message: await this.isolationNote(client, conversation) });
       await this.sync(); await this.refreshList();
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
@@ -273,5 +382,5 @@ export class ConversationPresenter {
       return text;
     } catch (error) { this.update({ message: this.errorText(error) }); return null; }
   }
-  dispose(): void { this.render = null; this.unsubscribe?.(); this.unsubscribe = null; this.unobserve?.(); this.unobserve = null; }
+  dispose(): void { this.documentJob?.controller.abort(); this.renders.clear(); this.unsubscribe?.(); this.unsubscribe = null; this.unobserve?.(); this.unobserve = null; }
 }

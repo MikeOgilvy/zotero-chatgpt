@@ -33,5 +33,10 @@ export class MemoryStorage implements StoragePort {
     next.set(previous, 0); next.set(bytes, previous.length);
     this.files.set(path, next); this.writes.push(new TextDecoder().decode(bytes)); return Promise.resolve();
   }
+  remove(path: string) {
+    if (this.fail) return Promise.reject(new Error('private-storage-path'));
+    this.files.delete(path);
+    return Promise.resolve();
+  }
 }
 export async function flush() { for (let i = 0; i < 100; i++) await Promise.resolve(); }

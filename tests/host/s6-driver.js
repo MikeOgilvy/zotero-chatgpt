@@ -83,8 +83,7 @@ async function runHostSmoke(config) {
         throw error;
       }
     };
-    const selectedDetails = () => win.document.querySelector(`#zotero-context-pane-item-deck > [data-tab-id="${win.Zotero_Tabs.selectedID}"]`);
-    const panel = () => selectedDetails()?.querySelector('[data-zcr-chat]');
+    const panel = () => { try { return reader()._iframeWindow?.document.querySelector('[data-zcr-chat]'); } catch { return null; } };
     await until(() => toggle(), 'reader toolbar');
     const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
     const ownProcesses = async () => {

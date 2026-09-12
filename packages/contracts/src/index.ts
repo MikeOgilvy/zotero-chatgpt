@@ -37,6 +37,41 @@ export interface Citation {
 export type RequestState = 'accepted' | 'dispatching' | 'running' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
 export type MessageStatus = 'pending' | 'streaming' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
 
+export interface PaperIdentity {
+  title: string;
+  authors: string[];
+  year?: string;
+  doi?: string;
+}
+
+export interface DocumentRevision { fingerprint: string; size: number; modifiedAt: number }
+export interface DocumentPage { pageIndex: number; pageLabel: string; text: string; status: 'text' | 'empty' | 'error'; partial?: true }
+/** Locally extracted text. No filesystem path or claim that figures were read. */
+export interface DocumentContext {
+  id: UUID;
+  paper: PaperScope;
+  revision: DocumentRevision;
+  parserVersion: string;
+  totalPages: number;
+  pages: DocumentPage[];
+}
+export interface DocumentSummary {
+  id: UUID;
+  revision: DocumentRevision;
+  parserVersion: string;
+  totalPages: number;
+  pages: Array<Pick<DocumentPage, 'pageIndex' | 'pageLabel' | 'status' | 'partial'>>;
+  textBytes: number;
+}
+
+/** User-attached image for `turn/start` UserInput::Image `{ type: "image", url }` (rust-v0.144.1). */
+export interface ImageAttachment {
+  id: UUID;
+  name: string;
+  mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  dataUrl: string;
+}
+
 export interface Message {
   id: UUID;
   requestId: UUID;
@@ -47,6 +82,11 @@ export interface Message {
   text: string;
   citations: Citation[];
   status: MessageStatus;
+  /** Present on user messages so the view can hide internal explain prompts. */
+  action?: 'explain' | 'ask';
+  images?: ImageAttachment[];
+  document?: DocumentSummary;
+  paper?: PaperIdentity;
 }
 
 export interface Conversation {
@@ -68,6 +108,11 @@ export interface SendInput {
   question: string;
   citations: Citation[];
   settings: GenerationSettings;
+  /** Bibliographic identity of the current paper; required for asks without a citation. */
+  paper?: PaperIdentity;
+  /** Optional image parts for rust-v0.144.1 `{ type: "image", url: dataUrl }`. */
+  images?: ImageAttachment[];
+  document?: DocumentContext;
 }
 
 export interface SendReceipt {
@@ -112,6 +157,7 @@ export interface Draft {
   paper: PaperScope;
   question: string;
   citations: Citation[];
+  images: ImageAttachment[];
 }
 
 /** Generic location shown in shareable diagnostics. Never include a username or real path. */

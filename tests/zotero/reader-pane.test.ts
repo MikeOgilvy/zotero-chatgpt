@@ -9,7 +9,7 @@ it('keeps chat ownership across tab switches and only closes for a native pane a
     itemID: 1, tabID: 'pdf-a', type: 'pdf', _window: win,
     zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
   };
-  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set());
+  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set(), () => undefined);
   const mount = vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
   const unmount = vi.spyOn(pane, 'unmountChat');
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: false, mode: 'item', scrollTop: 0, width: 280 });
@@ -26,7 +26,7 @@ it('keeps chat ownership across tab switches and only closes for a native pane a
   pane.reconcile();
   expect(pane.controller.active).toBe(true);
   expect(mount).toHaveBeenCalled();
-  context.collapsed = true;
+  context.collapsed = false;
   pane.reconcile();
   expect(pane.controller.active).toBe(false);
 });
@@ -36,6 +36,8 @@ it('restores fixed scale across rapid reopen when Zotero ignores destination zoo
   const win = { ZoteroContextPane: { collapsed: true, context: { mode: 'item' } }, requestAnimationFrame: (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; } } as ZoteroWindow;
   const scales: number[] = [];
   const pdfViewer = { _location: location,
+    get currentScale() { return typeof location.scale === 'number' ? location.scale / 100 : 1; },
+    set currentScale(value: number) { location.scale = value * 100; },
     set currentScaleValue(value: number) { scales.push(value); location.scale = value * 100; },
     scrollPageIntoView: ({ pageNumber }: { pageNumber: number }) => { location.pageNumber = pageNumber; },
   };
@@ -46,7 +48,7 @@ it('restores fixed scale across rapid reopen when Zotero ignores destination zoo
     // Zotero sets ignoreDestinationZoom=true, so navigation cannot change scale.
     navigate: ({ dest }) => { location.pageNumber = dest![0] + 1; },
   };
-  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set());
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set(), () => undefined);
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0, width: 280 });
   vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
   vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
@@ -68,6 +70,8 @@ it('restores the current page without delayed link-navigation focus from the ope
   const operations: string[] = [];
   const win = { ZoteroContextPane: { collapsed: true, context: { mode: 'item' } }, requestAnimationFrame: (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; } } as ZoteroWindow;
   const viewer = { _location: location,
+    get currentScale() { return typeof location.scale === 'number' ? location.scale / 100 : 1; },
+    set currentScale(value: number) { location.scale = value * 100; },
     set currentScaleValue(value: number) {
       operations.push('scale'); location.scale = value * 100;
       // A scale change renders old pages again. Link-service destinations left
@@ -85,7 +89,7 @@ it('restores the current page without delayed link-navigation focus from the ope
     zoomPageWidth: () => { location.scale = 'page-width'; }, zoomPageHeight: () => {}, zoomAuto: () => {},
     navigate: ({ dest }) => { location.pageNumber = dest![0] + 1; textLayerFocus.push(() => { location.pageNumber = dest![0] + 1; }); },
   };
-  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set());
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set(), () => undefined);
   vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0, width: 280 });
   vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
   vi.spyOn(pane, 'mountChat').mockResolvedValue(true);

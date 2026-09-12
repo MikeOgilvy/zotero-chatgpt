@@ -1,4 +1,5 @@
 import type { ToolbarEvent } from './host-types.ts';
+
 export function createToolbarButton(doc: Document, toggle: () => void): HTMLButtonElement {
   const button = doc.createElement('button');
   button.type = 'button'; button.className = 'toolbar-button'; button.tabIndex = -1;

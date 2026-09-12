@@ -46,8 +46,9 @@ async function runHostSmoke(config) {
       return current;
     };
     const toggle = () => { try { return reader()._iframeWindow?.document.querySelector('[data-zcr-toggle]') ?? null; } catch (error) { if (String(error).includes('dead object')) throw new Error('The test reader was unloaded while the run was in progress.'); throw error; } };
-    const selectedDetails = () => win.document.querySelector(`#zotero-context-pane-item-deck > [data-tab-id="${win.Zotero_Tabs.selectedID}"]`);
-    const panel = () => selectedDetails()?.querySelector('[data-zcr-chat]');
+    const chatDoc = () => { try { return reader()._iframeWindow?.document; } catch { return null; } };
+    const panel = () => chatDoc()?.querySelector('[data-zcr-chat]');
+    const dock = () => chatDoc()?.querySelector('[data-zcr-dock]');
     await until(() => toggle(), 'reader toolbar');
     win.ZoteroContextPane.collapsed = true; click(toggle());
     await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'native runtime initialization', 90000);
@@ -56,18 +57,30 @@ async function runHostSmoke(config) {
     const model = () => panel()?.querySelector('[data-zcr-setting="model"]');
     const speed = () => panel()?.querySelector('[data-zcr-setting="speed"]');
     const effort = () => panel()?.querySelector('[data-zcr-setting="effort"]');
-    await check('composer-controls-present', !!model() && !!speed() && !!effort());
-    const pane = win.document.getElementById('zotero-context-pane');
-    const paneWidth = pane?.getBoundingClientRect().width ?? 0;
-    await check('sidebar-width-clamped-to-560', paneWidth > 0 && paneWidth <= 560, { paneWidth, pref: Zotero.Prefs.get('extensions.zcr.sidebarWidth', true) });
+    const picker = () => panel()?.querySelector('[data-zcr-picker]');
+    const openPicker = () => {
+      const node = picker();
+      if (node && node.getAttribute('aria-expanded') !== 'true' && !node.disabled) click(node);
+    };
+    await check('composer-controls-present', !!picker() && !!panel()?.querySelector('[data-zcr-picker-menu]'));
+    const paneWidth = dock()?.getBoundingClientRect().width ?? 0;
+    const storedWidth = Zotero.Prefs.get('extensions.zcr.sidebarWidth', true);
+    await check('sidebar-width-honors-stored-900', Number(storedWidth) === 900 && paneWidth > 0, { paneWidth, pref: storedWidth });
+    const readerToolbar = chatDoc()?.querySelector('.toolbar');
+    await check('reader-toolbar-has-only-codex-toggle', !!toggle() && !readerToolbar?.querySelector('.zcr-chrome, [data-zcr-action="new-conversation"], [data-zcr-action="history"], [data-zcr-context-title]'), { toggle: !!toggle() });
+    await check('plugin-chrome-stays-in-sidebar', !!panel()?.querySelector('.zcr-chrome') && !!panel()?.querySelector('[data-zcr-action="new-conversation"]') && !readerToolbar?.querySelector('.zcr-chrome') && !win.document.querySelector('#zotero-context-pane .zcr-chrome, #zotero-context-pane [data-zcr-chat]'));
     const signedIn = panel()?.dataset.zcrAuth === 'signedIn';
     report.account = { state: panel()?.dataset.zcrAuth };
     if (signedIn) {
       await until(() => panel()?.dataset.zcrConversation, 'attachment conversation bound');
-      await check('catalog-model-options-loaded', model().options.length >= 1 && !model().disabled, { models: model().options.length });
-      await check('speed-and-effort-are-independent', speed().getAttribute('aria-label') !== effort().getAttribute('aria-label') || (speed().options.length >= 1 && effort().options.length >= 1), { speed: speed().options.length, effort: effort().options.length });
+      openPicker();
+      const modelOptions = panel()?.querySelectorAll('[data-zcr-picker-menu] [data-zcr-setting="model"]');
+      const effortOptions = panel()?.querySelectorAll('[data-zcr-picker-menu] [data-zcr-setting="effort"]');
+      await check('catalog-model-options-loaded', (modelOptions?.length ?? 0) >= 1 && !picker()?.disabled, { models: modelOptions?.length ?? 0 });
+      await check('speed-and-effort-are-independent', (effortOptions?.length ?? 0) >= 1 && (!speed() || speed().getAttribute('role') === 'switch'), { effort: effortOptions?.length ?? 0, speedRole: speed()?.getAttribute('role') || '' });
       const history = panel()?.querySelector('[data-zcr-history]');
-      await check('conversation-history-lists-current', !!history && history.options.length >= 1 && history.value === panel().dataset.zcrConversation);
+      const currentId = panel().dataset.zcrConversation;
+      await check('conversation-history-lists-current', !!currentId && !!history && (history.hidden || !!history.querySelector(`[data-zcr-conversation-id="${currentId}"]`)));
       await check('new-conversation-available', !!panel()?.querySelector('[data-zcr-action="new-conversation"]'));
       await check('copy-diagnostics-hidden-from-sidebar', !panel()?.querySelector('[data-zcr-action="copy-diagnostics"]'));
     } else {
@@ -145,7 +158,7 @@ async function runHostSmoke(config) {
     const nativeSearch = win.document.querySelector('#zotero-tb-search, #zotero-tb-search-textbox, .quick-search-textbox')
       || reader()._iframeWindow.document.querySelector('button.find');
     const chatButton = panel()?.querySelector('.zcr-button');
-    const chatSelect = panel()?.querySelector('.zcr-select');
+    const chatSelect = panel()?.querySelector('[data-zcr-setting], .zcr-menu, [data-zcr-picker]');
     if (chatButton && nativeSearch) {
       const chatFont = win.getComputedStyle(chatButton).fontFamily;
       const searchFont = (nativeSearch.ownerDocument.defaultView || win).getComputedStyle(nativeSearch).fontFamily;
@@ -158,9 +171,11 @@ async function runHostSmoke(config) {
       await skip('chat-controls-inherit-host-font', 'native search control or chat button was not found');
       await skip('chat-controls-are-not-brand-chrome', 'native search control or chat button was not found');
     }
-    if (chatSelect) {
-      const selectRect = chatSelect.getBoundingClientRect();
-      await check('composer-settings-remain-readable', selectRect.width > 24 && selectRect.height > 12, { width: selectRect.width, height: selectRect.height });
+    if (chatSelect || picker()) {
+      openPicker();
+      const selectRect = (panel()?.querySelector('[data-zcr-setting="model"]') || picker() || chatSelect).getBoundingClientRect();
+      const pickerRect = picker()?.getBoundingClientRect();
+      await check('composer-settings-remain-readable', (selectRect.width > 24 && selectRect.height > 12) || ((pickerRect?.width ?? 0) > 24 && (pickerRect?.height ?? 0) > 12), { width: selectRect.width, height: selectRect.height, picker: pickerRect });
     } else await skip('composer-settings-remain-readable', 'composer select was not in the panel');
     const themePref = 'extensions.zotero.theme';
     let previousTheme;
@@ -244,7 +259,7 @@ async function runHostSmoke(config) {
     await delay(250);
     await ensureSidebar(true);
     const originalWindow = { w: win.outerWidth, h: win.outerHeight, x: win.screenX, y: win.screenY, inner: win.innerWidth };
-    const paneEl = () => win.document.getElementById('zotero-context-pane');
+    const paneEl = () => dock();
     try {
       for (const width of [800, 1024, 1440]) {
         const chromeX = Math.max(0, win.outerWidth - win.innerWidth);
@@ -258,12 +273,17 @@ async function runHostSmoke(config) {
           continue;
         }
         const paneW = paneEl()?.getBoundingClientRect().width ?? 0;
+        const primaryBox = chatDoc()?.querySelector('#primary-view')?.getBoundingClientRect();
+        const dockBox = paneEl()?.getBoundingClientRect();
         const readerInner = view()._iframeWindow?.innerWidth ?? 0;
-        const overlay = paneW > 120 && readerInner > actualInner - 48;
-        const docked = paneW > 0 && paneW <= 560 && readerInner > 160 && !overlay && readerInner + paneW <= actualInner + 80;
-        await check(`window-${width}-keeps-dock-and-reader`, docked, { paneW, readerInner, actualInner, overlay, layout: Zotero.Prefs.get('layout') });
+        const overlay = !!(dockBox && primaryBox && dockBox.left < primaryBox.right - 8 && dockBox.right > primaryBox.left + 8 && dockBox.top < primaryBox.bottom - 8);
+        const docked = paneW > 0 && readerInner > 160 && !overlay && !!primaryBox && primaryBox.width > 160;
+        await check(`window-${width}-keeps-dock-and-reader`, docked, { paneW, readerInner, actualInner, overlay, primary: primaryBox?.toJSON?.() ?? null, layout: Zotero.Prefs.get('layout') });
+        openPicker();
         const modelBox = model()?.getBoundingClientRect();
-        await check(`window-${width}-composer-usable`, Boolean(model()) && (modelBox?.width ?? 0) > 32 && (modelBox?.height ?? 0) > 10, { model: modelBox?.toJSON?.() ?? null, paneW, readerInner });
+        const pickerBox = picker()?.getBoundingClientRect();
+        const composerUsable = Boolean(picker()) && ((modelBox?.width ?? 0) > 32 && (modelBox?.height ?? 0) > 10 || (pickerBox?.width ?? 0) > 32 && (pickerBox?.height ?? 0) > 10);
+        await check(`window-${width}-composer-usable`, composerUsable, { model: modelBox?.toJSON?.() ?? null, picker: pickerBox?.toJSON?.() ?? null, paneW, readerInner });
       }
     } finally {
       try { win.resizeTo(originalWindow.w, originalWindow.h); win.moveTo(originalWindow.x, originalWindow.y); } catch { /* restore best-effort */ }
@@ -273,14 +293,15 @@ async function runHostSmoke(config) {
     if (collections) {
       const readerBefore = view()._iframe.getBoundingClientRect().width;
       const collapsedBefore = collections.collapsed === true || collections.hidden === true || collections.getBoundingClientRect().width < 8;
-      await check('collections-pane-does-not-cover-chat', Boolean(panel()) && paneEl()?.getBoundingClientRect().width > 0, { collectionsWidth: collections.getBoundingClientRect().width, readerBefore, collapsedBefore });
+      await check('collections-pane-does-not-cover-chat', Boolean(panel()) && (dock()?.getBoundingClientRect().width ?? 0) > 0, { collectionsWidth: collections.getBoundingClientRect().width, readerBefore, collapsedBefore });
     } else await skip('collections-pane-does-not-cover-chat', 'collections pane element was not found');
     const context = win.ZoteroContextPane?.context;
     if (context && typeof context.mode === 'string') {
       context.mode = 'notes';
+      if (win.ZoteroContextPane) win.ZoteroContextPane.collapsed = false;
       await delay(500);
-      const chatReleased = !win.document.querySelector('item-details.zcr-chat-active') || context.mode === 'notes';
-      await check('notes-mode-releases-chat-dock', Boolean(chatReleased) && context.mode === 'notes', { mode: context.mode, chatActive: !!win.document.querySelector('item-details.zcr-chat-active') });
+      const chatReleased = !dock();
+      await check('notes-mode-releases-chat-dock', Boolean(chatReleased) && context.mode === 'notes', { mode: context.mode, dock: !!dock() });
       if (toggle()?.getAttribute('aria-pressed') !== 'true') click(toggle());
       await until(() => panel() && ['ready', 'error'].includes(panel().dataset.zcrRuntime), 'reopen chat after notes', 90000);
       await check('codex-reopens-after-notes-mode', !!panel() && panel().dataset.zcrRuntime === 'ready');

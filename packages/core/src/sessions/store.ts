@@ -1,11 +1,12 @@
-import { ReaderError, type Conversation, type GenerationSettings, type PaperScope, type RequestState, type UUID } from '../../../contracts/src/index.ts';
+import { ReaderError, type Conversation, type DocumentContext, type GenerationSettings, type PaperScope, type RequestState, type UUID } from '../../../contracts/src/index.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { validatePaperScope, validateSettings, validateCitation } from '../../../contracts/src/validation.ts';
+import { validatePaperScope, validateSettings, validateCitation, validateImageAttachment, validatePaperIdentity } from '../../../contracts/src/validation.ts';
+import { documentSummary, validateDocument } from '../../../contracts/src/document.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
 import { encodeRequestLog, parseRequestLog } from './log.ts';
 export interface RequestRecord { requestId: UUID; hash: string; state: RequestState; turnId: string | null; createdAt: string; updatedAt: string; action?: 'explain' | 'ask' }
 /** Persisted shape. Requests share the conversation file so accepted state and the user message land atomically. */
-export interface StoredConversation extends Conversation { schemaVersion: 1; logSeq: number; upstream: { threadId: string | null }; requests: RequestRecord[] }
+export interface StoredConversation extends Conversation { schemaVersion: 1 | 2; documents?: Record<string, DocumentContext>; logSeq: number; upstream: { threadId: string | null }; requests: RequestRecord[] }
 interface PaperIndex { schemaVersion: 1; conversations: UUID[]; current: UUID | null }
 export interface StoreClock { uuid: () => string; now: () => string }
 const UUID_PATTERN = /^[0-9a-f-]{36}$/u;
@@ -21,7 +22,14 @@ function int(value: unknown): number { if (typeof value !== 'number' || !Number.
 function settingsOf(value: unknown): GenerationSettings { try { return validateSettings(value); } catch { return unavailable(); } }
 function parseConversation(value: unknown): StoredConversation {
   const c = asRecord(value);
-  if (c.schemaVersion !== 1 || !Array.isArray(c.messages) || !Array.isArray(c.requests) || c.messages.length > 10_000 || c.requests.length > 10_000) unavailable();
+  if ((c.schemaVersion !== 1 && c.schemaVersion !== 2) || !Array.isArray(c.messages) || !Array.isArray(c.requests) || c.messages.length > 10_000 || c.requests.length > 10_000) unavailable();
+  const documents: Record<string, DocumentContext> = {};
+  if (c.schemaVersion === 2) {
+    for (const [id, raw] of Object.entries(asRecord(c.documents))) {
+      try { const doc = validateDocument(raw); if (doc.id !== id || JSON.stringify(doc.paper) !== JSON.stringify(validatePaperScope(c.paper))) unavailable(); documents[id] = doc; }
+      catch { unavailable(); }
+    }
+  }
   let paper: PaperScope; try { paper = validatePaperScope(c.paper); } catch { return unavailable(); }
   const messages = c.messages.map(entry => {
     const m = asRecord(entry);
@@ -29,6 +37,17 @@ function parseConversation(value: unknown): StoredConversation {
     let citations; try { citations = m.citations.map(validateCitation); } catch { return unavailable(); }
     const message: StoredConversation['messages'][number] = { id: str(m.id), requestId: str(m.requestId), role: m.role, phase: m.phase, settings: settingsOf(m.settings), text: str(m.text), citations, status: m.status as StoredConversation['messages'][number]['status'] };
     if (m.effectiveSettings !== undefined) message.effectiveSettings = settingsOf(m.effectiveSettings);
+    if (m.action === 'explain' || m.action === 'ask') message.action = m.action;
+    if (m.paper !== undefined) { try { message.paper = validatePaperIdentity(m.paper); } catch { unavailable(); } }
+    if (m.document !== undefined) {
+      const source = documents[str(asRecord(m.document).id)];
+      if (!source) unavailable();
+      message.document = documentSummary(source);
+    }
+    if (m.images !== undefined) {
+      if (!Array.isArray(m.images)) unavailable();
+      try { message.images = m.images.map(validateImageAttachment); } catch { return unavailable(); }
+    }
     return message;
   });
   const requests = c.requests.map(entry => {
@@ -39,7 +58,7 @@ function parseConversation(value: unknown): StoredConversation {
     return record;
   });
   const upstream = asRecord(c.upstream);
-  return { schemaVersion: 1, logSeq: c.logSeq === undefined ? 0 : int(c.logSeq), id: str(c.id), paper, title: str(c.title), settings: settingsOf(c.settings), activeRequestId: nullableStr(c.activeRequestId), messages, lastSeq: int(c.lastSeq), createdAt: str(c.createdAt), updatedAt: str(c.updatedAt), upstream: { threadId: nullableStr(upstream.threadId) }, requests };
+  return { schemaVersion: c.schemaVersion, ...(c.schemaVersion === 2 ? { documents } : {}), logSeq: c.logSeq === undefined ? 0 : int(c.logSeq), id: str(c.id), paper, title: str(c.title), settings: settingsOf(c.settings), activeRequestId: nullableStr(c.activeRequestId), messages, lastSeq: int(c.lastSeq), createdAt: str(c.createdAt), updatedAt: str(c.updatedAt), upstream: { threadId: nullableStr(upstream.threadId) }, requests };
 }
 function parseIndex(value: unknown): PaperIndex {
   const index = asRecord(value);
@@ -63,6 +82,10 @@ export class ConversationStore {
     return `conversations/${id}.json`;
   }
   private logPath(id: UUID): string { return `conversations/${id}.jsonl`; }
+  private sourcePath(conversationId: UUID, sourceId: UUID): string {
+    this.conversationPath(conversationId); this.conversationPath(sourceId);
+    return `conversations/${conversationId}.${sourceId}.source.json`;
+  }
   private async readJson(path: string): Promise<unknown> {
     let bytes: Uint8Array | null;
     try { bytes = await this.storage.read(path); } catch { unavailable(); }
@@ -109,6 +132,13 @@ export class ConversationStore {
     const cached = this.conversations.get(id); if (cached) return cached;
     const raw = await this.readJson(this.conversationPath(id));
     if (raw === null) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
+    const object = asRecord(raw);
+    if (object.schemaVersion === 2) {
+      if (!Array.isArray(object.documentIds) || object.documentIds.length > 10_000) unavailable();
+      const documents: Record<string, unknown> = {};
+      for (const key of object.documentIds) documents[str(key)] = await this.readJson(this.sourcePath(id, str(key)));
+      object.documents = documents;
+    }
     const conversation = await this.applyLog(parseConversation(raw));
     this.conversations.set(id, conversation); return conversation;
   }
@@ -129,6 +159,24 @@ export class ConversationStore {
       await this.writeJson(this.indexPath(paper), updated);
       this.conversations.set(id, conversation); this.indexes.set(this.indexPath(paper), updated);
       return clone(conversation);
+    });
+  }
+  /** Removes the conversation files and drops the id from the paper index. Does not overwrite a corrupt index. */
+  remove(paper: PaperScope, id: UUID): Promise<void> {
+    return this.serial(async () => {
+      const index = await this.loadIndex(paper);
+      if (!index.conversations.includes(id)) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
+      const remaining = index.conversations.filter(entry => entry !== id);
+      const updated: PaperIndex = { ...index, conversations: remaining, current: index.current === id ? remaining.at(-1) ?? null : index.current };
+      try {
+        const conversation = await this.load(id);
+        for (const sourceId of Object.keys(conversation.documents ?? {})) await this.storage.remove(this.sourcePath(id, sourceId));
+        await this.storage.remove(this.conversationPath(id));
+        await this.storage.remove(this.logPath(id));
+      } catch { storageFailure(); }
+      await this.writeJson(this.indexPath(paper), updated);
+      this.conversations.delete(id);
+      this.indexes.set(this.indexPath(paper), updated);
     });
   }
   select(paper: PaperScope, id: UUID): Promise<StoredConversation> {
@@ -158,7 +206,15 @@ export class ConversationStore {
         }
       } catch { storageFailure(); }
       copy.logSeq = logSeq;
-      await this.writeJson(this.conversationPath(copy.id), copy);
+      if (copy.schemaVersion === 2) {
+        for (const [id, document] of Object.entries(copy.documents ?? {})) {
+          const before = previous.documents?.[id];
+          if (!before) await this.writeJson(this.sourcePath(copy.id, id), validateDocument(document));
+          else if (JSON.stringify(before) !== JSON.stringify(document)) throw new ReaderError('REQUEST_CONFLICT', 'Saved PDF sources are immutable.');
+        }
+        const { documents, ...snapshot } = copy;
+        await this.writeJson(this.conversationPath(copy.id), { ...snapshot, documentIds: Object.keys(documents ?? {}) });
+      } else await this.writeJson(this.conversationPath(copy.id), copy);
       this.conversations.set(copy.id, copy);
     });
   }

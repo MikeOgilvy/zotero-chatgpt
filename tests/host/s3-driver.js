@@ -43,9 +43,10 @@ async function runHostSmoke(config) {
     };
     const readerA = await openReader(attachmentA);
     const toggle = reader => { try { return reader()._iframeWindow?.document.querySelector('[data-zcr-toggle]') ?? null; } catch (error) { if (String(error).includes('dead object')) throw new Error('The test reader was unloaded while the run was in progress.'); throw error; } };
-    const selectedDetails = () => win.document.querySelector(`#zotero-context-pane-item-deck > [data-tab-id="${win.Zotero_Tabs.selectedID}"]`);
-    const panel = () => selectedDetails()?.querySelector('[data-zcr-chat]');
-    const shell = () => selectedDetails()?.querySelector('[data-zcr-sidebar]');
+    const selectedReader = () => Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+    const chatDoc = () => { try { return selectedReader()?._iframeWindow?.document; } catch { return null; } };
+    const panel = () => chatDoc()?.querySelector('[data-zcr-chat]');
+    const shell = () => chatDoc()?.querySelector('[data-zcr-sidebar]');
     const alertText = () => panel()?.querySelector('[role="alert"]')?.textContent || '';
     await until(() => toggle(readerA), 'reader toolbar');
     const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
@@ -119,7 +120,8 @@ async function runHostSmoke(config) {
     await until(() => panel()?.dataset.zcrRuntime === 'ready', 'sidebar opened by Ask', 30000);
     await until(() => panel()?.querySelectorAll('[data-zcr-draft-citations] [data-zcr-citation]').length === 1, 'draft citation card');
     await check('ask-adds-one-draft-citation-without-request', panel().querySelectorAll('[data-zcr-message]').length === 0 && !panel().dataset.zcrActiveRequest);
-    await check('ask-focuses-question-input', win.document.activeElement === panel().querySelector('[data-zcr-input]') || panel().querySelector('[data-zcr-input]').matches(':focus'));
+    const askInput = panel().querySelector('[data-zcr-input]');
+    await check('ask-focuses-question-input', !!askInput && (chatDoc()?.activeElement === askInput || askInput.matches(':focus')));
     await until(() => !bar(), 'action bar removed with native popup after click', 10000).catch(() => undefined);
     // --- More details: exactly one explain request ---
     if (!signedIn && !config.interactiveLogin) { report.status = 'pre-auth-passed'; report.finishedAt = new Date().toISOString(); await save(); return; }
@@ -129,7 +131,8 @@ async function runHostSmoke(config) {
     click(bar().querySelector('[data-zcr-action="explain"]'));
     await until(() => panel()?.querySelectorAll('[data-zcr-message][data-role="user"]').length === 1, 'explain user message recorded', 30000);
     const userMessage = panel().querySelector('[data-zcr-message][data-role="user"]');
-    await check('more-details-records-one-user-message-with-citation', !!userMessage && userMessage.querySelectorAll('[data-zcr-citation]').length === 0 && !!panel().querySelector('[data-zcr-context] [data-zcr-action="open-citation"]') && panel().querySelectorAll('[data-zcr-draft-citations] [data-zcr-citation]').length === 1);
+    const visibleExplain = `${userMessage?.textContent || ''} ${panel().querySelector('[data-zcr-input]')?.value || ''}`;
+    await check('more-details-records-one-user-message-with-citation', !!userMessage && userMessage.querySelectorAll('[data-zcr-citation]').length === 0 && !!panel().querySelector('[data-zcr-context] [data-zcr-action="open-citation"]') && panel().querySelectorAll('[data-zcr-draft-citations] [data-zcr-citation]').length === 1 && !/tell me more about this|请用中文解释|请详细解释/u.test(visibleExplain));
     await until(() => panel()?.dataset.zcrGenerating === 'false', 'explain reaches a terminal state', 240000);
     const assistant = panel().querySelectorAll('[data-zcr-message][data-role="assistant"]');
     const outcome = { assistantMessages: assistant.length, lastStatus: assistant[assistant.length - 1]?.dataset.status ?? null, outputChars: Array.from(assistant).reduce((n, node) => n + (node.querySelector('[data-zcr-text]')?.textContent.trim().length ?? 0), 0), visibleError: alertText() };

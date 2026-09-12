@@ -61,6 +61,14 @@ export class GeckoStorage implements StoragePort {
   }
   writeAtomic(path: string, bytes: Uint8Array): Promise<void> { return this.write(path, bytes, false); }
   append(path: string, bytes: Uint8Array): Promise<void> { return this.write(path, bytes, true); }
+  remove(path: string): Promise<void> {
+    return this.serial(async () => {
+      try {
+        const target = await this.resolve(path, false);
+        if (target && await this.host.io.exists(target)) await this.host.io.remove(target, { ignoreAbsent: true });
+      } catch { throw new Error('Storage write failed'); }
+    });
+  }
   private write(path: string, bytes: Uint8Array, append: boolean): Promise<void> {
     const copy = bytes.slice();
     return this.serial(async () => {

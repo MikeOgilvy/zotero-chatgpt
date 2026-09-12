@@ -45,7 +45,7 @@ async function runHostSmoke(config) {
       try { return reader()._iframeWindow?.document.querySelector('[data-zcr-toggle]') ?? null; }
       catch (error) { if (String(error).includes('dead object')) throw new Error('The test reader was unloaded while the run was in progress; leave the dedicated Zotero window untouched during a host run.'); throw error; }
     };
-    const panel = () => win.document.querySelector('item-details.zcr-chat-active [data-zcr-account]');
+    const panel = () => { try { return reader()._iframeWindow?.document.querySelector('[data-zcr-chat]'); } catch { return null; } };
     const action = name => panel()?.querySelector(`[data-zcr-action="${name}"]`);
     await until(toggle, 'reader toolbar');
     const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');

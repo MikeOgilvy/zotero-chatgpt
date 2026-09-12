@@ -51,7 +51,7 @@ export async function buildReleasePlan() {
     xpi: sha256 ? xpiName : null,
     sha256,
     updateChannel: 'none',
-    notes: 'docs/release.md',
+    notes: 'docs/development.md',
     publishCommand: null,
   };
 }

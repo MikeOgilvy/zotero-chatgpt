@@ -37,9 +37,15 @@ describe('native dock ownership', () => {
     expect(state.dock).toEqual({ collapsed: true, mode: 'notes', scrollTop: 47, width: 280 });
     expect(state.position).toEqual({ scale: 125, anchor: { pageIndex: 6, left: 12, top: 300 } });
   });
-  it.each(['auto', 'page-fit', 'page-width'] as const)('preserves native %s zoom mode', async scale => {
-    const { state, controller } = setup(scale); await controller.toggle(); controller.close();
-    expect(state.zooms).toEqual([]);
+  it.each(['auto', 'page-fit', 'page-width'] as const)('reapplies native %s zoom so the PDF reflows to remaining width', async scale => {
+    const { state, controller } = setup(scale);
+    await controller.toggle();
+    expect(state.zooms[0]).toEqual({ scale, anchor: { pageIndex: 2, left: 8, top: 90 } });
+    state.position.anchor = { pageIndex: 3, left: 4, top: 50 };
+    controller.viewportChanged();
+    expect(state.zooms.at(-1)).toEqual({ scale, anchor: { pageIndex: 3, left: 4, top: 50 } });
+    controller.close();
+    expect(state.zooms.at(-1)).toEqual({ scale, anchor: { pageIndex: 3, left: 4, top: 50 } });
   });
   it('respects a manual zoom while the sidebar is open', async () => {
     const { state, controller } = setup(); await controller.toggle();
@@ -79,14 +85,18 @@ describe('native dock ownership', () => {
   });
 });
 describe('sidebar width', () => {
-  it('clamps to the 320–560 design range and 45% of available width', () => {
+  it('keeps a user width above 560 when the reader strip still has room', () => {
     expect(clampSidebarWidth(360, 1440)).toBe(360);
-    expect(clampSidebarWidth(700, 1440)).toBe(560);
+    expect(clampSidebarWidth(700, 1440)).toBe(700);
+    expect(clampSidebarWidth(900, 1440)).toBe(900);
     expect(clampSidebarWidth(200, 1440)).toBe(320);
     expect(clampSidebarWidth(360, 800)).toBe(360);
-    expect(clampSidebarWidth(360, 600)).toBe(270);
-    expect(clampSidebarWidth(200, 600)).toBe(270);
     expect(clampSidebarWidth(Number.NaN, 1440)).toBe(360);
+  });
+  it('temporarily shrinks so the PDF stays visible instead of using a 560/45% snap-back cap', () => {
+    expect(clampSidebarWidth(900, 600)).toBe(240);
+    expect(clampSidebarWidth(200, 600)).toBe(240);
+    expect(clampSidebarWidth(2000, 1440)).toBe(1080);
   });
   it('applies the remembered width on open and restores the previous native width on close', async () => {
     const { state, controller } = setup();
@@ -97,27 +107,50 @@ describe('sidebar width', () => {
     expect(state.dock.width).toBe(280);
     expect(state.remembered).toEqual([]);
   });
-  it('clamps a narrow window without overwriting the remembered width', async () => {
+  it('clamps a narrow window without overwriting the remembered width, then restores it', async () => {
     const { state, controller } = setup();
-    state.desired = 480;
+    state.desired = 900;
     await controller.toggle();
-    expect(state.dock.width).toBe(480);
+    expect(state.dock.width).toBe(900);
     state.available = 600;
     controller.viewportChanged();
-    expect(state.dock.width).toBe(270);
-    expect(state.desired).toBe(480);
+    expect(state.dock.width).toBe(240);
+    expect(state.desired).toBe(900);
     expect(state.remembered).toEqual([]);
     state.available = 1440;
     controller.viewportChanged();
-    expect(state.dock.width).toBe(480);
+    expect(state.dock.width).toBe(900);
   });
-  it('persists a splitter drag and re-anchors at the current reading position', async () => {
+  it('reflows with native page-width after open and viewport change, never a CSS scale', async () => {
+    const { state, controller } = setup();
+    await controller.toggle();
+    expect(state.zooms[0]).toEqual({ scale: 'page-width', anchor: { pageIndex: 2, left: 8, top: 90 } });
+    state.position.anchor = { pageIndex: 3, left: 4, top: 50 };
+    state.available = 1200;
+    controller.viewportChanged();
+    expect(state.zooms.at(-1)).toEqual({ scale: 'page-width', anchor: { pageIndex: 3, left: 4, top: 50 } });
+    expect(state.applied.at(-1)).toBe(360);
+    expect(state.remembered).toEqual([]);
+  });
+  it('persists a splitter drag wider than 560 and re-anchors at the current reading position', async () => {
     const { state, controller } = setup();
     await controller.toggle();
     state.position.anchor = { pageIndex: 4, left: 10, top: 240 };
-    await controller.setWidth(500);
-    expect(state.dock.width).toBe(500);
-    expect(state.remembered).toEqual([500]);
+    await controller.setWidth(700);
+    expect(state.dock.width).toBe(700);
+    expect(state.remembered).toEqual([700]);
+    expect(state.desired).toBe(700);
     expect(state.zooms.at(-1)).toEqual({ scale: 'page-width', anchor: { pageIndex: 4, left: 10, top: 240 } });
+  });
+  it('does not persist a temporary viewport clamp as the user-chosen width', async () => {
+    const { state, controller } = setup();
+    await controller.toggle();
+    await controller.setWidth(900);
+    expect(state.remembered).toEqual([900]);
+    state.available = 600;
+    controller.viewportChanged();
+    expect(state.dock.width).toBe(240);
+    expect(state.desired).toBe(900);
+    expect(state.remembered).toEqual([900]);
   });
 });

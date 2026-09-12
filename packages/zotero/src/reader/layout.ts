@@ -3,11 +3,14 @@ export interface Anchor { pageIndex: number; left: number; top: number }
 export interface ViewPosition { anchor: Anchor; scale: Scale }
 export interface DockState { collapsed: boolean; mode: 'item' | 'notes'; scrollTop: number; width: number }
 export const DEFAULT_SIDEBAR_WIDTH = 360;
-/** Max 560px or 45% of the reader+sidebar strip; min 320px unless the max is smaller. */
+export const MIN_SIDEBAR_WIDTH = 320;
+/** Keep at least this much of the reader+sidebar strip for the PDF so the pane cannot cover it. */
+export const MIN_READER_WIDTH = 360;
+/** User-chosen width is stored separately; this only applies a temporary viewport clamp. */
 export function clampSidebarWidth(desired: number, availableWidth: number): number {
-  const available = Number.isFinite(availableWidth) && availableWidth > 0 ? availableWidth : DEFAULT_SIDEBAR_WIDTH / 0.45;
-  const max = Math.min(560, Math.floor(available * 0.45));
-  const min = Math.min(320, max);
+  const available = Number.isFinite(availableWidth) && availableWidth > 0 ? availableWidth : DEFAULT_SIDEBAR_WIDTH + MIN_READER_WIDTH;
+  const max = Math.max(0, Math.floor(available - MIN_READER_WIDTH));
+  const min = Math.min(MIN_SIDEBAR_WIDTH, max);
   const target = Number.isFinite(desired) && desired > 0 ? desired : DEFAULT_SIDEBAR_WIDTH;
   return Math.min(Math.max(Math.round(target), min), Math.max(min, max));
 }
@@ -33,7 +36,9 @@ export class ReaderLayoutController {
   private disposed = false;
   private generation = 0;
   private previousDock: DockState | undefined;
+  private previousScale: Scale | undefined;
   private previousFixedScale: number | undefined;
+  private userZoomed = false;
   private desiredWidth = DEFAULT_SIDEBAR_WIDTH;
   constructor(private host: LayoutHost) {}
   get active(): boolean { return this.opened; }
@@ -45,7 +50,9 @@ export class ReaderLayoutController {
     const generation = ++this.generation;
     this.previousDock = this.host.captureDock();
     const position = this.host.capturePosition();
+    this.previousScale = position?.scale;
     this.previousFixedScale = typeof position?.scale === 'number' ? position.scale : undefined;
+    this.userZoomed = false;
     this.desiredWidth = this.host.readDesiredWidth();
     this.opened = true;
     this.host.showDock();
@@ -59,7 +66,7 @@ export class ReaderLayoutController {
       }
       if (!ready) { this.close(); return; }
       const currentPosition = this.host.capturePosition();
-      if (this.previousFixedScale !== undefined && currentPosition) this.host.setZoom('page-width', currentPosition.anchor);
+      if (currentPosition) this.reflow(currentPosition);
       this.host.setActive(true);
     } catch (error) {
       if (generation === this.generation) this.close();
@@ -73,13 +80,18 @@ export class ReaderLayoutController {
     const position = this.host.capturePosition();
     this.host.unmountChat();
     if (restore && this.previousDock) this.host.restoreDock(this.previousDock);
-    if (this.previousFixedScale !== undefined && position) this.host.setZoom(this.previousFixedScale, position.anchor);
+    if (position && !this.userZoomed) {
+      if (this.previousFixedScale !== undefined) this.host.setZoom(this.previousFixedScale, position.anchor);
+      else if (this.previousScale !== undefined) this.host.setZoom(this.previousScale, position.anchor);
+    }
     this.previousDock = undefined;
+    this.previousScale = undefined;
     this.previousFixedScale = undefined;
+    this.userZoomed = false;
     this.host.setActive(false);
   }
   nativeAction(): void { this.close(false); }
-  manualZoom(): void { this.previousFixedScale = undefined; }
+  manualZoom(): void { this.previousFixedScale = undefined; this.userZoomed = true; }
   /** Window or host layout changed: clamp the applied width, keep the remembered choice. */
   viewportChanged(): void { if (this.opened && !this.disposed) this.relayout(false); }
   /** Native splitter drag: persist the chosen width and restore the current PDF anchor. */
@@ -94,17 +106,17 @@ export class ReaderLayoutController {
   private applyWidth(persist: boolean): number {
     const applied = clampSidebarWidth(this.desiredWidth, this.host.measureAvailableWidth());
     this.host.applyWidth(applied);
-    if (persist) {
-      this.desiredWidth = applied;
-      this.host.rememberWidth(applied);
-    }
+    if (persist) this.host.rememberWidth(this.desiredWidth);
     return applied;
+  }
+  private reflow(position: ViewPosition): void {
+    if (this.userZoomed) this.host.keepAnchor(position.anchor);
+    else if (this.previousFixedScale !== undefined) this.host.setZoom('page-width', position.anchor);
+    else this.host.setZoom(position.scale, position.anchor);
   }
   private relayout(persist: boolean): void {
     const position = this.host.capturePosition();
     this.applyWidth(persist);
-    if (!position) return;
-    if (this.previousFixedScale !== undefined) this.host.setZoom('page-width', position.anchor);
-    else this.host.keepAnchor(position.anchor);
+    if (position) this.reflow(position);
   }
 }

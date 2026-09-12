@@ -59,7 +59,7 @@ async function loadBootstrap(): Promise<LoadedBootstrap> {
     Services: services,
     Zotero: zotero,
     ChromeUtils: { importESModule: () => ({}) }, IOUtils: {}, PathUtils: {},
-    Components: { classes: {}, interfaces: {} },
+    Components: { classes: {}, interfaces: {}, utils: { importGlobalProperties: (names: string[]) => { if (names.includes('AbortController')) scope.AbortController = AbortController; } } },
     fetch, crypto, TextDecoder, TextEncoder, URL, setTimeout, clearTimeout,
   };
   vm.createContext(scope);
@@ -96,6 +96,7 @@ describe("Zotero bootstrap lifecycle", () => {
     expect(bundle.TextDecoder).toBeTypeOf("function");
     const decode = new (bundle.TextDecoder as typeof TextDecoder)();
     expect(decode.decode(new Uint8Array([228, 184, 173]))).toBe("中");
+    const abort = new (bundle.AbortController as typeof AbortController)(); abort.abort(); expect(abort.signal.aborted).toBe(true);
   });
 
   it("waits for Zotero initialization before loading and starting existing windows", async () => {

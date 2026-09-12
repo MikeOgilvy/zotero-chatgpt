@@ -100,7 +100,7 @@ const prefs = {
   'extensions.startupScanScopes': 1,
   'extensions.update.enabled': false,
   'extensions.zotero.httpServer.enabled': false,
-  'extensions.zotero.integration.port': tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
+  'extensions.zotero.integration.port': tree.stage === 'context' ? 50014 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
   'extensions.zoteroMacWordIntegration.skipInstallation': true,
   'extensions.zoteroOpenOfficeIntegration.skipInstallation': true,
   'app.update.enabled': false,

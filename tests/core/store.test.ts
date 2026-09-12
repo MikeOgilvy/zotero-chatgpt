@@ -2,13 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { ConversationStore } from '../../packages/core/src/sessions/store.ts';
 import { ReaderError } from '../../packages/contracts/src/index.ts';
 import { MemoryStorage } from './doubles.ts';
-import { citationA, paperA, paperB, settings } from '../contracts/factories.ts';
+import { citationA, imageA, paperA, paperB, settings } from '../contracts/factories.ts';
+import { documentA } from '../contracts/document-fixture.ts';
 let counter = 0;
 function store(storage = new MemoryStorage()) {
   counter = 0;
   return { storage, store: new ConversationStore(storage, { uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`, now: () => '2026-09-09T08:00:00.000Z' }) };
 }
 describe('conversation store', () => {
+  it('stores immutable PDF text once outside streaming snapshots and restores schema 2 sources', async () => {
+    const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings);
+    c.schemaVersion = 2; c.documents = { [documentA.id]: documentA };
+    await s.save(c); c.lastSeq++; await s.save(c);
+    expect(storage.writes.filter(text => text.includes('Definition: x denotes'))).toHaveLength(1);
+    const snapshot = new TextDecoder().decode(storage.files.get(`conversations/${c.id}.json`));
+    expect(snapshot).not.toContain('Definition: x denotes');
+    const restored = new ConversationStore(storage, { uuid: () => 'unused', now: () => 'later' });
+    expect((await restored.get(c.id)).documents?.[documentA.id]?.pages[1]?.text).toContain('y = x + 7');
+  });
   it('creates the current conversation once per attachment and keeps sibling attachments apart', async () => {
     const { store: s } = store();
     expect(await s.current(paperA)).toBeNull();
@@ -21,13 +32,14 @@ describe('conversation store', () => {
   it('persists messages, request records and the upstream thread atomically and restores them', async () => {
     const { storage, store: s } = store();
     const conversation = await s.create(paperA, 'Paper A', settings);
-    conversation.messages.push({ id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'q', citations: [citationA], status: 'completed' });
+    conversation.messages.push({ id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'q', citations: [citationA], status: 'completed', images: [imageA] });
     conversation.requests.push({ requestId: 'r1', hash: 'h', state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now' });
     conversation.upstream.threadId = 'thread-1'; conversation.lastSeq = 3; conversation.activeRequestId = 'r1';
     await s.save(conversation);
     const restored = new ConversationStore(storage, { uuid: () => 'x', now: () => 'later' });
     const loaded = await restored.get(conversation.id);
-    expect(loaded.messages[0]?.citations[0]?.text).toBe(citationA.text); expect(loaded.requests[0]?.state).toBe('accepted');
+    expect(loaded.messages[0]?.citations[0]?.text).toBe(citationA.text); expect(loaded.messages[0]?.images?.[0]?.name).toBe('figure.png');
+    expect(loaded.requests[0]?.state).toBe('accepted');
     expect(loaded.upstream.threadId).toBe('thread-1'); expect(loaded.lastSeq).toBe(3); expect(loaded.activeRequestId).toBe('r1');
     expect(storage.writes.filter(w => w.includes('"requests"')).length).toBeGreaterThan(0);
     expect(loaded).not.toBe(conversation);
@@ -81,6 +93,40 @@ describe('conversation store', () => {
     await s.create(paperB, 'Supplement B', settings);
     await expect(s.select(paperB, a.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect((await s.current(paperA))?.id).toBe(a.id);
+  });
+  it('deletes a conversation and its log without touching a sibling attachment', async () => {
+    const { storage, store: s } = store();
+    const first = await s.create(paperA, 'Paper A', settings);
+    const second = await s.create(paperA, 'Paper A', settings);
+    const other = await s.create(paperB, 'Supplement B', settings);
+    await s.remove(paperA, first.id);
+    expect((await s.list(paperA)).map(c => c.id)).toEqual([second.id]);
+    expect((await s.current(paperA))?.id).toBe(second.id);
+    expect((await s.current(paperB))?.id).toBe(other.id);
+    expect([...storage.files.keys()].some(k => k.endsWith(`${first.id}.json`))).toBe(false);
+    expect([...storage.files.keys()].some(k => k.endsWith(`${first.id}.jsonl`))).toBe(false);
+    await expect(s.get(first.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+  it('after deleting the current chat, falls back to another listed conversation', async () => {
+    const { store: s } = store();
+    const first = await s.create(paperA, 'Paper A', settings);
+    const second = await s.create(paperA, 'Paper A', settings);
+    expect((await s.current(paperA))?.id).toBe(second.id);
+    await s.remove(paperA, second.id);
+    expect((await s.current(paperA))?.id).toBe(first.id);
+    expect((await s.list(paperA)).map(c => c.id)).toEqual([first.id]);
+  });
+  it('does not write an empty snapshot when history is unavailable', async () => {
+    const { storage, store: s } = store();
+    const created = await s.create(paperA, 'Paper A', settings);
+    const indexPath = [...storage.files.keys()].find(k => k.startsWith('papers/'))!;
+    const conversationPath = [...storage.files.keys()].find(k => k.endsWith(`${created.id}.json`))!;
+    const originalConversation = storage.files.get(conversationPath)!;
+    storage.files.set(indexPath, new TextEncoder().encode('{"schemaVersion":1,"conversations":'));
+    const fresh = new ConversationStore(storage, { uuid: () => 'x', now: () => 'later' });
+    await expect(fresh.remove(paperA, created.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' });
+    expect(new TextDecoder().decode(storage.files.get(indexPath))).toBe('{"schemaVersion":1,"conversations":');
+    expect(storage.files.get(conversationPath)).toEqual(originalConversation);
   });
   it('leaves a truncated paper index and a garbage-tailed conversation file untouched', async () => {
     const { storage, store: s } = store();

@@ -1,6 +1,7 @@
 import { ReaderError, paperId, type Conversation, type ErrorCode, type GenerationSettings, type Message, type PaperScope, type ReaderEvent, type RequestState, type SendInput, type SendReceipt, type ShareableDiagnostics, type UUID } from '../../../contracts/src/index.ts';
 import { shareableDiagnostics } from './diagnostics.ts';
 import { clone } from '../../../contracts/src/clone.ts';
+import { documentSummary } from '../../../contracts/src/document.ts';
 import { RuntimeFailure, type ModelOption } from '../../../contracts/src/runtime.ts';
 import { validatePaperScope, validateSendInput, validateSettings } from '../../../contracts/src/validation.ts';
 import { record } from '../codex/transport.ts';
@@ -33,7 +34,7 @@ const ACTIVE: RequestState[] = ['accepted', 'dispatching', 'running'];
 const HARMLESS_ITEMS = ['userMessage', 'reasoning', 'plan', 'contextCompaction'];
 const ANSWER_LIMIT = 1024 * 1024;
 async function hashInput(input: SendInput): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings }));
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -61,16 +62,26 @@ export class ReaderService {
   private runs = new Map<UUID, Run>();
   private runsByThread = new Map<string, Run>();
   private knownThreads = new Set<string>();
+  private knownDocuments = new Map<string, string>();
   private listeners = new Set<(event: ReaderEvent) => void>();
   private recovered = new Set<UUID>();
   private recovering = new Set<UUID>();
   private lastErrorCodes = new Map<UUID, ErrorCode>();
   private closed = false;
+  private opening = new Map<string, Promise<Conversation>>();
   constructor(private store: ConversationStore, private upstream: ServiceUpstream, private options: ServiceOptions) {}
   subscribe(listener: (event: ReaderEvent) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   // ---- conversations -------------------------------------------------------------------------
-  async current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
+  current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
     const scope = validatePaperScope(paper);
+    const key = paperId(scope);
+    const pending = this.opening.get(key);
+    if (pending) return pending.then(clone);
+    const operation = this.openCurrent(scope, title, settings).finally(() => { this.opening.delete(key); });
+    this.opening.set(key, operation);
+    return operation.then(clone);
+  }
+  private async openCurrent(scope: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
     const existing = await this.store.current(scope);
     if (existing) {
       await this.load(existing.id, existing);
@@ -108,6 +119,20 @@ export class ReaderService {
     await this.load(selected.id, selected);
     await this.ensureRecovered(selected.id);
     return toPublic(await this.load(selected.id));
+  }
+  async deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> {
+    const scope = validatePaperScope(paper);
+    const title = await this.serial(conversationId, async () => {
+      const conversation = await this.load(conversationId);
+      if (paperId(scope) !== paperId(conversation.paper)) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
+      if (conversation.activeRequestId || conversation.requests.some(r => ACTIVE.includes(r.state) || r.state === 'uncertain')) {
+        throw new ReaderError('BUSY', 'Stop the task and wait for a confirmed result before deleting this chat.');
+      }
+      await this.store.remove(scope, conversationId);
+      this.loaded.delete(conversationId); this.recovered.delete(conversationId);
+      return conversation.title;
+    });
+    return this.current(scope, title || 'PDF attachment');
   }
   /** Loads once. Leftover dispatching/running becomes uncertain; leftover accepted is redelivered once after recover. */
   private async load(id: UUID, fetched?: StoredConversation): Promise<StoredConversation> {
@@ -184,12 +209,18 @@ export class ReaderService {
   private async reconstructInput(conversation: StoredConversation, request: RequestRecord): Promise<SendInput | null> {
     const user = conversation.messages.find(m => m.requestId === request.requestId && m.role === 'user');
     if (!user) return null;
-    if (request.action) return { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings };
+    const paper = user.paper ?? (user.citations[0]
+      ? { title: user.citations[0].title, authors: user.citations[0].authors, ...(user.citations[0].year ? { year: user.citations[0].year } : {}), ...(user.citations[0].doi ? { doi: user.citations[0].doi } : {}) }
+      : conversation.title.trim() ? { title: conversation.title, authors: [] } : undefined);
+    const document = user.document ? conversation.documents?.[user.document.id] : undefined;
+    if (user.document && !document) return null;
+    const images = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}) };
+    if (request.action) return { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
     for (const action of ['explain', 'ask'] as const) {
-      const input: SendInput = { requestId: request.requestId, conversationId: conversation.id, action, question: user.text, citations: user.citations, settings: user.settings };
+      const input: SendInput = { requestId: request.requestId, conversationId: conversation.id, action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
       if (await hashInput(input) === request.hash) return input;
     }
-    return { requestId: request.requestId, conversationId: conversation.id, action: user.citations.length > 0 ? 'explain' : 'ask', question: user.text, citations: user.citations, settings: user.settings };
+    return { requestId: request.requestId, conversationId: conversation.id, action: user.citations.length > 0 ? 'explain' : 'ask', question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
   }
   private async applyHistory(conversation: StoredConversation, request: RequestRecord, turn: HistoryTurn): Promise<void> {
     if (turn.status === 'inProgress') {
@@ -300,6 +331,8 @@ export class ReaderService {
       if (this.closed || !this.upstream.ready()) throw new ReaderError('RUNTIME_UNAVAILABLE', 'Codex is not available; retry the connection first.', true);
       if (!this.upstream.signedIn()) throw new ReaderError('AUTH_REQUIRED', 'Sign in with ChatGPT before sending.');
       if (input.citations.some(c => paperId(c.paper) !== paperId(live.paper))) throw new ReaderError('INVALID_REQUEST', 'Citations must come from the attachment of this conversation.');
+      if (input.document && paperId(input.document.paper) !== paperId(live.paper)) throw new ReaderError('INVALID_REQUEST', 'PDF context must come from the attachment of this conversation.');
+      if (input.document && live.documents?.[input.document.id] && JSON.stringify(live.documents[input.document.id]) !== JSON.stringify(input.document)) throw new ReaderError('REQUEST_CONFLICT', 'This PDF snapshot identity already refers to different content.');
       const model = this.upstream.models().find(m => m.id === input.settings.model);
       if (!model) throw new ReaderError('MODEL_UNAVAILABLE', 'The selected model is not in the current catalog.');
       if (input.settings.effort !== null && !model.supportedReasoningEfforts.some(e => e.id === input.settings.effort)) throw new ReaderError('INVALID_REQUEST', 'The selected reasoning effort is not supported by this model.');
@@ -310,7 +343,8 @@ export class ReaderService {
       const request: RequestRecord = { requestId: input.requestId, hash, state: 'accepted', turnId: null, createdAt: now, updatedAt: now, action: input.action };
       await this.commit(input.conversationId, (c, emit) => {
         c.requests.push(request);
-        c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' });
+        if (input.document) { c.schemaVersion = 2; c.documents = { ...c.documents, [input.document.id]: input.document }; }
+        c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action, ...(input.images?.length ? { images: input.images } : {}), ...(input.document ? { document: documentSummary(input.document), ...(input.paper ? { paper: input.paper } : {}) } : {}) });
         c.activeRequestId = input.requestId; c.settings = input.settings;
         emit({ type: 'accepted', requestId: input.requestId });
       });
@@ -346,7 +380,10 @@ export class ReaderService {
       run.threadId = threadId; this.runsByThread.set(threadId, run);
       if (run.cancelWanted) { await this.settle(run, { kind: 'cancelled' }); return; }
       run.submitted = true;
-      const result = record(await this.upstream.request('turn/start', turnParams(threadId, requestId, readingInput(run.input), cwd, resolved)));
+      const documentKey = run.input.document ? `${run.input.document.id}:${resolved.model}` : null;
+      const reuse = documentKey !== null && this.knownDocuments.get(threadId) === documentKey;
+      if (documentKey) this.knownDocuments.set(threadId, documentKey);
+      const result = record(await this.upstream.request('turn/start', turnParams(threadId, requestId, readingInput(run.input, reuse), cwd, resolved, run.input.images ?? [])));
       const turnId = string(record(result.turn).id);
       if (run.turnId && run.turnId !== turnId) throw new Error('turn mismatch');
       run.turnId = turnId;
@@ -403,6 +440,7 @@ export class ReaderService {
   /** Thread-scoped notifications routed from the runtime session. Unknown threads are ignored. */
   handleNotice(method: string, params: Record<string, unknown>): void {
     if (typeof params.threadId !== 'string') return;
+    if (method === 'thread/compacted' || ((method === 'item/started' || method === 'item/completed') && params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction')) this.knownDocuments.delete(params.threadId);
     const run = this.runsByThread.get(params.threadId);
     if (!run || run.settled) return;
     void this.serial(run.conversationId, () => this.process(run, method, params)).catch(() => undefined);
@@ -478,6 +516,7 @@ export class ReaderService {
   private async finish(run: Run, outcome: Outcome): Promise<void> {
     if (run.settled) return;
     run.settled = true;
+    if (outcome.kind !== 'completed' && run.threadId) this.knownDocuments.delete(run.threadId);
     if (run.flushTimer) { clearTimeout(run.flushTimer); run.flushTimer = null; }
     this.runs.delete(run.requestId); if (run.threadId) this.runsByThread.delete(run.threadId);
     await this.flush(run).catch(() => undefined);

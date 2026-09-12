@@ -21,10 +21,12 @@ async function initialize({ id, rootURI }) {
   }
 
   // loadSubScript's target does not inherit the plugin sandbox capabilities.
+  Components.utils.importGlobalProperties(['AbortController']);
   scriptScope = {
     Zotero, ChromeUtils, IOUtils, PathUtils, Services,
     Cc: Components.classes, Ci: Components.interfaces,
-    fetch, crypto, TextDecoder, TextEncoder, URL, setTimeout, clearTimeout,
+    Cu: Components.utils,
+    fetch, crypto, TextDecoder, TextEncoder, URL, AbortController, setTimeout, clearTimeout,
   };
   Services.scriptloader.loadSubScript(
     `${rootURI}content/zcr.js`,

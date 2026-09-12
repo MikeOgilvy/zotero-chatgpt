@@ -32,6 +32,7 @@ it('keeps shareable diagnostics off the default sidebar; presenter still copies 
     list: () => Promise.resolve([structuredClone(conversation)]), select: () => Promise.reject(new Error()),
     get: () => Promise.resolve(structuredClone(conversation)), send: () => Promise.reject(new Error()),
     request: () => Promise.reject(new Error()), cancel: () => Promise.reject(new Error()),
+    deleteConversation: () => Promise.reject(new Error()),
     diagnostics: vi.fn(() => Promise.resolve(report)),
     subscribe: () => () => undefined, close: async () => {},
   };

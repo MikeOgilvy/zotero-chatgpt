@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterState } from '../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
-import { citationA, citationB, paperA, settings } from '../contracts/factories.ts';
+import { citationA, citationB, imageA, paperA, settings } from '../contracts/factories.ts';
+import { documentA } from '../contracts/document-fixture.ts';
 const model = { id: 'catalog-default', displayName: 'Catalog Default', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }], defaultServiceTier: 'priority' };
 const other = { id: 'other-model', displayName: 'Other Model', isDefault: false, supportedReasoningEfforts: [{ id: 'low', description: '' }], defaultReasoningEffort: 'low', serviceTiers: [] as Array<{ id: string; name: string; description: string }>, defaultServiceTier: null };
 function fixture(options: { signedIn?: boolean } = {}) {
@@ -34,6 +35,16 @@ function fixture(options: { signedIn?: boolean } = {}) {
       const state = message?.status === 'uncertain' ? 'uncertain' as const : message?.status === 'completed' ? 'completed' as const : 'running' as const;
       return Promise.resolve({ requestId, state, replay: false });
     }, cancel: vi.fn((_c: string, requestId: string) => { cancelled.push(requestId); return Promise.resolve({ requestId, state: 'running' as const, replay: false }); }),
+    deleteConversation: vi.fn((_paper, id: string) => {
+      const index = conversations.findIndex(entry => entry.id === id);
+      if (index < 0) return Promise.reject(new ReaderError('NOT_FOUND', 'Unknown conversation'));
+      conversations.splice(index, 1);
+      if (conversation.id === id) {
+        conversation = conversations[0] ?? { ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', title: 'Synthetic Paper A', messages: [], lastSeq: 0, activeRequestId: null };
+        if (!conversations.some(entry => entry.id === conversation.id)) conversations.push(conversation);
+      }
+      return Promise.resolve(structuredClone(conversation));
+    }),
     diagnostics: vi.fn((): Promise<ShareableDiagnostics> => Promise.resolve({
       pluginVersion: '0.3.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {},
       storageLocation: SHAREABLE_STORAGE_LOCATION,
@@ -55,6 +66,63 @@ function fixture(options: { signedIn?: boolean } = {}) {
 }
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 5));
 describe('conversation presenter', () => {
+  it('keeps two views of the same attachment consistent when either view closes', async () => {
+    const f = fixture(); await f.presenter.activate();
+    let first = ''; let second = '';
+    const unbindFirst = f.presenter.bind(s => { first = s.draft.question; });
+    const unbindSecond = f.presenter.bind(s => { second = s.draft.question; });
+    f.presenter.setQuestion('Both windows'); expect(first).toBe('Both windows'); expect(second).toBe('Both windows');
+    unbindFirst(); f.presenter.setQuestion('Second window'); expect(second).toBe('Second window'); expect(first).toBe('Both windows'); unbindSecond();
+  });
+  it('freezes the question, settings and conversation while PDF preparation is pending, and keeps newer input', async () => {
+    const f = fixture(); let resolve!: (value: typeof documentA) => void;
+    const prepare = () => new Promise<typeof documentA>(r => { resolve = r; });
+    const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', { ...f.services, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+    await presenter.activate(); presenter.setQuestion('Explain x');
+    const pending = presenter.send(); await settle();
+    expect(f.sent).toHaveLength(0); expect(presenter.snapshot().generating).toBe(true);
+    presenter.setQuestion('Next question'); presenter.setSettings({ ...settings, effort: 'high' });
+    resolve(documentA); await pending;
+    expect(f.sent[0]).toMatchObject({ question: 'Explain x', settings, document: documentA });
+    expect(presenter.snapshot().draft.question).toBe('Next question');
+  });
+  it('cancels PDF preparation without sending and preserves the question', async () => {
+    const f = fixture();
+    const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+      prepare: signal => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Preparation cancelled.')), { once: true })),
+      validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
+    } });
+    await presenter.activate(); presenter.setQuestion('Keep this');
+    const pending = presenter.send(); await settle(); await presenter.cancel(); await pending;
+    expect(f.sent).toHaveLength(0); expect(presenter.snapshot().draft.question).toBe('Keep this');
+    expect(presenter.snapshot().message).toMatch(/cancelled/iu);
+  });
+  it('keeps PDF failures visible and never sends a bibliographic-only substitute', async () => {
+    const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+      prepare: () => Promise.reject(new Error('PDF unavailable.')), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
+    } });
+    await presenter.activate(); presenter.setQuestion('Keep this'); await presenter.send();
+    expect(f.sent).toHaveLength(0); expect(presenter.snapshot().draft.question).toBe('Keep this'); expect(presenter.snapshot().message).toContain('PDF unavailable');
+  });
+  it('honors automatic-context opt-out changed by another view before sending', async () => {
+    const f = fixture(); let enabled = true;
+    const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+      prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => enabled, writeEnabled: value => { enabled = value; },
+    } });
+    await presenter.activate(); enabled = false; presenter.setQuestion('Explicit selection only'); await presenter.send();
+    expect(f.sent).toHaveLength(1); expect(f.sent[0]?.document).toBeUndefined();
+  });
+  it('new conversation starts with an empty draft and restores the old draft when selected again', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const original = f.conversation().id;
+    f.presenter.setQuestion('Original draft'); f.presenter.addCitation(citationA);
+    await f.presenter.newConversation();
+    expect(f.last().draft.question).toBe('');
+    expect(f.last().draft.citations).toEqual([]);
+    await f.presenter.openConversation(original);
+    expect(f.last().draft.question).toBe('Original draft');
+    expect(f.last().draft.citations).toEqual([citationA]);
+  });
   it('activates the attachment conversation and renders history without sending anything', async () => {
     const f = fixture(); f.setConversation({ ...f.conversation(), messages: [{ id: 'm1', requestId: 'r0', role: 'assistant', phase: 'final', settings, text: '旧回答', citations: [], status: 'completed' }], lastSeq: 4 });
     await f.presenter.activate();
@@ -72,11 +140,52 @@ describe('conversation presenter', () => {
     expect(f.last().draft.question).toBe(''); expect(f.last().draft.citations).toHaveLength(0);
     expect(f.last().conversation?.messages.at(-1)).toMatchObject({ role: 'user', text: '这里的先验指什么？' });
   });
+  it('keeps pending images on the draft and sends them as an ask image part', async () => {
+    const f = fixture(); await f.presenter.activate();
+    f.presenter.addImage(imageA);
+    f.presenter.addImage({ ...imageA });
+    expect(f.last().draft.images).toHaveLength(1);
+    f.presenter.removeImage(imageA.id);
+    expect(f.last().draft.images).toHaveLength(0);
+    f.presenter.addImage(imageA);
+    f.presenter.setQuestion('图里的符号是什么？');
+    await f.presenter.send();
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]).toMatchObject({ action: 'ask', question: '图里的符号是什么？', images: [imageA] });
+    expect(f.last().draft.images).toHaveLength(0);
+    expect(f.last().draft.question).toBe('');
+  });
   it('More details submits exactly one explain request with the default question and keeps the draft', async () => {
     const f = fixture(); await f.presenter.activate(); f.presenter.setQuestion('草稿中的问题'); f.presenter.addCitation(citationB);
     await Promise.all([f.presenter.explain(citationA), f.presenter.explain(citationA)]);
-    expect(f.sent).toHaveLength(1); expect(f.sent[0]).toMatchObject({ action: 'explain', citations: [citationA] }); expect(f.sent[0]!.question).toContain('解释');
+    expect(f.sent).toHaveLength(1); expect(f.sent[0]).toMatchObject({ action: 'explain', citations: [citationA] });
+    expect(f.sent[0]!.question).toBe('tell me more about this');
+    expect(f.sent[0]!.question).not.toMatch(/请用中文解释/u);
     expect(f.last().draft.question).toBe('草稿中的问题'); expect(f.last().draft.citations).toEqual([citationB]);
+  });
+  it('attaches bibliographic paper identity on ask even without a citation', async () => {
+    const f = fixture(); await f.presenter.activate();
+    f.presenter.setQuestion('这篇在讲什么方向？');
+    await f.presenter.send();
+    expect(f.sent[0]).toMatchObject({
+      action: 'ask', question: '这篇在讲什么方向？', citations: [],
+      paper: { title: 'Synthetic Paper A' },
+    });
+    expect(f.sent[0]!.paper?.title).toBeTruthy();
+  });
+  it('deletes a completed conversation and falls back without issuing a cancellation', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    await f.presenter.newConversation();
+    const secondId = f.last().conversation!.id;
+    f.presenter.setQuestion('第二问'); await f.presenter.send();
+    expect(f.last().generating).toBe(true);
+    f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'reply', finalText: 'done' });
+    await f.presenter.deleteConversation(secondId);
+    expect(f.client.deleteConversation).toHaveBeenCalledWith(paperA, secondId);
+    expect(f.cancelled).toEqual([]);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().conversations.map(c => c.id)).not.toContain(secondId);
   });
   it('applies streamed events after the snapshot by seq, ignores other conversations and shows terminal states', async () => {
     const f = fixture(); await f.presenter.activate(); await f.presenter.explain(citationA); const requestId = f.sent[0]!.requestId;
@@ -148,7 +257,9 @@ describe('conversation presenter', () => {
     (f.client.send as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ReaderError('BUSY', 'An earlier request in this conversation could not be confirmed; start a new conversation to continue.'));
     f.presenter.addCitation(citationA); f.presenter.setQuestion('问题'); await f.presenter.send();
     expect(f.last().message).toContain('new conversation'); expect(f.last().draft.question).toBe('问题'); expect(f.last().draft.citations).toEqual([citationA]);
-    await f.presenter.newConversation(); expect(f.client.newConversation).toHaveBeenCalledTimes(1); expect(f.last().conversation?.id).toBe('aaaaaaaa-0000-4000-8000-000000000002'); expect(f.last().draft.citations).toEqual([citationA]);
+    const original = f.last().conversation!.id;
+    await f.presenter.newConversation(); expect(f.client.newConversation).toHaveBeenCalledTimes(1); expect(f.last().conversation?.id).toBe('aaaaaaaa-0000-4000-8000-000000000002'); expect(f.last().draft.citations).toEqual([]);
+    await f.presenter.openConversation(original); expect(f.last().draft.citations).toEqual([citationA]); expect(f.last().draft.question).toBe('问题');
   });
   it('reports a runtime start failure and allows a deliberate retry', async () => {
     const f = fixture(); f.services.ensureStarted.mockRejectedValueOnce(new Error('Unable to prepare the bundled Codex runtime'));
@@ -214,7 +325,7 @@ describe('conversation presenter', () => {
     await f.presenter.newConversation();
     const secondId = f.last().conversation!.id;
     expect(secondId).not.toBe(firstId);
-    expect(f.last().draft.question).toBe('关于先验');
+    expect(f.last().draft.question).toBe('');
     expect(f.last().conversations.map(c => c.id)).toEqual([firstId, secondId]);
     f.presenter.setQuestion('新对话的问题'); f.presenter.removeCitation(citationA.id);
     await f.presenter.openConversation(firstId);

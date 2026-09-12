@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { ModelOption } from '../../packages/contracts/src/runtime.ts';
 import { settings } from '../contracts/factories.ts';
-import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
+import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
 
 const catalog: ModelOption[] = [
   {
@@ -47,8 +47,8 @@ it('builds three independent controls from the selected model, with Default when
   expect(withExtras[1]).toMatchObject({ label: 'Speed', value: 'priority', disabled: false });
   expect(withExtras[1]?.options).toEqual([
     { value: '', label: 'Default' },
+    { value: 'flex', label: 'Fast' },
     { value: 'priority', label: 'Priority' },
-    { value: 'flex', label: 'Flex' },
   ]);
   expect(withExtras[2]?.options.map(o => o.value)).toEqual(['', 'medium', 'high']);
 
@@ -65,5 +65,34 @@ it('labels a frozen snapshot from the catalog without rewriting it when the menu
   const frozen = settingsCaption(settings, catalog);
   expect(frozen).toBe('Catalog Default · Priority · medium');
   expect(settingsCaption({ ...settings, serviceTier: null, effort: null }, catalog)).toBe('Catalog Default · Default · Default');
+  expect(settingsCaption({ ...settings, serviceTier: 'flex' }, catalog)).toBe('Catalog Default · Fast · medium');
   expect(settingsCaption(settings, [catalog[1]!])).toBe('catalog-default · priority · medium');
+});
+
+it('maps product Fast onto a fast-named catalog tier, else the catalog’s fast-like tier', () => {
+  expect(resolveFastTier(catalog[0])).toEqual({ id: 'flex', name: 'Flex' });
+  const withFast = {
+    ...catalog[0]!,
+    serviceTiers: [
+      { id: 'priority', name: 'Priority', description: '' },
+      { id: 'fast-lane', name: 'Fast', description: '' },
+    ],
+  };
+  expect(resolveFastTier(withFast)).toEqual({ id: 'fast-lane', name: 'Fast' });
+  expect(resolveFastTier(catalog[1])).toBeUndefined();
+});
+
+it('prints catalog effort ids with Cursor-like names only when those ids exist', () => {
+  expect(effortLabel('low')).toBe('Low');
+  expect(effortLabel('xhigh')).toBe('Extra High');
+  expect(effortLabel('extra_high')).toBe('Extra High');
+  expect(effortLabel(null)).toBe('Default');
+  expect(effortLabel('custom-tier')).toBe('custom-tier');
+});
+
+it('labels the model chip as model + effort + Fast without inventing missing tiers', () => {
+  expect(modelChipLabel(null, catalog)).toBe('Model');
+  expect(modelChipLabel(settings, catalog)).toBe('Catalog Default Medium');
+  expect(modelChipLabel({ ...settings, serviceTier: 'flex', effort: 'high' }, catalog)).toBe('Catalog Default High Fast');
+  expect(modelChipLabel({ model: 'other-model', serviceTier: null, effort: 'low' }, catalog)).toBe('Other Model Low');
 });
