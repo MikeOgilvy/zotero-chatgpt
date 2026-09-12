@@ -1,8 +1,10 @@
 # 开发、测试与发行
 
-从仓库根目录执行，Node **24.x** / npm **11.6.1**，版本以 package.json、.nvmrc、manifest 为准。macOS Apple Silicon 是当前宿主验证目标。编辑器可用 Cursor + 官方 Codex 扩展；同一文件单一写入负责人，用户已授权本地小提交；推送和公开发布需另行授权。
+当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a1**。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
 
-## 从 checkout 构建
+四份权威文档分别负责[产品行为](zotero-codex-user-flow.md)、[架构与数据契约](module-design.md)、本文的开发操作、[进度与验收结果](progress.md)。不要再复制旧阶段计划或把单元、宿主、模型、发行证据混写成一个 PASS。
+
+## 构建与本地验证
 
 ```sh
 npm ci
@@ -14,70 +16,87 @@ npm run package:dev
 npm run verify:artifacts
 ```
 
-runtime-prepare 只从 `runtime/manifest.ts` 固定的官方归档获取、校验二进制到忽略的 `.zcr-dev/runtime-cache/`。不更换系统 CLI，不操作凭据。build 缺运行资产时明确失败，不用 fixture 假装正式包。
+`runtime-prepare.mjs` 仅在固定运行资产需要准备时执行：从 manifest 指定的官方归档获取并校验 Codex 0.144.1 到忽略的 `.zcr-dev/runtime-cache/`。它不替换系统 CLI，也不操作认证。缺少真实运行资产时构建失败，不用测试 fixture 冒充发行包。
 
-| 实际 npm script | 作用 |
+| 命令 | 作用与证据边界 |
 | --- | --- |
-| `build` / `dev` | esbuild 输出 build/dev；dev 监听，不自动重置或重载 Zotero |
-| `typecheck` / `lint` / `test:unit` | 类型、ESLint、Vitest；包含模拟协议/DOM和构建行为，均不证明模型/宿主通过 |
-| `package:dev` | build 后生成 dist/ 中按 Zotero manifest 版本命名的完整开发 XPI 和 SHA256SUMS |
-| `verify:artifacts` | 校验 XPI/目录白名单、runtime hash、许可证、无 Node 导入/账户/论文文件 |
-| `verify:install` | 安装生命周期 CLI；必须提供子命令（prepare/seed-records/upgrade/rollback/extract/updates-json/build-info），参数示例见下方（没有 --help 入口） |
-| `release:dry-run` | 本地发行计划，githubRelease=null；拒绝 publish/upload，不公开发布 |
+| `npm run build` / `npm run dev` | 构建或监听工作树；不自动重置 profile，也不保证已打开 Zotero 热重载 |
+| `npm run typecheck` / `npm run lint` | TypeScript / ESLint |
+| `npm run test:unit` | 协议、存储、DOM、范围、任务和构建等回归；宿主替身或模拟回答不是真实模型证据 |
+| `npm run package:dev` | 生成完整开发 XPI、固定运行资产及 SHA256SUMS |
+| `npm run verify:artifacts` | 检查发行白名单、hash、许可、无 Node 导入及私有记录 |
+| `npm run verify:install -- <command>` | 本地安装生命周期工具；需要明确子命令，没有通用 `--help` 入口 |
+| `npm run release:dry-run` | 检查本地发行计划，githubRelease=null；不发布或上传 |
 
-没有 test:live/test:integration 正式 npm script。当前 XPI 文件名为 `dist/zotero-codex-reader-0.3.0a1-dev.xpi`；不要在文档多个位置复制易过期摘要，实际 digest 读取 dist/SHA256SUMS 和 [progress](progress.md)。
-
-用实际 XPI 生成本地发行身份（不会启动 Zotero）：
+当前目标文件名为 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`。不要在文档多处手写 digest；以 `dist/SHA256SUMS`、实际包身份和 progress 为准。
 
 ```sh
-npm run verify:install -- build-info --xpi dist/zotero-codex-reader-0.3.0a1-dev.xpi --out .zcr-dev/build-info.json --json
+npm run verify:install -- build-info \
+  --xpi dist/zotero-codex-reader-0.4.0a1-dev.xpi \
+  --out .zcr-dev/build-info.json --json
 ```
 
-## 隔离宿主与人工试用
+非平凡行为先观察有意义的失败回归再实现，只扩大受影响检查。普通文档/配置直接核对，不写源码字符串测试。保持一文件一负责人，保护已有未提交改动；本地提交遵循当前会话授权，不自动推送。
 
-**所有宿主操作仅 `.zcr-dev/`，不得使用正常 Zotero profile/library。已有开发 profile 也可能含私有资料，不能清空、批量导出或读取认证文件。** 准备前关闭目标专用实例，保留正常 Zotero 运行。
+## 专用 context 树
+
+**当前产品/原生功能验收只用 `.zcr-dev/context/{profile,data}` 和合成材料。** 安装生命周期测试另用下述 s6 隔离树；所有目标都必须是经核对的 `.zcr-dev/` 专用子树。正常 Zotero 可以继续运行。已有 `.zcr-dev/profile`、旧测试账号和其他 Codex 会话都不能被清空、复制认证或当临时垃圾处理。
+
+更换 driver、安装包或准备模式前，先退出目标专用实例。自动管理进程时必须用 ps 核对完整 `-profile` / `-datadir` 参数；只看 runner.pid 或进程名不够。停止前只读该 profile 的 `records/conversations/*.json`（排除 `.source.json`）确认没有 activeRequestId；不读 account/auth。禁止 killall、清 profile、git clean/reset 或 blanket rm。
+
+人工试用使用明确的无 driver 模式：
 
 ```sh
 npm run package:dev
-node scripts/prepare-host-test.mjs --acceptance
+node scripts/prepare-host-test.mjs --context --acceptance
 /Applications/Zotero.app/Contents/MacOS/zotero \
-  -no-remote -profile "$PWD/.zcr-dev/profile" -datadir "$PWD/.zcr-dev/data"
+  -no-remote -profile "$PWD/.zcr-dev/context/profile" \
+  -datadir "$PWD/.zcr-dev/context/data"
 ```
 
-`--acceptance` 安装完整本地 XPI、刷新合成 reading.pdf，并移除自动 driver；不会主动发送。仅打开 `.zcr-dev/fixtures/reading.pdf` 的合成条目试用。目标行为见 [产品规格](zotero-codex-user-flow.md)。官方网页登录保留在浏览器中，不复制 token；测试账户最新可用性须查询协议，不能把历史限额日期当现状。
+该准备过程安装本地完整 XPI，刷新合成主文和补充 PDF，移除自动 driver，保留已有合成库和记录。打开助手本身不发模型请求。登录必须在此专用实例通过官方浏览器流程完成，不从日常 profile 或其他客户端复制 token。
 
-## 当前 PDF 宿主回归
+## 自动宿主模式
+
+以下模式互斥；选好一种准备后，用上方同一条专用启动命令运行。**准备脚本默认也会装自动 driver，不带参数不代表人工模式。**
+
+| 准备命令 | 会自动执行的内容 |
+| --- | --- |
+| `node scripts/prepare-host-test.mjs --context` | 当前 PDF 本地提取、页面标签/范围、原生 UI/会话/附件切换及合成性能样本；不发模型请求 |
+| `node scripts/prepare-host-test.mjs --context --native` | 将工作树生产模块编入独立测试 driver；新建合成条目、PDF、collection 和标注，执行审批/撤销/冲突、SHA、截图、后台引用；还会尝试固定公开 DOI 的**未保存网络元数据预览**，不调用模型或下载 OA PDF |
+| `node scripts/prepare-host-test.mjs --context --live` | 本地检查后对合成 PDF **真实调用已登录账户的模型**，检查回答来源及停止/完成竞态；会消耗实际可用额度，执行前必须有对应授权 |
+| `node scripts/prepare-host-test.mjs --context --acceptance` | 无自动 driver 的人工试用 |
+
+`--native` 不与 `--live` 或 `--acceptance` 合用。`--live` 不等于新登录测试，也不自动证明图像生成；实际模型、回答、取消结果和能力均以当次报告为准。脚本可优先选择目录中存在的 Spark，不通过改推理强度伪造速度档位，不因旧限额日期推断当前账户状态。
+
+context 报告写入 `.zcr-dev/context/host-report.json`。每次重跑前归档明确的失败报告；记录 subject 版本、包 hash、工作树/driver 来源、设备和实际执行范围。不要覆盖失败后只留下 PASS。native driver 直接导入工作树适配器，装着旧 subject XPI 时的通过不能当成新包 UI 验收。已有工作树 native API 证据、最终包验证及未运行项统一记在 [progress](progress.md)。
+
+自动 driver 完成后，先退出该专用实例并重新准备 `--context --acceptance`，再进行人工交互。不要在自动测试正在运行时操作其窗口，也不要让 CUA 自动切回日常 Zotero 后继续操作。bootstrap、原生注册、跨 realm 适配或进程代码变更需要重新打包并完成宿主生命周期重载；watch 不是重载证据。
+
+## 有针对性的恢复与安装测试
+
+纯本地回归可只选择相关测试文件：
 
 ```sh
-node scripts/prepare-host-test.mjs --context
-/Applications/Zotero.app/Contents/MacOS/zotero \
-  -no-remote -profile "$PWD/.zcr-dev/context/profile" -datadir "$PWD/.zcr-dev/context/data"
+npm run test:unit -- tests/core/tasks.test.ts tests/core/reading-coordinator.test.ts
+npm run test:unit -- tests/zotero/document-version.test.ts tests/zotero/reader-library.test.ts
+npm run test:unit -- tests/runtime/generated-image.test.ts
 ```
 
-该模式使用独立 context 树，只创建合成主文与补充 PDF；验证本地全文/页码范围/来源跳转/标题会话/草稿/附件切换/30 次性能样本，不调用模型。报告位于 `.zcr-dev/context/host-report.json`。不得将新的 scope 测试改成正常 profile。
+保留的 `--s2` 至 `--s6` 是测试驱动标识，不是新的产品授权范围。s2/s3 在已登录时可能发合成模型请求，`--login` 会启动官方授权；s5 会管理自己启动的运行进程；s6 用独立 virgin/upgrade 树验证安装生命周期。运行前读相应 driver 与参数，不复用正常或用途不明的 profile。
 
-人工试用本轮结果：先关闭专用 context 实例，再执行 `node scripts/prepare-host-test.mjs --context --acceptance`，然后用上方同一 profile/data 启动命令打开。该组合保留合成库和已保存会话记录并移除自动驱动；不会改动既有 `.zcr-dev/profile`。登录需用户在官方浏览器完成，不能从别的 profile 复制认证。
+```sh
+node scripts/prepare-host-test.mjs --s6
+```
 
-## 自动宿主验证
+需要两版本升级/回滚测试时，在已有明确授权下向 s6 同时传入 `--upgrade-xpi <本地新包>` 和 `--rollback-xpi <本地旧包>`；目标为 `.zcr-dev/s6-upgrade/`。这类测试的历史成功不证明当前 schema 3 或 0.4 包已通过升级。
 
-`node scripts/prepare-host-test.mjs --s2|--s3|--s4|--s5|--s6` 安装自动 driver。默认不带参数也会装 driver，不能当人工试用入口；运行期间不要操作测试窗口。脚本/fixture 的 S 命名为可执行验证标识，不再是产品计划。
+存储/恢复测试必须覆盖旧 schema 1/2、当前 schema 3、缺失/损坏来源、哈希不匹配、请求与上游 item 关联、取消竞态、批次释放及 uncertain 不重发。兼容性机制见[架构文档](module-design.md)。备份与诊断只处理明确的非认证记录；不包含 account/、原始 stdio 或未经白名单过滤的日志。草稿、聊天、原生标注、缓存和退出登录有独立寿命，不能用删除其中一种代替停止另一种任务。
 
-- s2/s3 在已登录时会发合成请求；`--login` 会启动官方授权。只用合成资料，额度拒绝不是模型回答。
-- s4 验证布局/目录/选区，不发模型；s5 仅终止自己专用 profile 的 Codex 进程并检查恢复，含明确 fixture 的 uncertain 记录，不发模型。
-- s6 默认 `.zcr-dev/s6-virgin/{profile,data}`，用 AddonManager 安装本地 XPI，不发模型。两个版本用 `--s6 --upgrade-xpi <local-new.xpi> --rollback-xpi <local-old.xpi>`，目标 `.zcr-dev/s6-upgrade/`，不得使用已登录树。
-- s2–s5 报告 `.zcr-dev/host-report.json`；s6 报告在所选专用子树。每次记录版本、XPI sha、设备、运行路径与 PASS/FAIL/NOT RUN；旧报告不自动适用于新 build。
-- driver 运行后先 `--acceptance` 再人工试用。更改 bootstrap/原生注册/进程代码须生命周期重载，watch 不代表热更新。
+## 发行边界
 
-## 存储、恢复与诊断
+0.4.0a1 是开发预览，`update_url` 仍为 zcr-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
 
-[架构文档](module-design.md) 定义唯一数据/迁移契约。普通记录备份只处理插件 records；认证 account/ 不纳入备份/诊断/测试材料。损坏记录保持原样，未知 schema 不重置为空。未实现跨设备同步。复制诊断只用程序白名单；截图/报告用合成资料。
+发行前还需以实际最终包完成干净 checkout 重建、资产核验、安装/官方登录/真实输出、无 Node 环境、下载隔离属性、升级保留记录、回退安全拒绝、长期性能和多窗口等验收。**目前不能从工作树 native 驱动通过推断最终 0.4 XPI、真实图像生成或升级已通过。** 所有结果与未完成门槛只在 progress 更新。
 
-## 发行
-
-当前 npm 0.3.0-alpha.1 / Zotero 0.3.0a1 是本地开发预览，update_url 为 zcr-dev.invalid 占位，**未启用更新频道**。runtime/licenses 与构建第三方许可必须保留；项目自身 LICENSE 尚待作者决定，不能替作者授权开源。
-
-发行前必须：干净 checkout 重建 → verify:artifacts 与 SHA256SUMS → 正式许可/平台资产审查 → 从真实下载包在无 Node/CLI 机器原生安装登录提问 → 下载隔离属性/签名、更新保留任务与数据、回退/损坏、多窗口、压力及隐私验收。未提交工作树副本重建不叫 clean HEAD；本地 XPI 安装不叫公开下载验收。Intel/Windows/Linux 未经同等宿主验证不能进支持表。
-
-`npm run release:dry-run` 仅可审查本地计划。push、公开上传、Release 和付费新服务必须另有明确授权；本次授权止于可逆本地开发/测试。
-
-开发分支使用 `codex/` 前缀。当前全量迭代在 `codex/product-agent-v0.4`，整合基线为 `38b047c`。先观察失败回归再实现，功能通过后以小提交记录；文档只维护当前四份权威职责。删除旧文档前保存有效约束/证据，历史以 Git 为准。人工模型测试优先使用目录中实际存在的 Spark（用户先前偏好）；不得为测试静默改产品默认模型或推理档位。
+推送、公开 Release、发布站点、启用付费新服务和操作真实文献库不在本地开发命令的隐含授权中。`release:dry-run` 只是可审查的本地计划；开发分支使用 `codex/` 前缀，实际提交/发行继续遵循当前会话授权。

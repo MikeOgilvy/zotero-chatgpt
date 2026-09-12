@@ -4,6 +4,17 @@ All notable user-facing changes will be recorded here. Versions below are **deve
 
 ## Unreleased
 
+### Development preview `0.4.0-alpha.1`
+
+- Adopted the MIT license for the project; the root `LICENSE` now ships inside the development XPI and `package.json` declares `"license": "MIT"`.
+- Added agent/task/workspace contracts and persistent local services: workspace preferences, research profiles and SKILL.md, unified `@article`/`@chat` references, offline history/drafts, and a native task ledger with approval, undo and conflict detection.
+- Added context planning and long-document handling: per-turn budget from the runtime window or the pinned catalog, focused and multi-pass reading, batch queueing, deterministic source ids and a 3 × 16 MiB local text cache, plus loaded-vs-disk SHA-256 PDF version checks.
+- Added model capability/usage handling and multimodal support: catalog modalities, provider capability and rate-limit parsing, 2 MiB input images, verified 16 MiB generated images, and the explicit diagram workflow.
+- Added the workspace, task, command-menu and UI-locale views, and made answer source links resolve `https://zcr.invalid/source/<documentId>/<pageIndex>` against the frozen document revision. The reading instruction now tells the model to emit that reserved form.
+- Verified in this working tree: `npm run typecheck` and `npm run lint` pass; `npm run test:unit` is **631 tests / 57 files**; `npm run package:dev` produces `dist/zotero-codex-reader-0.4.0a1-dev.xpi`; `npm run verify:artifacts` passes with **77 files** (digest in `dist/SHA256SUMS`).
+
+Known limits (not yet verified): isolated official ChatGPT login and live model answers, stop/uncertain resume in flight, the final 0.4 XPI's native host UI, native annotation/acquisition against a real library or network, live image generation, a clean-checkout rebuild for this commit range, and signed/public download or upgrade acceptance. No GitHub Release exists for this version.
+
 ### Development preview `0.3.0a1`
 
 - Native Zotero 9 sidebar, selection actions, bundled Codex `0.144.1`.

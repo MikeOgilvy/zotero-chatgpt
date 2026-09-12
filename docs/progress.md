@@ -1,8 +1,8 @@
 # 当前进度与验收
 
-2026-09-12 全量迭代进行中，分支 `codex/product-agent-v0.4`。先前整合状态已重新验证 325 tests 并保存为本地基线 `38b047c`；用户已授权继续全量实施、小提交及彻底删除旧文档/实现。下列旧迭代证据仍保留其原始范围。
+2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当前 HEAD 通过 `typecheck`/`lint`/`test:unit`（**631 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。
 
-前轮交付：**A 的可授权清理与基础修复，以及 B 的本地全文/会话/请求链路开发预览**。A 中受保护的未提交旧资料仍保留；B 的真实模型回答与完整预算/恢复门槛未通过，C–F 尚未交付。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
+本轮交付（**代码 + 单元测试证据，非真实模型/宿主证据**）：**B 的来源身份与预算/长文/会话恢复、C 的工作区/引用/skill、UI 的四区视图、D 的原生标注任务账本、E 的获取整理，以及多模态/能力/图像输出**。真实隔离登录与真实模型回答、最终 0.4 XPI 的宿主 UI、真实图像生成和公开发行门槛仍未验证。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
 
 ## 实际交付路径
 
@@ -19,15 +19,15 @@
 | 检查 | 本轮开始 | 当前结果与边界 |
 | --- | --- | --- |
 | `npm run typecheck` / `npm run lint` | PASS | PASS |
-| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **325 PASS / 40 files**；基线失败是固定日期硬断言 Today，已固定测试时钟；新增请求/上下文/取消/隔离/存储等回归 |
-| `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，完整本地开发 XPI（含固定 runtime） |
-| `npm run verify:artifacts` | 76 files PASS | **76 files PASS**，hash/白名单/许可/无私有记录与 Node 导入 |
+| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **631 PASS / 57 files**；新增契约/上下文/任务/工作区/原生/图像/来源链接回归；仅为单元证据 |
+| `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，`dist/zotero-codex-reader-0.4.0a1-dev.xpi`（含固定 runtime 与项目 MIT LICENSE） |
+| `npm run verify:artifacts` | 76 files PASS | **77 files PASS**，hash/白名单/许可/无私有记录与 Node 导入；digest 读 `dist/SHA256SUMS` |
 | `npm run verify:install -- build-info … --json` | 未作为基线执行 | PASS，实际本地 XPI 身份；不等于宿主升级/回退验收 |
 | `npm run release:dry-run` | 旧版曾执行 | PASS，githubRelease=null，没有公开上传；脚本说明改指 development |
 | `node scripts/prepare-host-test.mjs --context` + 专用 Zotero | 未执行 | **16/16 PASS**，下述宿主范围；signedOut，0 请求记录 |
 | 文档链接 / `git diff --check` / 构建依赖图 | 旧入口相互重复/冲突 | 12 个维护/保护文档链接目标有效；diff 无空白错误；生产图覆盖 37 个运行 TS 模块，另有必要的 host-types 纯类型模块 |
 
-工具链 Node 24.11.0 / npm 11.6.1。当前开发包：`dist/zotero-codex-reader-0.3.0a1-dev.xpi`，SHA-256 **`29b86b1e80cc610e860b597eeb4f5b8e691701794981f1925c1dc58a00a615a9`**。实际固定二进制 `codex-cli 0.144.1`，其生成的实验 JSON schema 在 verification/protocol。model/list 没有初始上下文窗口，tokenUsage 通知的 modelContextWindow 可为 null；当前显示未知，未猜容量。
+工具链 Node 24.11.0 / npm 11.6.1。当前开发包：`dist/zotero-codex-reader-0.4.0a1-dev.xpi`；本轮 `package:dev` + `verify:artifacts` 实测 **77 files**，SHA-256 以 `dist/SHA256SUMS` 为准（本轮实测 **`d33ab244f49e24da983daa2bfdbf542b8f6f28c5b40ad5b295ffd8c613311049`**）。项目 MIT `LICENSE` 已随包。实际固定二进制 `codex-cli 0.144.1`，其生成的实验 JSON schema 在 verification/protocol。model/list 没有初始上下文窗口，tokenUsage 通知的 modelContextWindow 可为 null；当前显示未知，未猜容量。
 
 宿主实际覆盖：完整 XPI 加载；标题/输入先可用；两页文本与罗马/数字标签；本地/未发送说明；页范围遗漏；返回原页和关闭保留页；signedOut 本地会话；同父/同名附件隔离；草稿恢复；30 次开关/设置；单一 dock/按钮；无模型请求记录。报告：[本轮宿主报告](../.zcr-dev/verification/scope-2026-09-11/host-current-pdf.json)。未读取/复制认证文件，未向真实库写条目。CUA 在关闭测试实例后自动重选日常窗口，随即停止该窗口操作；之后仅按已核对的专用 PID 管理测试进程。
 
@@ -69,14 +69,14 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | 要求 / 代码位置 | 现在与缺口 | 迭代 |
 | --- | --- | --- |
 | 标题/会话/全文：reader/document、chat、core/sessions | 上述本地/协议链路已验证；真实模型问答、选区全文推理/引文质量、host 文件替换和多窗口未测 | B |
-| 预算/长文/缓存 | 3 份 × 每份 2MiB 本地文本上限，不裁剪；窗口未知。自动章节/问题检索、实际预算预留、语义章节/段落坐标、OCR/页面图片未接；LRU 驱逐后的随机来源 ID 可能重复存档/发送；相同 size/mtime/fingerprint 的替换不能保证识别 | B |
-| 历史/恢复：presenter/store | 重开与隔离已验；离线 runtime 不可用时读历史、草稿/滚动重启持久化、空会话过滤、改名/跨文搜索/分支/队列仍缺。新 schema 2 单元恢复通过，旧版本会拒绝读取，宿主升级/回退未重跑 | B/C/F |
-| 统一 @文章/@chat、/skill、personalization | 规格保留，尚未实现；reader policy 仍禁止任意工具/脚本，不能直接放开 | C |
-| 模型/多模态/上下文 | 目录/按轮配置/粘贴图片/Markdown/KaTeX 有代码和单元；真实档位/多图、文件拖拽/截图/排序、图像生成、完整已发送/已引用面板及精确用量仍缺 | C |
-| 标注 / 获取整理 agent | 未实现；需候选定位、任务审批、原生写入/撤销/人工冲突、DOI/列表查重与合法全文核对、写入 ledger | D/E |
-| 安装/登录/发行/性能 | 当前只在 signedOut 专用树验证本地 XPI。官方新登录、真实输出/停止/在途恢复、干净 checkout/无 Node/下载隔离、长时压力/完整原生视觉矩阵、项目 LICENSE、公开发布均未完成 | F |
+| 预算/长文/缓存 | 本地文本缓存最多 **3 份、每份 16 MiB UTF-8**，超限要求缩小页范围；来源 ID 由文献身份/版本/解析器/页范围/文本摘要确定性生成，LRU 驱逐不改变身份；加载字节与磁盘 SHA-256 比较可发现 size/mtime 不变的替换。已接 runtime 窗口优先、否则固定 catalog 的预算与聚焦/多轮计划；自动章节/问题检索、语义坐标、OCR/页面图片仍未接。以上为代码+单元证据，真实模型预算行为未测 | B |
+| 历史/恢复：presenter/store | 离线历史、草稿/滚动持久化、改名/分支/排队、schema 3 读写与旧 schema 1/2 安全拒绝已有代码与单元回归；新 schema 的宿主升级/回退未重跑，真实模型在途恢复未测 | B/C/F |
+| 统一 @文章/@chat、/skill、personalization | WorkspaceStore、@article 元数据先行/选定后读取、@chat 有界快照、SKILL.md 解析与 revision 冲突、偏好/研究配置已有代码与单元；第三方 skill 仍不能授予权限。真实库接线与 UI 目视未验 | C |
+| 模型/多模态/上下文 | 固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴图片、生成图 16 MiB 校验与导出、diagram 线程能力已有代码与单元；真实档位/多图/真实图像生成、文件拖拽/截图排序、精确用量与完整已发送/已引用面板仍未测 | C |
+| 标注 / 获取整理 agent | 候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验已有代码与单元；真实库原生写入/撤销、网络预览与合法全文核对未在宿主验证 | D/E |
+| 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；本轮实测 `package:dev`/`verify:artifacts`。官方新登录、真实输出/停止/在途恢复、干净 checkout（本提交范围）/无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成 | F |
 
-**下一条可执行任务**：先稳定来源 ID 与版本校验，完成预算/长文策略和来源恢复测试；在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。随后按 C→D→E→F 完成全量目标，持续清理与性能回归。
+**下一条可执行任务**：在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”和真实图像生成；随后用真实宿主复核最终 0.4 XPI 的原生任务/获取 UI，再按 F 的门槛处理升级/回退、无 Node 安装与公开签名发行。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话；未发送草稿目前仅在插件寿命内保留，重启不会恢复。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
 
@@ -92,7 +92,7 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | S4 交互 | `c1b898ac4e35de49a65c96ce56e08db6949071b62618ff7c34a01672b942a0db`，40/40，5 NOT RUN，无模型发送 | 新 in-reader dock，主题/800px/底边/发送组合；原始记录见 Git 基线 |
 | S5 恢复 | 同 c1b898ac 包，17/17，1 NOT RUN；自有进程 TERM 与 fixture uncertain 隔离 | 在途 turn resume、掉电持久性 |
 | S6 virgin/升级 | 同 a1 包：15/15；a1→a2→a1：19/19（各2 NOT RUN），a2 `445f47243bb4108a0fc73c0e7c179702cc5c1068bbefb38b96d2a2a43c7b0309` | 公开下载/Gatekeeper、无 Node、真实模型、新 schema 回退 |
-| 工作树副本重建 | 旧工作树 npm ci 后复现 c1b898ac；release dry-run githubRelease=null | 不等于 clean git HEAD，不等于发布；项目 LICENSE 待作者决定 |
+| 工作树副本重建 | 旧工作树 npm ci 后复现 c1b898ac；release dry-run githubRelease=null | 不等于 clean git HEAD，不等于发布；项目已采用 MIT（根 `LICENSE`） |
 | 2026-09-10 UI | 最新工作树曾 306 tests /39 files，XPI 196f0dc… 装到专用 acceptance profile，无 driver | 当时 screenshot paste、新样式真实目视、图像模型发送未完成；基线今日发现跨日失败 |
 
 历史限额“约 2026-09-15”只是旧报告，当前账户可用性未读取，不作为当前结果。真实库不用于验证，不读旧认证或模型日志来猜状态。
@@ -100,13 +100,13 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 ## 当前全量执行计划
 
 - [x] 重新验证整合基线，建立功能分支与本地 checkpoint；收敛剩余旧文档。
-- [ ] B：稳定文件/来源身份，预算与长文覆盖，草稿/滚动持久化、全局历史/改名/分支/排队、离线历史；代码在 contracts、core/sessions、reader/document、chat/presenter。
-- [ ] C：实现可持久化 WorkspaceStore（偏好/研究配置/skills/引用）、统一 @文章/@chat 与 /skill；冻结本轮版本和权限。
-- [ ] UI：单标题/四区、自然布局 composer、统一候选键盘交互、稳定消息 DOM、主题/字号/焦点/图像预览；view.ts/sidebar.css 单一写入负责人。
-- [ ] D：原生 quote 定位适配＋持久化任务 ledger；模型产生候选，用户批量审批后真实标注，冲突检测与撤销。
-- [ ] E：明确 DOI/链接/列表的未保存元数据预览、查重、指定 collection、合法 PDF 验证、可靠报告和恢复；原生适配与 ledger 共用。
-- [ ] 多模态/能力：准确模型目录/usage/上下文预算来源；文件/拖拽/截图/多图；核验固定 runtime 图像生成能力并实际接通或报告真实阻塞。
-- [ ] F：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、版本升级回退；Node-free/公开下载仅在对应条件成立时验收。
-- [ ] 收尾：版本升级、小提交、干净 checkout 重建、产物/隐私/文档链接复查，只留必要测试/运行资产和当前证据。
+- [x] B（代码+单元）：稳定文件/来源身份，预算与长文覆盖，草稿/滚动持久化、全局历史/改名/分支/排队、离线历史；代码在 contracts、core/sessions、reader/document、chat/presenter。
+- [x] C（代码+单元）：可持久化 WorkspaceStore（偏好/研究配置/skills/引用）、统一 @文章/@chat 与 /skill；冻结本轮版本和权限。
+- [x] UI（代码+单元）：单标题/四区、自然布局 composer、统一候选键盘交互、稳定消息 DOM、字号/焦点/图像预览；view.ts/sidebar.css 单一写入负责人。
+- [x] D（代码+单元）：原生 quote 定位适配＋持久化任务 ledger；模型产生候选，审批后写入，冲突检测与撤销；真实库标注仍待宿主验证。
+- [x] E（代码+单元）：DOI/链接/列表未保存元数据、查重、指定 collection、OA PDF 校验与恢复；原生适配与 ledger 共用；网络/真实库未验。
+- [x] 多模态/能力（代码+单元）：模型目录/usage/上下文预算来源；粘贴/截图多图；固定 runtime 图像生成能力与 16 MiB 生成图校验；真实模型图像生成未验。
+- [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、版本升级回退；Node-free/公开下载仅在对应条件成立时验收。需要隔离官方登录、真实模型、真实宿主、签名 XPI 与公开发布授权。
+- [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建、产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
