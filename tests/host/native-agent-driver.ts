@@ -5,6 +5,7 @@ import { AgentTaskController } from '../../packages/core/src/tasks/controller.ts
 import { createNativeAgentPort } from '../../packages/zotero/src/agent/native.ts';
 import type { AgentHostCollection, AgentHostItem, NativeAgentHost } from '../../packages/zotero/src/agent/host.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from '../../packages/zotero/src/reader/document.ts';
+import { nativeSourceNavigator, openSourcePage } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { HostReader, ZoteroHost, ZoteroWindow } from '../../packages/zotero/src/reader/host-types.ts';
 import { createLibraryReferencePort } from '../../packages/zotero/src/reader/library.ts';
 import { geckoHost } from '../../packages/zotero/src/runtime/gecko.ts';
@@ -128,6 +129,7 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
       { name: 'oa-pdf-acquisition-and-correspondence', reason: 'This bounded smoke does not download external PDFs. Real network evidence is limited to unsaved DOI metadata translation.' },
       { name: 'official-login-and-credentials', reason: 'No login flow or authentication file is inspected.' },
       { name: 'installed-subject-ui-feature-wiring', reason: 'This smoke calls working-tree production adapters bundled in the test driver. Installed subject version/hash identify the host setup, not final XPI feature wiring.' },
+      { name: 'citation-link-click-in-model-answer', reason: 'The click handler binds a verbatim quote supplied in a live-model answer. This driver exercises the production locate/navigate path with an explicit synthetic fixture quote instead, which is not model output.' },
     ],
   };
   let reportWrites = Promise.resolve();
@@ -280,6 +282,26 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
       requireCheck(result.state === 'conflict' && current && current.annotationComment === comment && fixture.main.getAnnotations().length === 1, 'UNDO_OVERWROTE_MANUAL_EDIT');
       if (report.retained) report.retained.manuallyEditedAnnotationKey = saved.key;
       return { value: true, details: { conflictingAnnotationKey: saved.key, nativeCommentEditPreserved: true, otherTaskAnnotationRemoved: true, editInSameTimestampSecond: sameSecond, userEditSource: 'driver simulates a user edit through native Item.saveTx' } };
+    });
+    // Bounded real-host check of the citation path: production locate + native navigate on the
+    // frozen revision, with an explicit synthetic fixture quote. No library write and no model output.
+    await step('citation-quote-navigation-on-frozen-revision', 'real-host-api', async () => {
+      const view = opened._internalReader?._primaryView ?? opened._internalReader?._lastView;
+      const viewer = view?._iframeWindow?.PDFViewerApplication?.pdfViewer as unknown as { currentPageNumber?: number } | undefined;
+      requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
+      const annotationsBefore = fixture.main.getAnnotations().length;
+      guard(); await opened.navigate({ pageIndex: 1 });
+      await until(() => viewer?.currentPageNumber === 2, 'READER_DID_NOT_MOVE_TO_SECOND_PAGE');
+      const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => opened, paper);
+      const quote = 'A prior describes beliefs before a measurement is observed.';
+      const outcome = await openSourcePage(navigator, { paper, revision: document.revision }, 0, quote);
+      await until(() => viewer?.currentPageNumber === 1, 'READER_DID_NOT_NAVIGATE_TO_CITATION_PAGE');
+      const missQuote = 'SYNTHETIC ABSENT QUOTE 9F3K';
+      const miss = await openSourcePage(navigator, { paper, revision: document.revision }, 0, missQuote);
+      guard(); await fixture.main.loadAllData();
+      requireCheck(outcome === 'highlighted' && miss === 'unlocated', 'CITATION_PATH_OUTCOME_UNEXPECTED');
+      requireCheck(fixture.main.getAnnotations().length === annotationsBefore, 'CITATION_PATH_WROTE_TO_LIBRARY');
+      return { value: true, details: { outcome, missOutcome: miss, currentPageNumber: viewer?.currentPageNumber, navigationPageIndex: 0, quoteIsSyntheticFixture: true, modelProducedQuote: false, libraryWrite: false, annotationsBefore, annotationsAfter: fixture.main.getAnnotations().length } };
     });
     const references = createLibraryReferencePort(Zotero, { clientId, documentCache: cache, uuid: () => host.uuid(), getWindow: () => window });
     const referencePort: LibraryReferencePort = references;
