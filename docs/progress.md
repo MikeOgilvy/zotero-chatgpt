@@ -4,6 +4,14 @@
 
 2026-09-13 补充：在最终 0.4.0a1 开发包上重跑了专用宿主验证（`--context`、`--context --native`）与 s6 隔离树的升级/回退，并为“新 schema 回退安全拒绝”补了宿主检查与单元回归。证据目录 `.zcr-dev/verification/scope-2026-09-12/`（忽略），过程与失败报告见下节。
 
+### 2026-09-13 Codex 运行时升级 0.144.1 → 0.154.0（代码 + 单元证据，未打包）
+
+按已完成的重审（`.zcr-dev/pin-bump/0.154.0/REPORT.md`）应用：`runtime/manifest.ts` 固定 `rust-v0.154.0` darwin/arm64（归档 88080735 B / `344310a0…f9d7`，二进制 222655232 B / `4f859826…afcc`）；`packages/core/src/index.ts` 两处版本字面量改为 0.154.0；`reader-policy.ts` 只改两个已证实的键（`chatgpt_base_url` 现为 `https://chatgpt.com/backend-api/`，`experimental_thread_config_endpoint` 已从 schema 移除）。内嵌回退目录更新为 11 个 id（首个可见默认 `gpt-6-astra`，含两个 daybreak id；sol/terra/luna 回退窗口 372000 → 272000），并保持目录身份字面量与 manifest 绑定——否则每次查找都会返回 null。许可证只刷新 `RATATUI-LICENSE`（一行年份），其余三个逐字节相同。
+
+本地证据：`node scripts/runtime-prepare.mjs` 通过（先按 manifest 校验归档，再解包并校验二进制，macOS `codesign --verify --strict` 通过）；独立复核归档/二进制大小与 SHA-256 与 manifest 一致，`codesign -dvvv` 为 `Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2)`，在隔离临时 `HOME`/`CODEX_HOME` 下 `codex-cli --version` 输出 `0.154.0`。直连 GitHub release 在此时严重限速/中断，实际归档字节取自已重审且与 GitHub 发布摘要一致的本地副本，再由 `runtime-prepare` 独立校验。
+
+新增/更新单测锁定 pin：目录身份等于 manifest、目录内每个 id 都能解析（覆盖“身份不一致导致全为 null”的回归）、首个 id 为 `gpt-6-astra`、两个 0.154.0 策略键（错误 base URL 仍 fail-closed）。**未运行** `package:dev`/`verify:artifacts`：等本升级、会话归档与 chrome 改动全部落地后，只从干净树打一个包。真实账户是否真的可选到 `gpt-6-astra` 等新模型仍是 **UNKNOWN**，需真实登录宿主验证，本升级不保证。
+
 ### 2026-09-13 分支合并与耗时 UI（代码 + 单元证据）
 
 把两个独立完成、各自在各自工作树验证过的分支并入本分支（均基于 `c2822f2`）：
