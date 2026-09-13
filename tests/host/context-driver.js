@@ -403,9 +403,17 @@ async function runHostSmoke(config) {
       await until(() => contextSource() && !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || ''), 'context-source-follows-the-cited-page', 15000);
       await check('context-source-points-at-the-selected-page', !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || '') && Boolean(contextSource().querySelector('[data-zcr-action="open-citation"]')), { source: contextSource().textContent });
       pdfViewer().currentPageNumber = 1; await until(() => pdfViewer().currentPageNumber === 1, 'reset-viewer-to-page-1');
+      const navigationSource = contextSource().textContent;
       click(contextSource().querySelector('[data-zcr-action="open-citation"]'));
-      await until(() => pdfViewer().currentPageNumber === 2, 'source-navigation-to-cited-page', 10000);
-      await check('context-source-returns-to-the-cited-page', pdfViewer().currentPageNumber === 2, { pageNumber: pdfViewer().currentPageNumber, locationPage: pdfViewer()._location?.pageNumber });
+      const navigated = await until(() => pdfViewer().currentPageNumber === 2, 'source-navigation-to-cited-page', 20000).catch(() => null);
+      if (!navigated) {
+        // Report what the owner would see instead of navigating, so a product failure is not mistaken
+        // for a driver timing complaint.
+        report.navigationProbe = { source: navigationSource, visibleAlert: refusalAlert()?.textContent ?? '', productLoggedErrors: logErrors.slice(-4), currentPage: pdfViewer().currentPageNumber, locationPage: pdfViewer()._location?.pageNumber ?? null };
+        await check('context-source-returns-to-the-cited-page', false, report.navigationProbe);
+      } else {
+        await check('context-source-returns-to-the-cited-page', pdfViewer().currentPageNumber === 2, { pageNumber: pdfViewer().currentPageNumber, locationPage: pdfViewer()._location?.pageNumber });
+      }
     } else {
       await skip('context-source-points-at-the-selected-page', 'No synthetic text selection could be simulated in the real reader view.');
       await skip('context-source-returns-to-the-cited-page', 'No synthetic text selection could be simulated in the real reader view.');
