@@ -179,7 +179,7 @@ async function runHostSmoke(config) {
       const numPagesValue = pdfObject.numPages; const fingerprintsValue = [...(pdfObject.fingerprints ?? [])];
       const note = entry => legacy.order.push({ ...entry, ms: Date.now() - t0, stack: frames().slice(0, 3) });
       // A second consumer of the same promise: the product's own reference is returned untouched.
-      const watch = (result, onValue) => { void (async () => { try { onValue(await result); } catch { /* the product's rejection is its own to handle */ } })(); };
+      const watch = (result, onValue) => { void (async () => { try { onValue(await result); } catch (error) { legacy.watchError = String((error && error.message) || error); } })(); };
       const previousRestore = restoreInstrumentation;
       try {
         pdfObject.getData = function (...args) {
@@ -290,8 +290,10 @@ async function runHostSmoke(config) {
           : 'the product read fewer pages than this document has';
     // --- a3's own reachability control, now run after the product's turn ---
     {
-      const pdfObject = pdf().pdfDocument;
-      try { await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch { /* probe only */ }
+      try {
+        const pdfObject = pdf().pdfDocument;
+        await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin()));
+      } catch (error) { report.reachabilityError = String((error && error.message) || error); }
       legacy.probeRecorded = legacy.calls.pageData.includes(0);
       if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
     }
@@ -300,19 +302,21 @@ async function runHostSmoke(config) {
     // Is the loaded-bytes read unavailable to everyone at this moment, or only to the product? The
     // driver asks the same host method twice: once right now, once after a page read has made the
     // document serviceable. A bounded race keeps a hang from stalling the rest of the stage.
-    const bounded = async (label, work) => {
+    const probes = [];
+    const probe = async label => {
       let timer = null;
-      const deadline = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), 20000); });
       try {
-        const outcome = await Promise.race([work.then(value => `settled:${value?.byteLength ?? value?.chars?.length ?? 'value'}`, error => `error:${(error && error.message) || error}`), deadline]);
-        return `${label}=${outcome}`;
-      } catch (error) { return `${label}=threw:${(error && error.message) || error}`; }
+        const work = Promise.resolve(pdf().pdfDocument.getData());
+        const deadline = new Promise(resolve => { timer = Zotero.Promise.delay(20000).then(() => resolve('timeout')); });
+        const size = value => { try { return value?.byteLength ?? (Array.isArray(value) ? value.length : 'value'); } catch (error) { return `size-denied:${(error && error.message) || error}`; } };
+        const settled = work.then(value => `settled:${size(value)}`, error => `error:${(error && error.message) || error}`);
+        probes.push(`${label}=${await Promise.race([settled, deadline])}`);
+      } catch (error) { probes.push(`${label}=threw:${(error && error.message) || error}`); }
       finally { if (timer) clearTimeout(timer); }
     };
-    const probes = [];
-    probes.push(await bounded('getData-before-page-read', pdf().pdfDocument.getData()));
-    await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())).catch(() => null);
-    probes.push(await bounded('getData-after-page-read', pdf().pdfDocument.getData()));
+    await probe('getData-before-page-read');
+    try { await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch (error) { report.mechanismPageError = String((error && error.message) || error); }
+    await probe('getData-after-page-read');
     report.mechanismProbe = probes;
     // --- The driver's own native read, for comparison: same calls, but after the product's turn ---
     const extractPage = async pageIndex => {
