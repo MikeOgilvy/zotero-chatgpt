@@ -149,16 +149,6 @@ async function runHostSmoke(config) {
     const panelSelectorsAbsent = () => { const doc = rdoc(); return Boolean(doc) && REMOVED_PANEL_SELECTORS.every(selector => !doc.querySelector(selector)); };
     await until(() => reader()?._internalReader?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfDocument, 'pdf-loaded');
     await until(() => toggle(), 'toolbar-toggle');
-    // --- The driver's own native read of both pages, exactly where a3 did it: before its wrapper ---
-    const extractPage = async pageIndex => {
-      const raw = await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex }, viewWin()));
-      return (raw?.chars ?? []).map(char => char.ignorable ? '' : char.c + (char.paragraphBreakAfter ? '\n\n' : char.lineBreakAfter ? '\n' : char.spaceAfter ? ' ' : '')).join('').trim();
-    };
-    const labels = await pdf().pdfDocument.getPageLabels2();
-    const pageOne = await extractPage(0); const pageTwo = await extractPage(1);
-    await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
-    report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
-    await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
     // --- Diagnostic: the disk side of the product's own revision precondition ---
     // capture() compares a sha256 of the whole loaded PDF against a sha256 of the file on disk, and a
     // non-match rejects the preparation with "The PDF file changed while this reader was open." This
@@ -240,9 +230,7 @@ async function runHostSmoke(config) {
         pdfObject.getData = native.getData; pdfObject.getPageLabels2 = native.getPageLabels2; pdfObject.getPageData = native.getPageData;
         for (const [name, descriptor] of Object.entries(descriptors)) { try { if (descriptor) Object.defineProperty(pdfObject, name, descriptor); else delete pdfObject[name]; } catch { /* the reader may already be gone */ } }
       };
-      try { await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch { /* probe only */ }
-      legacy.probeRecorded = legacy.calls.pageData.includes(0);
-      if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
+      legacy.armedMs = Date.now() - t0;
     }
     report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
     // Everything the product-side preparation assertion reports. Written before the trigger so a run
@@ -292,6 +280,24 @@ async function runHostSmoke(config) {
         : recorded.length === 0
           ? `H2 access path: the product read ${productPageCalls.length} page(s) while the a3 wrapper recorded no page call`
           : 'the product read fewer pages than this document has';
+    // --- a3's own reachability control, now run after the product's turn ---
+    {
+      const pdfObject = pdf().pdfDocument;
+      try { await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch { /* probe only */ }
+      legacy.probeRecorded = legacy.calls.pageData.includes(0);
+      if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
+    }
+    report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
+    // --- The driver's own native read, for comparison: same calls, but after the product's turn ---
+    const extractPage = async pageIndex => {
+      const raw = await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex }, viewWin()));
+      return (raw?.chars ?? []).map(char => char.ignorable ? '' : char.c + (char.paragraphBreakAfter ? '\n\n' : char.lineBreakAfter ? '\n' : char.spaceAfter ? ' ' : '')).join('').trim();
+    };
+    const labels = await pdf().pdfDocument.getPageLabels2();
+    const pageOne = await extractPage(0); const pageTwo = await extractPage(1);
+    await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
+    report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
+    await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
     // The assertion rests only on what the product itself did: its revision gate for this file, and a
     // settled, non-empty read of every page. `counts.*Expected` counts only after the driver's own probe.
     const pageReads = legacy.order.filter(entry => entry.call === 'getPageData' && entry.settled === true && (entry.chars ?? 0) > 0);
