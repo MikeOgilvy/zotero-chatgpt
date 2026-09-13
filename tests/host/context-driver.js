@@ -52,22 +52,29 @@ async function runHostSmoke(config) {
     // which is what keeps that check able to fail. Nothing else about the driver changes.
     const optOutControl = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-opt-out'));
     if (optOutControl) Zotero.Prefs.set('extensions.zcr.automaticPdfText', false, true);
-    // --- The product's own automatic whole-PDF preparation, observed on the host APIs it calls ---
-    // The a3 check wrapped the reader's own PDF object and waited for the product's page calls after
-    // reading both pages itself. It timed out, and the archived report explains why such an instrument
-    // could not succeed: its positive control only proved that a call through the driver's own
-    // reference lands in the wrapper, while the product's background read had already run and its
-    // result was cached (`DocumentReader` keys [paperId, revision, parser, first, last]), so no second
-    // page read was ever going to arrive. This check observes the product through host objects it
-    // looks up itself, armed before the reader is opened so no read can happen unobserved:
-    //   * `io.stat(path)` and `io.computeHexDigest(path, 'sha256')` are the revision gate of the
-    //     product's `capture()` (packages/zotero/src/reader/document.ts); the digest runs only after
-    //     the whole loaded PDF has been read out of the reader and hashed;
-    //   * `TextEncoder.prototype.encode` sees each page's text as `DocumentReader` measures it, so two
-    //     page-sized non-JSON encodings are the product extracting both pages, which can only follow a
-    //     whole-file read whose digest matched the file on disk.
-    // This driver never calls any of those three on this PDF, and the arming is verified by identity,
-    // so a refused host replacement fails the check out loud instead of degrading into a pass.
+    // --- The product's own automatic whole-PDF preparation, observed with nothing of the driver's on the
+    // document ---
+    // What a3 measured here was its own instrument. It wrapped `getPageData`/`getPageLabels2` on the
+    // reader's PDF object, proved by a call through that same object that its wrapper was reachable, and
+    // then waited for the product's page calls. The control proved only that the driver's own access path
+    // lands in the wrapper; it said nothing about the product's. Measured without any wrapper, the
+    // product's preparation completes on this host, while every run with the wrapper installed recorded
+    // the product's read failing (`Permission denied to access property "length"` on the wrapped object)
+    // and, later, every PDF-dependent check in the stage failing behind it. The instrument was the fault,
+    // and the earlier "observable" control could not have detected that.
+    // What is observed instead are two host objects the product looks up on its own, with no replacement
+    // of any reader method:
+    //   * `io.stat(path)` and `io.computeHexDigest(path, 'sha256')` are the revision gate of the product's
+    //     `capture()`; `capture()` runs once per `prepare()` and once more from `validate()`, and
+    //     `validate()` is only reached after the whole-document read returned a document. So a second
+    //     resolved digest for this file is the product having read and prepared this PDF by itself, with
+    //     the sidebar opened and nothing sent.
+    // The driver's own disk probe runs before the trigger and is excluded by `driverProbeAt`, so what is
+    // counted is only the product's work; arming is verified by identity, so a refused replacement fails
+    // the check out loud rather than silently degrading it into a pass.
+    // `TextEncoder.prototype.encode` is still counted for information, but it cannot carry the assertion:
+    // the plugin's `TextEncoder` is injected from the bootstrap scope, so the product's page-text
+    // measurements never reach this driver's prototype (0 observed while preparation demonstrably ran).
     const t0 = Date.now();
     const observations = [];
     const counts = { stat: 0, digest: 0, encode: 0, encodePageText: 0, encodeJson: 0, statExpected: 0, digestExpected: 0 };
@@ -118,7 +125,7 @@ async function runHostSmoke(config) {
     };
     const observedGate = () => observations.find(entry => entry.label === 'stat' && entry.file === expectedFile) && observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.algorithm === 'sha256' && entry.ok);
     const observedPageTexts = () => observations.filter(entry => entry.label === 'encode' && entry.jsonShaped === false && (entry.characters ?? 0) >= 200);
-    await check('read-observation-armed-on-shared-host-apis', Boolean(armed.stat && armed.digest && armed.encode && expectedFile), { armed, file: expectedFile, optOutControl });
+    await check('read-observation-armed-on-shared-host-apis', Boolean(armed.stat && armed.digest && expectedFile), { armed, file: expectedFile, optOutControl, note: 'The encode counter is informational: the plugin TextEncoder is a different object from this scope\'s, so it cannot be required.' });
     const preparation = {
       expectedFile,
       optOutControl,
@@ -251,7 +258,7 @@ async function runHostSmoke(config) {
         contextState: contextRing()?.dataset.zcrContextState ?? null,
       },
       wrapPdfInstrument,
-      note: 'Assertion source: the product\'s own revision gate for this file (IOUtils.stat + computeHexDigest, counted only after the driver\'s own disk probe) and the per-page text it measures with TextEncoder. The driver never calls those on this PDF.',
+      note: 'Assertion source: the product\'s own revision gates for this file (IOUtils.stat + computeHexDigest, counted only after the driver\'s own disk probe). A second gate means the product reached its own validate() after reading the whole document. The driver never calls those on this PDF.',
     };
     // --- The product's own trigger: its toolbar toggle opens the sidebar, whose own copy says that
     // opening it prepares local text (chat/view.ts). a3 clicked here and then waited for the product's
@@ -262,9 +269,10 @@ async function runHostSmoke(config) {
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
     await check('title-before-or-with-connection', panel()?.textContent.includes(title));
-    // Wait for the product's own work with nothing of the driver's on the document: its revision gate
-    // for this file, and the per-page text it measures while it reads. The wait can fail honestly.
-    const readObserved = await until(() => counts.statExpected >= 1 && counts.digestExpected >= 1 && observedPageTexts().length >= 2, 'automatic-background-preparation', 60000).catch(() => null);
+    // Wait for the product's own gate sequence for this file: one gate from `prepare()`, a second from
+    // `validate()`, which it can only reach after the whole-document read returned. Nothing of the
+    // driver's is on the document, and the wait can fail honestly.
+    const readObserved = await until(() => counts.statExpected >= 1 && counts.digestExpected >= 2, 'automatic-background-preparation', 60000).catch(() => null);
     // Snapshot the live state again: the pre-trigger copy above cannot contain the product's own errors.
     report.preparation.productLoggedErrors = logErrors;
     report.preparation.prefReads = prefReads;
@@ -328,7 +336,7 @@ async function runHostSmoke(config) {
     // The assertion rests only on what the product itself did: its revision gate for this file and the
     // per-page text it measured. `counts.*Expected` counts only after the driver's own disk probe, and
     // the driver has not read any of this document with the wrapper off.
-    const preparationObserved = counts.statExpected >= 1 && counts.digestExpected >= 1 && pageTexts.length >= 2;
+    const preparationObserved = counts.statExpected >= 1 && counts.digestExpected >= 2;
     report.backgroundPreparation.preparationObserved = preparationObserved;
     report.backgroundPreparation.pageTextEvidence = pageTextEvidence;
     report.backgroundPreparation.pageTextEncodings = pageTexts.length;
