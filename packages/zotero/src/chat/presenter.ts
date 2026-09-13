@@ -225,7 +225,12 @@ export class ConversationPresenter {
       const saved = await workspace.readDraft(this.paper, id) ?? (id ? await workspace.readDraft(this.paper, null) : null);
       if (this.disposed) return;
       if (saved && this.draftVersion === version) {
-        this.update({ draft: workspaceDraft(saved.draft), scrollTop: saved.scrollTop, document: { ...this.state.document, range: clone(saved.pageRange), prepared: null, phase: 'idle', error: null } });
+        // The persisted `pageRange` is deliberately not restored. The panel that could show or clear a
+        // saved range is gone, so adopting one would silently narrow every later request with no way
+        // out of that state. The field stays in the schema (always written as null) so an older record
+        // still reads without error; its range value is simply dropped. `setDocumentRange` and
+        // `prepareContext` remain available for an explicit programmatic scope.
+        this.update({ draft: workspaceDraft(saved.draft), scrollTop: saved.scrollTop, document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null } });
       } else if (this.draftVersion !== version && id) {
         this.pendingSaves.delete('unbound'); this.stageDraft();
       }
@@ -238,7 +243,9 @@ export class ConversationPresenter {
     this.stashDraft();
     if (!this.services.getWorkspace || this.disposed) return;
     const key = this.draftKey();
-    this.pendingSaves.set(key, { schemaVersion: 1, paper: clone(this.paper), conversationId: this.state.conversation?.id ?? null, draft: clone(this.state.draft), scrollTop: this.state.scrollTop, pageRange: clone(this.state.document.range), updatedAt: this.services.now() });
+    // `pageRange` is retained in the schema but never populated: no UI can show or clear a range, so
+    // persisting one would create an unreachable narrowing state. Always write null.
+    this.pendingSaves.set(key, { schemaVersion: 1, paper: clone(this.paper), conversationId: this.state.conversation?.id ?? null, draft: clone(this.state.draft), scrollTop: this.state.scrollTop, pageRange: null, updatedAt: this.services.now() });
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flushDraft().catch(() => {}); }, 150);
   }
@@ -879,7 +886,7 @@ export class ConversationPresenter {
         else {
           this.drafts.set(conversation.id, cleared);
           if (this.services.getWorkspace) {
-            this.pendingSaves.set(conversation.id, { schemaVersion: 1, paper: clone(this.paper), conversationId: conversation.id, draft: cleared, scrollTop: position?.scrollTop ?? 0, pageRange: clone(position?.range ?? null), updatedAt: this.services.now() });
+            this.pendingSaves.set(conversation.id, { schemaVersion: 1, paper: clone(this.paper), conversationId: conversation.id, draft: cleared, scrollTop: position?.scrollTop ?? 0, pageRange: null, updatedAt: this.services.now() });
             if (this.saveTimer) clearTimeout(this.saveTimer);
             this.saveTimer = setTimeout(() => { this.saveTimer = null; void this.flushDraft().catch(() => {}); }, 150);
           }
@@ -1089,7 +1096,7 @@ export class ConversationPresenter {
       scrollTop: position?.scrollTop ?? 0,
       message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [],
       acquisitionTarget: null, messageFocus: null,
-      document: { ...this.state.document, range: clone(position?.range ?? null), prepared: null, phase: 'idle', error: null },
+      document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null },
     });
     this.stageDraft();
     return !this.hasUnarchivedChatForPaper(closingId);
@@ -1131,11 +1138,11 @@ export class ConversationPresenter {
     let draft = override ?? this.drafts.get(conversation.id); let position = this.positions.get(conversation.id);
     if (!draft && this.services.getWorkspace) {
       const saved = await (await this.getWorkspace()).readDraft(this.paper, conversation.id);
-      if (saved) { draft = saved.draft; position = { scrollTop: saved.scrollTop, range: saved.pageRange }; }
+      if (saved) { draft = saved.draft; position = { scrollTop: saved.scrollTop, range: null }; }
     }
     if (stash) this.stageDraft(); this.draftVersion++;
     this.update({ conversation, draft: draft ? workspaceDraft(draft) : this.emptyDraft(conversation.settings), scrollTop: position?.scrollTop ?? 0, message: null, pendingExplain: null, tasks: [], readingJobs: [], contextReport: conversation.messages.filter(message => message.role === 'user').at(-1)?.contextReport ?? null, messageFocus: null, acquisitionTarget: null,
-      document: { ...this.state.document, range: clone(position?.range ?? null), prepared: null, phase: 'idle', error: null } });
+      document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null } });
     if (this.client) this.update({ message: await this.isolationNote(this.client, conversation) });
     this.stageDraft();
   }

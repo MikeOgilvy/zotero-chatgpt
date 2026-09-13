@@ -69,9 +69,49 @@ it('restores local chat, rich draft and scroll while runtime is unavailable, the
   const f = fixture({ offline: true }); const id = f.conversation().id;
   f.saved.set(id, { schemaVersion: 1, conversationId: id, paper: paperA, updatedAt: '2026-09-12T00:00:00Z', scrollTop: 175, pageRange: [2, 2], draft: { paper: paperA, settings, question: 'Saved question', citations: [citationA], images: [imageA], references: [reference], skillId: 'user-study', profileId: 'formal', overrides: {} } });
   await f.presenter.activate();
-  expect(f.presenter.snapshot()).toMatchObject({ conversation: { id }, draft: { question: 'Saved question', references: [reference], profileId: 'formal' }, scrollTop: 175, document: { range: [2, 2] } });
+  // The record's `pageRange` is read without error and dropped: the control that could show or clear
+  // it is gone, so a restored range would silently narrow every later request forever.
+  expect(f.presenter.snapshot()).toMatchObject({ conversation: { id }, draft: { question: 'Saved question', references: [reference], profileId: 'formal' }, scrollTop: 175, document: { range: null } });
   expect(f.sent).toHaveLength(0); f.presenter.setQuestion('Edited offline'); f.presenter.setScrollTop(230); await f.presenter.flushDraft();
   expect(f.saved.get(id)).toMatchObject({ draft: { question: 'Edited offline', references: [reference] }, scrollTop: 230 });
+  // Nothing re-persists a range either: the schema field stays but is always written as null.
+  expect(f.saved.get(id)?.pageRange).toBeNull();
+  f.presenter.dispose();
+});
+
+it('sends the whole PDF after a legacy draft with a saved page range is loaded', async () => {
+  const f = fixture({ document: true }); const id = f.conversation().id;
+  f.saved.set(id, { schemaVersion: 1, conversationId: id, paper: paperA, updatedAt: '2026-09-12T00:00:00Z', scrollTop: 40, pageRange: [2, 2], draft: { paper: paperA, settings, question: 'Summarize the whole paper', citations: [], images: [], references: [], skillId: null, profileId: null, overrides: {} } });
+  // A real reader honours the range it is handed, which is how a restored range would narrow the send.
+  f.services.document!.prepare = (_signal, _progress, range) => Promise.resolve(range
+    ? { ...copy(documentA), pages: documentA.pages.filter(page => page.pageIndex + 1 >= range[0] && page.pageIndex + 1 <= range[1]) }
+    : copy(documentA));
+  await f.presenter.activate();
+  expect(f.presenter.snapshot().document.range).toBeNull();
+  f.presenter.setQuestion('Summarize the whole paper'); await f.presenter.send();
+  expect(f.sent).toHaveLength(1);
+  // The whole PDF, not the single page a dead UI once narrowed to.
+  expect(f.sent[0]!.document?.pages.map(page => page.pageIndex)).toEqual([0, 1]);
+  await f.presenter.flushDraft();
+  for (const record of f.saved.values()) expect(record.pageRange).toBeNull();
+  f.presenter.dispose();
+});
+
+it('still honours an explicit programmatic page range, even though no UI persists one', async () => {
+  const f = fixture({ document: true });
+  // The range capability stayed functional: only the automatic round-trip through storage is gone.
+  f.services.document!.prepare = (_signal, _progress, range) => Promise.resolve(range
+    ? { ...copy(documentA), pages: documentA.pages.filter(page => page.pageIndex + 1 >= range[0] && page.pageIndex + 1 <= range[1]) }
+    : copy(documentA));
+  await f.presenter.activate();
+  f.presenter.setDocumentRange(2, 2); await f.presenter.prepareContext();
+  expect(f.presenter.snapshot().document.range).toEqual([2, 2]);
+  expect(f.presenter.snapshot().document.prepared?.pages.map(page => page.pageIndex)).toEqual([1]);
+  f.presenter.setQuestion('Explain the theorem'); await f.presenter.send();
+  expect(f.sent[0]!.document?.pages.map(page => page.pageIndex)).toEqual([1]);
+  // ...but the explicit scope is never written to storage, so it cannot outlive this session.
+  await f.presenter.flushDraft();
+  for (const record of f.saved.values()) expect(record.pageRange).toBeNull();
   f.presenter.dispose();
 });
 
