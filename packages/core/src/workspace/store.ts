@@ -234,13 +234,15 @@ export class WorkspaceStore implements ReaderWorkspace {
     const frozen = validatePaperScope(paper); this.draftPath(frozen, conversationId);
     return this.serial(() => this.loadDraft(frozen, conversationId));
   }
+  /** Deletes only the draft file when it exists; shared image assets are never collected here. */
+  private async removeDraft(paper: PaperScope, conversationId: string | null): Promise<void> {
+    const path = this.draftPath(paper, conversationId);
+    if (!await this.loadDraft(paper, conversationId)) return;
+    try { await this.storage.remove(path); } catch { failedSave(); }
+  }
   deleteDraft(paper: PaperScope, conversationId: string | null): Promise<void> {
-    const frozen = validatePaperScope(paper); const path = this.draftPath(frozen, conversationId);
-    return this.serial(async () => {
-      if (!await this.loadDraft(frozen, conversationId)) return;
-      // Assets may be shared with other drafts. No garbage collection is implicit in deletion.
-      try { await this.storage.remove(path); } catch { failedSave(); }
-    });
+    const frozen = validatePaperScope(paper); this.draftPath(frozen, conversationId);
+    return this.serial(() => this.removeDraft(frozen, conversationId));
   }
   private async loadConversation(id: string, metadataOnly = false): Promise<Conversation> {
     uuid(id); const path = `conversations/${id}.json`;
@@ -328,6 +330,9 @@ export class WorkspaceStore implements ReaderWorkspace {
         // Exactly one scope per chat: archive state is the only difference between the two queries.
         if (!!c.archivedAt !== archivedScope) continue;
         const tasks = tasksByConversation.get(c.id) ?? [];
+        // The Preferences pane must not delete a chat the sidebar would refuse to delete over.
+        const unfinishedWork = !!c.activeRequestId || !!c.queuedRequestIds?.length
+          || tasks.some(task => ['preparing', 'review', 'running', 'uncertain'].includes(task.state) || task.items.some(item => ['writing', 'undoing', 'uncertain'].includes(item.status)));
         let saved = await this.loadDraft(c.paper, c.id);
         if (!saved) {
           const key = paperId(c.paper);
@@ -341,9 +346,39 @@ export class WorkspaceStore implements ReaderWorkspace {
         if (search && !searchable.includes(search)) continue;
         const updatedAt = [c.updatedAt, ...(draftPresent && saved ? [saved.updatedAt] : []), ...tasks.map(task => task.updatedAt)].sort().at(-1)!;
         const previews = [{ at: c.updatedAt, text: c.messages.findLast(message => message.text.trim())?.text ?? '' }, ...(draftPresent && saved ? [{ at: saved.updatedAt, text: saved.draft.question }] : []), ...tasks.map(task => ({ at: task.updatedAt, text: task.question }))].filter(item => item.text.trim()).sort((a, b) => b.at.localeCompare(a.at));
-        entries.push({ id: c.id, paper: clone(c.paper), title: c.title, identity, updatedAt, createdAt: c.createdAt, messageCount: c.messages.length, taskCount: tasks.length, preview: preview(previews[0]?.text ?? ''), hasDraft: draftPresent, activeRequestId: c.activeRequestId, ...(c.archivedAt ? { archivedAt: c.archivedAt } : {}) });
+        entries.push({ id: c.id, paper: clone(c.paper), title: c.title, identity, updatedAt, createdAt: c.createdAt, messageCount: c.messages.length, taskCount: tasks.length, preview: preview(previews[0]?.text ?? ''), hasDraft: draftPresent, activeRequestId: c.activeRequestId, ...(unfinishedWork ? { unfinishedWork: true } : {}), ...(c.archivedAt ? { archivedAt: c.archivedAt } : {}) });
       }
       return entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    });
+  }
+  /**
+   * Reversible archive toggle through the same conversation store the sidebar uses: nothing is
+   * removed, an open request keeps running, and a record already in the requested state is not
+   * rewritten. Archiving is refused for a chat this profile does not own.
+   */
+  setConversationArchived(id: string, archived: boolean): Promise<void> {
+    return this.serial(async () => {
+      uuid(id);
+      const store = new ConversationStore(this.storage, this.clock);
+      const conversation = await store.get(id);
+      this.ownedPaper(conversation.paper);
+      if (archived === !!conversation.archivedAt) return;
+      if (archived) conversation.archivedAt = this.clock.now(); else delete conversation.archivedAt;
+      await store.save(conversation);
+    });
+  }
+  /**
+   * Explicit removal of one stored chat and its bound draft. Shared image assets and native task
+   * ledgers are deliberately left in place; nothing else is pruned, and the paper index's current
+   * pointer falls back to the previous chat (or none) inside the conversation store.
+   */
+  removeConversation(paper: PaperScope, id: string): Promise<void> {
+    const checked = this.ownedPaper(paper);
+    return this.serial(async () => {
+      uuid(id);
+      const store = new ConversationStore(this.storage, this.clock);
+      await store.remove(checked, id);
+      await this.removeDraft(checked, id);
     });
   }
   snapshotChat(conversationId: string, messageIds?: string[]): Promise<ReaderReference> {

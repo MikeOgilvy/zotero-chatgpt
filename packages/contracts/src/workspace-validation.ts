@@ -1,5 +1,5 @@
 import { ReaderError, paperId, type ContextBatch, type ContextReport } from './index.ts';
-import type { Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowSnapshot } from './workspace.ts';
+import type { HistoryEntry, Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowSnapshot } from './workspace.ts';
 import { validatePaperIdentity, validatePaperScope } from './validation.ts';
 import { validateDocument } from './document.ts';
 function fail(): never { throw new ReaderError('INVALID_REQUEST', 'The workflow or reference snapshot is invalid.'); }
@@ -13,6 +13,9 @@ function text(value: unknown, max = 4096, min = 0): string {
 function array(value: unknown, max: number): unknown[] { if (!Array.isArray(value) || value.length > max) fail(); return value; }
 function count(value: unknown, max = Number.MAX_SAFE_INTEGER): number { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > max) fail(); return value; }
 function uuid(value: unknown): string { const id = text(value, 36, 36); if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(id)) fail(); return id; }
+function timestamp(value: unknown): string {
+  const result = text(value, 40, 1); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(result) || !Number.isFinite(Date.parse(result))) fail(); return result;
+}
 const preferenceKeys = ['language', 'detail', 'mathematics', 'background', 'citationStyle', 'annotationStyle'] as const;
 export function validatePreferences(value: unknown): Partial<Personalization> {
   const source = object(value, preferenceKeys); const result: Partial<Personalization> = {};
@@ -25,7 +28,7 @@ export function validatePreferences(value: unknown): Partial<Personalization> {
 export function validateReference(value: unknown): ReaderReference {
   const source = object(value, ['id', 'kind', 'label', 'paper', 'identity', 'conversationId', 'messageIds', 'text', 'range', 'capturedAt']);
   if (!['article', 'chat', 'collection', 'note', 'annotation'].includes(String(source.kind))) fail();
-  const capturedAt = text(source.capturedAt, 40, 1); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(capturedAt) || !Number.isFinite(Date.parse(capturedAt))) fail();
+  const capturedAt = timestamp(source.capturedAt);
   const result: ReaderReference = { id: text(source.id, 256, 1), kind: source.kind as ReaderReference['kind'], label: text(source.label, 2048, 1), capturedAt };
   if (source.paper !== undefined) result.paper = validatePaperScope(source.paper);
   if (source.identity !== undefined) result.identity = validatePaperIdentity(source.identity);
@@ -33,6 +36,26 @@ export function validateReference(value: unknown): ReaderReference {
   if (source.messageIds !== undefined) { result.messageIds = array(source.messageIds, 32).map(id => text(id, 128, 1)); if (new Set(result.messageIds).size !== result.messageIds.length) fail(); }
   if (source.text !== undefined) { result.text = text(source.text, 48 * 1024); if (new TextEncoder().encode(result.text).length > 48 * 1024) fail(); }
   if (source.range !== undefined) { const pair = array(source.range, 2).map(n => count(n, 10000)); if (pair.length !== 2 || pair[0]! < 1 || pair[1]! < pair[0]!) fail(); result.range = [pair[0]!, pair[1]!]; }
+  return result;
+}
+const historyEntryKeys = ['id', 'paper', 'title', 'identity', 'updatedAt', 'createdAt', 'messageCount', 'preview', 'hasDraft', 'activeRequestId', 'taskCount', 'unfinishedWork', 'archivedAt'] as const;
+/**
+ * Validates one History listing row exactly as the store may return it. A malformed row fails the
+ * whole listing rather than being dropped: a list that silently lost a chat would misreport what is
+ * stored on disk.
+ */
+export function validateHistoryEntry(value: unknown): HistoryEntry {
+  const source = object(value, historyEntryKeys);
+  if (typeof source.hasDraft !== 'boolean') fail();
+  const result: HistoryEntry = {
+    id: uuid(source.id), paper: validatePaperScope(source.paper), title: text(source.title, 2048),
+    identity: validatePaperIdentity(source.identity), updatedAt: timestamp(source.updatedAt), createdAt: timestamp(source.createdAt),
+    messageCount: count(source.messageCount, 10_000), preview: text(source.preview, 4096), hasDraft: source.hasDraft,
+    activeRequestId: source.activeRequestId === null ? null : uuid(source.activeRequestId),
+  };
+  if (source.taskCount !== undefined) result.taskCount = count(source.taskCount, 10_000);
+  if (source.unfinishedWork !== undefined) { if (source.unfinishedWork !== true) fail(); result.unfinishedWork = true; }
+  if (source.archivedAt !== undefined) result.archivedAt = timestamp(source.archivedAt);
   return result;
 }
 export function validateReferenceInput(value: unknown): ReferenceInput {

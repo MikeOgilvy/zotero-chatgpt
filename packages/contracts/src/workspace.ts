@@ -70,6 +70,11 @@ export interface HistoryEntry {
   updatedAt: string; createdAt: string; messageCount: number; preview: string;
   hasDraft: boolean; activeRequestId: string | null;
   taskCount?: number;
+  /**
+   * True while the chat owns an in-flight or queued answer, or an unfinished native task. The
+   * Preferences pane refuses to delete such a chat for the same reason the sidebar does.
+   */
+  unfinishedWork?: boolean;
   /** Present only on an archived chat; echoes {@link import('./index.ts').Conversation.archivedAt}. */
   archivedAt?: string;
 }
@@ -79,6 +84,38 @@ export interface HistoryEntry {
  * other. An empty query lists everything in that scope.
  */
 export interface HistoryScope { archived?: boolean }
+/** The scope switch the History management UI offers, including "no scope filter". */
+export type HistoryFilterScope = 'all' | 'active' | 'archived';
+export interface HistoryFilter { scope: HistoryFilterScope; paperId: string | null }
+/** A distinct paper among listed chats, used to build the paper filter without a second query. */
+export interface HistoryPaperOption { id: string; label: string; paper: PaperScope }
+/** One chat that could not be changed or confirmed, with the reason shown to the owner. */
+export interface HistoryFailed { id: string; message: string }
+/**
+ * What the History section renders. Counts are for `entries` (the current query), so filtering
+ * narrows the list and the counts together instead of reporting a total the list does not show.
+ */
+export interface HistoryListing { entries: HistoryEntry[]; activeCount: number; archivedCount: number }
+export type HistoryAction = 'archive' | 'restore' | 'delete';
+/**
+ * The honest outcome of a History mutation. `changed` lists exactly the chats the store confirmed;
+ * `failed` names every chat that was not changed and why; `warnings` records non-fatal surprises
+ * (for example a mutation that succeeded but whose re-verification could not be read). `partial` is
+ * true whenever fewer chats changed than were requested.
+ */
+export interface HistoryMutationReport {
+  action: HistoryAction; requested: number; changed: string[]; failed: HistoryFailed[]; warnings: string[]; partial: boolean;
+}
+/**
+ * The subset of the workspace the History management logic needs. `ReaderWorkspace` satisfies it.
+ * The two mutators are optional: a build whose store cannot change stored chats omits them and the
+ * Preferences pane degrades to listing, filtering and archiving nothing.
+ */
+export interface HistorySource {
+  history(query?: string, scope?: HistoryScope): Promise<HistoryEntry[]>;
+  setConversationArchived?(id: string, archived: boolean): Promise<void>;
+  removeConversation?(paper: PaperScope, id: string): Promise<void>;
+}
 export interface ReaderWorkspace {
   settings(): Promise<WorkspaceSettings>;
   saveSettings(value: WorkspaceSettings): Promise<void>;
@@ -92,6 +129,16 @@ export interface ReaderWorkspace {
   readConversation(id: string): Promise<import('./index.ts').Conversation>;
   currentConversation(paper: PaperScope): Promise<import('./index.ts').Conversation | null>;
   snapshotChat(conversationId: string, messageIds?: string[]): Promise<ReaderReference>;
+  /**
+   * Reversible archive/restore of one stored chat. The record keeps its identity and content; only
+   * the scope it appears in changes. Optional so older stores stay source-compatible.
+   */
+  setConversationArchived?(id: string, archived: boolean): Promise<void>;
+  /**
+   * Explicit removal of one stored chat and its bound draft, leaving shared assets and native task
+   * ledgers in place. Optional for the same reason; never invoked implicitly.
+   */
+  removeConversation?(paper: PaperScope, id: string): Promise<void>;
 }
 export interface LibraryReferencePort {
   collections?(): Promise<Array<import('./agent.ts').NativeCollectionTarget & { name: string }>>;
