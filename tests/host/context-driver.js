@@ -60,7 +60,12 @@ async function runHostSmoke(config) {
     const openPage = rows[1].querySelector('button'); openPage.click();
     await until(() => pdf().pdfViewer.currentPageNumber === 2, 'source-navigation');
     toggle().click(); await until(() => !panel(), 'close-sidebar');
-    await check('close-preserves-current-page', pdf().pdfViewer.currentPageNumber === 2, { page: pdf().pdfViewer.currentPageNumber });
+    await check('close-preserves-current-page', pdf().pdfViewer.currentPageNumber === 2, {
+      page: pdf().pdfViewer.currentPageNumber,
+      location: pdf().pdfViewer._location && { pageNumber: pdf().pdfViewer._location.pageNumber, left: pdf().pdfViewer._location.left, top: pdf().pdfViewer._location.top, scale: pdf().pdfViewer._location.scale },
+      dock: Boolean(rdoc()?.querySelector('[data-zcr-dock]')),
+      sidebarCollapsed: win.ZoteroContextPane?.collapsed,
+    });
     toggle().click(); await until(() => panel()?.dataset.zcrConversation === conversationA, 'same-conversation-restored');
     await check('draft-preserved', input().value === 'Unsent synthetic question about the current PDF');
     const readRange = context().querySelectorAll('input'); readRange[0].value = '2'; readRange[1].value = '2';

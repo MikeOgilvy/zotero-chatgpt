@@ -102,3 +102,49 @@ it('restores the current page without delayed link-navigation focus from the ope
   expect(operations).toEqual(['scale', 'anchor']);
   expect(textLayerFocus).toHaveLength(0);
 });
+it('keeps the page a programmatic jump moved to while the viewer location still lags it', async () => {
+  // pdf.js applies a jump's scroll and sets `currentPageNumber` synchronously (`#scrollIntoView`),
+  // but only derives `_location` from the visible page when the scroll-driven `update()` runs on
+  // the next frame. Host evidence: resource/reader/pdf/web/viewer.mjs `_setCurrentPageNumber` /
+  // `#scrollIntoView` versus `_scrollUpdate()` / `_updateLocation()`.
+  const PAGE_HEIGHT = 800;
+  const frames: FrameRequestCallback[] = [];
+  let appliedPage = 1; // the scroll offset a programmatic jump already applied
+  let currentPageNumber = 1;
+  const location = { pageNumber: 1, left: -11, top: 600, scale: 210 as string | number };
+  const win = { ZoteroContextPane: { collapsed: true, context: { mode: 'item' } }, requestAnimationFrame: (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; } } as ZoteroWindow;
+  const viewer = {
+    _location: location,
+    get currentPageNumber() { return currentPageNumber; },
+    get currentScale() { return typeof location.scale === 'number' ? location.scale / 100 : 1; },
+    set currentScale(value: number) { location.scale = value * 100; },
+    get currentScaleValue() { return location.scale; },
+    set currentScaleValue(value: number) { location.scale = value * 100; },
+    scrollPageIntoView: ({ pageNumber }: { pageNumber: number }) => {
+      currentPageNumber = pageNumber; appliedPage = pageNumber;
+      frames.push(() => { currentPageNumber = appliedPage; location.pageNumber = appliedPage; location.top = (appliedPage - 1) * PAGE_HEIGHT; });
+    },
+  };
+  const reader: HostReader = {
+    itemID: 42, tabID: 'pdf-tab', type: 'pdf', _window: win,
+    _internalReader: { _lastView: { _iframeWindow: { PDFViewerApplication: { pdfViewer: viewer } } } },
+    zoomPageWidth: () => { location.scale = 'page-width'; }, zoomPageHeight: () => {}, zoomAuto: () => {},
+    navigate: () => {},
+  };
+  const pane = new NativeReaderPane({} as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: true, mode: 'item', scrollTop: 0, width: 280 });
+  vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
+  vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
+  const flushFrames = () => { for (let guard = 0; frames.length && guard < 10; guard++) for (const callback of frames.splice(0)) callback(0); };
+  await pane.controller.toggle(); flushFrames();
+  // The jump is applied, but the scroll-driven `update()` has not refreshed `_location` yet.
+  location.pageNumber = 1; location.top = 600;
+  viewer.scrollPageIntoView({ pageNumber: 2 });
+  expect(viewer.currentPageNumber).toBe(2);
+  expect(location.pageNumber).toBe(1);
+  expect(pane.capturePosition()?.anchor.pageIndex).toBe(1);
+  pane.controller.close();
+  flushFrames();
+  expect(location.pageNumber).toBe(2);
+  expect(viewer.currentPageNumber).toBe(2);
+});

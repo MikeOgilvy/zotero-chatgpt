@@ -32,11 +32,22 @@ export function zoomReader(reader: HostReader, action: 'in' | 'out' | 'reset'): 
   viewer.currentScale = action === 'in' ? viewer.currentScale * 1.1 : Math.max(0.25, viewer.currentScale / 1.1);
 }
 export function capturePosition(reader: HostReader): ViewPosition | undefined {
-  const location = reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfViewer._location;
-  if (!location) return;
+  const viewer = reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+  const location = viewer?._location;
+  if (!viewer || !location) return;
   const scale = location.scale;
   if (typeof scale !== 'number' && scale !== 'auto' && scale !== 'page-fit' && scale !== 'page-width') return;
-  return { scale, anchor: { pageIndex: location.pageNumber - 1, left: location.left, top: location.top } };
+  // pdf.js applies a programmatic jump's scroll and sets `currentPageNumber` synchronously, but
+  // only refreshes `_location` from the visible page on the next scroll frame (viewer.mjs
+  // `#scrollIntoView`/`_setCurrentPageNumber` versus `_scrollUpdate`/`_updateLocation`). A close
+  // inside that window would capture the page the jump left and re-anchor the reader to it.
+  const live = viewer.currentPageNumber;
+  if (live === location.pageNumber || !Number.isFinite(live)) {
+    return { scale, anchor: { pageIndex: location.pageNumber - 1, left: location.left, top: location.top } };
+  }
+  // The committed page is known, but the offset that belongs to it is not. Restoring the page
+  // alone is honest; the horizontal offset cannot be invented from the stale location.
+  return { scale, anchor: { pageIndex: live - 1, left: 0, top: 0 } };
 }
 export class NativeReaderPane implements LayoutHost {
   readonly controller = new ReaderLayoutController(this);
@@ -171,6 +182,9 @@ export class NativeReaderPane implements LayoutHost {
     const generation = ++this.zoomGeneration;
     this.pendingFixedScale = typeof scale === 'number' ? scale : undefined;
     this.expectedPreset = typeof scale === 'string' ? scale : undefined;
+    // Preset zooms reflow and re-anchor from the viewer location, which can still name the page a
+    // jump left; declare the anchor we are restoring to before the native reflow reads it.
+    this.alignViewerLocation(anchor);
     if (scale === 'page-width') this.reader.zoomPageWidth();
     else if (scale === 'page-fit') this.reader.zoomPageHeight();
     else if (scale === 'auto') this.reader.zoomAuto();
@@ -193,6 +207,18 @@ export class NativeReaderPane implements LayoutHost {
       if (generation !== this.zoomGeneration) return;
       this.scrollTo(anchor);
     });
+  }
+  /**
+   * pdf.js `#setScaleUpdatePages` re-anchors a preset zoom from `_location`. When a programmatic
+   * jump is still waiting for its scroll frame, `_location` names the page that jump left, so the
+   * native reflow would pull the reader back before the frame below restores the anchor.
+   */
+  private alignViewerLocation(anchor: Anchor): void {
+    const viewer = this.reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+    const location = viewer?._location;
+    if (!viewer || !location) return;
+    if (location.pageNumber === anchor.pageIndex + 1) return;
+    viewer._location = { ...location, pageNumber: anchor.pageIndex + 1, left: anchor.left, top: anchor.top };
   }
   private scrollTo(anchor: Anchor): void {
     const viewer = this.reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
