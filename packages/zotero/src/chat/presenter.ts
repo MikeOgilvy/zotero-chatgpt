@@ -78,6 +78,20 @@ export interface PresenterState {
 const LOGIN_HOSTS = ['auth.openai.com', 'chatgpt.com'];
 const UNCERTAIN_ISOLATION = 'An earlier request in this conversation could not be confirmed; start a new conversation to continue.';
 function bytes(value: unknown): number { return new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value)).length; }
+/**
+ * The planner owns the coverage explanation and enumerates unread or clipped pages inside it. Two
+ * fast paths never reach the planner — a window so unknown that there is no budget to partition
+ * against, and a document that fits the estimate outright — so they repeat the same disclosure from
+ * the same source fields rather than claiming the gaps stayed explicit. A page is a gap when it
+ * carries no text or was clipped as `partial`; the wording mirrors `gapSummary` in
+ * `core/context/planner.ts` so the report never states less than the planner would.
+ */
+function gapDisclosure(document: DocumentContext): string {
+  const gaps = document.pages.filter(page => page.status !== 'text' || page.partial);
+  if (!gaps.length) return '';
+  const shown = gaps.slice(0, 12).map(page => `${page.pageLabel} (${page.status === 'text' ? 'partial text' : `no text: ${page.status}`})`);
+  return ` Recorded source gaps: ${shown.join(', ')}${gaps.length > 12 ? `, and ${gaps.length - 12} more` : ''}.`;
+}
 function unfinishedReading(job: ReadingJob): boolean { return !['completed', 'cancelled', 'failed'].includes(job.status); }
 function activeReading(job: ReadingJob): boolean { return ['reserved', 'submitting', 'running', 'cancelling'].includes(job.status); }
 function aborted(signal: AbortSignal): void { if (signal.aborted) throw new ReaderError('INVALID_REQUEST', 'Request preparation cancelled. Your draft is kept.'); }
@@ -494,7 +508,7 @@ export class ConversationPresenter {
   }
   private async getReading(client?: ReaderClient): Promise<PresenterReading> {
     if (this.readingPort && this.readingClient === (client ?? null)) return this.readingPort;
-    if (!this.services.getReading) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Multi-pass reading is unavailable. Choose a smaller explicit source range.');
+    if (!this.services.getReading) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Multi-pass reading is unavailable in this runtime. Nothing was sent.');
     const reading = await this.services.getReading(client); this.unreading?.(); this.readingPort = reading; this.readingClient = client ?? null;
     this.unreading = reading.subscribe(job => this.acceptReading(job)); return reading;
   }
@@ -937,26 +951,36 @@ export class ConversationPresenter {
     const budget = this.estimateBudget(input, conversation);
     const primary = input.document ?? documents[0]!;
     if (budget.accuracy === 'unknown' || budget.textBudgetTokens === null) {
-      input.contextReport = { mode: 'full', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: null, selectedPages: primary.pages.map(page => page.pageIndex), totalPages: primary.totalPages, reason: 'All authorized source text is included. Model capacity or retained history is unknown; fit was not asserted.' }; return null;
+      // No trustworthy window: every locally extracted authorized page is supplied as-is (nothing is
+      // silently dropped), the pages the extractor could not read stay reported as gaps, and the
+      // unknown capacity means fit is not asserted in either direction.
+      input.contextReport = { mode: 'full', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: null, selectedPages: primary.pages.map(page => page.pageIndex), totalPages: primary.totalPages, reason: `All locally extracted authorized text is supplied. Model capacity or retained history is unknown; fit was not asserted.${gapDisclosure(primary)}` }; return null;
     }
-    if (!budget.textBudgetTokens) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The context budget leaves no room for PDF text. Start a new chat or narrow the supplied context.');
+    if (!budget.textBudgetTokens) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The context budget leaves no room for PDF text. Start a new chat to reset the retained history.');
     const total = documents.reduce((sum, document) => sum + bytes(document), 0);
     if (total <= budget.textBudgetTokens) {
-      input.contextReport = { mode: 'full', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: primary.pages.map(page => page.pageIndex), totalPages: primary.totalPages, reason: 'All authorized text fits the conservative context estimate. Extraction gaps and image costs remain explicit.' }; return null;
+      input.contextReport = { mode: 'full', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: primary.pages.map(page => page.pageIndex), totalPages: primary.totalPages, reason: `All authorized source pages fit within the conservative estimate. Image costs remain explicit.${gapDisclosure(primary)}` }; return null;
     }
     const perSource = { ...budget, textBudgetTokens: Math.floor(budget.textBudgetTokens / documents.length) };
     const plans = await Promise.all(documents.map(document => planContext({ document, question: input.question, citations: input.citations, budget: perSource })));
     const all = plans.flatMap(plan => plan.documents);
-    if (all.length > 256) throw new ReaderError('PAYLOAD_TOO_LARGE', 'This scope needs more than 256 reading passes. Choose a smaller explicit scope.');
+    if (all.length > 256) throw new ReaderError('PAYLOAD_TOO_LARGE', 'This source needs more than 256 reading passes at the current budget. No text was dropped, but the request was not sent.');
     if (plans.every(plan => plan.mode !== 'multi-pass') && all.reduce((sum, document) => sum + bytes(document), 0) <= budget.textBudgetTokens) {
       const substitute = (document: DocumentContext) => all.find(fragment => paperId(fragment.paper) === paperId(document.paper) && (fragment.sourceId ?? fragment.id) === (document.sourceId ?? document.id)) ?? document;
       if (input.document) input.document = substitute(input.document);
       if (input.references) input.references = input.references.map(reference => reference.document ? { ...reference, document: substitute(reference.document) } : reference);
       const selected = input.document ?? all[0]!;
-      input.contextReport = { mode: 'focused', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: selected.pages.map(page => page.pageIndex), totalPages: selected.totalPages, reason: 'Question-focused source fragments are supplied; unselected pages were not sent.' }; return null;
+      // The plan that produced the fragment we report on owns the explanation: it names the local
+      // selection rule, the pages it left out and every recorded gap. Its mode is the honest one.
+      const selectedPlan = plans.find(plan => plan.documents.some(fragment => fragment.id === selected.id)) ?? plans[0]!;
+      input.contextReport = { mode: selectedPlan.mode, capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: selected.pages.map(page => page.pageIndex), totalPages: selected.totalPages, reason: selectedPlan.coverage.reason }; return null;
     }
     const first = plans[0]!;
-    const plan: ContextPlan = { mode: 'multi-pass', documents: all, budget, coverage: { ...first.coverage, reason: `The authorized sources require ${all.length} reading passes followed by synthesis. Per-source coverage is recorded on each completed pass.` } };
+    // Each authorized source is planned separately, and each plan explains its own page coverage. The
+    // first plan alone would drop the other sources' gaps and exclusions, so every distinct reason is
+    // carried into the aggregate report; identical reasons collapse rather than repeat.
+    const reasons = [...new Set(plans.map(plan => plan.coverage.reason.trim()))];
+    const plan: ContextPlan = { mode: 'multi-pass', documents: all, budget, coverage: { ...first.coverage, reason: `The authorized sources require ${all.length} reading passes followed by synthesis. ${reasons.join(' ')}` } };
     input.contextReport = { mode: 'multi-pass', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: first.coverage.selectedPages, totalPages: first.coverage.totalPages, reason: plan.coverage.reason }; return plan;
   }
   private async submit(conversation: Conversation, input: SendInput, context: RequestContext, draft: WorkspaceDraft, configuration: WorkspaceSettings | null, queued = false): Promise<void> {
@@ -985,7 +1009,7 @@ export class ConversationPresenter {
         references.push(reference.kind === 'chat' ? validateReference(reference) : await this.previewReference(reference, controller.signal));
       }
       if (references.length) input.references = references;
-      if (input.document && !input.document.pages.some(page => page.status === 'text') && !input.images?.length) throw new ReaderError('INVALID_REQUEST', 'No extractable text was found in this range. Attach the relevant page image or select a readable range.');
+      if (input.document && !input.document.pages.some(page => page.status === 'text') && !input.images?.length) throw new ReaderError('INVALID_REQUEST', 'No extractable text was found in the pages supplied from this PDF. Attach the relevant page image if you want to ask about them.');
       const modalities = this.state.runtime?.models.find(model => model.id === input.settings.model)?.inputModalities;
       if (input.images?.length && modalities && !modalities.includes('image')) throw new ReaderError('MODEL_UNAVAILABLE', 'The selected model does not accept image input.');
       const plan = await this.planInput(input, current); aborted(controller.signal);

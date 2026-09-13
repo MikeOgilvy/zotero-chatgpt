@@ -849,6 +849,8 @@ it('surfaces the honest text-not-ready refusal now that no panel reports coverag
   await presenter.send();
   await vi.waitFor(() => expect(alert.hidden).toBe(false));
   expect(alert.textContent).toMatch(/No extractable text/iu);
+  // The refusal names no control that no longer exists: the page-range picker is gone.
+  expect(alert.textContent).not.toMatch(/range/iu);
   expect(sent).toHaveLength(0);
 });
 

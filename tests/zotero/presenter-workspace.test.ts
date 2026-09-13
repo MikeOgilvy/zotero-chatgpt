@@ -230,6 +230,9 @@ function taskPort(conversationId: string) {
 function smallBudget(): ReturnType<NonNullable<PresenterServices['contextBudget']>> {
   return { capacity: 100000, provenance: 'runtime-reported', accuracy: 'estimate', textBudgetTokens: 1500, reservations: { history: 0, instructions: 1000, workflow: 1000, images: 0, question: 100, output: 1000, safety: 1000, total: 4100 }, overBudget: false, assumptions: ['synthetic test budget'] };
 }
+function unknownBudget(): ReturnType<NonNullable<PresenterServices['contextBudget']>> {
+  return { capacity: null, provenance: 'unknown', accuracy: 'unknown', textBudgetTokens: null, reservations: { history: null, instructions: 1000, workflow: 1000, images: 0, question: 100, output: 1000, safety: null, total: null }, overBudget: null, assumptions: ['no reported window and no pinned catalog entry'] };
+}
 
 it('routes long-source sends and explicit queues through the shared reading coordinator', async () => {
   const f = fixture({ document: true }); const r = readingPort(f.conversation().id);
@@ -237,11 +240,46 @@ it('routes long-source sends and explicit queues through the shared reading coor
   f.services.document!.prepare = () => Promise.resolve(long); f.services.contextBudget = smallBudget; f.services.getReading = () => Promise.resolve(r.reading);
   await f.presenter.activate(); f.presenter.setQuestion('Summarize all pages'); await f.presenter.send();
   expect(r.reading.start).toHaveBeenCalledWith(expect.objectContaining({ document: long }), expect.objectContaining({ mode: 'multi-pass' })); expect(f.sent).toHaveLength(0);
-  expect(f.presenter.snapshot().contextReport?.mode).toBe('multi-pass'); await f.presenter.cancelReading(r.jobs[0]!.id);
+  expect(f.presenter.snapshot().contextReport?.mode).toBe('multi-pass');
+  // The planner's own per-source explanation reaches the report instead of a generic sentence.
+  expect(f.presenter.snapshot().contextReport?.reason).toContain('All authorized pages are partitioned into reading passes');
+  expect(f.presenter.snapshot().contextReport?.reason).toContain('marked partial');
+  await f.presenter.cancelReading(r.jobs[0]!.id);
   expect(f.presenter.snapshot().readingJobs[0]?.status).toBe('cancelled');
   f.saveConversation({ ...f.conversation(), activeRequestId: 'active-request' });
   f.presenter.setQuestion('Read all pages next'); await f.presenter.queueDraft();
   expect(r.reading.enqueue).toHaveBeenCalled(); expect(f.queued).toHaveLength(0); f.presenter.dispose();
+});
+
+it('reports the planner\'s real gap disclosure when the model window is unknown', async () => {
+  const f = fixture({ document: true });
+  // A recorded gap: the second authorized page exists but the extractor returned no text for it.
+  const gapped = { ...copy(documentA), pages: [{ ...documentA.pages[0]! }, { ...documentA.pages[1]!, text: '', status: 'empty' as const }] };
+  f.services.document!.prepare = () => Promise.resolve(gapped); f.services.contextBudget = unknownBudget;
+  await f.presenter.activate(); f.presenter.setQuestion('What does this paper claim?'); await f.presenter.send();
+  const report = f.presenter.snapshot().contextReport;
+  expect(report?.mode).toBe('full');
+  expect(report?.textBudgetTokens).toBeNull();
+  // The unknown branch must not claim fit, and must not hide that a page had no extractable text.
+  expect(report?.reason).toContain('All locally extracted authorized text is supplied');
+  expect(report?.reason).toContain('fit was not asserted');
+  expect(report?.reason).toContain('Recorded source gaps: ii (no text: empty)');
+  expect(f.sent).toHaveLength(1); f.presenter.dispose();
+});
+
+it('reports the planner\'s excluded-page explanation, not a generic sentence, for a focused send', async () => {
+  const f = fixture({ document: true });
+  const long = { ...copy(documentA), pages: [
+    { ...documentA.pages[0]!, text: 'Definition: x denotes the hidden state.\n\n'.repeat(80) },
+    { ...documentA.pages[1]!, text: 'A source paragraph about many other things.\n\n'.repeat(80) },
+  ] };
+  f.services.document!.prepare = () => Promise.resolve(long); f.services.contextBudget = smallBudget;
+  await f.presenter.activate(); f.presenter.setQuestion('What is the definition of x?'); await f.presenter.send();
+  const report = f.presenter.snapshot().contextReport;
+  expect(report?.mode).toBe('focused');
+  expect(report?.reason).toContain('Partial, question-focused coverage selected by local term matching');
+  expect(report?.reason).toContain('Excluded pages: ii');
+  expect(f.sent).toHaveLength(1); f.presenter.dispose();
 });
 
 it('loads persisted reading jobs without a runtime connection', async () => {
