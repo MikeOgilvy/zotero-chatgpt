@@ -35,9 +35,16 @@ function offeredRank(id: string): number {
  * for capability lookups and historical message captions but never appears in the menu. When the
  * account offers none of the two families, the full list is kept rather than emptying a working
  * picker; that also keeps synthetic catalogs (and offline tests) usable.
+ *
+ * `allowedIds` is the Preferences allowlist from `enforcedAllowedModelIds`. `undefined` keeps the
+ * historical family rule exactly as it was. When provided, exactly those catalog ids are offered in
+ * the same rank order; a stale list whose ids are all gone from the live catalog falls back to the
+ * full list instead of blanking a working picker.
  */
-export function offeredModels(models: readonly ModelOption[]): ModelOption[] {
-  const offered = models.filter(model => OFFERED_MODEL_FAMILY.test(model.id));
+export function offeredModels(models: readonly ModelOption[], allowedIds?: readonly string[]): ModelOption[] {
+  const offered = allowedIds === undefined
+    ? models.filter(model => OFFERED_MODEL_FAMILY.test(model.id))
+    : models.filter(model => allowedIds.includes(model.id));
   if (!offered.length) return models.slice();
   return offered.slice().sort((a, b) => offeredRank(a.id) - offeredRank(b.id) || a.id.localeCompare(b.id));
 }
@@ -47,8 +54,8 @@ export function offeredModels(models: readonly ModelOption[]): ModelOption[] {
  * start-up preference and can lag behind, so it is never the default here, and `gpt-6-astra` is
  * first regardless of the order the runtime pages the catalog in.
  */
-function defaultModel(models: readonly ModelOption[]): ModelOption | undefined {
-  return offeredModels(models)[0];
+function defaultModel(models: readonly ModelOption[], allowedIds?: readonly string[]): ModelOption | undefined {
+  return offeredModels(models, allowedIds)[0];
 }
 function encode(value: string | null): string { return value ?? ''; }
 function supportedTier(model: ModelOption, tier: string | null): boolean {
@@ -58,14 +65,14 @@ function supportedEffort(model: ModelOption, effort: string | null): boolean {
   return effort === null || model.supportedReasoningEfforts.some(option => option.id === effort);
 }
 
-export function catalogDefaultSettings(models: readonly ModelOption[]): GenerationSettings | null {
-  const model = defaultModel(models);
+export function catalogDefaultSettings(models: readonly ModelOption[], allowedIds?: readonly string[]): GenerationSettings | null {
+  const model = defaultModel(models, allowedIds);
   return model ? { model: model.id, serviceTier: model.defaultServiceTier, effort: model.defaultReasoningEffort } : null;
 }
 
 /** Keep a still-legal combo; if the model or a field is gone, show that model's catalog defaults. */
-export function alignSettings(models: readonly ModelOption[], settings: GenerationSettings): GenerationSettings {
-  const offered = offeredModels(models);
+export function alignSettings(models: readonly ModelOption[], settings: GenerationSettings, allowedIds?: readonly string[]): GenerationSettings {
+  const offered = offeredModels(models, allowedIds);
   const model = modelOf(offered, settings.model) ?? offered[0];
   if (!model) return settings;
   return {
@@ -75,8 +82,8 @@ export function alignSettings(models: readonly ModelOption[], settings: Generati
   };
 }
 
-export function applyComposerChoice(models: readonly ModelOption[], current: GenerationSettings, field: ComposerField, raw: string): GenerationSettings {
-  if (field === 'model') return alignSettings(models, { ...current, model: raw || current.model });
+export function applyComposerChoice(models: readonly ModelOption[], current: GenerationSettings, field: ComposerField, raw: string, allowedIds?: readonly string[]): GenerationSettings {
+  if (field === 'model') return alignSettings(models, { ...current, model: raw || current.model }, allowedIds);
   if (field === 'speed') return { ...current, serviceTier: raw === '' ? null : raw };
   return { ...current, effort: raw === '' ? null : raw };
 }
@@ -108,11 +115,11 @@ function speedLabel(model: ModelOption | undefined, tier: string | null): string
   return model?.serviceTiers.find(option => option.id === tier)?.name ?? tier;
 }
 
-export function composerControls(models: readonly ModelOption[], settings: GenerationSettings | null): ComposerControl[] {
-  const offered = offeredModels(models);
+export function composerControls(models: readonly ModelOption[], settings: GenerationSettings | null, allowedIds?: readonly string[]): ComposerControl[] {
+  const offered = offeredModels(models, allowedIds);
   // A draft/conversation can still hold a model the picker no longer offers; align it first so the
   // model field shows an offered value instead of a blank selection.
-  const current = settings ? alignSettings(models, settings) : null;
+  const current = settings ? alignSettings(models, settings, allowedIds) : null;
   const selected = current ? modelOf(offered, current.model) : undefined;
   const modelOptions = offered.map(model => ({ value: model.id, label: model.displayName }));
   const effortOptions: ComposerOption[] = [{ value: '', label: 'Default' }, ...(selected?.supportedReasoningEfforts.map(effort => ({ value: effort.id, label: effortLabel(effort.id) })) ?? [])];
@@ -143,12 +150,12 @@ export function effortLabel(id: string | null): string {
   return id;
 }
 
-export function modelChipLabel(settings: GenerationSettings | null, models: readonly ModelOption[]): string {
+export function modelChipLabel(settings: GenerationSettings | null, models: readonly ModelOption[], allowedIds?: readonly string[]): string {
   if (!settings) return 'Model';
   // The button must name the model the composer would actually send, so a saved model the picker
   // no longer offers is shown as its aligned replacement rather than a stale, unselectable id.
-  const current = alignSettings(models, settings);
-  const model = modelOf(offeredModels(models), current.model);
+  const current = alignSettings(models, settings, allowedIds);
+  const model = modelOf(offeredModels(models, allowedIds), current.model);
   const parts = [model?.displayName ?? current.model];
   if (current.effort) parts.push(effortLabel(current.effort));
   const fast = resolveFastTier(model);
@@ -156,6 +163,6 @@ export function modelChipLabel(settings: GenerationSettings | null, models: read
   return parts.join(' ');
 }
 
-export function pickerSummary(settings: GenerationSettings | null, models: readonly ModelOption[]): string {
-  return modelChipLabel(settings, models);
+export function pickerSummary(settings: GenerationSettings | null, models: readonly ModelOption[], allowedIds?: readonly string[]): string {
+  return modelChipLabel(settings, models, allowedIds);
 }

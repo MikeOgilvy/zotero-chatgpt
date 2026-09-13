@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { ModelOption } from '../../packages/contracts/src/runtime.ts';
 import { settings } from '../contracts/factories.ts';
-import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, offeredModels, resolveFastTier, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
+import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, offeredModels, pickerSummary, resolveFastTier, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
 
 const catalog: ModelOption[] = [
   {
@@ -190,4 +190,98 @@ it('labels the model chip as model + effort + Fast without inventing missing tie
   expect(modelChipLabel(settings, catalog)).toBe('Catalog Default Medium');
   expect(modelChipLabel({ ...settings, serviceTier: 'flex', effort: 'high' }, catalog)).toBe('Catalog Default High Fast');
   expect(modelChipLabel({ model: 'other-model', serviceTier: null, effort: 'low' }, catalog)).toBe('Other Model Low');
+});
+
+/**
+ * The Preferences allowlist half of `offeredModels`. `undefined` is the untouched default and must
+ * reproduce the historical GPT-6 / GPT-5.6 rule byte for byte; an explicit list is authoritative
+ * over the picker, including ids outside those two families, but a list whose ids are all gone from
+ * the live catalog must keep the full list rather than blank the menu.
+ */
+it('keeps the historical family set exactly when the allowlist is undefined', () => {
+  for (const input of [liveModels, embeddedModels]) {
+    const untouched = offeredModels(input, undefined).map(model => model.id);
+    const omitted = offeredModels(input).map(model => model.id);
+    expect(untouched).toEqual(offeredIds);
+    expect(omitted).toEqual(offeredIds);
+  }
+});
+
+it('offers exactly the allowed ids in the same rank order when an allowlist is provided', () => {
+  // Rank still wins over the order the allowlist lists the ids in: Sol is newest-first.
+  expect(offeredModels(liveModels, ['gpt-5.6-luna', 'gpt-6-astra', 'gpt-5.6-terra']).map(model => model.id))
+    .toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+  expect(offeredModels(liveModels, ['gpt-5.6-terra', 'gpt-5.6-luna']).map(model => model.id))
+    .toEqual(['gpt-5.6-terra', 'gpt-5.6-luna']);
+  // An explicitly allowed id from outside the historical families is offered as-is.
+  expect(offeredModels(liveModels, ['gpt-5.5']).map(model => model.id)).toEqual(['gpt-5.5']);
+});
+
+it('falls back to the full list when a stale allowlist matches nothing in the live catalog', () => {
+  expect(offeredModels(liveModels, ['retired-model', 'gpt-9-ghost']).map(model => model.id))
+    .toEqual(liveModels.map(model => model.id));
+  // A partially stale list keeps only the ids the catalog still carries.
+  expect(offeredModels(liveModels, ['gpt-5.5', 'retired-model']).map(model => model.id)).toEqual(['gpt-5.5']);
+});
+
+it('treats an explicitly empty allowlist differently from the untouched default', () => {
+  const untouched = offeredModels(embeddedModels).map(model => model.id);
+  const empty = offeredModels(embeddedModels, []).map(model => model.id);
+  expect(untouched).toEqual(offeredIds);
+  // An empty list filters everything out, so the picker falls back to the full list, not `[]`.
+  expect(empty).toEqual(embeddedModels.map(model => model.id));
+  expect(empty).not.toEqual(untouched);
+  expect(empty.length).toBeGreaterThan(0);
+});
+
+it('derives the catalog default from the allowlist when one is provided', () => {
+  expect(catalogDefaultSettings(liveModels, ['gpt-5.6-luna', 'gpt-5.6-terra']))
+    .toEqual({ model: 'gpt-5.6-terra', serviceTier: null, effort: 'medium' });
+  // A stale allowlist still yields the full list rather than no default. The fallback keeps the
+  // catalog's own order, exactly like the family rule's existing full-list fallback.
+  expect(catalogDefaultSettings(liveModels, ['retired-model']))
+    .toEqual({ model: 'gpt-5.6-sol', serviceTier: null, effort: 'medium' });
+});
+
+it('aligns a legacy conversation pinned to a now-excluded model to the first allowed model', () => {
+  const allowed = ['gpt-5.6-terra', 'gpt-5.6-luna'];
+  expect(alignSettings(liveModels, { model: 'gpt-5.5', serviceTier: null, effort: 'medium' }, allowed))
+    .toEqual({ model: 'gpt-5.6-terra', serviceTier: null, effort: 'medium' });
+  // A still-allowed choice is kept untouched, including a supported non-default effort.
+  const highLuna = option('gpt-5.6-luna', 'GPT-5.6-Luna', {
+    supportedReasoningEfforts: [{ id: 'medium', description: 'Balanced' }, { id: 'high', description: 'Deeper' }],
+  });
+  const withHighLuna = liveModels.map(model => (model.id === 'gpt-5.6-luna' ? highLuna : model));
+  expect(alignSettings(withHighLuna, { model: 'gpt-5.6-luna', serviceTier: null, effort: 'high' }, allowed))
+    .toEqual({ model: 'gpt-5.6-luna', serviceTier: null, effort: 'high' });
+});
+
+it('limits the model control to the allowlist and aligns an excluded saved model', () => {
+  const controls = composerControls(liveModels, { model: 'gpt-5.5', serviceTier: null, effort: 'medium' }, ['gpt-5.6-sol', 'gpt-5.6-luna']);
+  const modelControl = controls.find(control => control.field === 'model')!;
+  expect(modelControl.options.map(option => option.value)).toEqual(['gpt-5.6-sol', 'gpt-5.6-luna']);
+  expect(modelControl.value).toBe('gpt-5.6-sol');
+  expect(modelControl.disabled).toBe(false);
+});
+
+it('aligns a model choice against the allowlist while the speed/effort paths still bypass it', () => {
+  const allowed = ['gpt-5.6-terra', 'gpt-5.6-luna'];
+  expect(applyComposerChoice(liveModels, settings, 'model', 'gpt-5.5', allowed))
+    .toEqual({ model: 'gpt-5.6-terra', serviceTier: null, effort: 'medium' });
+  // Speed and effort keep their direct write-through: no alignSettings, no allowlist filtering.
+  expect(applyComposerChoice(liveModels, settings, 'speed', 'flex', allowed)).toEqual({ ...settings, serviceTier: 'flex' });
+  expect(applyComposerChoice(liveModels, settings, 'effort', 'high', allowed)).toEqual({ ...settings, effort: 'high' });
+});
+
+it('labels the chip and picker summary against the allowlist', () => {
+  const pinned = { model: 'gpt-5.5', serviceTier: null, effort: 'medium' };
+  expect(modelChipLabel(pinned, liveModels, ['gpt-5.6-luna'])).toBe('GPT-5.6-Luna Medium');
+  expect(pickerSummary(pinned, liveModels, ['gpt-5.6-luna'])).toBe('GPT-5.6-Luna Medium');
+  expect(pickerSummary(null, liveModels, ['gpt-5.6-luna'])).toBe('Model');
+});
+
+it('keeps captions looking excluded models up in the full list', () => {
+  // settingsCaption takes no allowlist and must stay truthful about a model the picker no longer
+  // offers, so it still reads the full runtime snapshot.
+  expect(settingsCaption({ model: 'gpt-5.5', serviceTier: null, effort: 'medium' }, liveModels)).toBe('GPT-5.5 · Default · medium');
 });
