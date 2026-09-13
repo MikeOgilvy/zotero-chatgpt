@@ -332,6 +332,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   });
   const isNearBottom = () => messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
   let hasNewContent = false;
+  /** Whether the transcript was pinned to the newest answer at the last render. */
+  let sticking = true;
   const newContent = button(COPY.newContent, 'new-content', () => { hasNewContent = false; messages.scrollTop = messages.scrollHeight; newContent.hidden = true; });
   newContent.hidden = true;
   newContent.classList.add('zcr-new-content');
@@ -449,6 +451,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const card = el('figure', 'zcr-image-card'); card.dataset.zcrImage = image.id;
     const open = button('Preview image', 'preview-image', () => previewImage(image, open));
     const thumbnail = el('img'); thumbnail.src = image.dataUrl; thumbnail.alt = image.name; thumbnail.loading = 'lazy';
+    // An image grows the transcript after the last render already scrolled: re-pin only if it was pinned.
+    thumbnail.addEventListener('load', () => { if (sticking) messages.scrollTop = messages.scrollHeight; });
     open.replaceChildren(thumbnail); card.append(open);
     card.append(el('figcaption', '', image.origin?.kind === 'generated' ? 'Generated image' : image.name));
     return card;
@@ -967,6 +971,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     else if (contentChanged && follow.stick) {
       messages.scrollTop = messages.scrollHeight; hasNewContent = false;
     } else if (follow.showNewContent) hasNewContent = true;
+    sticking = conversationChanged ? isNearBottom() : follow.stick;
     newContent.hidden = !hasNewContent;
     const draftIds = state.draft.citations.map(c => c.id).join('\n');
     if (draftCitations.dataset.rendered !== draftIds) { draftCitations.dataset.rendered = draftIds; draftCitations.replaceChildren(...state.draft.citations.map(c => citationCard(c, true))); }

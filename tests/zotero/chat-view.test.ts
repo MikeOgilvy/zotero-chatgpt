@@ -714,6 +714,34 @@ it('keeps the composer free of voice input and third-party chat branding', async
 });
 
 
+it('keeps the transcript pinned when an answer image finishes loading', async () => {
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const { root } = await mountReadyChat({ messages: [
+    { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
+  ] });
+  const transcript = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  Object.defineProperty(transcript, 'scrollHeight', { get: () => 1000, configurable: true });
+  Object.defineProperty(transcript, 'clientHeight', { get: () => 200, configurable: true });
+  transcript.scrollTop = 900;
+  transcript.scrollTop = 500;
+  transcript.querySelector('img')!.dispatchEvent(new (root.ownerDocument.defaultView!.Event)('load'));
+  expect(transcript.scrollTop).toBe(1000);
+});
+
+it('leaves the transcript alone when an image loads while the reader is scrolled away', async () => {
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const { root, presenter } = await mountReadyChat({ messages: [
+    { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
+  ] });
+  const transcript = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  Object.defineProperty(transcript, 'scrollHeight', { get: () => 1000, configurable: true });
+  Object.defineProperty(transcript, 'clientHeight', { get: () => 200, configurable: true });
+  transcript.scrollTop = 100;
+  presenter.setQuestion('keep reading');
+  transcript.querySelector('img')!.dispatchEvent(new (root.ownerDocument.defaultView!.Event)('load'));
+  expect(transcript.scrollTop).toBe(100);
+});
+
 it('shows pending image thumbnails in the composer and can remove them', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [], draftImages: [imageA] });
   const thumb = root.querySelector('[data-zcr-draft-image]');
