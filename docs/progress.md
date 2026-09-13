@@ -266,6 +266,17 @@ owner 逐段拍照反馈后的面板简化，均为代码 + 单元证据；未�
 - **门禁**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **966 passed / 76 files**（较上轮 977 少 11 条，全部是被删除的 storage/archive/五字段相关用例；净新增覆盖：面板单指令框与 profile 保留、only-annotate 与“普通提问不带 workflow”、历史全选/截断/未完成拒绝/archivedAt 当普通对话、指令进入请求 payload、live 模型接线改名）。失败先行的观察：把面板/locale/历史段临时换回改动前版本后，新用例分别以 `expected [ 'builtin-read', … ] to equal [ 'builtin-annotate', … ]`、`expected <input data-zcr-pref="preference-language"> to be null`、`Missing [data-zcr-history-id]` 失败，恢复后全绿。
 - **未验证**：上述均为代码 + 单元证据。真实宿主与真实模型未跑；面板中文/CJK 视觉、`Codex instructions` 在真实 Gecko 下的行高与换行、侧边栏 archive 移除后的真实历史popover 行为都仍需宿主目视。
 
+### 2026-09-13 开发 XPI 安装流自校验与脚枪文档（代码 + 单元 + 只读真实 profile 观察；**真机重启用例未跑**）
+
+把“把开发 XPI 装进真实 Zotero profile”从手工多步（ps 核对 → cp 备份 → cp 新包 → 手记版本/SHA → 手动设/撤 `extensions.startupScanScopes` → 人工重启核对）收敛为一条自校验命令；操作与机制小节见 [development](development.md)。
+
+- **已有 vs 新增**：`.zcr-dev/` 隔离树生命周期工具 `scripts/install-lifecycle.mjs`（`verify:install`）已提供 XPI 备份、`readXpiIdentity`、SHA-256 与忙碌检测；本轮**新增** `scripts/install-dev-xpi.ts`（`npm run install:dev -- plan|install|check|revert|rollback`）并复用上述原语（从 lifecycle 导出 `SUBJECT_ID`），未另起并行机制。`tsconfig.json` 打开 `allowJs`、纳入 `scripts/**/*.ts`；`package.json` 增脚本。
+- **为什么是脚本而不是文档化命令**：a3/a4 的 owner 安装是多步且易错的流程，其记录明确写了“未设临时 `extensions.startupScanScopes`（版本与 mtime 已变，判定不需要）”——正是会静默留下陈旧版本字符串、且没有可还原记录的路径；因此判为脚本更安全。
+- **脚枪的只读真实证据（owner profile `mi2zhr2s.default`，PID 50356，未重启）**：`extensions.json` 报告 `0.4.0a2`（文件 mtime 2026-09-13T06:10:43Z），而磁盘 `extensions/{8a5f5bde-…}.xpi` 为 92,661,563 bytes / SHA-256 `5a6bb161…`（与 `dist` 的 0.4.0a4 产物逐字节一致），`lsof` 显示 PID 50356 以 inode 59247502 持有该文件，`prefs.js` 无 `startupScanScopes`。即“执行的是 a4、登记的是 a2”。这些是**只读观察**；机制出处（`omni.ja` 的默认 pref、`XPIProvider.sys.mjs`、`plugins.js`）在 development 小节引用。
+- **本轮对 owner profile 只读**：只执行一次 `install:dev plan --profile <owner profile> --xpi dist/zotero-codex-reader-0.4.0a4-dev.xpi`（结果 `already-installed`），前后 `prefs.js`/`extensions.json`/`addonStartup.json.lz4`/XPI 的 size+mtime 完全一致，`user.js` 与工具记录文件始终不存在；未重启、未启动第二个实例、未改任何偏好。
+- **门禁**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **988 passed / 77 files / 0 skipped**（此前 970/76）。新增 `tests/build/install-dev-xpi.test.ts` 18 条：纯逻辑（pref 解析与杠杆规划、`lsof`/`ps` 解析、备份命名、参数解析）+ 临时 profile 本地流（plan 不写盘、install 的备份+SHA+记录+杠杆、`already-installed` 幂等、运行中/外来 `user.js`/缺 profile 的拒绝、`--rescan never`、check 的实测通过/闲置 `failed`、rollback 还原并备份旧包）。
+- **未证明（不得当成通过）**：真机端到端仍需**一次目标 profile 的重启**才能证明——`install` 后启动该 profile 的 Zotero 一次再 `check`，才能观测“运行实例持有已安装文件 + `extensions.json` 版本追平”。本轮只跑 dry-run 与临时目录 + 注入式 deps（`lsof`/`ps` 为合成输出），故 `check` 的真实 `lsof`/`ps` 路径和“真实 Gecko 确实按杠杆重扫”**未在真机验证**；owner 实例 mid-acceptance，按 owner 决定未重启。
+
 ## 已迁移的旧版证据（不是本次通过）
 
 来源为被合并的 Git 已追踪 QA；原始历史可从 HEAD `1fdd3dc` 查看。本表只保存仍影响当前判断的证据，不延续逐日流水账。环境均旧 macOS arm64 / Zotero 9.0.6 专用 profile / 合成材料。
@@ -303,6 +314,7 @@ owner 逐段拍照反馈后的面板简化，均为代码 + 单元证据；未�
 - [x] 0.4.0a4 版本提升、门禁、打包与产物校验（代码+单元+产物）：提交 `96f8c2c`；`typecheck`/`lint` PASS、`test:unit` 打包前 968+2 skip、打包后与清理后均 **970/970（76 files，0 skipped）**、`package:dev` → `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（92,661,563 bytes，SHA-256 `5a6bb161…`）、`verify:artifacts` 79 files PASS；owner profile 已装入 a4 供验收（profile 变更，非仓库提交）。
 - [x] 真实宿主 `--context`（2026-09-13 0.4.0a4，**取代 a3 的 FAILED 结论**）：**32 executed / 32 PASS / 0 FAIL**，`recordedRequests = 0`，`build` 0.4.0a4 且 SHA-256 与产物一致；首次命中 `Appearance`/`外观` 图例 canary；a3 曾失败的 `automatic-whole-pdf-background-preparation-without-panel` 通过（`productGate` 2/2、10 次自动读取、`preparationObserved: true`）。报告归档 `.zcr-dev/verification/scope-2026-09-13-a4/`。8 项 `notRun`（含 `--live-model` 需 owner 登录）不得当作通过。
 - [x] 死代码清理（代码+单元，2026-09-13）：移除 `sidebar.css` 中已无引用的 `.zcr-history-archived-label` 规则，并删掉 `sidebar-styles.test.ts` fixture 中同 class 的无断言 span；提交 `f1e8044`，清理后 970/970。
+- [x] 开发 XPI 安装流自校验（代码+单元+只读真实 profile，2026-09-13）：新增 `npm run install:dev`（`plan`/`install`/`check`/`revert`/`rollback`）与 18 条单元/临时树回归（`test:unit` 988/988、77 files），脚枪与命令见 development；真机 `check` 仍需一次目标 profile 重启才能证明，owner 当前实例按决定未重启。
 - [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；CI/release 工作流已按真实脚本与 `.nvmrc` 加固且保持无 upload/publish；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。

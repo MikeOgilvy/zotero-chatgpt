@@ -26,6 +26,7 @@ npm run verify:artifacts
 | `npm run package:dev` | 生成完整开发 XPI、固定运行资产及 SHA256SUMS |
 | `npm run verify:artifacts` | 检查发行白名单、hash、许可、无 Node 导入及私有记录 |
 | `npm run verify:install -- <command>` | 本地安装生命周期工具；需要明确子命令，没有通用 `--help` 入口 |
+| `npm run install:dev -- <command>` | 真实 Zotero profile 的开发 XPI 安装与自校验（`plan`/`install`/`check`/`revert`/`rollback`）；见下节 |
 | `npm run release:dry-run` | 检查本地发行计划，githubRelease=null；不发布或上传 |
 
 当前目标文件名为 `dist/zotero-codex-reader-0.4.0a4-dev.xpi`。不要在文档多处手写 digest；以 `dist/SHA256SUMS`、实际包身份和 progress 为准。
@@ -96,6 +97,27 @@ node scripts/prepare-host-test.mjs --s6
 历史注意：`834b7fc` 自身无法独立通过 `typecheck`（`tests/zotero/source-links.test.ts` 引用了当时 `DocumentRevision` 尚未提供的 `sha256` 字段）；其后的提交都可独立构建。历史不重写，`git bisect` 请以 `834b7fc^` 为已知良好基点或对该提交 `skip`。
 
 存储/恢复测试必须覆盖旧 schema 1/2、当前 schema 3、缺失/损坏来源、哈希不匹配、请求与上游 item 关联、取消竞态、批次释放及 uncertain 不重发。兼容性机制见[架构文档](module-design.md)。备份与诊断只处理明确的非认证记录；不包含 account/、原始 stdio 或未经白名单过滤的日志。草稿、聊天、原生标注、缓存和退出登录有独立寿命，不能用删除其中一种代替停止另一种任务。
+
+## 把开发 XPI 装进真实 profile（自校验）
+
+**脚枪：换掉 profile 里已侧载的 XPI 后，*报告版本*会停在旧值，而*实际执行的代码*已是新包。** 装载不走登记：Zotero 的 `plugins.js` `_loadScope` 用 `loadSubScriptWithOptions(addon.getResourceURI() + 'bootstrap.js', { ignoreCache: true })` 从 XPI 现读 `bootstrap.js`；而 `about:addons` 与插件 `version` 来自 `extensions.json` / `addonStartup.json.lz4`，这两个文件经 `JSONFile` 以 `finalizeAt: AddonManagerPrivate.finalShutdown` 在**退出时**写入。因此换包后启动一次，`clientInfo.version`（`packages/core/src/index.ts`）与白名单诊断（`packages/core/src/sessions/service.ts`）仍是旧版本字符串。`pluginVersion` **没有功能闸门作用**：兼容性只看 `codexVersion !== '0.154.0'`（同文件），不要把它说成会拒绝加载。
+
+**为什么单纯重启不解决**：编译默认是 `pref("extensions.startupScanScopes", 0)`（`/Applications/Zotero.app/Contents/Resources/app/omni.ja` → `defaults/preferences/zotero.js`）。同一 build 启动时 `XPIProvider.checkForChanges` 传 `aAppChanged === false`，`XPIStates.scanForChanges(ignoreSideloads)` 命中 `if (ignoreSideloads && !(loc.scope & startupScanScopes)) continue;`，直接跳过 profile 位置（`SCOPE_PROFILE = 1`），从不比较文件 mtime/size；启动也不调用 `AddonManager.getNewSideloads()`。只有一次**包含 profile scope 的扫描**才会让登记追上。
+
+```sh
+npm run install:dev -- plan     --profile "<profile 目录>" --xpi dist/zotero-codex-reader-0.4.0a4-dev.xpi
+npm run install:dev -- install  --profile "<profile 目录>" --xpi dist/zotero-codex-reader-0.4.0a4-dev.xpi
+npm run install:dev -- check    --profile "<profile 目录>"
+npm run install:dev -- revert   --profile "<profile 目录>"
+npm run install:dev -- rollback --profile "<profile 目录>"
+```
+
+- `plan` 只读：不写文件、不改偏好；`install` 在目标 profile 正在运行时拒绝执行（先退出该实例）。
+- `install` 先把当前 XPI 备份为同目录 `{addonId}.xpi.zcr-bak-<UTC 时间戳>-<版本>`，记录其版本 + SHA-256，再把产物放到唯一路径，并复核落盘字节与产物 SHA-256 一致（不一致即失败，不报成功）。它**不**手改 `prefs.js`、`extensions.json`、`addonStartup.json.lz4`。若 `extensions.startupScanScopes` 尚不含 profile scope，它写一个受管 `user.js`（仅含这一条 `user_pref`，带标记）把下次启动的扫描扩到 profile；若 `user.js` 已存在但不是本工具所写，或 `prefs.js` 里有人故意设过非默认值，宁可直接拒绝并要人工处理。
+- `check` **按测量**而非元数据：用 `lsof` 确认运行中的实例打开的正是已安装 XPI（inode + size 与磁盘一致），并读 `extensions.json` 的 `version` 对照产物版本。实例仍在运行时该文件保持上次退出值，故报 `not-measured` 而非假通过；空闲且版本落后就 `failed` 并给出 Config Editor 手动步骤。`check` 顺带推进杠杆还原：把受管 `user.js` 钉回默认，或当 `prefs.js` 从未落值时直接删除它。
+- `revert` 只还原杠杆（不换包）；`rollback` 换回最近的 `.zcr-bak-*` 备份（同样先把当前包另存为备份）。所有子命令加 `--json` 输出结构化结果。
+
+`install:dev` 面向真实 profile；`.zcr-dev/` 隔离树的生命周期测试仍用 `verify:install`，两者不互相代替。
 
 ## 人工登录的模型目录实测
 
