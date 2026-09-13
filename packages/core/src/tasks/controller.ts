@@ -29,7 +29,10 @@ function equal(a: unknown, b: unknown): boolean {
 function proposal(value: unknown): AnnotationProposal {
   const p = record(value, ['quote', 'pageIndex', 'reason']);
   if (!Number.isSafeInteger(p.pageIndex) || (p.pageIndex as number) < 0 || (p.pageIndex as number) >= 10000) invalid();
-  return { quote: text(p.quote, 16000, 2), pageIndex: p.pageIndex as number, reason: text(p.reason, 4000) };
+  // `reason` only becomes the annotation comment. A model that omits it still has to supply an exact
+  // quote and a valid page, so treating it as empty keeps a resolvable candidate instead of dropping
+  // the whole batch. Extra keys remain rejected: the allowlist is what stops model-chosen write fields.
+  return { quote: text(p.quote, 16000, 2), pageIndex: p.pageIndex as number, reason: p.reason === undefined ? '' : text(p.reason, 4000) };
 }
 export function parseAnnotationCandidates(value: string): AnnotationProposal[] {
   text(value, 1024 * 1024, 2);

@@ -54,7 +54,31 @@ function fixture() {
 }
 it('parses a bounded annotation proposal without accepting model-selected permissions or write fields', () => {
   expect(parseAnnotationCandidates('{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition"}]}')).toEqual([{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }]);
-  for (const text of ['```json\n{"candidates":[]}\n```', '{"candidates":[],"approved":true}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition","key":"HOSTILE1"}]}']) expect(() => parseAnnotationCandidates(text)).toThrow();
+  // A missing comment is not a reason to drop an otherwise resolvable candidate.
+  expect(parseAnnotationCandidates('{"candidates":[{"quote":"A definition","pageIndex":0}]}')).toEqual([{ quote: 'A definition', pageIndex: 0, reason: '' }]);
+  for (const text of ['```json\n{"candidates":[]}\n```', '{"candidates":[],"approved":true}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":"Definition","key":"HOSTILE1"}]}', '{"candidates":[{"quote":"A definition","pageIndex":0,"reason":7}]}']) expect(() => parseAnnotationCandidates(text)).toThrow();
+});
+it('carries a well-formed model annotation answer through parse, planning, approval and undo', async () => {
+  const f = fixture();
+  // The exact shape the annotate workflow asks the model to return, with the surrounding whitespace a
+  // streamed answer carries. This is the only seam the host smoke driver leaves unverified
+  // (`real-model-proposal`): it supplies hand-written proposals instead of model text.
+  const answer = '\n{"candidates":[{"quote":"A prior describes beliefs before a measurement is observed.","pageIndex":0,"reason":"Definition of a prior."},{"quote":"A likelihood describes the measurement under each candidate.","pageIndex":1,"reason":"Definition of a likelihood."}]}\n';
+  const candidates = parseAnnotationCandidates(answer);
+  expect(candidates).toEqual([
+    { quote: 'A prior describes beliefs before a measurement is observed.', pageIndex: 0, reason: 'Definition of a prior.' },
+    { quote: 'A likelihood describes the measurement under each candidate.', pageIndex: 1, reason: 'Definition of a likelihood.' },
+  ]);
+  const planned = await f.controller.planAnnotations({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Highlight the definitions.', modelRequestId: 'model-request-annotate', candidates });
+  if (planned.kind !== 'annotations') throw new Error('The model candidates did not produce an annotation task.');
+  expect(planned.state).toBe('review'); expect(planned.items.every(item => item.resolution?.status === 'resolved')).toBe(true);
+  expect(f.creates()).toBe(0);
+  const applied = await f.controller.approve(planned.id, planned.items.map(item => item.id));
+  if (applied.kind !== 'annotations') throw new Error('The approved task changed kind.');
+  expect(applied.state).toBe('completed'); expect(f.creates()).toBe(2);
+  expect(applied.items.map(item => item.annotation?.comment)).toEqual([`${NATIVE_ANNOTATION_PROVENANCE}\nDefinition of a prior.`, `${NATIVE_ANNOTATION_PROVENANCE}\nDefinition of a likelihood.`]);
+  const undone = await f.controller.undo(planned.id);
+  expect(undone.state).toBe('undone'); expect(f.annotations.size).toBe(0);
 });
 it('persists candidate review and source validation without native writes before approval', async () => {
   const f = fixture(); const task = await f.plan();
