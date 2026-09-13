@@ -48,7 +48,7 @@ it('waits for the reader PDF that loads after the panel opens instead of failing
   const f = fixture();
   const application = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!;
   const pdf = application.pdfDocument!;
-  application.pdfDocument = undefined;
+  delete application.pdfDocument;
   let waits = 0;
   const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { delay: () => { waits += 1; if (waits === 3) application.pdfDocument = pdf; return Promise.resolve(); } });
   await expect(source.capture()).resolves.toHaveProperty('revision.sha256');
@@ -57,7 +57,7 @@ it('waits for the reader PDF that loads after the panel opens instead of failing
 it('reports one honest failure when the PDF never loads and stays cancellable while waiting', async () => {
   const f = fixture();
   const application = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!;
-  application.pdfDocument = undefined;
+  delete application.pdfDocument;
   let waits = 0;
   const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { delay: () => { waits += 1; return Promise.resolve(); } });
   await expect(source.capture()).rejects.toThrow(/could not be read locally/i);

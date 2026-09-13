@@ -91,7 +91,7 @@ const READY_ATTEMPTS = 40;
  * Narrow native source access. Paths stay in this adapter and are never sent or persisted.
  * `delay` is injectable so the bounded PDF-readiness wait is deterministic under test.
  */
-export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReader | undefined, scope: PaperScope, options: { delay?(milliseconds: number): Promise<void> } = {}) {
+export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReader | undefined, scope: PaperScope, options: { delay?: (milliseconds: number) => Promise<void> } = {}) {
   const loadedVersions = new WeakMap<TextPdf, string>();
   const wait = options.delay ?? ((milliseconds: number) => new Promise<void>(resolve => { globalThis.setTimeout(resolve, milliseconds); }));
   const capture = (signal?: AbortSignal): Promise<DocumentSource> => {

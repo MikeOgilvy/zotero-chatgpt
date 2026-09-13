@@ -110,7 +110,8 @@ export async function imagesFromClipboardItems(
     if (!isClipboardImageFlavor(item.type) && !item.type.startsWith('image/')) continue;
     const file = item.getAsFile();
     if (!file) continue;
-    files.push({ file, type: item.type, name: 'name' in file && typeof file.name === 'string' ? file.name : undefined });
+    const name = 'name' in file && typeof file.name === 'string' ? file.name : undefined;
+    files.push({ file, type: item.type, ...(name ? { name } : {}) });
   }
   const images: ImageAttachment[] = [];
   for (const entry of files) {
