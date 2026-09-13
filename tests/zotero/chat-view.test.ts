@@ -806,6 +806,24 @@ it('keeps the one-time PDF send consent reachable without the removed panel', as
   await vi.waitFor(() => expect(disclosure.hasAttribute('hidden')).toBe(true));
 });
 
+it('surfaces the honest text-not-ready refusal now that no panel reports coverage', async () => {
+  const unreadable = { ...documentA, pages: documentA.pages.map(page => ({ ...page, text: '', status: 'empty' as const })) };
+  const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(unreadable), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+  await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
+  // The panel that used to report "N/M pages with text" and "Text is not silently truncated" is gone,
+  // so the request boundary itself has to stay honest: a document with no readable text must be
+  // refused out loud rather than sent as an empty context.
+  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
+  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')!;
+  expect(alert.hidden).toBe(true);
+  presenter.setQuestion('What does this paper claim?');
+  await presenter.send();
+  await vi.waitFor(() => expect(alert.hidden).toBe(false));
+  expect(alert.textContent).toMatch(/No extractable text/iu);
+  expect(sent).toHaveLength(0);
+});
+
 it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   applySidebarStyles(root);
