@@ -270,9 +270,11 @@ function pageSetLabel(indexes: number[]): string {
 /**
  * The last request's concrete context report, rendered for the ring's hover/focus disclosure. Every
  * field comes from {@link ContextReport} exactly as the planner recorded it: nothing is re-derived,
- * and a field the report leaves unknown is shown as unknown rather than guessed. Static strings carry
- * `data-zcr-ui="true"` so `mountUILocale` translates them as soon as their keys are unified into
- * `ui-locale.ts`; strings built from counts stay verbatim until a pattern rule exists for them.
+ * and a field the report leaves unknown is shown as unknown rather than guessed. Every label and
+ * value carries `data-zcr-ui="true"` so `mountUILocale` translates the phrasing: the labels have
+ * `ui-locale.ts` keys, and the value templates that embed counts have `progress()` patterns that
+ * carry the numbers through verbatim. The reason line is deliberately unmarked — it is the planner's
+ * recorded explanation, i.e. data, and is never rewritten on screen.
  */
 function contextDetailNodes(doc: Document, report: ContextReport): HTMLElement {
   const node = (tag: string, className: string, text = ''): HTMLElement => {
@@ -280,10 +282,10 @@ function contextDetailNodes(doc: Document, report: ContextReport): HTMLElement {
     element.className = className; if (text) element.textContent = text;
     return element;
   };
-  const line = (label: string, value: string, staticValue: boolean) => {
+  const line = (label: string, value: string) => {
     const row = node('p', 'zcr-context-detail');
     const name = node('span', 'zcr-context-detail-label', label); name.setAttribute('data-zcr-ui', 'true');
-    const text = node('span', 'zcr-context-detail-value', value); if (staticValue) text.setAttribute('data-zcr-ui', 'true');
+    const text = node('span', 'zcr-context-detail-value', value); text.setAttribute('data-zcr-ui', 'true');
     row.append(name, doc.createTextNode(' '), text);
     return row;
   };
@@ -292,11 +294,11 @@ function contextDetailNodes(doc: Document, report: ContextReport): HTMLElement {
   const mode = report.mode === 'full' ? COPY.contextDetailModeFull : report.mode === 'focused' ? COPY.contextDetailModeFocused : COPY.contextDetailModeMultiPass;
   const windowKnown = report.capacity !== null;
   const allowanceKnown = report.textBudgetTokens !== null;
-  body.append(title, line(COPY.contextDetailMode, mode, true));
-  body.append(line(COPY.contextDetailPages, COPY.contextDetailPagesValue(report.selectedPages.length, report.totalPages), false));
-  if (report.selectedPages.length < report.totalPages) body.append(line(COPY.contextDetailPageSet, pageSetLabel(report.selectedPages), false));
-  body.append(line(COPY.contextDetailWindow, windowKnown ? COPY.contextDetailWindowValue(report.capacity!, report.provenance === 'pinned-catalog' ? 'pinned-catalog' : 'runtime-reported') : COPY.contextDetailWindowUnknown, !windowKnown));
-  body.append(line(COPY.contextDetailAllowance, allowanceKnown ? COPY.contextDetailAllowanceValue(report.textBudgetTokens!) : COPY.contextDetailAllowanceUnknown, !allowanceKnown));
+  body.append(title, line(COPY.contextDetailMode, mode));
+  body.append(line(COPY.contextDetailPages, COPY.contextDetailPagesValue(report.selectedPages.length, report.totalPages)));
+  if (report.selectedPages.length < report.totalPages) body.append(line(COPY.contextDetailPageSet, pageSetLabel(report.selectedPages)));
+  body.append(line(COPY.contextDetailWindow, windowKnown ? COPY.contextDetailWindowValue(report.capacity!, report.provenance === 'pinned-catalog' ? 'pinned-catalog' : 'runtime-reported') : COPY.contextDetailWindowUnknown));
+  body.append(line(COPY.contextDetailAllowance, allowanceKnown ? COPY.contextDetailAllowanceValue(report.textBudgetTokens!) : COPY.contextDetailAllowanceUnknown));
   if (!allowanceKnown || report.provenance === 'unknown') { const noFit = node('p', 'zcr-context-detail zcr-context-detail-nofit', COPY.contextDetailNoFit); noFit.setAttribute('data-zcr-ui', 'true'); body.append(noFit); }
   const coverage = node('p', 'zcr-context-detail-label', COPY.contextDetailCoverage); coverage.setAttribute('data-zcr-ui', 'true');
   body.append(coverage, node('p', 'zcr-context-detail-reason', report.reason));

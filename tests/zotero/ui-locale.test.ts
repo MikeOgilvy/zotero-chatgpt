@@ -114,6 +114,42 @@ it('localizes the context ring accessible report in both directions', () => {
   expect(unknown.getAttribute('aria-label')).toBe('Current context is unknown: the runtime has not reported usage for this model.'); locale.dispose();
 });
 
+it('localizes the context coverage disclosure while keeping counts and the planner reason verbatim', () => {
+  const { document, root, add } = setup();
+  const details = add('div', 'zcr-context-details');
+  const title = add('p', 'zcr-context-details-title', 'Context supplied to the last request', details); title.setAttribute('data-zcr-ui', 'true');
+  // Mirrors the real `line()` shape: label span, a literal space, then the value span.
+  const row = (label: string, value: string) => {
+    const line = add('p', 'zcr-context-detail', '', details);
+    const name = add('span', 'zcr-context-detail-label', label, line); name.setAttribute('data-zcr-ui', 'true');
+    const text = add('span', 'zcr-context-detail-value', value, line); text.setAttribute('data-zcr-ui', 'true');
+    text.before(document.createTextNode(' '));
+    return text;
+  };
+  const pagesValue = row('Pages supplied', '14 of 312 pages');
+  const windowValue = row('Model window', '128,000 tokens (runtime reported)');
+  const allowanceValue = row('Text allowance', 'not asserted');
+  const setValue = row('Page numbers', '1–4, 7, and 3 more');
+  const noFit = add('p', 'zcr-context-detail zcr-context-detail-nofit', 'Fit was not asserted: model capacity or retained history is unknown.', details); noFit.setAttribute('data-zcr-ui', 'true');
+  // The planner's recorded reason has no `data-zcr-ui` marker, so it is data, not copy.
+  const reason = add('p', 'zcr-context-detail-reason', 'Recorded source gaps: 3 pages with no text, and 2 more.', details);
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(title.textContent).toBe('上次请求提供的上下文');
+  expect(details.querySelector('.zcr-context-detail-label')!.textContent).toBe('已提供页数');
+  // Counts, page sets and token figures are re-emitted verbatim; only the phrase changes.
+  expect(pagesValue.textContent).toBe('14 / 312 页');
+  expect(windowValue.textContent).toBe('128,000 词元（运行时报告）');
+  expect(allowanceValue.textContent).toBe('未断言');
+  expect(setValue.textContent).toBe('1–4, 7，另有 3 个');
+  expect(noFit.textContent).toBe('未断言是否适配：模型容量或保留的历史记录未知。');
+  expect(reason.textContent).toBe('Recorded source gaps: 3 pages with no text, and 2 more.');
+  locale.update('en');
+  expect(pagesValue.textContent).toBe('14 of 312 pages');
+  expect(windowValue.textContent).toBe('128,000 tokens (runtime reported)');
+  expect(setValue.textContent).toBe('1–4, 7, and 3 more');
+  expect(reason.textContent).toBe('Recorded source gaps: 3 pages with no text, and 2 more.'); locale.dispose();
+});
+
 it('localizes the honest elapsed-time states while keeping the measured seconds verbatim', () => {
   const { root, add } = setup();
   const waiting = add('p', 'zcr-request-timing'); add('span', 'zcr-request-timing-text', 'Waiting 7s', waiting);

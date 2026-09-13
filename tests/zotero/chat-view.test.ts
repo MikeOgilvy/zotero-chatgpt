@@ -598,16 +598,31 @@ it('keeps the ring coverage disclosure after a UI-language switch', async () => 
   await vi.waitFor(() => expect(presenter.snapshot().workspace?.uiLanguage).toBe('zh'));
   // The disclosure survives the switch in place: it is not torn down, emptied or rebuilt from scratch.
   expect(root.querySelector<HTMLElement>('.zcr-context-details')).toBe(details);
-  expect(details.textContent).toContain('2 of 2 pages');
+  // The disclosure's own copy actually switches, not just the ring's accessible name: labels render
+  // in the new language and the value templates translate their phrasing while carrying the counts
+  // through verbatim.
+  expect(details.textContent).toContain('上次请求提供的上下文');
+  expect(details.textContent).toContain('模式');
+  expect(details.textContent).toContain('整份来源');
+  expect(details.textContent).toContain('已提供页数');
+  expect(details.textContent).toContain('2 / 2 页');
+  expect(details.textContent).toContain('模型窗口');
+  expect(details.textContent).toContain('未知');
+  expect(details.textContent).toContain('文本配额');
+  expect(details.textContent).toContain('未断言');
+  expect(details.textContent).toContain('未断言是否适配：模型容量或保留的历史记录未知。');
+  expect(details.textContent).toContain('已提供与未提供的内容');
+  // The planner's recorded explanation is data: it stays verbatim, numbers and all.
   expect(details.textContent).toContain('All locally extracted authorized text is supplied');
-  // Its static copy is marked as UI text, which is the hook `mountUILocale` already selects; the
-  // translated values arrive when the keys are unified into `ui-locale.ts`.
-  const staticNodes = [...details.querySelectorAll<HTMLElement>('[data-zcr-ui="true"]')];
-  expect(staticNodes.length).toBeGreaterThan(0);
-  expect(staticNodes.map(node => node.textContent)).toContain('Context supplied to the last request');
-  // The ring's own accessible name does translate today, which proves the live language switch
-  // reached the affordance: only the disclosure's new copy still awaits its `ui-locale.ts` keys.
+  expect(details.textContent).not.toContain('已经提取');
+  // The ring's own accessible name translates too, which is the existing affordance-level proof.
   expect(ring.getAttribute('aria-label')).toMatch(/当前上下文未知/u);
+  // Switching back restores the English source rather than leaving the translated copy stuck.
+  await presenter.saveAppearance({ uiLanguage: 'en' });
+  await vi.waitFor(() => expect(presenter.snapshot().workspace?.uiLanguage).toBe('en'));
+  expect(details.textContent).toContain('Context supplied to the last request');
+  expect(details.textContent).toContain('2 of 2 pages');
+  expect(details.textContent).not.toContain('上次请求提供的上下文');
 });
 
 it('closes the dock once and stays a safe no-op for a repeat close or with no chat open', async () => {

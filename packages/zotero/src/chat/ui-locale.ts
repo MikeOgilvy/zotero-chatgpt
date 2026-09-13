@@ -99,6 +99,15 @@ const COPY: Readonly<Record<string, string>> = {
   'The stored size could not be measured. Nothing was changed.': '无法测量已占用的空间，未做任何更改。',
   'At least these figures: an unexpected entry in the records store was not measured.': '至少为以下数值：未测量记录存储中一个意外的条目。',
   'The records store could not be listed, so its size is unknown. Nothing was changed.': '无法列出记录存储，因此占用空间未知。未做任何更改。',
+  // Context-ring coverage disclosure (rendered by `contextDetailNodes` in chat/view.ts). These are
+  // labels and phrases only: page numbers, token figures, model ids and the planner's `reason` line
+  // are data and pass through verbatim. `unknown`/`not asserted` are emitted only by the disclosure.
+  'Context supplied to the last request': '上次请求提供的上下文',
+  Mode: '模式', 'Whole source': '整份来源', 'Question-focused selection': '按问题选取', 'Multi-pass reading': '多轮阅读',
+  'Pages supplied': '已提供页数', 'Page numbers': '页码', 'Model window': '模型窗口',
+  unknown: '未知', 'Text allowance': '文本配额', 'not asserted': '未断言',
+  'Fit was not asserted: model capacity or retained history is unknown.': '未断言是否适配：模型容量或保留的历史记录未知。',
+  'What was supplied and what was not': '已提供与未提供的内容',
 };
 
 // Content areas are never localized, including controls embedded in rendered Markdown.
@@ -213,6 +222,16 @@ function progress(text: string): string {
   if (match) return `上下文 ${match[1]} / ${match[2]} 词元`;
   match = /^Context ([\d.]+k?) tokens · window unknown$/u.exec(text);
   if (match) return `上下文 ${match[1]} 词元 · 窗口未知`;
+  // Context-ring coverage disclosure. The template phrases translate; every count, page number and
+  // token figure is captured and re-emitted verbatim. `…, and N more` is the page set's own tail.
+  match = /^(\d+) of (\d+) pages$/u.exec(text);
+  if (match) return `${match[1]} / ${match[2]} 页`;
+  match = /^([\d,]+) tokens \((runtime reported|bundled catalog estimate)\)$/u.exec(text);
+  if (match) return `${match[1]} 词元（${match[2] === 'runtime reported' ? '运行时报告' : '内置目录估算'}）`;
+  match = /^([\d,]+) tokens$/u.exec(text);
+  if (match) return `${match[1]} 词元`;
+  match = /^(.+), and (\d+) more$/u.exec(text);
+  if (match) return `${match[1]}，另有 ${match[2]} 个`;
   match = /^Metadata saved; PDF unavailable \((no doi|no oa candidate|existing pdf|download failed|file type mismatch|identity unconfirmed|supplementary|file too large)\)$/u.exec(text);
   if (match) {
     const reason: Readonly<Record<string, string>> = { 'no doi': '无 DOI', 'no oa candidate': '无开放获取来源', 'existing pdf': '已有 PDF', 'download failed': '下载失败', 'file type mismatch': '文件类型不符', 'identity unconfirmed': '文献身份未确认', supplementary: '补充材料', 'file too large': '文件过大' };
