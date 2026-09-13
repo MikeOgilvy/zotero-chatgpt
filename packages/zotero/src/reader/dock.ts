@@ -37,7 +37,7 @@ function paintDockColumn(dock: HTMLElement, width?: number): void {
   pin('unicode-bidi', 'isolate');
   pin('overflow', 'hidden');
   pin('box-sizing', 'border-box');
-  pin('background', 'var(--material-background, var(--color-background, #fff))');
+  pin('background', 'var(--material-background, var(--color-background, Canvas))');
   pin('color', 'var(--fill-primary, CanvasText)');
   pin('font-family', 'inherit');
   pin('font-size', '13px');
@@ -86,20 +86,40 @@ export interface DockResizeHost {
   setWidth(cssPixels: number): void;
 }
 
-/** Pointer-captured drag so moving into the PDF iframe still changes dock width. */
+/** Pointer-captured drag so moving into the PDF iframe still changes dock width.
+ * Moves are coalesced into one width change per animation frame: applying a width captures the
+ * PDF position and re-zooms, which is too expensive to run per pointer event on a busy drag.
+ * The release always flushes the final position exactly once, so no move is dropped. */
 export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () => void {
   const doc = resizer.ownerDocument;
+  const view = doc.defaultView;
+  const frame: (run: () => void) => number = typeof view?.requestAnimationFrame === 'function'
+    ? run => view.requestAnimationFrame(() => run())
+    : run => (view?.setTimeout(run, 16) ?? setTimeout(run, 16)) as unknown as number;
+  const drop = (handle: number) => { if (typeof view?.cancelAnimationFrame === 'function') view.cancelAnimationFrame(handle); else view?.clearTimeout(handle); };
   let dragging = false;
   let startX = 0;
   let startWidth = 0;
+  let pendingWidth: number | null = null;
+  let handle: number | null = null;
+  const flush = () => { if (pendingWidth === null) return; const width = pendingWidth; pendingWidth = null; host.setWidth(width); };
+  const schedule = (width: number) => {
+    pendingWidth = width;
+    if (handle === null) handle = frame(() => { handle = null; flush(); });
+  };
+  const settle = () => {
+    if (handle !== null) { drop(handle); handle = null; }
+    flush();
+  };
   const onMove = (event: PointerEvent) => {
     if (!dragging) return;
     event.preventDefault();
-    host.setWidth(startWidth + (startX - event.clientX));
+    schedule(startWidth + (startX - event.clientX));
   };
   const onUp = (event: PointerEvent) => {
     if (!dragging) return;
     dragging = false;
+    settle();
     try { resizer.releasePointerCapture(event.pointerId); } catch { /* capture may already be gone */ }
     doc.removeEventListener('pointermove', onMove);
     doc.removeEventListener('pointerup', onUp);
@@ -116,6 +136,8 @@ export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () =
   resizer.addEventListener('pointerdown', onDown);
   return () => {
     dragging = false;
+    if (handle !== null) { drop(handle); handle = null; }
+    pendingWidth = null;
     resizer.removeEventListener('pointerdown', onDown);
     doc.removeEventListener('pointermove', onMove);
     doc.removeEventListener('pointerup', onUp);

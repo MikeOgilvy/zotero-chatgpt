@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Window } from 'happy-dom';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
 import { applyDockWidth, bindDockResize, injectReaderStyles, mountReaderDock, unmountReaderDock } from '../../packages/zotero/src/reader/dock.ts';
 import { MIN_SIDEBAR_WIDTH } from '../../packages/zotero/src/reader/layout.ts';
@@ -167,7 +167,8 @@ it('attaches the dock stylesheet to the reader iframe document and keeps a compo
   expect(dock.style.getPropertyPriority('min-width')).toBe('important');
   expect(dock.style.getPropertyPriority('writing-mode')).toBe('important');
   expect(dock.style.fontFamily).toBe('inherit');
-  expect(dock.style.background).toMatch(/material-background|#fff/u);
+  expect(dock.style.background).toMatch(/material-background|Canvas/u);
+  expect(dock.style.background).not.toMatch(/#fff/u);
   expect(dock.getAttribute('style') ?? '').not.toMatch(/min-width:\s*0(?:px)?(?:;|$)/u);
 
   const sidebar = renderReaderShell(body, { title: 'Paper', key: 'PDFONE01', libraryID: 1 }, () => undefined);
@@ -195,5 +196,31 @@ it('lets the dock splitter change width without locking min-width to the current
   expect(dock.style.width).toBe('520px');
   expect(dock.style.minWidth).toBe(`${MIN_SIDEBAR_WIDTH}px`);
   expect(doc.documentElement.style.getPropertyValue('--zcr-dock-width')).toBe('520px');
+  unbind();
+});
+
+it('coalesces a splitter drag into one width change per frame and flushes the release exactly', async () => {
+  const doc = readerDocument();
+  const { dock } = mountReaderDock(doc)!;
+  applyDockWidth(doc, 400);
+  const resizer = dock.querySelector<HTMLElement>('[data-zcr-resizer]')!;
+  const applied: number[] = [];
+  const unbind = bindDockResize(resizer, {
+    currentWidth: () => Number.parseFloat(dock.style.width),
+    setWidth: width => { applied.push(width); applyDockWidth(doc, width); },
+  });
+  const view = doc.defaultView!;
+  resizer.dispatchEvent(new view.PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 1000, pointerId: 2 }));
+  doc.dispatchEvent(new view.PointerEvent('pointermove', { bubbles: true, clientX: 980, pointerId: 2 }));
+  doc.dispatchEvent(new view.PointerEvent('pointermove', { bubbles: true, clientX: 960, pointerId: 2 }));
+  doc.dispatchEvent(new view.PointerEvent('pointermove', { bubbles: true, clientX: 940, pointerId: 2 }));
+  expect(applied).toEqual([]);
+  await vi.waitFor(() => expect(applied).toEqual([460]));
+  doc.dispatchEvent(new view.PointerEvent('pointermove', { bubbles: true, clientX: 880, pointerId: 2 }));
+  doc.dispatchEvent(new view.PointerEvent('pointerup', { bubbles: true, clientX: 880, pointerId: 2 }));
+  expect(applied).toEqual([460, 520]);
+  expect(dock.style.width).toBe('520px');
+  await new Promise(resolve => setTimeout(resolve, 40));
+  expect(applied).toEqual([460, 520]);
   unbind();
 });

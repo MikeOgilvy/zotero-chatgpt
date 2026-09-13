@@ -1,4 +1,5 @@
 import type { Conversation, DocumentContext, DocumentRevision, DocumentSummary, Message, PaperScope } from '../../../contracts/src/index.ts';
+import { clone } from '../../../contracts/src/clone.ts';
 
 export interface AnswerSource {
   id: string;
@@ -56,12 +57,13 @@ function parseInternalReference(href: string | null): InternalAttempt | null {
 }
 
 function deepFreezeSource(source: AnswerSource): AnswerSource {
-  const clone = structuredClone(source);
-  Object.freeze(clone.paper);
-  Object.freeze(clone.revision);
-  for (const page of clone.pages) Object.freeze(page);
-  Object.freeze(clone.pages);
-  return Object.freeze(clone);
+  // Gecko plugin sandboxes do not expose `structuredClone`; use the contract-safe deep copy.
+  const frozen = clone(source);
+  Object.freeze(frozen.paper);
+  Object.freeze(frozen.revision);
+  for (const page of frozen.pages) Object.freeze(page);
+  Object.freeze(frozen.pages);
+  return Object.freeze(frozen);
 }
 
 function statusFor(anchor: HTMLAnchorElement): HTMLElement | null {
@@ -175,6 +177,16 @@ export function answerSources(conversation: Conversation, message: Message): Ans
   return [...byId.values()];
 }
 
+/** Neutralize one citation without touching the rest of the rendered answer. */
+function degrade(anchor: HTMLAnchorElement): void {
+  bindings.delete(anchor);
+  anchor.removeAttribute('href');
+  anchor.removeAttribute('data-zcr-source');
+  anchor.removeAttribute('data-zcr-page');
+  anchor.setAttribute('aria-disabled', 'true');
+  try { setStatus(anchor, UNAVAILABLE_TEXT); } catch { /* the answer still renders without a status */ }
+}
+
 /**
  * Rewrites frozen answer citations into keyboard-operable anchors.
  *
@@ -182,6 +194,9 @@ export function answerSources(conversation: Conversation, message: Message): Ans
  * `sources` become live. Everything else keeps its original behaviour; unsupported internal
  * links are disabled with a constant explanation. Click authority is captured in a closure so
  * later DOM or caller mutations cannot retarget an already-linked citation.
+ *
+ * Each anchor is isolated: a malformed citation must never throw out of this function and blank
+ * the whole answer, and a failure must never leave a reserved `zcr.invalid` link live.
  */
 export function linkAnswerSources(
   fragment: DocumentFragment,
@@ -190,32 +205,31 @@ export function linkAnswerSources(
 ): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   for (const anchor of fragment.querySelectorAll('a')) {
-    const reference = parseInternalReference(originalHref.get(anchor) ?? anchor.getAttribute('href'));
-    if (!reference) {
-      unbind(anchor);
-      clearStatus(anchor);
-      continue;
-    }
-    originalHref.set(anchor, originalHref.get(anchor) ?? anchor.getAttribute('href')!);
-    wire(anchor);
-    const pageIndex = reference.pageIndex;
-    const source = reference.id === null || pageIndex === null ? undefined : byId.get(reference.id);
-    const page = source?.pages.find(candidate => candidate.pageIndex === pageIndex);
-    if (!source || !page || pageIndex === null) {
-      bindings.delete(anchor);
+    try {
+      const reference = parseInternalReference(originalHref.get(anchor) ?? anchor.getAttribute('href'));
+      if (!reference) {
+        unbind(anchor);
+        clearStatus(anchor);
+        continue;
+      }
+      originalHref.set(anchor, originalHref.get(anchor) ?? anchor.getAttribute('href')!);
+      wire(anchor);
+      const pageIndex = reference.pageIndex;
+      const source = reference.id === null || pageIndex === null ? undefined : byId.get(reference.id);
+      const page = source?.pages.find(candidate => candidate.pageIndex === pageIndex);
+      if (!source || !page || pageIndex === null) {
+        degrade(anchor);
+        continue;
+      }
       anchor.removeAttribute('href');
-      anchor.removeAttribute('data-zcr-source');
-      anchor.removeAttribute('data-zcr-page');
-      anchor.setAttribute('aria-disabled', 'true');
-      setStatus(anchor, UNAVAILABLE_TEXT);
-      continue;
+      anchor.removeAttribute('aria-disabled');
+      anchor.dataset.zcrSource = source.id;
+      anchor.dataset.zcrPage = String(pageIndex);
+      anchor.textContent = `p. ${page.pageLabel}`;
+      clearStatus(anchor);
+      bindings.set(anchor, { source: deepFreezeSource(source), pageIndex, open });
+    } catch {
+      degrade(anchor);
     }
-    anchor.removeAttribute('href');
-    anchor.removeAttribute('aria-disabled');
-    anchor.dataset.zcrSource = source.id;
-    anchor.dataset.zcrPage = String(pageIndex);
-    anchor.textContent = `p. ${page.pageLabel}`;
-    clearStatus(anchor);
-    bindings.set(anchor, { source: deepFreezeSource(source), pageIndex, open });
   }
 }

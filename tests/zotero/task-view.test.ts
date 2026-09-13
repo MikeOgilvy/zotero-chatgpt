@@ -107,6 +107,20 @@ it('shows actual reading steps, supports cancellation/reconciliation, and opens 
   expect(container.querySelector<HTMLDetailsElement>('[data-zcr-reading-job]')!.open).toBe(false);
 });
 
+it('retries an unavailable reading description once the job advances', async () => {
+  const describeReading = vi.fn().mockResolvedValueOnce(null)
+    .mockResolvedValue({ question: 'Compare both chapters', scopeLabel: 'Selected PDF pages 1–8' });
+  const { container, view } = setup({ describeReading });
+  const job: ReadingJob = { schemaVersion: 1, id: 'reading-one', conversationId: 'chat-one', inputHash: 'hash', revision: 1, status: 'running', createdAt: 'now', updatedAt: 'now', cancelRequested: false, steps: [] };
+  view.update({ tasks: [], readingJobs: [job] });
+  await vi.waitFor(() => expect(describeReading).toHaveBeenCalledTimes(1));
+  expect(container.textContent).not.toContain('Compare both chapters');
+  view.update({ tasks: [], readingJobs: [{ ...job, revision: 2, updatedAt: 'later' }] });
+  await vi.waitFor(() => expect(container.textContent).toContain('Compare both chapters'));
+  expect(container.textContent).toContain('Selected PDF pages 1–8');
+  expect(describeReading).toHaveBeenCalledTimes(2);
+});
+
 it('does not duplicate a pending approval and retains review state after a handler failure', async () => {
   let reject!: (error: Error) => void;
   const { container, view, actions, action } = setup({ approveSelected: vi.fn(() => new Promise((_resolve, fail) => { reject = fail; })) });

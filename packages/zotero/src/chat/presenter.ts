@@ -79,6 +79,7 @@ export class ConversationPresenter {
   private connecting: Promise<ReaderClient> | null = null;
   private unobserve: (() => void) | null = null;
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeClient: ReaderClient | null = null;
   private buffered: ReaderEvent[] = [];
   private syncing = false;
   private syncGeneration = 0;
@@ -122,10 +123,14 @@ export class ConversationPresenter {
   focusInput(): void { this.update({ focusToken: this.state.focusToken + 1 }); }
   snapshot(): PresenterState { return clone(this.state); }
   /** Views are read-only; they must not mutate this object. External callers still use snapshot(). */
-  private notify(): void { for (const render of this.renders) render(this.state); }
+  private render(render: (state: PresenterState) => void): void {
+    // A failing view must never stop propagation to the other views (or abort the caller).
+    try { render(this.state); } catch { /* the view reports its own failure; state stays authoritative */ }
+  }
+  private notify(): void { for (const render of this.renders) this.render(render); }
   /** A view binds to receive state; unbinding releases only the view, never the runtime or the draft. */
   bind(render: (state: PresenterState) => void): () => void {
-    this.renders.add(render); render(this.state);
+    this.renders.add(render); this.render(render);
     if (this.client && this.state.conversation) void this.sync();
     return () => { this.renders.delete(render); if (!this.renders.size) void this.flushDraft().catch(() => {}); };
   }
@@ -497,7 +502,10 @@ export class ConversationPresenter {
     if (enabled && !this.submitting) void this.prepareContext().catch(() => {});
   }
   setDocumentRange(first: number | null, last: number | null): void {
-    const range: [number, number] | null = first === null && last === null ? null : [first ?? 1, last ?? first ?? 1];
+    const bound = (value: number | null) => value !== null && Number.isFinite(value) && value >= 1 ? Math.floor(value) : null;
+    const low = bound(first); const high = bound(last);
+    const range: [number, number] | null = low === null && high === null ? null
+      : low === null ? [high!, high!] : high === null ? [low, low] : low <= high ? [low, high] : [high, low];
     this.update({ document: { ...this.state.document, range, prepared: null, phase: 'idle', error: null } });
     this.draftVersion++; this.stageDraft();
     if (!this.submitting) { this.documentJob?.controller.abort(); if (this.state.document.enabled) void this.prepareContext().catch(() => {}); }
@@ -540,7 +548,7 @@ export class ConversationPresenter {
     try { return await waitPreparation(prepared, signal); }
     finally { if (job) { job.consumers--; if (signal.aborted && job.consumers === 0) job.controller.abort(); } }
   }
-  async retry(): Promise<void> { this.client = null; if (this.state.persistence === 'error') this.localFlight = null; await this.activate(); }
+  async retry(): Promise<void> { this.client = null; this.unobserve?.(); this.unobserve = null; if (this.state.persistence === 'error') this.localFlight = null; await this.activate(); }
   private connect(): Promise<ReaderClient> {
     if (this.client && this.client.snapshot().runtime === 'ready') return Promise.resolve(this.client);
     if (this.connecting) return this.connecting;
@@ -610,7 +618,11 @@ export class ConversationPresenter {
   }
   // ---- events -----------------------------------------------------------------------------------
   private listen(client: ReaderClient): void {
-    if (this.unsubscribe) return;
+    // A restarted runtime yields a new per-instance listener set; the old subscription would
+    // never deliver another event, so re-subscribe whenever the client identity changes.
+    if (this.unsubscribe && this.unsubscribeClient === client) return;
+    this.unsubscribe?.(); this.unsubscribe = null;
+    this.unsubscribeClient = client;
     this.unsubscribe = client.subscribe(event => {
       if (!this.state.conversation || event.conversationId !== this.state.conversation.id) {
         const known = this.state.conversations.some(conversation => conversation.id === event.conversationId) || this.drafts.has(event.conversationId);
@@ -858,11 +870,29 @@ export class ConversationPresenter {
     const conversation = this.state.conversation; if (!conversation?.queuedRequestIds?.includes(requestId)) throw new ReaderError('NOT_FOUND', 'This request is not queued in the current chat.');
     await (await this.connect()).cancel(conversation.id, requestId); await this.sync();
   }
+  private conversationHasContent(conversation: Conversation): boolean {
+    const draft = this.drafts.get(conversation.id);
+    const pendingDraft = !!draft && (draft.question.trim().length > 0 || draft.citations.length > 0 || draft.images.length > 0
+      || draft.references.length > 0 || !!draft.skillId || !!draft.profileId || Object.keys(draft.overrides ?? {}).length > 0);
+    return conversation.messages.length > 0 || !!conversation.activeRequestId || !!conversation.queuedRequestIds?.length || pendingDraft;
+  }
   async newConversation(): Promise<void> {
     try {
       await this.loadLocal(); const navigation = ++this.navigation;
       const client = await this.connect();
       this.stageDraft();
+      // Never stack duplicate empty chats: adopt the open one, or the most recent idle empty one.
+      // The cached list can lag the live conversation, so the open one always wins by id.
+      const byId = new Map([...this.state.conversations]
+        .sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt))
+        .map(entry => [entry.id, entry] as const));
+      if (this.state.conversation) byId.set(this.state.conversation.id, this.state.conversation);
+      const idle = [...byId.values()].find(entry => paperId(entry.paper) === paperId(this.paper) && !this.conversationHasContent(entry));
+      if (idle) {
+        if (idle.id !== this.state.conversation?.id) await this.openConversation(idle.id);
+        else this.update({ message: null, pendingExplain: null, contextReport: null });
+        return;
+      }
       const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
       if (navigation !== this.navigation) return;
       this.stageDraft(); this.draftVersion++;
@@ -959,6 +989,6 @@ export class ConversationPresenter {
     if (this.disposed) return;
     this.stageDraft(); void this.flushDraft().catch(() => {}); this.disposed = true;
     this.documentJob?.controller.abort(); for (const controller of this.submissions.values()) controller.abort();
-    this.renders.clear(); this.unsubscribe?.(); this.unsubscribe = null; this.unobserve?.(); this.unobserve = null; this.untasks?.(); this.unreading?.();
+    this.renders.clear(); this.unsubscribe?.(); this.unsubscribe = null; this.unsubscribeClient = null; this.unobserve?.(); this.unobserve = null; this.untasks?.(); this.unreading?.();
   }
 }

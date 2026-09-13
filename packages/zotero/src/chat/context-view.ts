@@ -1,6 +1,46 @@
-import type { DocumentContext } from '../../../contracts/src/index.ts';
+import type { DocumentContext, UsageReport } from '../../../contracts/src/index.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import { getPinnedModelCapabilities } from '../../../core/src/codex/model-capabilities.ts';
+
+export interface ContextUsage {
+  /** Input tokens from the last runtime usage report; never reconstructed from message text. */
+  usedTokens: number;
+  window: number | null;
+  provenance: 'runtime-reported' | 'pinned-catalog' | 'unknown';
+}
+
+/**
+ * The runtime reports usage per turn, so this is the last reported input size, not a live count.
+ * It stays null for a different model to avoid attributing another model's report to this one.
+ */
+export function currentContextUsage(modelId: string | null | undefined, usage: UsageReport | null | undefined): ContextUsage | null {
+  if (!modelId || !usage || usage.model !== modelId) return null;
+  const reported = usage.contextWindow;
+  const pinned = getPinnedModelCapabilities(modelId)?.contextWindow ?? null;
+  const window = reported ?? pinned;
+  return { usedTokens: usage.last.inputTokens, window, provenance: reported != null ? 'runtime-reported' : pinned != null ? 'pinned-catalog' : 'unknown' };
+}
+
+export function formatContextTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens);
+  const thousands = tokens / 1000;
+  return `${thousands >= 100 ? Math.round(thousands) : Math.round(thousands * 10) / 10}k`;
+}
+
+export function contextUsageLabel(usage: ContextUsage | null): string {
+  if (!usage) return 'Context unknown';
+  return usage.window === null ? `Context ${formatContextTokens(usage.usedTokens)} tokens · window unknown` : `Context ${formatContextTokens(usage.usedTokens)} / ${formatContextTokens(usage.window)} tokens`;
+}
+
+export function contextUsageTitle(usage: ContextUsage | null): string {
+  if (!usage) return 'Current context is unknown: the runtime has not reported usage for this model.';
+  const used = usage.usedTokens.toLocaleString('en-US');
+  const tail = 'This is the last report, not remaining context.';
+  if (usage.window === null) return `Last runtime usage report: ${used} input tokens; the model window is unknown. ${tail}`;
+  const window = usage.window.toLocaleString('en-US');
+  const origin = usage.provenance === 'runtime-reported' ? 'runtime reported' : 'bundled catalog estimate';
+  return `Last runtime usage report: ${used} input tokens; model window ${window} (${origin}). ${tail}`;
+}
 
 /** Compact coverage plus an on-demand local source preview. Never equates parsing with sending. */
 export function mountDocumentContext(parent: HTMLElement, settings: HTMLElement, presenter: ConversationPresenter, openPage?: (document: DocumentContext, pageIndex: number) => Promise<void>) {
@@ -18,7 +58,7 @@ export function mountDocumentContext(parent: HTMLElement, settings: HTMLElement,
   const summary = el('summary', 'Current PDF'); summary.setAttribute('aria-label', 'Current PDF context');
   const status = el('p'); status.setAttribute('role', 'status');
   const coverage = el('p');
-  const limits = el('p', 'Model context window: unknown. Text is not silently truncated. Figures and complex formulas may need page images.');
+  const limits = el('p', 'Model context window: unknown. Figures and complex formulas may need page images. Text is not silently truncated.');
   const sent = el('div'); sent.className = 'zcr-sent-context'; sent.dataset.zcrSentContext = '';
   const controls = el('div'); controls.className = 'zcr-context-range';
   const first = el('input'); const last = el('input');

@@ -6,7 +6,7 @@ import { ConversationPresenter, type DocumentServices } from '../../packages/zot
 import { documentA } from '../contracts/document-fixture.ts';
 import { mountChatView, renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
+import { SHAREABLE_STORAGE_LOCATION, type Citation, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
 import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
@@ -38,7 +38,11 @@ async function mountReadyChat(options: {
   uuid?: () => string;
   document?: DocumentServices;
   openDocumentPage?: (document: { paper: PaperScope; revision: DocumentRevision }, pageIndex: number) => Promise<void>;
+  openCitation?: (citation: Citation) => Promise<void>;
+  copyText?: (text: string) => void;
   openLink?: (url: string) => void;
+  usage?: Conversation['usage'];
+  rename?: (id: string, title: string) => Promise<Conversation>;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -48,6 +52,7 @@ async function mountReadyChat(options: {
       citations: [citationA], status: 'completed',
     }],
     lastSeq: 0, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
+    ...(options.usage ? { usage: options.usage } : {}),
   };
   const runtime: RuntimeSnapshot = {
     revision: 0, runtime: 'ready', account: { state: 'signedIn' }, login: null,
@@ -92,6 +97,14 @@ async function mountReadyChat(options: {
     },
     request: () => Promise.resolve({ requestId: 'r1', state: 'completed', replay: false }),
     cancel: () => Promise.reject(new Error()),
+    renameConversation: options.rename ?? ((id, title) => {
+      const index = listed.findIndex(entry => entry.id === id);
+      if (index < 0) return Promise.reject(new Error('missing conversation'));
+      const renamed = { ...listed[index]!, title, titleCustomized: true };
+      listed[index] = renamed;
+      if (conversation.id === id) conversation = renamed;
+      return Promise.resolve(structuredClone(renamed));
+    }),
     deleteConversation: (_paper, id) => {
       const index = listed.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new Error('missing conversation'));
@@ -128,11 +141,12 @@ async function mountReadyChat(options: {
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   const scale = options.textScale ?? { value: 1 };
   mountChatView(root, presenter, {
-    openCitation: () => Promise.resolve(),
+    openCitation: options.openCitation ?? (() => Promise.resolve()),
     readTextScale: () => scale.value,
     writeTextScale: value => { scale.value = value; },
     confirm: options.confirm ?? (() => true),
     uuid: options.uuid ?? (() => imageA.id),
+    ...(options.copyText ? { copyText: options.copyText } : {}),
     ...(options.openDocumentPage ? { openDocumentPage: options.openDocumentPage } : {}),
     ...(options.openLink ? { openLink: options.openLink } : {}),
     ...(options.readerZoom ? {
@@ -147,6 +161,10 @@ async function mountReadyChat(options: {
   await Promise.resolve();
   return { root, presenter, scale, client, emit: (event: ReaderEvent) => onEvent(event), updateRuntime: (patch: Partial<RuntimeSnapshot>) => { Object.assign(runtime, patch); onRuntime(structuredClone(runtime)); } };
 }
+
+const assistantMessage = (text: string): Conversation['messages'][number] => ({
+  id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text,
+});
 
 function applySidebarStyles(root: HTMLElement): CSSStyleDeclaration {
   const doc = root.ownerDocument;
@@ -292,6 +310,96 @@ it('surfaces a constant failure when the frozen source cannot be opened, without
   await vi.waitFor(() => expect(text.querySelector('[role="status"]')?.textContent).toBe('The source could not be opened. Reopen the PDF and try again.'));
   expect(text.textContent).not.toContain('/private');
   expect(openLink).not.toHaveBeenCalled();
+});
+
+it('reports a failed view action in a dedicated slot without leaking the raw error', async () => {
+  const { root, presenter } = await mountReadyChat();
+  vi.spyOn(presenter, 'cancelQueuedRequest').mockRejectedValue(new Error('/private/library/file.pdf'));
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]')!.click();
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(viewError.hidden).toBe(false));
+  expect(viewError.textContent).toBe('This action could not be completed.');
+  expect(root.textContent).not.toContain('/private');
+  expect(root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')?.hidden).toBe(true);
+});
+
+it('reports a rejected citation open without clobbering the presenter message slot', async () => {
+  const openCitation = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
+  const { root } = await mountReadyChat({ draftCitations: [citationA], openCitation });
+  root.querySelector<HTMLButtonElement>('[data-zcr-context-source] [data-zcr-action="open-citation"]')!.click();
+  await vi.waitFor(() => expect(openCitation).toHaveBeenCalled());
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(viewError.textContent).toBe('The source could not be opened.'));
+  expect(root.textContent).not.toContain('/private');
+});
+
+it('routes a rejected draft-citation open through the same dedicated slot', async () => {  const openCitation = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
+  const { root } = await mountReadyChat({ draftCitations: [citationA], openCitation });
+  root.querySelector<HTMLButtonElement>('[data-zcr-citation] [data-zcr-action="open-citation"]')!.click();
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(viewError.textContent).toBe('The source could not be opened.'));
+  expect(root.textContent).not.toContain('/private');
+});
+
+it('announces status through the dedicated live region instead of the whole transcript', async () => {
+  const { root } = await mountReadyChat();
+  expect(root.querySelector('[data-zcr-messages]')?.hasAttribute('aria-live')).toBe(false);
+  expect(root.querySelector('.zcr-status-line')?.getAttribute('role')).toBe('status');
+});
+
+it('offers a discoverable copy control for an answer and confirms the copy', async () => {
+  const copyText = vi.fn();
+  const { root } = await mountReadyChat({ messages: [assistantMessage('先验是初始信念。')], copyText });
+  const copy = root.querySelector<HTMLButtonElement>('[data-zcr-action="copy-answer"]')!;
+  expect(copy.hidden).toBe(false);
+  expect(copy.dataset.zcrCopied).toBeUndefined();
+  copy.click();
+  expect(copyText).toHaveBeenCalledWith('先验是初始信念。');
+  expect(copy.dataset.zcrCopied).toBe('true');
+  expect(copy.getAttribute('aria-label')).toBe('Copied');
+});
+
+it('offers a copy control for every fenced code block', async () => {
+  const copyText = vi.fn();
+  const { root } = await mountReadyChat({ messages: [assistantMessage('See:\n\n```ts\nconst x = 1;\n```\n')], copyText });
+  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const wrapper = text.querySelector<HTMLElement>('.zcr-code-block');
+  expect(wrapper?.parentElement).toBe(text);
+  const copy = wrapper!.querySelector<HTMLButtonElement>('[data-zcr-action="copy-code"]')!;
+  copy.click();
+  expect(copyText).toHaveBeenCalledWith('const x = 1;\n');
+  expect(copy.dataset.zcrCopied).toBe('true');
+});
+
+it('gives every markdown table its own local scroll container', async () => {
+  const { root } = await mountReadyChat({ messages: [assistantMessage('| a | b |\n| - | - |\n| 1 | 2 |\n')] });
+  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const wrapper = text.querySelector<HTMLElement>('.zcr-table-block');
+  expect(wrapper?.parentElement).toBe(text);
+  expect(wrapper?.firstElementChild?.tagName).toBe('TABLE');
+});
+
+it('shows an honest context indicator: an explicit unknown until the runtime reports usage', async () => {
+  const { root } = await mountReadyChat();
+  const chip = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  expect(chip.textContent).toBe('Context unknown');
+  expect(chip.getAttribute('aria-label')).toContain('unknown');
+  expect(chip.getAttribute('role')).toBe('status');
+});
+
+it('shows the last runtime context report with its window and never a remaining-space claim', async () => {
+  const { root } = await mountReadyChat({
+    usage: {
+      model: 'catalog-default', contextWindow: 128000,
+      last: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
+      total: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
+    },
+  });
+  const chip = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  expect(chip.textContent).toBe('Context 12.3k / 128k tokens');
+  expect(chip.getAttribute('aria-label')).toContain('12,345');
+  expect(chip.getAttribute('aria-label')).toContain('128,000');
+  expect(chip.getAttribute('aria-label')).toContain('not remaining context.');
 });
 
 it('keeps the offline composer editable while preventing model submission', async () => {
@@ -485,7 +593,7 @@ it('keeps the composer as one card: textarea, footer chip, and circular arrow se
   expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
 });
 
-it('uses icon-only New chat, Copy, and history-row delete actions with accessible names', async () => {
+it('uses icon-only New chat and history-row delete actions with accessible names', async () => {
   const { root } = await mountReadyChat({
     messages: [
       { id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What does this mean?', citations: [citationA], status: 'completed' },
@@ -497,7 +605,8 @@ it('uses icon-only New chat, Copy, and history-row delete actions with accessibl
   expect(fresh?.textContent?.trim()).toBe('');
   const copy = root.querySelector('[data-zcr-action="copy-answer"]');
   expect(copy?.getAttribute('aria-label')).toBe('Copy');
-  expect(copy?.textContent?.trim()).toBe('');
+  // Copy is a labelled chip now: the visible "Copy" text is the discoverability affordance.
+  expect(copy?.querySelector('[data-zcr-copy-label]')?.textContent).toBe('Copy');
   const removeChat = root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]');
   expect(removeChat?.getAttribute('aria-label')).toMatch(/Delete chat/u);
   expect(removeChat?.textContent?.trim()).toBe('');
@@ -566,6 +675,71 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
   expect(root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]')).toBeTruthy();
   expect(root.querySelector('[data-zcr-action="pin-conversation"]')).toBeNull();
   } finally { now.mockRestore(); }
+});
+
+it('renames the open chat from the history actions and closes the form on success', async () => {
+  const { root, presenter } = await mountReadyChat();
+  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!;
+  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  expect(form.hidden).toBe(true);
+  rename.click();
+  expect(form.hidden).toBe(false);
+  const input = form.querySelector<HTMLInputElement>('input')!;
+  expect(input.value).toBe('Synthetic Paper A');
+  input.value = '  先验讨论  ';
+  form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  await vi.waitFor(() => expect(form.hidden).toBe(true));
+  expect(presenter.snapshot().conversation?.title).toBe('先验讨论');
+});
+
+it('reports a failed rename in the view error slot and keeps the form open', async () => {
+  const { root } = await mountReadyChat({ rename: () => Promise.reject(new Error('/Users/somebody/private/state.json missing')) });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!.click();
+  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(slot.hidden).toBe(false));
+  expect(slot.textContent).not.toContain('/Users/somebody');
+  expect(form.hidden).toBe(false);
+});
+
+
+it('keeps the composer free of voice input and third-party chat branding', async () => {
+  const { root } = await mountReadyChat();
+  const composer = root.querySelector<HTMLElement>('[data-zcr-composer]')!;
+  const controls = [...composer.querySelectorAll('button')]
+    .map(node => `${node.getAttribute('aria-label') ?? ''} ${node.getAttribute('title') ?? ''} ${node.textContent ?? ''}`).join('\n');
+  expect(controls).not.toMatch(/voice|microphone|dictate|\bmic\b|ChatGPT/iu);
+  expect(composer.querySelector('[data-zcr-input]')?.getAttribute('placeholder')).toBe('Ask a question…');
+});
+
+
+it('keeps the transcript pinned when an answer image finishes loading', async () => {
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const { root } = await mountReadyChat({ messages: [
+    { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
+  ] });
+  const transcript = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  Object.defineProperty(transcript, 'scrollHeight', { get: () => 1000, configurable: true });
+  Object.defineProperty(transcript, 'clientHeight', { get: () => 200, configurable: true });
+  transcript.scrollTop = 900;
+  transcript.scrollTop = 500;
+  transcript.querySelector('img')!.dispatchEvent(new (root.ownerDocument.defaultView!.Event)('load'));
+  expect(transcript.scrollTop).toBe(1000);
+});
+
+it('leaves the transcript alone when an image loads while the reader is scrolled away', async () => {
+  const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
+  const { root, presenter } = await mountReadyChat({ messages: [
+    { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
+  ] });
+  const transcript = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  Object.defineProperty(transcript, 'scrollHeight', { get: () => 1000, configurable: true });
+  Object.defineProperty(transcript, 'clientHeight', { get: () => 200, configurable: true });
+  transcript.scrollTop = 100;
+  presenter.setQuestion('keep reading');
+  transcript.querySelector('img')!.dispatchEvent(new (root.ownerDocument.defaultView!.Event)('load'));
+  expect(transcript.scrollTop).toBe(100);
 });
 
 it('shows pending image thumbnails in the composer and can remove them', async () => {

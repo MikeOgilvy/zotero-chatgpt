@@ -74,6 +74,24 @@ describe('conversation presenter', () => {
     f.presenter.setQuestion('Both windows'); expect(first).toBe('Both windows'); expect(second).toBe('Both windows');
     unbindFirst(); f.presenter.setQuestion('Second window'); expect(second).toBe('Second window'); expect(first).toBe('Both windows'); unbindSecond();
   });
+  it('re-subscribes to a replaced runtime client after retry and applies its events', async () => {
+    const f = fixture(); await f.presenter.activate(); await f.presenter.explain(citationA); const requestId = f.sent[0]!.requestId;
+    const replacement = new Set<(event: ReaderEvent) => void>();
+    const second: ReaderClient = { ...f.client, subscribe: listener => { replacement.add(listener); return () => { replacement.delete(listener); }; } };
+    f.services.ensureStarted.mockImplementation(() => Promise.resolve(second));
+    await f.presenter.retry();
+    expect(replacement.size).toBe(1);
+    for (const listener of replacement) listener({ type: 'delta', requestId, messageId: 'a1', text: '重连', seq: 50, conversationId: f.conversation().id, at: 'now' });
+    expect(f.last().conversation?.messages.at(-1)?.text).toBe('重连');
+  });
+  it('keeps propagating state and never throws when one bound view fails', async () => {
+    const f = fixture(); await f.presenter.activate();
+    let seen = ''; let calls = 0;
+    f.presenter.bind(() => { if (++calls > 1) throw new Error('/private/library/file.pdf'); });
+    f.presenter.bind(s => { seen = s.draft.question; });
+    expect(() => f.presenter.setQuestion('仍然更新')).not.toThrow();
+    expect(seen).toBe('仍然更新');
+  });
   it('freezes the question, settings and conversation while PDF preparation is pending, and keeps newer input', async () => {
     const f = fixture(); let resolve!: (value: typeof documentA) => void;
     const prepare = () => new Promise<typeof documentA>(r => { resolve = r; });
@@ -186,11 +204,15 @@ describe('conversation presenter', () => {
   it('deletes a completed conversation and falls back without issuing a cancellation', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
+    // The first chat holds a completed turn, so New chat has to create a second one.
+    f.presenter.setQuestion('第一问'); await f.presenter.send();
+    f.emit({ type: 'messageCompleted', requestId: f.sent[0]!.requestId, messageId: 'reply-one', finalText: 'done', phase: 'final' });
+    f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'reply-one', finalText: 'done' });
     await f.presenter.newConversation();
     const secondId = f.last().conversation!.id;
     f.presenter.setQuestion('第二问'); await f.presenter.send();
     expect(f.last().generating).toBe(true);
-    f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'reply', finalText: 'done' });
+    f.emit({ type: 'completed', requestId: f.sent[1]!.requestId, messageId: 'reply', finalText: 'done' });
     await f.presenter.deleteConversation(secondId);
     expect(f.client.deleteConversation).toHaveBeenCalledWith(paperA, secondId);
     expect(f.cancelled).toEqual([]);
@@ -346,6 +368,39 @@ describe('conversation presenter', () => {
     expect(f.last().conversation?.id).toBe(secondId);
     expect(f.last().draft.question).toBe('新对话的问题');
     expect(f.last().draft.citations).toEqual([]);
+  });
+  it('normalizes a blank or reversed page range instead of preparing an impossible slice', async () => {
+    const f = fixture(); await f.presenter.activate();
+    expect(f.last().document.range).toBeNull();
+    f.presenter.setDocumentRange(5, 2);
+    expect(f.last().document.range).toEqual([2, 5]);
+    f.presenter.setDocumentRange(Number(''), Number(''));
+    expect(f.last().document.range).toBeNull();
+    f.presenter.setDocumentRange(3, null);
+    expect(f.last().document.range).toEqual([3, 3]);
+    f.presenter.setDocumentRange(1.7, 4.2);
+    expect(f.last().document.range).toEqual([1, 4]);
+  });
+  it('reuses an idle empty chat instead of stacking duplicate empty sessions', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).not.toHaveBeenCalled();
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().conversations.map(c => c.id)).toEqual([firstId]);
+
+    f.presenter.setQuestion('新问题');
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    const secondId = f.last().conversation!.id;
+    expect(secondId).not.toBe(firstId);
+    expect(f.last().draft.question).toBe('');
+
+    await f.presenter.openConversation(firstId);
+    expect(f.last().draft.question).toBe('新问题');
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    expect(f.last().conversation?.id).toBe(secondId);
   });
   it('copyDiagnostics serializes whitelist fields and never includes citation text', async () => {
     const f = fixture();

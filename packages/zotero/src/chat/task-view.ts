@@ -21,29 +21,6 @@ export interface TaskViewActions {
 type TaskItem = AgentTaskRecord['items'][number];
 const TASK_LABEL = { preparing: 'Preparing', review: 'Review', running: 'Running', completed: 'Completed', partial: 'Partly completed', cancelled: 'Cancelled', uncertain: 'Unconfirmed', undone: 'Undone', conflict: 'Conflict', failed: 'Failed' } as const;
 const ITEM_LABEL = { candidate: 'Ready', unresolved: 'Unresolved', skipped: 'Skipped', writing: 'Writing…', applied: 'Applied', 'metadata-only': 'Metadata saved', failed: 'Failed', uncertain: 'Unconfirmed', undoing: 'Undoing…', undone: 'Undone', conflict: 'Changed output preserved' } as const;
-const STYLES = `
-.zcr-task-view { display:flex; flex-direction:column; gap:8px; min-width:0; font:inherit; font-size:12px; }
-.zcr-task-view [hidden] { display:none!important; }
-.zcr-task-card { min-width:0; border:1px solid var(--zcr-border,GrayText); border-radius:8px; background:var(--material-background,Canvas); }
-.zcr-task-card > summary { min-height:28px; padding:6px 8px; box-sizing:border-box; cursor:pointer; font-size:12px; overflow-wrap:anywhere; }
-.zcr-task-body { padding:0 8px 8px; min-width:0; }
-.zcr-task-question { margin:4px 0 8px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.45; }
-.zcr-task-muted,.zcr-task-scope { margin:4px 0; color:var(--fill-secondary,GrayText); font-size:11px; line-height:16px; overflow-wrap:anywhere; }
-.zcr-task-row { padding:8px 0; border-top:1px solid var(--zcr-border,GrayText); min-width:0; }
-.zcr-task-row-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.zcr-task-check { display:flex; align-items:center; gap:6px; min-height:28px; font:inherit; }
-.zcr-task-check input { flex:0 0 auto; }
-.zcr-task-quote { margin:4px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.5; }
-.zcr-task-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:6px; }
-.zcr-task-button { appearance:none; min-height:28px; padding:4px 8px; border:1px solid var(--zcr-border,GrayText); border-radius:5px; background:transparent; color:inherit; font:inherit; line-height:18px; cursor:pointer; box-sizing:border-box; }
-.zcr-task-button:hover { background:var(--fill-quinary,ButtonFace); }
-.zcr-task-button:disabled { opacity:.5; cursor:default; }
-.zcr-task-view :focus-visible { outline:2px solid AccentColor; outline-offset:1px; }
-.zcr-task-field { display:flex; flex-direction:column; align-items:stretch; gap:4px; margin:6px 0; }
-.zcr-task-field select { max-width:100%; min-width:0; min-height:28px; padding:4px; border:1px solid var(--zcr-border,GrayText); border-radius:5px; background:var(--material-background,Field); color:inherit; font:inherit; }
-.zcr-task-error { margin:6px 0; overflow-wrap:anywhere; font-size:12px; }
-.zcr-task-counts { font-variant-numeric:tabular-nums; }
-`;
 function eligible(item: TaskItem): boolean { return item.status === 'candidate' && (item.kind === 'annotation' ? item.resolution?.status === 'resolved' : !!item.preview?.candidates.length); }
 function hasOutput(item: TaskItem): boolean { return item.status !== 'undone' && (item.kind === 'annotation' ? !!item.annotation : !!item.item); }
 function itemOutcome(item: TaskItem): string {
@@ -66,7 +43,6 @@ function placeChildren(parent: HTMLElement, nodes: HTMLElement[]): void {
 export function mountTaskView(container: HTMLElement, actions: TaskViewActions): { update(state: TaskViewState): void; dispose(): void } {
   const doc = container.ownerDocument;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
-  const style = create('style'); style.textContent = STYLES; doc.head.append(style);
   const root = create('section', '', 'zcr-task-view'); root.setAttribute('aria-label', 'Tasks'); container.append(root);
   const button = (label: string, action: string, click: () => void) => { const node = create('button', label, 'zcr-task-button'); node.type = 'button'; node.dataset.zcrTaskAction = action; node.setAttribute('aria-label', label); node.addEventListener('click', click); return node; };
   const cards = new Map<string, { node: HTMLDetailsElement; update(task: AgentTaskRecord): void; dispose(): void }>();
@@ -76,7 +52,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
     let task = initial; let previousState = initial.state; let userToggled = false; let removed = false;
     const node = create('details', '', 'zcr-task-card'); node.dataset.zcrTaskId = task.id; node.open = !['completed', 'undone'].includes(task.state);
     const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
-    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-scope');
+    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-muted'); scope.dataset.zcrTaskScope = '';
     const counts = create('p', '', 'zcr-task-muted zcr-task-counts'); counts.setAttribute('role', 'status');
     const rows = create('div'); const guidance = create('p', '', 'zcr-task-muted'); const error = create('p', '', 'zcr-task-error'); error.setAttribute('role', 'alert'); error.hidden = true;
     const controls = create('div', '', 'zcr-task-actions'); body.append(question, scope, counts, rows, guidance, error, controls); node.append(summary, body);
@@ -214,7 +190,18 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
     };
     const cancel = button('Cancel reading', 'reading-cancel', () => execute('cancel', () => actions.cancelReading(job.id), cancel));
     const reconcile = button('Reconcile reading', 'reading-reconcile', () => execute('reconcile', () => actions.reconcileReading(job.id), reconcile)); controls.append(cancel, reconcile);
-    if (actions.describeReading) void actions.describeReading(job.id).then(description => { if (!removed && description) { question.textContent = description.question; scope.textContent = description.scopeLabel; question.hidden = false; scope.hidden = false; } }).catch(() => {});
+    let described = false; let describing = false;
+    const loadDescription = () => {
+      if (!actions.describeReading || described || describing) return;
+      describing = true;
+      void actions.describeReading(job.id).then(description => {
+        describing = false;
+        if (removed || !description) return;
+        described = true;
+        question.textContent = description.question; scope.textContent = description.scopeLabel; question.hidden = false; scope.hidden = false;
+      }).catch(() => { describing = false; });
+    };
+    loadDescription();
     const refresh = () => {
       if (removed) return;
       summary.textContent = `Reading · ${job.status} · ${job.steps.filter(step => step.status === 'completed').length}/${job.steps.length} passes`;
@@ -234,7 +221,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       cancel.hidden = ['completed', 'cancelled', 'failed'].includes(job.status); cancel.disabled = pending.has('cancel') || job.cancelRequested || job.status === 'cancelling';
       reconcile.hidden = !['uncertain', 'paused'].includes(job.status) && job.persistence !== 'unconfirmed'; reconcile.disabled = pending.has('reconcile');
     };
-    return { node, update: (next: ReadingJob) => { if (next.revision < job.revision) return; if (next.revision > job.revision) actionError = null; job = next; if (!userToggled && previousStatus !== job.status) node.open = job.status !== 'completed'; previousStatus = job.status; refresh(); }, dispose: () => { removed = true; node.remove(); } };
+    return { node, update: (next: ReadingJob) => { if (next.revision < job.revision) return; if (next.revision > job.revision) actionError = null; job = next; loadDescription(); if (!userToggled && previousStatus !== job.status) node.open = job.status !== 'completed'; previousStatus = job.status; refresh(); }, dispose: () => { removed = true; node.remove(); } };
   };
   return { update: state => {
     if (disposed) return;
@@ -244,5 +231,5 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
     for (const task of state.tasks) { let view = cards.get(task.id); if (!view) { view = createTask(task); cards.set(task.id, view); } view.update(task); nodes.push(view.node); }
     for (const job of jobs) { let view = readingCards.get(job.id); if (!view) { view = createReading(job); readingCards.set(job.id, view); } view.update(job); nodes.push(view.node); }
     placeChildren(root, nodes); root.hidden = nodes.length === 0;
-  }, dispose: () => { if (disposed) return; disposed = true; for (const view of cards.values()) view.dispose(); for (const view of readingCards.values()) view.dispose(); root.remove(); style.remove(); } };
+  }, dispose: () => { if (disposed) return; disposed = true; for (const view of cards.values()) view.dispose(); for (const view of readingCards.values()) view.dispose(); root.remove(); } };
 }
