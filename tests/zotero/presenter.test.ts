@@ -194,11 +194,15 @@ describe('conversation presenter', () => {
   it('deletes a completed conversation and falls back without issuing a cancellation', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
+    // The first chat holds a completed turn, so New chat has to create a second one.
+    f.presenter.setQuestion('第一问'); await f.presenter.send();
+    f.emit({ type: 'messageCompleted', requestId: f.sent[0]!.requestId, messageId: 'reply-one', finalText: 'done', phase: 'final' });
+    f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'reply-one', finalText: 'done' });
     await f.presenter.newConversation();
     const secondId = f.last().conversation!.id;
     f.presenter.setQuestion('第二问'); await f.presenter.send();
     expect(f.last().generating).toBe(true);
-    f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'reply', finalText: 'done' });
+    f.emit({ type: 'completed', requestId: f.sent[1]!.requestId, messageId: 'reply', finalText: 'done' });
     await f.presenter.deleteConversation(secondId);
     expect(f.client.deleteConversation).toHaveBeenCalledWith(paperA, secondId);
     expect(f.cancelled).toEqual([]);
@@ -354,6 +358,27 @@ describe('conversation presenter', () => {
     expect(f.last().conversation?.id).toBe(secondId);
     expect(f.last().draft.question).toBe('新对话的问题');
     expect(f.last().draft.citations).toEqual([]);
+  });
+  it('reuses an idle empty chat instead of stacking duplicate empty sessions', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).not.toHaveBeenCalled();
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().conversations.map(c => c.id)).toEqual([firstId]);
+
+    f.presenter.setQuestion('新问题');
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    const secondId = f.last().conversation!.id;
+    expect(secondId).not.toBe(firstId);
+    expect(f.last().draft.question).toBe('');
+
+    await f.presenter.openConversation(firstId);
+    expect(f.last().draft.question).toBe('新问题');
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    expect(f.last().conversation?.id).toBe(secondId);
   });
   it('copyDiagnostics serializes whitelist fields and never includes citation text', async () => {
     const f = fixture();

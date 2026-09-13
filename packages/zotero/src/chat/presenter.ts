@@ -867,11 +867,29 @@ export class ConversationPresenter {
     const conversation = this.state.conversation; if (!conversation?.queuedRequestIds?.includes(requestId)) throw new ReaderError('NOT_FOUND', 'This request is not queued in the current chat.');
     await (await this.connect()).cancel(conversation.id, requestId); await this.sync();
   }
+  private conversationHasContent(conversation: Conversation): boolean {
+    const draft = this.drafts.get(conversation.id);
+    const pendingDraft = !!draft && (draft.question.trim().length > 0 || draft.citations.length > 0 || draft.images.length > 0
+      || draft.references.length > 0 || !!draft.skillId || !!draft.profileId || Object.keys(draft.overrides ?? {}).length > 0);
+    return conversation.messages.length > 0 || !!conversation.activeRequestId || !!conversation.queuedRequestIds?.length || pendingDraft;
+  }
   async newConversation(): Promise<void> {
     try {
       await this.loadLocal(); const navigation = ++this.navigation;
       const client = await this.connect();
       this.stageDraft();
+      // Never stack duplicate empty chats: adopt the open one, or the most recent idle empty one.
+      // The cached list can lag the live conversation, so the open one always wins by id.
+      const byId = new Map([...this.state.conversations]
+        .sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt))
+        .map(entry => [entry.id, entry] as const));
+      if (this.state.conversation) byId.set(this.state.conversation.id, this.state.conversation);
+      const idle = [...byId.values()].find(entry => paperId(entry.paper) === paperId(this.paper) && !this.conversationHasContent(entry));
+      if (idle) {
+        if (idle.id !== this.state.conversation?.id) await this.openConversation(idle.id);
+        else this.update({ message: null, pendingExplain: null, contextReport: null });
+        return;
+      }
       const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
       if (navigation !== this.navigation) return;
       this.stageDraft(); this.draftVersion++;

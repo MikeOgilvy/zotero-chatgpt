@@ -42,6 +42,7 @@ async function mountReadyChat(options: {
   copyText?: (text: string) => void;
   openLink?: (url: string) => void;
   usage?: Conversation['usage'];
+  rename?: (id: string, title: string) => Promise<Conversation>;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -96,6 +97,14 @@ async function mountReadyChat(options: {
     },
     request: () => Promise.resolve({ requestId: 'r1', state: 'completed', replay: false }),
     cancel: () => Promise.reject(new Error()),
+    renameConversation: options.rename ?? ((id, title) => {
+      const index = listed.findIndex(entry => entry.id === id);
+      if (index < 0) return Promise.reject(new Error('missing conversation'));
+      const renamed = { ...listed[index]!, title, titleCustomized: true };
+      listed[index] = renamed;
+      if (conversation.id === id) conversation = renamed;
+      return Promise.resolve(structuredClone(renamed));
+    }),
     deleteConversation: (_paper, id) => {
       const index = listed.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new Error('missing conversation'));
@@ -667,6 +676,33 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
   expect(root.querySelector('[data-zcr-action="pin-conversation"]')).toBeNull();
   } finally { now.mockRestore(); }
 });
+
+it('renames the open chat from the history actions and closes the form on success', async () => {
+  const { root, presenter } = await mountReadyChat();
+  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!;
+  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  expect(form.hidden).toBe(true);
+  rename.click();
+  expect(form.hidden).toBe(false);
+  const input = form.querySelector<HTMLInputElement>('input')!;
+  expect(input.value).toBe('Synthetic Paper A');
+  input.value = '  先验讨论  ';
+  form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  await vi.waitFor(() => expect(form.hidden).toBe(true));
+  expect(presenter.snapshot().conversation?.title).toBe('先验讨论');
+});
+
+it('reports a failed rename in the view error slot and keeps the form open', async () => {
+  const { root } = await mountReadyChat({ rename: () => Promise.reject(new Error('/Users/somebody/private/state.json missing')) });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!.click();
+  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(slot.hidden).toBe(false));
+  expect(slot.textContent).not.toContain('/Users/somebody');
+  expect(form.hidden).toBe(false);
+});
+
 
 it('shows pending image thumbnails in the composer and can remove them', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [], draftImages: [imageA] });
