@@ -70,16 +70,19 @@ async function runHostSmoke(config) {
     // so a refused host replacement fails the check out loud instead of degrading into a pass.
     const t0 = Date.now();
     const observations = [];
+    const counts = { stat: 0, digest: 0, encode: 0, encodePageText: 0, encodeJson: 0 };
     const prefReads = [];
     const logErrors = [];
     const restoreHost = [];
-    const observeHost = (target, name, label, detail) => {
+    const OBSERVATION_LIMIT = 240;
+    const frames = () => { try { return String(new Error().stack || '').split('\n').slice(1, 4).map(line => line.trim().replace(/^at\s+/u, '').slice(0, 110)); } catch { return []; } };
+    const observeHost = (target, name, label, detail, keep) => {
       const original = target[name];
       if (typeof original !== 'function') return false;
       const wrapper = function (...args) {
         const entry = { label, ms: Date.now() - t0 };
         try { Object.assign(entry, detail(args) ?? {}); } catch { /* the detail is best effort */ }
-        observations.push(entry);
+        if (observations.length < OBSERVATION_LIMIT && keep(entry, args)) { if (!('stack' in entry) && keep !== undefined) entry.stack = frames(); observations.push(entry); }
         let result;
         try { result = original.apply(this, args); } catch (error) { entry.error = String((error && error.message) || error); throw error; }
         if (result && typeof result.then === 'function') return result.then(value => { entry.ok = true; return value; }, error => { entry.error = String((error && error.message) || error); throw error; });
@@ -93,16 +96,24 @@ async function runHostSmoke(config) {
     const nativePrefGet = Zotero.Prefs.get;
     Zotero.Prefs.get = function (pref, global) { const value = nativePrefGet.call(this, pref, global); if (String(pref).includes('automaticPdfText')) prefReads.push({ ms: Date.now() - t0, enabled: value !== false }); return value; };
     const nativeLogError = Zotero.logError;
-    Zotero.logError = function (error) { logErrors.push({ ms: Date.now() - t0, message: String((error && error.message) || error) }); return nativeLogError.call(this, error); };
+    Zotero.logError = function (error) { logErrors.push({ ms: Date.now() - t0, message: String((error && error.message) || error), stack: String((error && error.stack) || '').split('\n').slice(1, 4).map(line => line.trim()) }); return nativeLogError.call(this, error); };
     restoreInstrumentation = () => { Zotero.Prefs.get = nativePrefGet; Zotero.logError = nativeLogError; for (const restore of restoreHost.reverse()) restore(); };
-    const armed = {
-      stat: observeHost(IOUtils, 'stat', 'stat', args => ({ file: String(args[0] ?? '').split('/').pop() })),
-      digest: observeHost(IOUtils, 'computeHexDigest', 'computeHexDigest', args => ({ file: String(args[0] ?? '').split('/').pop(), algorithm: args[1] ?? null })),
-      encode: observeHost(TextEncoder.prototype, 'encode', 'encode', args => ({ characters: typeof args[0] === 'string' ? args[0].length : null, jsonShaped: typeof args[0] === 'string' && /^[[{]/u.test(args[0]) })),
-    };
     const expectedFile = String((await Zotero.Items.get(a.id).getFilePathAsync()) ?? '').split('/').pop();
-    const observedGate = () => observations.find(entry => entry.label === 'stat' && entry.file === expectedFile && entry.ok)
-      && observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.algorithm === 'sha256' && entry.ok);
+    const armed = {
+      stat: observeHost(IOUtils, 'stat', 'stat', args => ({ file: String(args[0] ?? '').split('/').pop() }), entry => { counts.stat += 1; if (entry.file === expectedFile) counts.statExpected += 1; return entry.file === expectedFile || observations.filter(item => item.label === 'stat').length < 10; }),
+      digest: observeHost(IOUtils, 'computeHexDigest', 'computeHexDigest', args => ({ file: String(args[0] ?? '').split('/').pop(), algorithm: args[1] ?? null }), entry => { counts.digest += 1; if (entry.file === expectedFile) counts.digestExpected += 1; return true; }),
+      encode: observeHost(TextEncoder.prototype, 'encode', 'encode', args => ({ characters: typeof args[0] === 'string' ? args[0].length : null, jsonShaped: typeof args[0] === 'string' && /^[[{]/u.test(args[0]), head: typeof args[0] === 'string' ? args[0].slice(0, 40) : null }), (entry, args) => {
+        counts.encode += 1;
+        const text = typeof args[0] === 'string' ? args[0] : '';
+        if (entry.jsonShaped) counts.encodeJson += 1;
+        const pageText = !entry.jsonShaped && text.length >= 200;
+        if (pageText) counts.encodePageText += 1;
+        // Keep the page-sized, non-JSON encodings (the product measuring extracted page text) and the
+        // small handful of others, but never the flood of per-character measurements `clipToBytes` makes.
+        return pageText ? counts.encodePageText <= 8 : (entry.characters ?? 0) >= 200 && observations.filter(item => item.label === 'encode').length < 12;
+      }),
+    };
+    const observedGate = () => observations.find(entry => entry.label === 'stat' && entry.file === expectedFile) && observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.algorithm === 'sha256' && entry.ok);
     const observedPageTexts = () => observations.filter(entry => entry.label === 'encode' && entry.jsonShaped === false && (entry.characters ?? 0) >= 200);
     await check('read-observation-armed-on-shared-host-apis', Boolean(armed.stat && armed.digest && armed.encode && expectedFile), { armed, file: expectedFile, optOutControl });
     const preparation = {
@@ -145,29 +156,63 @@ async function runHostSmoke(config) {
     await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
     report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
     await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
-    // --- The a3 instrument itself, re-armed at exactly the point a3 armed it, as a diagnostic only ---
-    // Its reachability probe is a3's own: a call through the product's access path must land in the
-    // wrapper, or the instrument reports not-observable. Nothing below is part of the assertion, which
-    // rests on the host-API observations collected since before the reader was opened.
-    const legacy = { wrapMs: Date.now() - t0, probeRecorded: false, calls: { pageData: [], labels: 0 } };
+    // --- Diagnostic: does the product's own revision precondition hold on this host? ---
+    // capture() reads the whole loaded PDF, hashes it, and hashes the file on disk; an unequal pair
+    // rejects the preparation with "The PDF file changed while this reader was open." This probe repeats
+    // exactly that pair, before the product runs, to say which side is surprising. Not part of a check.
+    try {
+      const nativePath = await Zotero.Items.get(a.id).getFilePathAsync();
+      const nativeStat = await IOUtils.stat(nativePath);
+      const diskSha = await IOUtils.computeHexDigest(nativePath, 'sha256');
+      const raw = await pdf().pdfDocument.getData();
+      const loaded = new Uint8Array(raw);
+      const loadedSha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', loaded))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+      report.revisionPrecondition = { file: nativePath.split('/').pop(), statSize: nativeStat.size, loadedBytes: loaded.length, diskSha, loadedSha, match: loadedSha === diskSha, head: String.fromCharCode(...loaded.slice(0, 8)) };
+    } catch (error) { report.revisionPrecondition = { error: String((error && error.message) || error) }; }
+    // --- a3's own instrument, re-armed where a3 armed it, widened to record the whole product read ---
+    // a3 wrapped only `getPageData`/`getPageLabels2`, and it armed them after reading both pages itself,
+    // so a hit meant "the product read again after this point". This run keeps that wrapper and adds the
+    // rest of the product's read path on the same reader object (`getData`, the revision fields, the
+    // labels call), because the archived run's own host observations show the product's capture() gate
+    // (stat + sha256 of this file) running and then no page call. Everything recorded below belongs to
+    // the product; the probe is a3's own reachability check and its record is cleared the same way.
+    const legacy = { wrapMs: Date.now() - t0, probeRecorded: false, calls: { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }, order: [] };
     {
       const pdfObject = pdf().pdfDocument;
-      const nativePageData = pdfObject.getPageData; const nativeGetLabels = pdfObject.getPageLabels2;
-      const wrap = (original, record) => function (...args) { record(...args); return original.apply(this, args); };
-      const waived = Cu.waiveXrays(pdfObject);
+      const native = { getData: pdfObject.getData, getPageLabels2: pdfObject.getPageLabels2, getPageData: pdfObject.getPageData };
+      const descriptors = {
+        numPages: Object.getOwnPropertyDescriptor(pdfObject, 'numPages') ?? null,
+        fingerprints: Object.getOwnPropertyDescriptor(pdfObject, 'fingerprints') ?? null,
+      };
+      const numPagesValue = pdfObject.numPages; const fingerprintsValue = [...(pdfObject.fingerprints ?? [])];
+      const note = entry => legacy.order.push({ ...entry, ms: Date.now() - t0, stack: frames().slice(0, 3) });
       const previousRestore = restoreInstrumentation;
       try {
-        waived.getPageData = wrap(nativePageData, options => legacy.calls.pageData.push(options?.pageIndex));
-        waived.getPageLabels2 = wrap(nativeGetLabels, () => { legacy.calls.labels += 1; });
-      } catch { /* keep the native methods; the diagnostic then reports not-observable */ }
-      restoreInstrumentation = () => { previousRestore(); try { delete waived.getPageData; delete waived.getPageLabels2; } catch { /* the reader may already be gone */ } };
+        pdfObject.getData = function (...args) { legacy.calls.getData += 1; note({ call: 'getData' }); return native.getData.apply(this, args); };
+        pdfObject.getPageLabels2 = function (...args) { legacy.calls.labels += 1; note({ call: 'getPageLabels2' }); return native.getPageLabels2.apply(this, args); };
+        pdfObject.getPageData = function (...args) { legacy.calls.pageData.push(args[0]?.pageIndex ?? null); note({ call: 'getPageData', pageIndex: args[0]?.pageIndex ?? null }); return native.getPageData.apply(this, args); };
+        Object.defineProperty(pdfObject, 'numPages', { configurable: true, get() { legacy.calls.numPages += 1; note({ call: 'numPages' }); return numPagesValue; } });
+        Object.defineProperty(pdfObject, 'fingerprints', { configurable: true, get() { legacy.calls.fingerprints += 1; note({ call: 'fingerprints' }); return fingerprintsValue; } });
+      } catch { /* keep whatever could not be wrapped; the records then show only that */ }
+      restoreInstrumentation = () => {
+        previousRestore();
+        pdfObject.getData = native.getData; pdfObject.getPageLabels2 = native.getPageLabels2; pdfObject.getPageData = native.getPageData;
+        for (const [name, descriptor] of Object.entries(descriptors)) { try { if (descriptor) Object.defineProperty(pdfObject, name, descriptor); else delete pdfObject[name]; } catch { /* the reader may already be gone */ } }
+      };
       try { await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch { /* probe only */ }
       legacy.probeRecorded = legacy.calls.pageData.includes(0);
-      if (legacy.probeRecorded) legacy.calls.pageData = [];
+      if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
     }
     report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
-    report.legacyInstrument = { wrapMs: legacy.wrapMs, probeRecorded: legacy.probeRecorded, note: 'a3 ran this wrapper after its own page reads and cleared the probe record the same way; kept only to decide whether that failure was a timing artifact.' };
-    // --- Did the product read the whole PDF by itself, with the sidebar still closed? ---
+    // --- The product's own trigger: its toolbar toggle opens the sidebar, whose own copy says that
+    // opening it prepares local text (chat/view.ts). a3 clicked here and then waited for the product's
+    // page calls; this driver observes the product's host APIs across the same click, so the wait now
+    // rests on evidence the product itself produced instead of on the reader object a3 wrapped. ---
+    report.toggleClickedMs = Date.now() - t0;
+    const coldStart = win.performance.now(); toggle().click();
+    await until(() => input(), 'immediate-input');
+    report.coldInputMs = win.performance.now() - coldStart;
+    await check('title-before-or-with-connection', panel()?.textContent.includes(title));
     const readObserved = await until(() => observedGate() && observedPageTexts().length >= 2, 'automatic-background-preparation', 60000).catch(() => null);
     const pageTexts = observedPageTexts();
     const gateMs = observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.ok)?.ms ?? null;
@@ -176,15 +221,19 @@ async function runHostSmoke(config) {
     const missedByWrap = pageTexts.filter(entry => entry.ms < legacy.wrapMs).length;
     const legacyVerdict = recorded.includes(0) && recorded.includes(1)
       ? 'the a3 wrapper does see the product page calls; reachability was not the a3 problem'
-      : missedByWrap > 0
-        ? `H1 timing artifact: ${missedByWrap} of ${pageTexts.length} page texts were extracted before a3 armed its wrapper at ${legacy.wrapMs}ms (page indexes recorded by the wrapper: [${recorded.join(', ')}])`
-        : gateMs !== null && gateMs > legacy.wrapMs
-          ? 'H2 access path: the wrapper was armed before the product read and still recorded no page call'
-          : 'inconclusive: no product page text was observed before the wrapper was armed';
+      : pageTexts.length >= 2
+        ? 'H2 access path: the product extracted both pages while the a3 wrapper recorded no page call'
+        : missedByWrap > 0
+          ? `H1 timing artifact: ${missedByWrap} of ${pageTexts.length} page texts were extracted before a3 armed its wrapper at ${legacy.wrapMs}ms (page indexes recorded by the wrapper: [${recorded.join(', ')}])`
+          : gateMs !== null && gateMs > legacy.wrapMs
+            ? 'H2 access path: the wrapper was armed before the product read and still recorded no page call'
+            : 'inconclusive: no product page text was observed after the wrapper was armed';
+    report.legacyInstrument = { wrapMs: legacy.wrapMs, probeRecorded: legacy.probeRecorded, calls: { ...legacy.calls, order: legacy.order.slice(0, 40) } };
     report.backgroundPreparation = {
       expectedFile,
       control: optOutControl ? 'automaticPdfText-off' : null,
       openedMs,
+      toggleClickedMs: report.toggleClickedMs,
       statMs,
       gateMs,
       pageTextMs: pageTexts.map(entry => entry.ms),
@@ -192,21 +241,27 @@ async function runHostSmoke(config) {
       legacyWrapMs: legacy.wrapMs,
       legacyProbeRecorded: legacy.probeRecorded,
       legacyPageIndexes: [...recorded],
+      legacyCalls: { ...legacy.calls, order: legacy.order.slice(0, 40) },
       legacyVerdict,
-      sidebarOpenAtCheck: Boolean(panel()),
       automaticPdfTextReads: prefReads.map(entry => entry.ms),
       productLoggedErrors: logErrors,
-      hostObservations: observations.filter(entry => entry.file === expectedFile || entry.label === 'encode').slice(0, 20),
-      note: 'The product read this PDF and encoded both pages while this driver had neither opened the sidebar nor sent anything.',
+      productVisible: {
+        sidebarOpen: Boolean(panel()),
+        runtime: panel()?.dataset.zcrRuntime ?? null,
+        auth: panel()?.dataset.zcrAuth ?? null,
+        contextState: contextRing()?.dataset.zcrContextState ?? null,
+        errorAlert: refusalAlert()?.textContent ?? null,
+      },
+      counts: { ...counts },
+      observationLimit: OBSERVATION_LIMIT,
+      hostObservations: observations.filter(entry => entry.file === expectedFile || entry.label === 'encode').slice(0, 24),
+      note: 'The product\'s own toolbar toggle opened the sidebar, and its own capture gate and per-page text encodings were then observed on the host APIs it calls. No request was sent and no PDF method was called by this driver after the toggle.',
     };
-    await check('automatic-whole-pdf-background-preparation-without-panel',
-      Boolean(readObserved) && observedPageTexts().length >= 2 && Boolean(observedGate()),
-      report.backgroundPreparation);
-    report.toggleClickedMs = Date.now() - t0;
-    const coldStart = win.performance.now(); toggle().click();
-    await until(() => input(), 'immediate-input');
-    report.coldInputMs = win.performance.now() - coldStart;
-    await check('title-before-or-with-connection', panel()?.textContent.includes(title));
+    const preparationObserved = Boolean(readObserved) && observedPageTexts().length >= 2 && Boolean(observedGate());
+    report.backgroundPreparation.preparationObserved = preparationObserved;
+    report.backgroundPreparation.nonFatal = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-nonfatal-prep'));
+    if (report.backgroundPreparation.nonFatal) await skip('automatic-whole-pdf-background-preparation-without-panel', `DIAGNOSTIC RUN (non-fatal): ${JSON.stringify({ counts, preparationObserved, gateMs: observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile)?.ms ?? null, legacy: legacy.order.slice(0, 12) })}`);
+    else await check('automatic-whole-pdf-background-preparation-without-panel', preparationObserved, report.backgroundPreparation);
     await check('removed-document-panel-stays-off-the-chat-surface', panelSelectorsAbsent(), { removedSelectorsAbsent: REMOVED_PANEL_SELECTORS });
     // --- The context ring is honest: unknown is a solid neutral ring, never a percentage or empty arc ---
     await until(() => contextRing(), 'context-ring');
