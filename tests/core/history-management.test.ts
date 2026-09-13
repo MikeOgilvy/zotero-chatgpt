@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
 import { paperId, type Conversation, type PaperScope } from '../../packages/contracts/src/index.ts';
 import type { StoragePort } from '../../packages/contracts/src/runtime.ts';
-import type { HistoryEntry, HistoryListing, HistoryMutationReport, HistorySource, HistoryStorageReport } from '../../packages/contracts/src/workspace.ts';
+import type { HistoryEntry, HistoryListing, HistoryMutationReport, HistorySource } from '../../packages/contracts/src/workspace.ts';
 import { ConversationStore } from '../../packages/core/src/sessions/store.ts';
-import { filterHistory, HistoryManager, historyCounts, historyPapers, isHistoryListing, isHistoryReport, isHistoryStorageReport } from '../../packages/core/src/workspace/history.ts';
+import { filterHistory, HistoryManager, historyCounts, historyPapers, isHistoryListing, isHistoryReport } from '../../packages/core/src/workspace/history.ts';
 import { WorkspaceStore } from '../../packages/core/src/workspace/store.ts';
 import { paperA, paperB, settings } from '../contracts/factories.ts';
 import { MemoryStorage } from './doubles.ts';
@@ -177,29 +177,6 @@ it('rejects malformed listing and report payloads instead of accepting or collap
   expect(isHistoryReport({ ...report, failed: [{ id: entry.id }] })).toBe(false);
   expect(isHistoryReport({ ...report, partial: true })).toBe(false);
   expect(isHistoryReport(null)).toBe(false);
-});
-
-it('rejects a malformed storage report instead of presenting a number it cannot trust', () => {
-  const valid: HistoryStorageReport = {
-    location: '/tmp/profile/zotero-codex-reader/v1/records', scope: 'zotero-codex-reader/v1/records',
-    bytes: 300, chatBytes: 200, draftBytes: 60, otherBytes: 40, files: 4, chats: [{ id: '12345678-0000-4000-8000-000000000001', bytes: 200 }],
-    chatsComplete: true, complete: true, stoppedBy: null, limits: { entries: 20_000, bytes: 1 << 30, depth: 4 }, measuredAt: NOW,
-  };
-  expect(isHistoryStorageReport(valid)).toBe(true);
-  expect(isHistoryStorageReport(null)).toBe(false);
-  expect(isHistoryStorageReport({ ...valid, bytes: 'nope' })).toBe(false);
-  // The subtree split must add up, or the pane would show parts that do not match the total.
-  expect(isHistoryStorageReport({ ...valid, otherBytes: 41 })).toBe(false);
-  // An incomplete figure must say which bound stopped it, and a complete one must claim no stop.
-  expect(isHistoryStorageReport({ ...valid, complete: false })).toBe(false);
-  expect(isHistoryStorageReport({ ...valid, stoppedBy: 'entries' })).toBe(false);
-  expect(isHistoryStorageReport({ ...valid, complete: false, stoppedBy: 'unknown' })).toBe(false);
-  // Per-chat bytes can never exceed the chat subtree, and ids are distinct.
-  expect(isHistoryStorageReport({ ...valid, chats: [{ id: valid.chats[0]!.id, bytes: 201 }] })).toBe(false);
-  expect(isHistoryStorageReport({ ...valid, chats: [valid.chats[0]!, valid.chats[0]!] })).toBe(false);
-  // The walked scope is relative to the profile; an absolute path there would be a forged location.
-  expect(isHistoryStorageReport({ ...valid, scope: '/zotero-codex-reader/v1/records' })).toBe(false);
-  expect(isHistoryStorageReport({ ...valid, extra: true })).toBe(false);
 });
 
 it('lists chats without reading stored document bodies or image assets', async () => {

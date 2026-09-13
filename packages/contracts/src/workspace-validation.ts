@@ -1,5 +1,5 @@
 import { ReaderError, paperId, type ContextBatch, type ContextReport } from './index.ts';
-import type { HistoryEntry, HistoryStorageReport, HistoryStorageStop, Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowSnapshot } from './workspace.ts';
+import type { HistoryEntry, Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowSnapshot } from './workspace.ts';
 import { validatePaperIdentity, validatePaperScope } from './validation.ts';
 import { validateDocument } from './document.ts';
 function fail(): never { throw new ReaderError('INVALID_REQUEST', 'The workflow or reference snapshot is invalid.'); }
@@ -57,39 +57,6 @@ export function validateHistoryEntry(value: unknown): HistoryEntry {
   if (source.unfinishedWork !== undefined) { if (source.unfinishedWork !== true) fail(); result.unfinishedWork = true; }
   if (source.archivedAt !== undefined) result.archivedAt = timestamp(source.archivedAt);
   return result;
-}
-const storageStopCodes = ['entries', 'bytes', 'depth', 'entry-type', 'listing'] as const;
-/**
- * Validates a storage measurement exactly as the host may report it. A figure whose parts do not add
- * up, or that claims to be complete while naming a stop, is rejected whole: the pane then says the
- * size is unknown instead of showing a number it cannot stand behind.
- */
-export function validateHistoryStorageReport(value: unknown): HistoryStorageReport {
-  const source = object(value, ['location', 'scope', 'bytes', 'chatBytes', 'draftBytes', 'otherBytes', 'files', 'chats', 'chatsComplete', 'complete', 'stoppedBy', 'limits', 'measuredAt']);
-  const location = text(source.location, 4096, 1);
-  const scope = text(source.scope, 512, 1);
-  // The scope is always relative to the profile: an absolute path here would be a forged location.
-  if (/^[/\\]/u.test(scope) || scope.split('/').some(part => !part || part === '.' || part === '..')) fail();
-  const bytes = count(source.bytes);
-  const chatBytes = count(source.chatBytes); const draftBytes = count(source.draftBytes); const otherBytes = count(source.otherBytes);
-  if (chatBytes + draftBytes + otherBytes !== bytes) fail();
-  const files = count(source.files, 10_000_000);
-  if (typeof source.chatsComplete !== 'boolean' || typeof source.complete !== 'boolean') fail();
-  if (source.stoppedBy !== null && !storageStopCodes.includes(source.stoppedBy as (typeof storageStopCodes)[number])) fail();
-  const stoppedBy = source.stoppedBy === null ? null : source.stoppedBy as HistoryStorageStop;
-  // An incomplete figure must name the bound that stopped it; a complete one must name none.
-  if (source.complete !== (stoppedBy === null)) fail();
-  const limits = object(source.limits, ['entries', 'bytes', 'depth']);
-  const entries = count(limits.entries, 1_000_000); const limitBytes = count(limits.bytes, 1_099_511_627_776); const depth = count(limits.depth, 16);
-  if (!entries || !limitBytes || !depth) fail();
-  const chats = array(source.chats, 1000).map(row => {
-    const chat = object(row, ['id', 'bytes']);
-    return { id: text(chat.id, 64, 1), bytes: count(chat.bytes) };
-  });
-  if (new Set(chats.map(chat => chat.id)).size !== chats.length) fail();
-  // Per-chat bytes are a subset of the chat subtree, and one file belongs to at most one chat.
-  if (chats.length > files || chats.reduce((total, chat) => total + chat.bytes, 0) > chatBytes) fail();
-  return { location, scope, bytes, chatBytes, draftBytes, otherBytes, files, chats, chatsComplete: source.chatsComplete, complete: source.complete, stoppedBy, limits: { entries, bytes: limitBytes, depth }, measuredAt: timestamp(source.measuredAt) };
 }
 export function validateReferenceInput(value: unknown): ReferenceInput {
   const source = object(value, ['id', 'kind', 'label', 'paper', 'identity', 'conversationId', 'messageIds', 'text', 'range', 'capturedAt', 'document']);

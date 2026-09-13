@@ -12,16 +12,14 @@ import { createHistorySection, type HistorySection } from './history-section.ts'
  * revision conflicts, and the pane re-reads after every write so it never shows a state the store
  * refused. Per-chat overrides stay in the sidebar and are never written from here.
  *
- * Copy follows the stored UI language through the same localizer the sidebar uses. Profile names,
- * skill names, ids, versions and file paths are never translated.
+ * Copy follows the stored UI language through the same localizer the sidebar uses. Skill names, ids,
+ * versions, model ids and file paths are never translated.
  */
 export interface PreferencesPaneHost {
   read(): Promise<WorkspaceSettings>;
   save(value: WorkspaceSettings): Promise<void>;
   setSkillEnabled(id: string, enabled: boolean): Promise<void>;
   exportPreferences(): Promise<void>;
-  /** A fresh, valid profile id; minted in the plugin sandbox, never in the pane. */
-  profileId(): string;
   /** The shared automatic-PDF-text opt-out (`extensions.zcr.automaticPdfText`), never a store copy. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
@@ -32,17 +30,11 @@ export interface PreferencesPaneHost {
    */
   readLiveModels?(): Promise<unknown>;
   /**
-   * History management. All three are optional and versioned by presence: a host that has not been
+   * History management. Both are optional and versioned by presence: a host that has not been
    * upgraded renders no History section rather than a broken one.
    */
   readHistory?(query: string): Promise<unknown>;
-  setHistoryArchived?(ids: string[], archived: boolean): Promise<unknown>;
   deleteHistory?(ids: string[]): Promise<unknown>;
-  /**
-   * Bounded storage measurement, separately optional: a host without it still gets the full History
-   * list and states that the size is unavailable instead of showing a blank or a guess.
-   */
-  readStorageReport?(): Promise<unknown>;
 }
 export interface PreferencesPane {
   mount(root: Element): Promise<void>;
@@ -50,22 +42,33 @@ export interface PreferencesPane {
 }
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
-const PREFERENCE_FIELDS: ReadonlyArray<{ key: keyof Personalization; title: string; kind: 'input' | 'textarea' | 'select'; choices?: ReadonlyArray<readonly [string, string]> }> = [
-  { key: 'language', title: 'Answer language', kind: 'input' },
-  { key: 'detail', title: 'Answer detail', kind: 'select', choices: [['brief', 'Brief'], ['standard', 'Standard'], ['detailed', 'Detailed']] },
-  { key: 'mathematics', title: 'Mathematical explanation', kind: 'select', choices: [['auto', 'Automatic'], ['intuition-first', 'Intuition first'], ['formal', 'Formal derivation']] },
-  { key: 'background', title: 'Research background', kind: 'textarea' },
-  { key: 'citationStyle', title: 'Citation style', kind: 'input' },
-  { key: 'annotationStyle', title: 'Annotation style', kind: 'input' },
-];
+/**
+ * The persisted field that carries the owner's free-text instructions. `background` was the existing
+ * free-text preference, so the Codex-shaped instructions box reuses it instead of adding a shape.
+ * The other five preference fields stay in the record — still validated and still sent inside the
+ * frozen `workflow.preferences` snapshot — but are no longer editable in this pane.
+ */
+const INSTRUCTIONS_FIELD: keyof Personalization = 'background';
+const INSTRUCTIONS_MAX = 4096;
 
 /**
- * Stateful copy for the model fieldset: the pane says which source the rows came from. Both
- * sentences are exact keys in `chat/ui-locale.ts`; the GPT-5.3 Spark family is named because it is
- * the one family that is not in the bundled catalog and can only arrive from the runtime.
+ * The builtin workflows the pane offers. The definitions stay installed and the default path is
+ * untouched — an ordinary question carries no workflow at all (`skillId: null`) — so withdrawing a
+ * builtin here only removes its row. The owner's own user/imported workflows keep their rows.
+ * Reversible: add an id back to this set to list it again. Recorded in `docs/progress.md`.
  */
-const MODELS_NOTE_BUNDLED = 'Choose which models the composer may offer. This list is the catalog bundled with the pinned Codex runtime, not a live report of your account\'s entitlements. The GPT-5.3-Spark models come from the running Codex runtime and are not in the bundled catalog, so they appear here only after a runtime has reported them; no ids are guessed. The exact id under each name is what is sent.';
-const MODELS_NOTE_LIVE = 'Choose which models the composer may offer. This list combines the models the running Codex runtime reported for this account with the GPT-6 and GPT-5.6 models in the bundled catalog. The exact id under each name is what is sent.';
+const OFFERED_BUILTIN_SKILLS = new Set(['builtin-annotate']);
+function offeredSkill(skill: ReaderSkill): boolean {
+  return skill.origin !== 'builtin' || OFFERED_BUILTIN_SKILLS.has(skill.id);
+}
+
+/**
+ * Stateful copy for the model fieldset: one line saying where the rows came from. The GPT-5.3 Spark
+ * family is named because it is the one family that is not in the bundled catalog and can only
+ * arrive from the runtime. Both sentences are exact keys in `chat/ui-locale.ts`.
+ */
+const MODELS_NOTE_BUNDLED = 'This is the bundled catalog, not your account\'s live entitlements. GPT-5.3-Spark models come from the running runtime and appear only after it reports them. The exact id is what is sent.';
+const MODELS_NOTE_LIVE = 'These rows combine the models the running runtime reported with the bundled catalog\'s GPT-6 and GPT-5.6. The exact id is what is sent.';
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : 'The action could not be completed.';
@@ -88,7 +91,6 @@ function isSettings(value: unknown): value is WorkspaceSettings {
 export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPane {
   let root: Element | null = null;
   let current: WorkspaceSettings | null = null;
-  let selectedProfileId: string | null = null;
   let busy = false;
   let disposed = false;
   let frame: HTMLElement | null = null;
@@ -173,15 +175,11 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     uiLanguage: HTMLSelectElement;
     textScale: HTMLInputElement;
     automaticPdfText: HTMLInputElement;
-    preferences: Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>;
+    /** The one editable preference: the free-text instructions carried by `background`. */
+    instructions: HTMLTextAreaElement;
     savePreferences: HTMLButtonElement;
     exportPreferences: HTMLButtonElement;
     models: HTMLElement;
-    profile: HTMLSelectElement;
-    profileName: HTMLInputElement;
-    saveProfile: HTMLButtonElement;
-    updateProfile: HTMLButtonElement;
-    deleteProfile: HTMLButtonElement;
     skills: HTMLElement;
   }
 
@@ -216,9 +214,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     const automaticPdfText = element(doc, 'input');
     automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zcrPref = 'automatic-pdf-text';
     automaticPdfLabel.append(automaticPdfText);
-    const automaticPdfNote = element(doc, 'p', 'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.');
-    automaticPdfNote.className = 'zcr-preferences-muted';
-    pdfText.append(automaticPdfLabel, automaticPdfNote);
+    pdfText.append(automaticPdfLabel);
 
     // The allowlist is a checkbox list, not a multi-select: the pane's existing controls are labels
     // plus checkboxes (skills, automatic PDF text), and a long model list stays keyboard-operable,
@@ -233,75 +229,65 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     models.dataset.zcrPref = 'models';
     modelsField.append(note, models);
 
-    const research = fieldset(doc, container, 'Research preferences');
-    const preferences = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
-    for (const field of PREFERENCE_FIELDS) {
-      const label = labelled(doc, research, field.title, `preference-${field.key}`, field.kind, field.choices);
-      const control = label.querySelector(field.kind) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-      preferences.set(field.key, control);
-    }
-    const savePreferences = element(doc, 'button', 'Save preferences');
+    // The Codex shape: a title, one description line and one multi-line instructions box with Save.
+    // The single box is the whole section; the instructions persist in `background` and reach every
+    // request in the frozen `workflow.preferences` snapshot.
+    const research = fieldset(doc, container, 'Codex instructions');
+    const instructionNote = element(doc, 'p', 'Give Codex extra instructions and context for all chats.');
+    instructionNote.className = 'zcr-preferences-muted';
+    research.append(instructionNote);
+    const instructionsLabel = labelled(doc, research, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
+    const instructions = instructionsLabel.querySelector('textarea') as HTMLTextAreaElement;
+    instructions.rows = 5;
+    instructions.maxLength = INSTRUCTIONS_MAX;
+    const savePreferences = element(doc, 'button', 'Save');
     savePreferences.type = 'button'; savePreferences.dataset.zcrPref = 'save-preferences';
-    const exportPreferences = element(doc, 'button', 'Export preferences');
-    exportPreferences.type = 'button'; exportPreferences.dataset.zcrPref = 'export-preferences';
-    research.append(savePreferences, exportPreferences);
+    research.append(savePreferences);
 
-    const profiles = fieldset(doc, container, 'Research profiles');
-    const editing = labelled(doc, profiles, 'Profile being edited', 'profile', 'select');
-    const profile = editing.querySelector('select') as HTMLSelectElement;
-    const nameLabel = labelled(doc, profiles, 'Research profile name', 'profile-name', 'input');
-    const profileName = nameLabel.querySelector('input') as HTMLInputElement;
-    const actions = element(doc, 'div');
-    actions.className = 'zcr-preferences-actions';
-    const saveProfile = element(doc, 'button', 'Save as new profile');
-    const updateProfile = element(doc, 'button', 'Update selected profile');
-    const deleteProfile = element(doc, 'button', 'Delete selected profile');
-    for (const [button, pref] of [[saveProfile, 'save-profile'], [updateProfile, 'update-profile'], [deleteProfile, 'delete-profile']] as const) {
-      button.type = 'button'; button.dataset.zcrPref = pref;
-    }
-    actions.append(saveProfile, updateProfile, deleteProfile);
-    profiles.append(actions);
-
+    // The builtin list is withdrawn to `annotate` for now (see `OFFERED_BUILTIN_SKILLS`); the
+    // definitions stay installed and the owner's own user/imported workflows still list here.
     const workflows = fieldset(doc, container, 'Installed workflows');
     const skills = element(doc, 'div');
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
 
+    // Export is its own pane-level action: it writes the whole stored preferences and profile
+    // snapshot, not the single instructions box, so it does not belong inside that fieldset.
+    const exportPreferences = element(doc, 'button', 'Export preferences');
+    exportPreferences.type = 'button'; exportPreferences.dataset.zcrPref = 'export-preferences';
+    const footer = element(doc, 'div');
+    footer.className = 'zcr-preferences-actions';
+    footer.append(exportPreferences);
+    container.append(footer);
+
     // History management sits last so listing it never delays the settings form above it.
-    if (host.readHistory && host.setHistoryArchived && host.deleteHistory) {
+    if (host.readHistory && host.deleteHistory) {
       historySection = createHistorySection(doc, {
         readHistory: query => host.readHistory!(query),
-        setHistoryArchived: (ids, archived) => host.setHistoryArchived!(ids, archived),
         deleteHistory: ids => host.deleteHistory!(ids),
-        ...(host.readStorageReport ? { readStorageReport: () => host.readStorageReport!() } : {}),
       }, current?.uiLanguage ?? 'en');
       container.append(historySection.element);
     }
 
-    return { form: container, uiLanguage, textScale, automaticPdfText, preferences, savePreferences, exportPreferences, models, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
+    return { form: container, uiLanguage, textScale, automaticPdfText, instructions, savePreferences, exportPreferences, models, skills };
   }
 
   let controls: Controls | null = null;
   let historySection: HistorySection | null = null;
 
+  /**
+   * The persisted preferences with only the editable instructions replaced. The five fields the pane
+   * no longer edits are carried through from the stored record unchanged, so nothing is dropped and
+   * the frozen `workflow.preferences` snapshot keeps sending exactly what is stored.
+   */
   function formPreferences(settings: WorkspaceSettings): Personalization {
-    const next = { ...settings.preferences } as Record<keyof Personalization, string>;
-    for (const field of PREFERENCE_FIELDS) {
-      const control = controls?.preferences.get(field.key);
-      if (!control) continue;
-      next[field.key] = control.value;
-    }
-    return next as unknown as Personalization;
-  }
-
-  function selectedProfile(settings: WorkspaceSettings): { id: string; name: string; preferences: Partial<Personalization> } | null {
-    return settings.profiles.find(profile => profile.id === selectedProfileId) ?? null;
+    return { ...settings.preferences, [INSTRUCTIONS_FIELD]: controls?.instructions.value ?? settings.preferences[INSTRUCTIONS_FIELD] };
   }
 
   function syncSkills(settings: WorkspaceSettings): void {
-    const wanted = new Set(settings.skills.map(skill => skill.id));
+    const wanted = new Set(settings.skills.filter(offeredSkill).map(skill => skill.id));
     for (const [id, entry] of skillRows) if (!wanted.has(id)) { entry.row.remove(); skillRows.delete(id); }
-    const nodes = settings.skills.map(skill => {
+    const nodes = settings.skills.filter(offeredSkill).map(skill => {
       let entry = skillRows.get(skill.id);
       if (!entry) { entry = skillRow(skill); skillRows.set(skill.id, entry); }
       entry.update(skill);
@@ -394,10 +380,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   /** Disabled state only: values stay exactly as the user left them while a write is in flight. */
   function refreshDisabled(): void {
     if (!controls || !current) return;
-    const profile = selectedProfile(current);
-    for (const control of [controls.uiLanguage, controls.textScale, controls.automaticPdfText, controls.savePreferences, controls.exportPreferences, controls.saveProfile, controls.profileName, controls.profile, ...controls.preferences.values()]) control.disabled = busy;
-    controls.updateProfile.disabled = busy || !profile;
-    controls.deleteProfile.disabled = busy || !profile;
+    for (const control of [controls.uiLanguage, controls.textScale, controls.automaticPdfText, controls.instructions, controls.savePreferences, controls.exportPreferences]) control.disabled = busy;
     for (const [id, entry] of skillRows) entry.setDisabled(busy || (current.skills.find(skill => skill.id === id)?.unsupportedDependencies.length ?? 0) > 0);
     for (const entry of modelRows.values()) entry.setDisabled(busy);
     historySection?.setBusy(busy);
@@ -409,22 +392,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     controls.textScale.value = String(current.textScale);
     // Always re-read the pref: another reader may have changed what this checkbox shows.
     controls.automaticPdfText.checked = host.readAutomaticPdfText();
-    const profile = selectedProfile(current);
-    const shown = profile ? { ...current.preferences, ...profile.preferences } : current.preferences;
-    for (const field of PREFERENCE_FIELDS) {
-      const control = controls.preferences.get(field.key)!;
-      control.value = shown[field.key] ?? '';
-    }
-    const none = element((root as Element).ownerDocument, 'option', 'No profile selected');
-    none.value = '';
-    controls.profile.replaceChildren(none, ...current.profiles.map(item => {
-      const option = element((root as Element).ownerDocument, 'option', item.name);
-      option.value = item.id;
-      return option;
-    }));
-    controls.profile.value = profile?.id ?? '';
-    if (profile) controls.profileName.value = profile.name;
-    controls.profile.disabled = busy;
+    controls.instructions.value = current.preferences[INSTRUCTIONS_FIELD] ?? '';
     syncSkills(current);
     syncModels(current);
     // Language changes and every re-read both land here, so the copy follows the stored setting.
@@ -444,7 +412,6 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       if (disposed) return;
       if (!isSettings(value)) { current = null; hardFailure('The stored preferences could not be read.'); return; }
       current = value;
-      if (selectedProfileId && !value.profiles.some(profile => profile.id === selectedProfileId)) selectedProfileId = null;
       sync();
       // The history listing is a separate, lazy read: a slow or unreadable history never blocks the form.
       if (refreshHistory) void historySection?.refresh();
@@ -575,15 +542,10 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       uiLanguage: form.querySelector('[data-zcr-pref="uiLanguage"]') as HTMLSelectElement,
       textScale: form.querySelector('[data-zcr-pref="textScale"]') as HTMLInputElement,
       automaticPdfText: form.querySelector('[data-zcr-pref="automatic-pdf-text"]') as HTMLInputElement,
-      preferences: new Map(PREFERENCE_FIELDS.map(field => [field.key, form.querySelector(`[data-zcr-pref="preference-${field.key}"]`) as HTMLInputElement])),
+      instructions: form.querySelector(`[data-zcr-pref="preference-${INSTRUCTIONS_FIELD}"]`) as HTMLTextAreaElement,
       savePreferences: form.querySelector('[data-zcr-pref="save-preferences"]') as HTMLButtonElement,
       exportPreferences: form.querySelector('[data-zcr-pref="export-preferences"]') as HTMLButtonElement,
       models: form.querySelector('[data-zcr-pref="models"]') as HTMLElement,
-      profile: form.querySelector('[data-zcr-pref="profile"]') as HTMLSelectElement,
-      profileName: form.querySelector('[data-zcr-pref="profile-name"]') as HTMLInputElement,
-      saveProfile: form.querySelector('[data-zcr-pref="save-profile"]') as HTMLButtonElement,
-      updateProfile: form.querySelector('[data-zcr-pref="update-profile"]') as HTMLButtonElement,
-      deleteProfile: form.querySelector('[data-zcr-pref="delete-profile"]') as HTMLButtonElement,
       skills: form.querySelector('[data-zcr-pref="skills"]') as HTMLElement,
     };
     localizer = mountUILocale(root);
@@ -614,36 +576,6 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
         .then(() => { if (!disposed) show(status, 'Preferences exported.'); })
         .catch((caught: unknown) => { if (!disposed) fail(message(caught)); })
         .finally(() => { busy = false; if (!disposed) sync(); });
-    });
-    listen(controls.profile, 'change', () => {
-      selectedProfileId = controls!.profile.value || null;
-      sync();
-    });
-    listen(controls.saveProfile, 'click', () => {
-      if (!current) return;
-      const name = controls!.profileName.value.trim();
-      if (!name) { fail('Name this research profile.'); controls!.profileName.focus(); return; }
-      const preferences = formPreferences(current);
-      const id = host.profileId();
-      void commit(settings => ({ ...settings, profiles: [...settings.profiles.filter(profile => profile.id !== id), { id, name, preferences }] }), 'Research profile saved.').then(saved => {
-        if (!saved || disposed) return;
-        selectedProfileId = id;
-        sync();
-      });
-    });
-    listen(controls.updateProfile, 'click', () => {
-      if (!current) return;
-      const profile = selectedProfile(current);
-      if (!profile) return;
-      const preferences = formPreferences(current);
-      void commit(settings => ({ ...settings, profiles: settings.profiles.map(item => (item.id === profile.id ? { ...item, preferences } : item)) }), 'Research profile updated.');
-    });
-    listen(controls.deleteProfile, 'click', () => {
-      if (!current) return;
-      const profile = selectedProfile(current);
-      if (!profile) return;
-      selectedProfileId = null;
-      void commit(settings => ({ ...settings, profiles: settings.profiles.filter(item => item.id !== profile.id) }), 'Research profile deleted.');
     });
 
     await reload(true, true);

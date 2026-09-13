@@ -1,6 +1,6 @@
 import { ReaderError, paperId } from '../../../contracts/src/index.ts';
-import type { HistoryEntry, HistoryFilter, HistoryListing, HistoryMutationReport, HistoryPaperOption, HistorySource, HistoryStorageReport } from '../../../contracts/src/workspace.ts';
-import { validateHistoryEntry, validateHistoryStorageReport } from '../../../contracts/src/workspace-validation.ts';
+import type { HistoryEntry, HistoryFilter, HistoryListing, HistoryMutationReport, HistoryPaperOption, HistorySource } from '../../../contracts/src/workspace.ts';
+import { validateHistoryEntry } from '../../../contracts/src/workspace-validation.ts';
 
 /**
  * History management for the native Preferences pane. All of it is headless: listing, filtering,
@@ -65,13 +65,6 @@ export function parseHistoryListing(value: unknown): HistoryListing {
 export function parseHistoryReport(value: unknown): HistoryMutationReport {
   if (!isHistoryReport(value)) return unavailable();
   return value;
-}
-/**
- * A storage measurement is accepted only when it is internally consistent, so a partly measured or
- * mismatched figure never reaches the owner as a size.
- */
-export function isHistoryStorageReport(value: unknown): value is HistoryStorageReport {
-  try { validateHistoryStorageReport(value); return true; } catch { return false; }
 }
 
 export function historyCounts(entries: readonly HistoryEntry[]): { total: number; active: number; archived: number } {

@@ -14,7 +14,6 @@ interface PreferencesBridge {
   writeSettings(json: string): Promise<void> | void;
   setSkillEnabled(id: string, enabled: boolean): Promise<void> | void;
   exportPreferences(): Promise<void> | void;
-  newProfileId(): string;
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /**
@@ -27,10 +26,7 @@ interface PreferencesBridge {
    * an older plugin host simply renders no History section instead of failing to mount the pane.
    */
   readHistory?(query: string): Promise<string> | string;
-  setHistoryArchived?(ids: string, archived: boolean): Promise<string> | string;
   deleteHistory?(ids: string): Promise<string> | string;
-  /** Bounded storage measurement, optional like the rest: absent means the pane says size is unknown. */
-  readStorageReport?(): Promise<string> | string;
 }
 interface ZoteroGlobal {
   ZoteroCodexReaderPreferencesHost?: PreferencesBridge;
@@ -60,15 +56,10 @@ function mount(root: Element): void {
   }
   // History methods cross as JSON text too. A host that has not published them yet gets a pane with
   // no History section; a malformed payload is the section's problem, never a mount failure.
-  const history = bridge.readHistory && bridge.setHistoryArchived && bridge.deleteHistory
+  const history = bridge.readHistory && bridge.deleteHistory
     ? {
         readHistory: async (query: string): Promise<unknown> => JSON.parse(await bridge.readHistory!(query)) as unknown,
-        setHistoryArchived: async (ids: string[], archived: boolean): Promise<unknown> => JSON.parse(await bridge.setHistoryArchived!(JSON.stringify(ids), archived)) as unknown,
         deleteHistory: async (ids: string[]): Promise<unknown> => JSON.parse(await bridge.deleteHistory!(JSON.stringify(ids))) as unknown,
-        // The storage measurement is separately optional: without it the section still lists chats.
-        ...(bridge.readStorageReport ? {
-          readStorageReport: async (): Promise<unknown> => JSON.parse(await bridge.readStorageReport!()) as unknown,
-        } : {}),
       }
     : {};
   const pane = createPreferencesPane({
@@ -76,7 +67,6 @@ function mount(root: Element): void {
     save: value => Promise.resolve(bridge.writeSettings(JSON.stringify(value))),
     setSkillEnabled: (id, enabled) => Promise.resolve(bridge.setSkillEnabled(id, enabled)),
     exportPreferences: () => Promise.resolve(bridge.exportPreferences()),
-    profileId: () => bridge.newProfileId(),
     readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
     writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
     // The live model list is optional like History: an older host renders the bundled families and

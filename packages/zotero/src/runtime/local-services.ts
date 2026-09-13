@@ -6,7 +6,6 @@ import { createNativeAgentPort } from '../agent/native.ts';
 import type { NativeAgentHost } from '../agent/host.ts';
 import { createLibraryReferencePort } from '../reader/library.ts';
 import type { ReaderDocumentCache } from '../reader/document.ts';
-import { createHistoryStorageReader } from '../workspace/history-storage.ts';
 import { GeckoStorage, privateDirectory } from './storage.ts';
 import type { RuntimeHost } from './prepare.ts';
 
@@ -47,9 +46,7 @@ export function createLocalServices(host: RuntimeHost, zotero: unknown, namespac
     void coordinator.catch(() => { if (activeReader === entry) activeReader = undefined; });
     return coordinator;
   };
-  // Constructing the reader touches no directory; the bounded walk runs only when the owner asks.
-  const measureRecords = createHistoryStorageReader(host);
-  return { getWorkspace, getTasks, getReading, library, measureRecords, async stop(): Promise<void> {
+  return { getWorkspace, getTasks, getReading, library, async stop(): Promise<void> {
     stopped = true;
     const work: Array<Promise<unknown>> = [];
     for (const reader of [activeReader?.coordinator, offlineReader]) if (reader) work.push(reader.then(reader => reader.dispose()));

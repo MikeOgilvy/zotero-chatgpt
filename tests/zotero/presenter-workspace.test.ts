@@ -320,6 +320,27 @@ it('refuses chat deletion while native work remains without cancelling or undoin
   expect(t.port.cancel).not.toHaveBeenCalled(); expect(t.port.undo).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
+it('carries the stored Codex instructions into the outgoing request for an ordinary question', async () => {
+  const f = fixture(); await f.presenter.activate();
+  const stored = f.workspaceSettings();
+  await f.presenter.savePreferences({ ...stored.preferences, background: 'I know linear algebra; prefer SI units.' });
+  f.presenter.setQuestion('Explain the main claim');
+  await f.presenter.send();
+  // An ordinary question carries no skill — that is why withdrawing builtin `read` from the pane's
+  // list cannot affect it — but it still carries the global preferences, instructions included.
+  expect(f.sent[0]?.workflow).toMatchObject({ skill: null, preferences: { background: 'I know linear algebra; prefer SI units.' } });
+  expect(f.sent).toHaveLength(1);
+
+  // Changing the box changes the next payload: the instructions are read per request, not cached.
+  f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'answer', finalText: 'Done' });
+  const next = f.workspaceSettings();
+  await f.presenter.savePreferences({ ...next.preferences, background: 'Answer in Chinese.' });
+  f.presenter.setQuestion('And the second claim?');
+  await f.presenter.send();
+  expect(f.sent[1]?.workflow?.preferences.background).toBe('Answer in Chinese.');
+  f.presenter.dispose();
+});
+
 it('persists editable research profiles but refuses a stale workflow editor', async () => {
   const f = fixture(); await f.presenter.activate();
   const profile = await f.presenter.saveProfile({ id: null, name: 'My project', preferences: { detail: 'detailed' } }); await f.presenter.selectProfile(profile.id);

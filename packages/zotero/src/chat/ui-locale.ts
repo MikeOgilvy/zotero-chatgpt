@@ -4,6 +4,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Sign in with ChatGPT': '使用 ChatGPT 登录', 'Cancel sign-in': '取消登录', Reconnect: '重新连接',
   'New chat': '新建对话', 'Chat history': '对话历史', 'Search chats…': '搜索对话…',
   'Close chat': '关闭对话', 'Delete chat': '删除对话', 'Rename chat': '重命名对话', 'Save name': '保存名称', 'Chat name': '对话名称',
+  // The sidebar's Archived section still renders these; the native pane no longer does.
   Archived: '已归档', 'Archived chats': '已归档的对话', 'Archive chat': '归档对话', 'Restore chat': '恢复对话',
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
   More: '更多', 'Chat options': '对话选项', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
@@ -27,7 +28,6 @@ const COPY: Readonly<Record<string, string>> = {
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
   'Move image earlier': '将图片前移', 'Move image later': '将图片后移',
   'Use current PDF text automatically': '自动使用当前 PDF 文本',
-  'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.': '更改将影响之后的请求。已有文本仍保留在当前对话中；新建对话即可排除它。',
   'Continue with current PDF': '继续使用当前 PDF',
   'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.': '发送时，此 PDF 的提取文本、选中文本和附加图片将通过你的 ChatGPT 账户发送至 Codex。打开侧栏仅会在本地准备文本。你可以在 Zotero 的偏好设置窗口中关闭自动使用 PDF 文本。',
   'This action could not be completed.': '此操作未能完成。',
@@ -45,11 +45,8 @@ const COPY: Readonly<Record<string, string>> = {
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
   'Reference first PDF page': '引用 PDF 起始页', 'Reference last PDF page': '引用 PDF 结束页',
   "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.": '回答偏好、研究配置和工作流可用性位于 Zotero 的偏好设置窗口中。',
-  'Answer language': '回答语言', 'Answer detail': '回答详细程度', 'Mathematical explanation': '数学解释方式',
-  'Research background': '研究背景', 'Citation style': '引用风格', 'Annotation style': '标注风格',
-  Brief: '简短', Standard: '标准', Detailed: '详细', Automatic: '自动', 'Intuition first': '直觉优先', 'Formal derivation': '形式推导',
-  'Save global preferences': '保存全局偏好', 'Save preferences': '保存偏好', 'Export preferences': '导出偏好',
-  'Research profile name': '研究配置名称', 'Save as new profile': '另存为新配置', 'Update selected profile': '更新所选配置', 'Delete selected profile': '删除所选配置',
+  'Instructions': '指令', 'Codex instructions': 'Codex 指令', 'Give Codex extra instructions and context for all chats.': '为所有对话提供额外的指令和上下文。',
+  'Save': '保存', 'Export preferences': '导出偏好',
   'Installed workflows': '已安装的工作流', 'Create workflow': '创建工作流', 'Import workflow': '导入工作流',
   Name: '名称', Description: '说明', Version: '版本', Workflow: '工作流', 'SKILL.md content': 'SKILL.md 内容',
   'Read and explain': '阅读与解释', 'Review annotations': '审核标注', 'Acquire literature': '获取文献', 'Create diagram': '生成示意图',
@@ -75,33 +72,23 @@ const COPY: Readonly<Record<string, string>> = {
   'PDF download is unavailable for this target; approval saves metadata only.': '此目标无法下载 PDF；批准后仅保存元数据。',
   // Native Zotero Preferences pane (workspace/preferences-pane.ts). Messages the store raises
   // through the same text reach the sidebar too, so the key is deliberately shared.
-  Chat: '对话', 'Research preferences': '研究偏好', 'Research profiles': '研究配置',
+  Chat: '对话',
   Models: '模型', 'PDF text': 'PDF 文本',
-  'Choose which models the composer may offer. This list is the catalog bundled with the pinned Codex runtime, not a live report of your account\'s entitlements. The GPT-5.3-Spark models come from the running Codex runtime and are not in the bundled catalog, so they appear here only after a runtime has reported them; no ids are guessed. The exact id under each name is what is sent.': '选择对话输入框可以提供哪些模型。此列表是固定版本 Codex 运行时随包附带的模型目录，并非你账户权限的实时报告。GPT-5.3-Spark 模型由正在运行的 Codex 运行时提供，不在随包目录中，因此只有在某个运行时报告过它们之后才会出现在这里；不会猜测任何 id。每个名称下方显示的确切 id 就是实际发送的 id。',
-  'Choose which models the composer may offer. This list combines the models the running Codex runtime reported for this account with the GPT-6 and GPT-5.6 models in the bundled catalog. The exact id under each name is what is sent.': '选择对话输入框可以提供哪些模型。此列表由正在运行的 Codex 运行时为此账户报告的模型，加上随包目录中的 GPT-6 与 GPT-5.6 模型组成。每个名称下方显示的确切 id 就是实际发送的 id。',
-  'Profile being edited': '正在编辑的研究配置', 'No profile selected': '未选择研究配置',
+  'This is the bundled catalog, not your account\'s live entitlements. GPT-5.3-Spark models come from the running runtime and appear only after it reports them. The exact id is what is sent.': '这是随包目录，并非你账户的实时权限。GPT-5.3-Spark 模型由正在运行的运行时提供，只有在它报告过之后才会出现。实际发送的是确切 id。',
+  'These rows combine the models the running runtime reported with the bundled catalog\'s GPT-6 and GPT-5.6. The exact id is what is sent.': '这些行由正在运行的运行时报告的模型，加上随包目录中的 GPT-6 与 GPT-5.6 组成。实际发送的是确切 id。',
   'Interface language saved.': '界面语言已保存。', 'Chat text scale saved.': '聊天字号已保存。',
   'Automatic PDF text preparation is on.': '已开启自动准备 PDF 文本。', 'Automatic PDF text preparation is off.': '已关闭自动准备 PDF 文本。',
-  'Preferences exported.': '偏好已导出。', 'Research profile updated.': '研究配置已更新。', 'Research profile deleted.': '研究配置已删除。',
-  'Workflow updated.': '工作流已更新。', 'Name this research profile.': '请为此研究配置命名。',
+  'Preferences exported.': '偏好已导出。',
+  'Workflow updated.': '工作流已更新。',
   'The stored preferences could not be read.': '无法读取已保存的偏好。',
-  // History management section (workspace/history-section.ts). Counts, sizes, paper titles and paths
-  // are data and stay verbatim; only the phrases below are translated.
-  Active: '活动', Show: '显示', Paper: '文献', 'All papers': '全部文献',
-  'Archive selected': '归档所选项', 'Restore selected': '恢复所选项', 'Delete selected': '删除所选项',
+  // History management section (workspace/history-section.ts). Counts, paper titles, timestamps and
+  // chat titles are data and stay verbatim; only the phrases below are translated.
+  Paper: '文献', 'All papers': '全部文献', 'Select all': '全选',
+  'Delete selected': '删除所选项',
   'Delete permanently': '永久删除', 'work in progress': '有未完成的工作',
-  'Chats stored on this computer. Archiving is reversible; deleting is not. Nothing is removed until you confirm it.': '保存在此电脑上的对话。归档可以恢复，删除无法恢复；在你确认之前不会移除任何内容。',
   'The saved chat list could not be read. Nothing was changed.': '无法读取已保存的对话列表，未做任何更改。',
   'The change could not be confirmed. Reopen this section to see what is actually stored.': '无法确认更改结果。请重新打开此部分以查看实际保存的内容。',
   'A chat with an unfinished answer or native task was skipped: finish or cancel it before deleting.': '已跳过包含未完成回答或原生任务的对话：请先完成或取消，再删除。',
-  // Storage report. The location, the file count and every byte figure are measurements, never copy.
-  Storage: '存储',
-  'Chats, drafts, workflows and task records live in one plugin-owned folder inside your Zotero profile. Measuring reads file sizes only — never chat text, drafts or credential files — and it never changes anything.': '对话、草稿、工作流和任务记录都保存在 Zotero 配置文件内一个由本插件拥有的文件夹中。测量只读取文件大小，绝不读取对话正文、草稿或认证文件，也不会更改任何内容。',
-  'Calculate size': '计算占用空间', 'Measuring…': '正在测量…', 'Size not measured yet.': '尚未测量占用空间。',
-  'This build cannot report how much space stored chats take.': '此版本无法报告已保存对话占用的空间。',
-  'The stored size could not be measured. Nothing was changed.': '无法测量已占用的空间，未做任何更改。',
-  'At least these figures: an unexpected entry in the records store was not measured.': '至少为以下数值：未测量记录存储中一个意外的条目。',
-  'The records store could not be listed, so its size is unknown. Nothing was changed.': '无法列出记录存储，因此占用空间未知。未做任何更改。',
   // Context-ring coverage disclosure (rendered by `contextDetailNodes` in chat/view.ts). These are
   // labels and phrases only: page numbers, token figures, model ids and the planner's `reason` line
   // are data and pass through verbatim. `unknown`/`not asserted` are emitted only by the disclosure.
@@ -133,14 +120,13 @@ const TEXT = [
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
-  // Native Preferences pane: pane copy only. Profile names, skill names and ids are never matched.
+  // Native Preferences pane: pane copy only. Skill names and ids are never matched.
   '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
-  '.zcr-preferences [data-zcr-pref^="preference-"] option', '.zcr-preferences [data-zcr-pref="profile"] option[value=""]',
   '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',
-  // History management section: its own status, confirmation and storage lines, plus filter options.
+  // History management section: its own status, select-all count, confirmation lines, paper options.
   '.zcr-preferences [data-zcr-history="error"]', '.zcr-preferences [data-zcr-history="status"]',
-  '.zcr-preferences [data-zcr-history="confirm-text"]', '.zcr-preferences [data-zcr-history="storage"] > strong',
-  '.zcr-preferences [data-zcr-history="scope"] option', '.zcr-preferences [data-zcr-history="paper"] option',
+  '.zcr-preferences [data-zcr-history="confirm-text"]', '.zcr-preferences [data-zcr-history="selected-count"]',
+  '.zcr-preferences [data-zcr-history="paper"] option',
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
@@ -180,13 +166,15 @@ function progress(text: string): string {
   if (match) return `目标分类：${match[1]}`;
   match = /^Source: (\S+)\nPermissions: (.*)\nUnsupported dependencies: (.*)$/u.exec(text);
   if (match) return `来源：${match[1]}\n权限：${match[2] === 'none' ? '无' : match[2]}\n不支持的依赖：${match[3] === 'none' ? '无' : match[3]}`;
-  // History management section. Every number, title, size and path in these lines is data and is
-  // carried through verbatim; only the surrounding sentence is translated. They precede the generic
+  // History management section. Every number and title in these lines is data and is carried
+  // through verbatim; only the surrounding sentence is translated. They precede the generic
   // `Delete …?` rule below, which would otherwise only translate the verb.
-  match = /^(\d+) stored chats? · (\d+) archived$/u.exec(text);
-  if (match) return `已保存 ${match[1]} 个对话 · ${match[2]} 个已归档`;
-  match = /^(\d+) matching chats? · (\d+) archived$/u.exec(text);
-  if (match) return `匹配 ${match[1]} 个对话 · ${match[2]} 个已归档`;
+  match = /^(\d+) stored chats?$/u.exec(text);
+  if (match) return `已保存 ${match[1]} 个对话`;
+  match = /^(\d+) matching chats?$/u.exec(text);
+  if (match) return `匹配 ${match[1]} 个对话`;
+  match = /^(\d+) selected$/u.exec(text);
+  if (match) return `已选择 ${match[1]} 个`;
   match = /^(\d+) messages?$/u.exec(text);
   if (match) return `${match[1]} 条消息`;
   match = /^(\d+) tasks?$/u.exec(text);
@@ -195,30 +183,15 @@ function progress(text: string): string {
   if (match) return `仅显示最近匹配的 ${match[2]} 个对话中的 ${match[1]} 个。请缩小搜索范围或更改文献筛选以查看其余内容。`;
   match = /^…and (\d+) more papers — search to narrow$/u.exec(text);
   if (match) return `……还有 ${match[1]} 篇文献，请用搜索缩小范围`;
-  match = /^(Archived|Restored|Deleted) (\d+) of (\d+) chats?\.(?: (\d+) could not be changed\.)?$/u.exec(text);
+  match = /^Deleted (\d+) of (\d+) chats?\.(?: (\d+) could not be changed\.)?$/u.exec(text);
   if (match) {
-    const verb = match[1] === 'Deleted' ? '删除' : match[1] === 'Archived' ? '归档' : '恢复';
-    const head = `已${verb} ${match[3]} 个对话中的 ${match[2]} 个。`;
-    return match[4] ? `${head}有 ${match[4]} 个未能更改。` : head;
+    const head = `已删除 ${match[2]} 个对话中的 ${match[1]} 个。`;
+    return match[3] ? `${head}有 ${match[3]} 个未能更改。` : head;
   }
   match = /^Delete “(.+)”\? This permanently removes the chat, its messages and its unsent draft from this computer\. Native task outputs and exported files are not undone\. This cannot be undone\.$/u.exec(text);
   if (match) return `删除“${match[1]}”？将从此电脑永久移除该对话、其中的消息及其未发送的草稿。原生任务的输出和已导出的文件不会被撤销。此操作无法撤销。`;
   match = /^Delete (\d+) chats\? This permanently removes those chats, their messages and their unsent drafts from this computer\. Native task outputs and exported files are not undone\. This cannot be undone\.$/u.exec(text);
   if (match) return `删除 ${match[1]} 个对话？将从此电脑永久移除这些对话、其中的消息及其未发送的草稿。原生任务的输出和已导出的文件不会被撤销。此操作无法撤销。`;
-  match = /^Location: (.+)$/u.exec(text);
-  if (match) return `位置：${match[1]}`;
-  match = /^Absolute path: (.+)$/u.exec(text);
-  if (match) return `绝对路径：${match[1]}`;
-  match = /^Chats (.+) · Drafts (.+) · Other records (.+) · (\d+) files$/u.exec(text);
-  if (match) return `对话 ${match[1]} · 草稿 ${match[2]} · 其他记录 ${match[3]} · ${match[4]} 个文件`;
-  match = /^Measured (.+)\.$/u.exec(text);
-  if (match) return `测量时间 ${match[1]}。`;
-  match = /^At least these figures: the measurement stopped at its (.+) bound\.$/u.exec(text);
-  if (match) return `至少为以下数值：测量在 ${match[1]} 上限处停止。`;
-  match = /^At least these figures: a directory deeper than (\d+) levels was not measured\.$/u.exec(text);
-  if (match) return `至少为以下数值：未测量深度超过 ${match[1]} 层的目录。`;
-  match = /^Per-chat sizes are shown for the largest (\d+) chats\.$/u.exec(text);
-  if (match) return `按对话显示的大小仅覆盖最大的 ${match[1]} 个对话。`;
   match = /^Delete (.+)\?$/u.exec(text);
   if (match) return `删除 ${match[1]}？`;
   match = /^Context ([\d.]+k?) \/ ([\d.]+k?) tokens$/u.exec(text);

@@ -1,29 +1,25 @@
-import type { HistoryAction, HistoryEntry, HistoryFilterScope, HistoryListing, HistoryMutationReport, HistoryStorageReport } from '../../../contracts/src/workspace.ts';
-import { filterHistory, historyCounts, historyPapers, isHistoryListing, isHistoryReport, isHistoryStorageReport } from '../../../core/src/workspace/history.ts';
-import { HISTORY_STORAGE_SCOPE } from './history-storage.ts';
+import type { HistoryEntry, HistoryListing, HistoryMutationReport } from '../../../contracts/src/workspace.ts';
+import { filterHistory, historyPapers, isHistoryListing, isHistoryReport } from '../../../core/src/workspace/history.ts';
 
 /**
  * The History section of the native Zotero Preferences pane.
  *
- * It renders one listing from the workspace store (the pane never reads transcript files itself),
- * keeps filtering client-side over that single listing, and treats archiving as the reversible
- * toggle it already is. Only deleting is destructive, and every delete goes through an explicit
- * confirmation that names what is removed. Nothing is ever pruned on open.
+ * It renders one listing from the workspace store (the pane never reads transcript files itself) and
+ * keeps the paper filter client-side over that single listing. Deleting is the only removal path:
+ * every delete goes through an explicit confirmation that names how many chats are removed and says
+ * the removal is permanent. Nothing is ever pruned on open.
  *
- * The storage report is measured only when the owner presses "Calculate size": it stats files in the
- * plugin's own records store, reads no contents, and states its bounds when it stops early.
+ * Archive is gone from this surface. Chats a previous build archived (a stored `archivedAt`) are
+ * listed and behave exactly like ordinary chats here; the field is left on disk untouched.
  *
  * Copy is not authored here: every user-facing string below is an English literal that
  * `chat/ui-locale.ts` translates in place, sharing one dictionary with the sidebar. Parameterised
- * lines are built by the helpers below so the locale's patterns can match them; ids, titles, paths
- * and byte figures are the owner's data and pass through verbatim.
+ * lines are built by the helpers below so the locale's patterns can match them; ids, titles and
+ * timestamps are the owner's data and pass through verbatim.
  */
 export interface HistorySectionHost {
   readHistory(query: string): Promise<unknown>;
-  setHistoryArchived(ids: string[], archived: boolean): Promise<unknown>;
   deleteHistory(ids: string[]): Promise<unknown>;
-  /** Optional: without it the section still lists chats and says the size is unavailable. */
-  readStorageReport?(): Promise<unknown>;
 }
 export interface HistorySection {
   readonly element: HTMLElement;
@@ -38,49 +34,30 @@ const SEARCH_DEBOUNCE_MS = 200;
 /**
  * The pane never builds an unbounded list of rows or paper options: a store may hold thousands of
  * chats, and rendering them all would block the Preferences window. The counts always state the
- * true totals, and the truncation is said out loud instead of being silently hidden.
+ * true totals, and the truncation is said out loud instead of being silently hidden. "Select all"
+ * selects exactly the rows this bound rendered, and the truncation note states that more exist.
  */
 const ROW_LIMIT = 200;
 const PAPER_LIMIT = 200;
 
-/**
- * Copy is written as plain English literals: the pane mounts `chat/ui-locale.ts` over this section,
- * so every string below is translated in one place together with the sidebar. Parameterised lines
- * (counts, sizes, confirmation wording) are matched by that locale's patterns; paper titles, ids,
- * paths and byte figures stay data and pass through verbatim.
- */
 function messages(count: number): string { return `${count} ${count === 1 ? 'message' : 'messages'}`; }
 function tasks(count: number): string { return `${count} ${count === 1 ? 'task' : 'tasks'}`; }
-function stored(total: number, archived: number): string { return `${total} stored ${total === 1 ? 'chat' : 'chats'} · ${archived} archived`; }
-function matching(total: number, archived: number): string { return `${total} matching ${total === 1 ? 'chat' : 'chats'} · ${archived} archived`; }
+function stored(total: number): string { return `${total} stored ${total === 1 ? 'chat' : 'chats'}`; }
+function matching(total: number): string { return `${total} matching ${total === 1 ? 'chat' : 'chats'}`; }
 function showing(shown: number, total: number): string { return `Showing the ${shown} most recent of ${total} matching chats. Narrow the search or the paper filter to see the rest.`; }
 function morePapers(count: number): string { return `…and ${count} more papers — search to narrow`; }
-function outcome(action: HistoryAction, changed: number, requested: number, failed: number): string {
-  const verb = action === 'delete' ? 'Deleted' : action === 'archive' ? 'Archived' : 'Restored';
-  const head = `${verb} ${changed} of ${requested} ${requested === 1 ? 'chat' : 'chats'}.`;
+function selectedCount(count: number): string { return `${count} selected`; }
+function outcome(changed: number, requested: number, failed: number): string {
+  const head = `Deleted ${changed} of ${requested} ${requested === 1 ? 'chat' : 'chats'}.`;
   return failed ? `${head} ${failed} could not be changed.` : head;
 }
 function confirmDeleteOne(title: string): string { return `Delete “${title}”? This permanently removes the chat, its messages and its unsent draft from this computer. Native task outputs and exported files are not undone. This cannot be undone.`; }
 function confirmDeleteMany(count: number): string { return `Delete ${count} chats? This permanently removes those chats, their messages and their unsent drafts from this computer. Native task outputs and exported files are not undone. This cannot be undone.`; }
-function location(scope: string): string { return `Location: ${scope}`; }
-function absolutePath(path: string): string { return `Absolute path: ${path}`; }
-function sizes(chat: string, draft: string, other: string, files: number): string { return `Chats ${chat} · Drafts ${draft} · Other records ${other} · ${files} files`; }
-function measuredAt(when: string): string { return `Measured ${when}.`; }
-function stoppedEntries(limit: number): string { return `At least these figures: the measurement stopped at its ${limit}-entry bound.`; }
-function stoppedBytes(limit: string): string { return `At least these figures: the measurement stopped at its ${limit} bound.`; }
-function stoppedDepth(limit: number): string { return `At least these figures: a directory deeper than ${limit} levels was not measured.`; }
-function chatsPartial(shown: number): string { return `Per-chat sizes are shown for the largest ${shown} chats.`; }
 const UNFINISHED = 'work in progress';
-const ARCHIVED_BADGE = 'Archived';
 const REFUSED_UNFINISHED = 'A chat with an unfinished answer or native task was skipped: finish or cancel it before deleting.';
 const LIST_FAILED = 'The saved chat list could not be read. Nothing was changed.';
 const ACTION_FAILED = 'The change could not be confirmed. Reopen this section to see what is actually stored.';
-const STORAGE_INTRO = 'Chats, drafts, workflows and task records live in one plugin-owned folder inside your Zotero profile. Measuring reads file sizes only — never chat text, drafts or credential files — and it never changes anything.';
-const STORAGE_UNAVAILABLE = 'This build cannot report how much space stored chats take.';
-const STORAGE_FAILED = 'The stored size could not be measured. Nothing was changed.';
-const STORAGE_NOT_MEASURED = 'Size not measured yet.';
-const STOPPED_ENTRY_TYPE = 'At least these figures: an unexpected entry in the records store was not measured.';
-const STOPPED_LISTING = 'The records store could not be listed, so its size is unknown. Nothing was changed.';
+const EMPTY = 'No saved chats match this search.';
 
 // Every user-facing string in this section lives in `chat/ui-locale.ts`; nothing is duplicated here.
 
@@ -92,17 +69,6 @@ function el<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, text =
 function reason(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
 /** UTC, minute precision, sortable and identical on every machine; identical to the stored value. */
 function stamp(iso: string): string { return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`; }
-/**
- * Binary units, one decimal below 100: a size is either exact or the report says it is a lower
- * bound. Never a rounded-up figure presented as exact.
- */
-function bytesText(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
-  let value = bytes / 1024; let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
-  return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]!}`;
-}
 
 export function createHistorySection(doc: Document, host: HistorySectionHost, initial: 'en' | 'zh'): HistorySection {
   let language = initial;
@@ -110,18 +76,11 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   const selected = new Set<string>();
   let pending: string[] | null = null;
   let query = '';
-  let scope: HistoryFilterScope = 'active';
   let paper: string | null = null;
   let busy = false;
   let disposed = false;
   let seq = 0;
   let timer: ReturnType<typeof globalThis.setTimeout> | null = null;
-  /** Last measurement the owner asked for; cleared whenever a mutation makes it stale. */
-  let measured: HistoryStorageReport | null = null;
-  let measuring = false;
-  /** True when the last measurement could not be trusted; the size line then says exactly that. */
-  let storageFailure = false;
-  const measuredChats = new Map<string, number>();
   const listeners: Array<{ element: Element; type: string; handler: (event: Event) => void }> = [];
   const listen = <T extends Element>(element: T, type: string, handler: (event: Event) => void): T => {
     element.addEventListener(type, handler);
@@ -132,25 +91,15 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   const box = el(doc, 'fieldset');
   box.dataset.zcrPref = 'history';
   const legend = el(doc, 'legend');
-  const intro = el(doc, 'p');
-  intro.className = 'zcr-preferences-muted';
   const counts = el(doc, 'p');
   counts.className = 'zcr-preferences-muted';
   counts.dataset.zcrHistory = 'counts';
   counts.hidden = true;
 
-  const searchLabel = el(doc, 'label');
-  const searchText = doc.createTextNode('');
+  // The search box carries its own accessible name; there is no second visible "Search chats…" label.
   const search = el(doc, 'input');
   search.type = 'search';
   search.dataset.zcrHistory = 'search';
-  searchLabel.append(searchText, search);
-
-  const scopeLabel = el(doc, 'label');
-  const scopeText = doc.createTextNode('');
-  const scopeSelect = el(doc, 'select');
-  scopeSelect.dataset.zcrHistory = 'scope';
-  scopeLabel.append(scopeText, scopeSelect);
 
   const paperLabel = el(doc, 'label');
   const paperText = doc.createTextNode('');
@@ -160,7 +109,29 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
 
   const filters = el(doc, 'div');
   filters.className = 'zcr-preferences-history-filters';
-  filters.append(searchLabel, scopeLabel, paperLabel);
+  filters.append(search, paperLabel);
+
+  // Bulk actions appear only when something is selected; the select-all row states the real count.
+  const bulk = el(doc, 'div');
+  bulk.className = 'zcr-preferences-history-bulk';
+  bulk.dataset.zcrHistory = 'bulk';
+  bulk.hidden = true;
+  const selectAllLabel = el(doc, 'label');
+  const selectAll = el(doc, 'input');
+  selectAll.type = 'checkbox';
+  selectAll.dataset.zcrHistory = 'select-all';
+  const selectAllText = doc.createTextNode('');
+  selectAllLabel.append(selectAll, selectAllText);
+  const selectedText = el(doc, 'span');
+  selectedText.className = 'zcr-preferences-muted';
+  selectedText.dataset.zcrHistory = 'selected-count';
+  const deleteSelected = el(doc, 'button');
+  deleteSelected.type = 'button';
+  deleteSelected.dataset.zcrHistory = 'delete-selected';
+  const actions = el(doc, 'div');
+  actions.className = 'zcr-preferences-actions';
+  actions.append(deleteSelected);
+  bulk.append(selectAllLabel, selectedText, actions);
 
   const list = el(doc, 'div');
   list.dataset.zcrHistory = 'list';
@@ -182,16 +153,6 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   status.setAttribute('aria-live', 'polite');
   status.hidden = true;
 
-  const actions = el(doc, 'div');
-  actions.className = 'zcr-preferences-actions';
-  const archiveSelected = el(doc, 'button');
-  archiveSelected.type = 'button';
-  archiveSelected.dataset.zcrHistory = 'archive-selected';
-  const deleteSelected = el(doc, 'button');
-  deleteSelected.type = 'button';
-  deleteSelected.dataset.zcrHistory = 'delete-selected';
-  actions.append(archiveSelected, deleteSelected);
-
   const confirm = el(doc, 'div');
   confirm.dataset.zcrHistory = 'confirm-actions';
   confirm.hidden = true;
@@ -208,35 +169,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   confirmButtons.append(confirmDelete, cancel);
   confirm.append(confirmText, confirmButtons);
 
-  const storage = el(doc, 'div');
-  storage.dataset.zcrHistory = 'storage';
-  const storageHeading = el(doc, 'strong');
-  const storageIntro = el(doc, 'p');
-  storageIntro.className = 'zcr-preferences-muted';
-  const storageScope = el(doc, 'p');
-  storageScope.className = 'zcr-preferences-muted';
-  storageScope.dataset.zcrHistory = 'storage-scope';
-  const storagePath = el(doc, 'p');
-  storagePath.className = 'zcr-preferences-muted';
-  storagePath.dataset.zcrHistory = 'storage-path';
-  storagePath.hidden = true;
-  const storageSize = el(doc, 'p');
-  storageSize.className = 'zcr-preferences-muted';
-  storageSize.dataset.zcrHistory = 'storage-size';
-  const storageNote = el(doc, 'p');
-  storageNote.className = 'zcr-preferences-muted';
-  storageNote.dataset.zcrHistory = 'storage-note';
-  storageNote.hidden = true;
-  const storageChats = el(doc, 'p');
-  storageChats.className = 'zcr-preferences-muted';
-  storageChats.dataset.zcrHistory = 'storage-chats';
-  storageChats.hidden = true;
-  const measure = el(doc, 'button');
-  measure.type = 'button';
-  measure.dataset.zcrHistory = 'measure';
-  storage.append(storageHeading, storageIntro, storageScope, storagePath, storageSize, storageNote, storageChats, measure);
-
-  box.append(legend, intro, counts, filters, list, truncated, empty, failure, status, actions, confirm, storage);
+  box.append(legend, counts, filters, bulk, list, truncated, empty, failure, status, confirm);
 
   /** Drop listeners whose element is no longer part of the section, so refreshes cannot leak them. */
   function pruneListeners(): void {
@@ -261,22 +194,21 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   function showFailure(text: string): void { clearMessages(); failure.textContent = text; failure.hidden = false; }
 
   function visibleEntries(): HistoryEntry[] {
-    return filterHistory(current?.entries ?? [], { scope, paperId: paper });
+    return filterHistory(current?.entries ?? [], { scope: 'all', paperId: paper });
   }
   function entryById(id: string): HistoryEntry | null {
     return current?.entries.find(entry => entry.id === id) ?? null;
   }
   /**
-   * The phrases after the paper identity, each rendered as its own text node so the pane's localizer
-   * can translate them individually. Paper titles and byte figures are the owner's data, never copy.
+   * The phrases after the chat identity, each rendered as its own text node so the pane's localizer
+   * can translate them individually. Chat and paper titles are the owner's data, never copy.
    */
-  function metaOf(entry: HistoryEntry): Array<[string, boolean]> {
-    const parts: Array<[string, boolean]> = [[messages(entry.messageCount), false]];
+  function metaOf(entry: HistoryEntry, showPaper: boolean): Array<[string, boolean]> {
+    const parts: Array<[string, boolean]> = [[stamp(entry.updatedAt), true]];
+    if (showPaper) parts.push([entry.identity.title || entry.title, true]);
+    parts.push([messages(entry.messageCount), false]);
     if (entry.taskCount) parts.push([tasks(entry.taskCount), false]);
     if (entry.unfinishedWork) parts.push([UNFINISHED, false]);
-    if (entry.archivedAt) parts.push([ARCHIVED_BADGE, false]);
-    const bytes = measuredChats.get(entry.id);
-    if (bytes !== undefined) parts.push([bytesText(bytes), true]);
     return parts;
   }
 
@@ -284,6 +216,8 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     const entries = visibleEntries();
     // The listing is already sorted newest first, so the slice is the newest chats, not an arbitrary set.
     const shown = entries.slice(0, ROW_LIMIT);
+    const rendered = new Set(shown.map(entry => entry.id));
+    for (const id of [...selected]) if (!rendered.has(id)) selected.delete(id);
     const rows = shown.map(entry => {
       const row = el(doc, 'div');
       row.className = 'zcr-preferences-history-row';
@@ -294,26 +228,26 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       toggle.type = 'checkbox';
       toggle.dataset.zcrHistorySelect = entry.id;
       toggle.checked = selected.has(entry.id);
-      listen(toggle, 'change', () => { if (toggle.checked) selected.add(entry.id); else selected.delete(entry.id); renderActions(); });
+      listen(toggle, 'change', () => { if (toggle.checked) selected.add(entry.id); else selected.delete(entry.id); renderBulk(); });
+      // The chat title appears exactly once, on the row that selects it.
       const title = el(doc, 'strong', entry.title || entry.identity.title);
-      // Titles and previews are the owner's content, never UI copy: keep them out of the localizer.
       title.dataset.zcrUi = 'false';
       selectLabel.append(toggle, title);
 
       const meta = el(doc, 'p');
       meta.className = 'zcr-preferences-muted';
-      // The paper identity and timestamp are content; each phrase after it is its own text node so
-      // the localizer can translate it without touching the title.
-      const identity = el(doc, 'span', `${entry.identity.title || entry.title} · ${stamp(entry.updatedAt)}`);
-      identity.dataset.zcrUi = 'false';
-      meta.append(identity);
-      for (const [text, content] of metaOf(entry)) {
+      // The paper title is only repeated when it differs from the chat title; the timestamp, counts
+      // and status phrases are each their own text node so the localizer can translate them.
+      const showPaper = Boolean(entry.identity.title) && entry.identity.title !== entry.title;
+      const parts = metaOf(entry, showPaper);
+      parts.forEach(([text, content], index) => {
+        if (index) meta.append(doc.createTextNode(' · '));
         if (content) {
-          const node = el(doc, 'span', ` · ${text}`);
+          const node = el(doc, 'span', text);
           node.dataset.zcrUi = 'false';
           meta.append(node);
-        } else meta.append(doc.createTextNode(' · '), doc.createTextNode(text));
-      }
+        } else meta.append(doc.createTextNode(text));
+      });
       row.append(selectLabel, meta);
       if (entry.preview) {
         const preview = el(doc, 'p');
@@ -323,10 +257,6 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
         row.append(preview);
       }
 
-      const archive = el(doc, 'button', entry.archivedAt ? 'Restore chat' : 'Archive chat');
-      archive.type = 'button';
-      archive.dataset.zcrHistoryArchive = entry.id;
-      listen(archive, 'click', () => { void apply(entry.archivedAt ? 'restore' : 'archive', [entry.id]); });
       const remove = el(doc, 'button', 'Delete chat');
       remove.type = 'button';
       remove.dataset.zcrHistoryDelete = entry.id;
@@ -334,7 +264,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       listen(remove, 'click', () => requestDelete([entry.id]));
       const rowActions = el(doc, 'div');
       rowActions.className = 'zcr-preferences-actions';
-      rowActions.append(archive, remove);
+      rowActions.append(remove);
       row.append(rowActions);
       return row;
     });
@@ -343,26 +273,25 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     pruneListeners();
     truncated.textContent = entries.length > shown.length ? showing(shown.length, entries.length) : '';
     truncated.hidden = entries.length <= shown.length;
-    empty.textContent = 'No saved chats match this search.';
+    empty.textContent = EMPTY;
     empty.hidden = entries.length > 0 || !current;
-    applyBusy();
+    renderBulk();
   }
 
-  function renderActions(): void {
-    const chosen = [...selected].map(entryById).filter((entry): entry is HistoryEntry => !!entry);
-    const restorable = chosen.length > 0 && chosen.every(entry => !!entry.archivedAt);
-    archiveSelected.textContent = restorable ? 'Restore selected' : 'Archive selected';
-    lock(archiveSelected, chosen.length === 0);
-    lock(deleteSelected, chosen.length === 0);
+  /** The count is the number actually selected, and the all-row is checked only when all are. */
+  function renderBulk(): void {
+    const visible = visibleEntries().slice(0, ROW_LIMIT);
+    const chosen = visible.filter(entry => selected.has(entry.id)).length;
+    bulk.hidden = selected.size === 0;
+    selectAll.checked = visible.length > 0 && chosen === visible.length;
+    selectAll.indeterminate = chosen > 0 && chosen < visible.length;
+    selectAll.disabled = busy || visible.length === 0;
+    selectedText.textContent = selectedCount(selected.size);
+    lock(deleteSelected, selected.size === 0);
     applyBusy();
   }
 
   function renderFilters(): void {
-    const all = el(doc, 'option', 'All'); all.value = 'all';
-    const active = el(doc, 'option', 'Active'); active.value = 'active';
-    const archived = el(doc, 'option', 'Archived'); archived.value = 'archived';
-    for (const option of [all, active, archived]) option.selected = option.value === scope;
-    scopeSelect.replaceChildren(all, active, archived);
     const papers = historyPapers(current?.entries ?? []);
     if (paper !== null && !papers.some(option => option.id === paper)) paper = null;
     const any = el(doc, 'option', 'All papers'); any.value = '';
@@ -383,96 +312,23 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   /** Static chrome and control copy. Every literal here is a key or pattern in `chat/ui-locale.ts`. */
   function renderChrome(): void {
     legend.textContent = 'Chat history';
-    intro.textContent = 'Chats stored on this computer. Archiving is reversible; deleting is not. Nothing is removed until you confirm it.';
-    searchText.data = 'Search chats…';
     search.placeholder = 'Search chats…';
     search.setAttribute('aria-label', 'Search chats…');
-    scopeText.data = 'Show';
     paperText.data = 'Paper';
+    selectAllText.data = 'Select all';
     deleteSelected.textContent = 'Delete selected';
     cancel.textContent = 'Cancel';
     confirmDelete.textContent = 'Delete permanently';
-    empty.textContent = 'No saved chats match this search.';
+    empty.textContent = EMPTY;
     renderFilters();
-    renderStorage();
     renderRows();
-    renderActions();
     renderConfirm();
   }
 
   function renderCounts(): void {
     if (!current) { counts.textContent = ''; counts.hidden = true; return; }
-    const totals = historyCounts(current.entries);
-    counts.textContent = query ? matching(totals.total, totals.archived) : stored(totals.total, totals.archived);
+    counts.textContent = query ? matching(current.entries.length) : stored(current.entries.length);
     counts.hidden = false;
-  }
-
-  function storageNoteText(report: HistoryStorageReport): string {
-    if (report.complete) return measuredAt(stamp(report.measuredAt));
-    switch (report.stoppedBy) {
-      case 'entries': return stoppedEntries(report.limits.entries);
-      case 'bytes': return stoppedBytes(bytesText(report.limits.bytes));
-      case 'depth': return stoppedDepth(report.limits.depth);
-      case 'entry-type': return STOPPED_ENTRY_TYPE;
-      default: return STOPPED_LISTING;
-    }
-  }
-
-  /**
-   * The report is shown exactly as measured: the location is stated even before measuring, the size
-   * is either an exact measured figure, a stated lower bound, or honestly unavailable — never a
-   * blank and never a guess.
-   */
-  function renderStorage(): void {
-    storageHeading.textContent = 'Storage';
-    storageIntro.textContent = STORAGE_INTRO;
-    storageScope.textContent = location(measured ? measured.scope : HISTORY_STORAGE_SCOPE);
-    measuredChats.clear();
-    if (measured) for (const chat of measured.chats) measuredChats.set(chat.id, chat.bytes);
-    measure.hidden = !host.readStorageReport;
-    if (!host.readStorageReport) {
-      storageSize.textContent = STORAGE_UNAVAILABLE;
-      storagePath.hidden = true; storageNote.hidden = true; storageChats.hidden = true;
-      return;
-    }
-    measure.textContent = measuring ? 'Measuring…' : 'Calculate size';
-    lock(measure, measuring);
-    if (storageFailure) {
-      // The block itself reports an untrustworthy measurement; no fake number, no extra banner noise.
-      storageSize.textContent = STORAGE_FAILED;
-      storagePath.hidden = true; storageNote.hidden = true; storageChats.hidden = true;
-      return;
-    }
-    if (!measured) {
-      storageSize.textContent = STORAGE_NOT_MEASURED;
-      storagePath.hidden = true; storageNote.hidden = true; storageChats.hidden = true;
-      return;
-    }
-    storageSize.textContent = sizes(bytesText(measured.chatBytes), bytesText(measured.draftBytes), bytesText(measured.otherBytes), measured.files);
-    storagePath.textContent = absolutePath(measured.location);
-    storagePath.hidden = false;
-    storageNote.textContent = storageNoteText(measured);
-    storageNote.hidden = false;
-    storageChats.textContent = measured.chatsComplete ? '' : chatsPartial(measured.chats.length);
-    storageChats.hidden = measured.chatsComplete;
-  }
-
-  /** Only the owner's explicit action measures anything; the walk is bounded inside the host port. */
-  async function measureStorage(): Promise<void> {
-    if (busy || disposed || measuring || !host.readStorageReport) return;
-    measuring = true;
-    renderStorage();
-    try {
-      const raw = await host.readStorageReport();
-      if (!disposed) { measured = isHistoryStorageReport(raw) ? raw : null; storageFailure = measured === null; }
-    } catch {
-      if (!disposed) { measured = null; storageFailure = true; }
-    } finally {
-      measuring = false;
-    }
-    if (disposed) return;
-    renderStorage();
-    renderRows();
   }
 
   function renderConfirm(): void {
@@ -495,13 +351,13 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     renderConfirm();
   }
 
-  async function apply(action: HistoryAction, ids: string[]): Promise<void> {
+  async function apply(ids: string[]): Promise<void> {
     if (busy || disposed || !ids.length) return;
-    if (action === 'delete' && ids.some(id => entryById(id)?.unfinishedWork)) { showFailure(REFUSED_UNFINISHED); return; }
+    if (ids.some(id => entryById(id)?.unfinishedWork)) { showFailure(REFUSED_UNFINISHED); return; }
     busy = true; clearMessages(); applyBusy();
     let result: { text: string; failure: boolean } | null = null;
     try {
-      const raw = action === 'delete' ? await host.deleteHistory(ids) : await host.setHistoryArchived(ids, action === 'archive');
+      const raw = await host.deleteHistory(ids);
       if (disposed) return;
       if (!isHistoryReport(raw)) {
         // The call returned something unusable: re-read rather than claim any result.
@@ -509,9 +365,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       } else {
         const report: HistoryMutationReport = raw;
         for (const id of report.changed) selected.delete(id);
-        // The store changed, so a figure measured before it is no longer current. Say so.
-        if (report.changed.length) measured = null;
-        result = { text: outcome(report.action, report.changed.length, report.requested, report.failed.length), failure: report.partial || report.failed.length > 0 || report.warnings.length > 0 };
+        result = { text: outcome(report.changed.length, report.requested, report.failed.length), failure: report.partial || report.failed.length > 0 || report.warnings.length > 0 };
       }
     } catch (caught) {
       if (!disposed) result = { text: reason(caught), failure: true };
@@ -536,7 +390,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
         list.replaceChildren();
         counts.textContent = ''; counts.hidden = true;
         empty.hidden = true;
-        renderActions();
+        renderBulk();
         showFailure(LIST_FAILED);
         return;
       }
@@ -546,9 +400,8 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       clearMessages();
       renderCounts();
       renderFilters();
-      renderStorage();
       renderRows();
-      renderActions();
+      renderBulk();
       renderConfirm();
     } catch (caught) {
       if (disposed || token !== seq) return;
@@ -556,7 +409,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       list.replaceChildren();
       counts.textContent = ''; counts.hidden = true;
       empty.hidden = true;
-      renderActions();
+      renderBulk();
       showFailure(reason(caught));
     }
   }
@@ -566,16 +419,15 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     if (timer !== null) globalThis.clearTimeout(timer);
     timer = globalThis.setTimeout(() => { timer = null; void refresh(); }, SEARCH_DEBOUNCE_MS);
   });
-  listen(scopeSelect, 'change', () => { scope = scopeSelect.value as HistoryFilterScope; renderRows(); renderCounts(); });
   listen(paperSelect, 'change', () => { paper = paperSelect.value || null; renderRows(); renderCounts(); });
-  listen(archiveSelected, 'click', () => {
-    const chosen = [...selected].map(entryById).filter((entry): entry is HistoryEntry => !!entry);
-    if (!chosen.length) return;
-    void apply(chosen.every(entry => !!entry.archivedAt) ? 'restore' : 'archive', chosen.map(entry => entry.id));
+  listen(selectAll, 'change', () => {
+    const visible = visibleEntries().slice(0, ROW_LIMIT).map(entry => entry.id);
+    if (selectAll.checked) for (const id of visible) selected.add(id);
+    else for (const id of visible) selected.delete(id);
+    renderRows();
   });
   listen(deleteSelected, 'click', () => requestDelete([...selected]));
-  listen(measure, 'click', () => { void measureStorage(); });
-  listen(confirmDelete, 'click', () => { const ids = pending; pending = null; renderConfirm(); if (ids) void apply('delete', ids); });
+  listen(confirmDelete, 'click', () => { const ids = pending; pending = null; renderConfirm(); if (ids) void apply(ids); });
   listen(cancel, 'click', () => { pending = null; renderConfirm(); });
 
   renderChrome();
@@ -585,7 +437,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     setLanguage(next: 'en' | 'zh'): void {
       if (next === language || disposed) return;
       language = next;
-      renderChrome(); renderCounts(); renderRows(); renderActions(); renderConfirm();
+      renderChrome(); renderCounts(); renderRows(); renderConfirm();
     },
     setBusy(next: boolean): void { busy = next; if (!disposed) applyBusy(); },
     refresh,

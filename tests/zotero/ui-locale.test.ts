@@ -41,13 +41,13 @@ it('never translates source, chat, history, candidate, profile or workflow conte
 });
 
 it('preserves form elements, selection values, names and whitespace in translated labels', () => {
-  const { document, root, add } = setup(); const settings = add('div', 'zcr-workspace-settings');
-  const label = add('label', '', '  Answer detail\n', settings); const select = add('select', '', '', label); select.name = 'detail';
-  const brief = add('option', '', 'Brief', select); brief.value = 'brief'; const standard = add('option', '', 'Standard', select); standard.value = 'standard'; select.value = 'standard'; select.focus();
+  const { document, root, add } = setup(); const settings = add('div', 'zcr-preferences');
+  const label = add('label', '', '  Instructions\n', settings); const select = add('select', '', '', label); select.name = 'paper'; select.dataset.zcrHistory = 'paper';
+  const all = add('option', '', 'All papers', select); all.value = ''; const busy = add('option', '', 'work in progress', select); busy.value = 'busy'; select.value = 'busy'; select.focus();
   const textNode = label.firstChild; const locale = mountUILocale(root); locale.update('zh');
-  expect(label.firstChild).toBe(textNode); expect(textNode!.textContent).toBe('  回答详细程度\n'); expect(brief.textContent).toBe('简短');
-  expect(select.value).toBe('standard'); expect(select.name).toBe('detail'); expect(document.activeElement).toBe(select);
-  locale.update('en'); expect(textNode!.textContent).toBe('  Answer detail\n'); expect(standard.textContent).toBe('Standard'); locale.dispose();
+  expect(label.firstChild).toBe(textNode); expect(textNode!.textContent).toBe('  指令\n'); expect(all.textContent).toBe('全部文献');
+  expect(select.value).toBe('busy'); expect(select.name).toBe('paper'); expect(document.activeElement).toBe(select);
+  locale.update('en'); expect(textNode!.textContent).toBe('  Instructions\n'); expect(busy.textContent).toBe('work in progress'); locale.dispose();
 });
 
 it('localizes controls added by later renders and restores the latest externally authored status', async () => {

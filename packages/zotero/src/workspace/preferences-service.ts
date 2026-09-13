@@ -1,6 +1,5 @@
 import { ReaderError } from '../../../contracts/src/index.ts';
 import type { ReaderWorkspace, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { validateHistoryStorageReport } from '../../../contracts/src/workspace-validation.ts';
 import { HistoryManager } from '../../../core/src/workspace/history.ts';
 import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/src/workspace/export.ts';
 
@@ -12,7 +11,6 @@ import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/sr
  */
 export interface PreferencesServiceHost {
   workspace(): Promise<ReaderWorkspace>;
-  uuid(): string;
   /** Native save dialog; the host owns the file picker and the exact bytes written. */
   exportText(name: string, text: string): Promise<void>;
   /** The plugin preference `extensions.zcr.automaticPdfText`; not part of the workspace store. */
@@ -24,30 +22,17 @@ export interface PreferencesServiceHost {
    * without the port still renders the pane from the bundled catalog with honest copy.
    */
   liveModels?(): Promise<string[] | null>;
-  /**
-   * Bounded measurement of the plugin's own records store, for the History section's size report.
-   * Optional: a host that omits it renders an honest unavailable state instead of a made-up number.
-   */
-  storageReport?(): Promise<unknown>;
 }
 export interface PreferencesService {
   readSettings(): Promise<string>;
   writeSettings(json: string): Promise<void>;
   setSkillEnabled(id: string, enabled: boolean): Promise<void>;
   exportPreferences(): Promise<void>;
-  /** Profile ids are minted in the plugin sandbox so the pane needs no host globals. */
-  newProfileId(): string;
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /** History management is exposed as JSON text like everything else crossing the pane boundary. */
   readHistory(query: string): Promise<string>;
-  setHistoryArchived(idsJson: string, archived: boolean): Promise<string>;
   deleteHistory(idsJson: string): Promise<string>;
-  /**
-   * The storage measurement as JSON text. Absent when the host cannot measure; the pane then shows
-   * that size is unavailable rather than a blank or an estimate.
-   */
-  readStorageReport?(): Promise<string>;
   /**
    * The runtime's live model ids as JSON text, or the JSON literal `null` when no runtime has
    * reported any. Absent when the host has no runtime bridge; the pane then says the Spark models
@@ -78,13 +63,8 @@ function parseSettings(json: string): WorkspaceSettings {
 }
 
 export function createPreferencesService(host: PreferencesServiceHost): PreferencesService {
-  // Presence, not a flag: a host without a reader simply has no `readStorageReport` to call.
-  const measure = host.storageReport?.bind(host);
   const live = host.liveModels?.bind(host);
   return {
-    ...(measure ? {
-      async readStorageReport(): Promise<string> { return JSON.stringify(validateHistoryStorageReport(await measure())); },
-    } : {}),
     ...(live ? {
       async readLiveModels(): Promise<string> { return JSON.stringify(await live()); },
     } : {}),
@@ -108,9 +88,6 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
       // Same payload and same native file dialog as the sidebar export, from one definition.
       await host.exportText(PREFERENCES_EXPORT_NAME, preferencesExportText(await (await host.workspace()).settings()));
     },
-    newProfileId(): string {
-      return `profile-${host.uuid()}`;
-    },
     readAutomaticPdfText(): boolean {
       return host.readAutomaticPdfText() !== false;
     },
@@ -121,10 +98,6 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
     async readHistory(query: string): Promise<string> {
       if (typeof query !== 'string' || query.length > 1024) throw new ReaderError('INVALID_REQUEST', 'The history search is invalid.');
       return JSON.stringify(await new HistoryManager(await host.workspace()).listing(query));
-    },
-    async setHistoryArchived(idsJson: string, archived: boolean): Promise<string> {
-      if (typeof archived !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'A stored chat is either archived or not.');
-      return JSON.stringify(await new HistoryManager(await host.workspace()).setArchivedByIds(parseIds(idsJson), archived));
     },
     async deleteHistory(idsJson: string): Promise<string> {
       return JSON.stringify(await new HistoryManager(await host.workspace()).removeByIds(parseIds(idsJson)));

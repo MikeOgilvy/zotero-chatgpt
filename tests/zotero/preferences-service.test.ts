@@ -21,7 +21,6 @@ function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error
   let automaticPdfText = true;
   const service = createPreferencesService({
     workspace: () => Promise.resolve(workspace),
-    uuid: () => 'aaaaaaaa-0000-4000-8000-00000000000a',
     exportText,
     readAutomaticPdfText: () => automaticPdfText,
     writeAutomaticPdfText: enabled => { automaticPdfText = enabled; },
@@ -46,11 +45,6 @@ it('carries the runtime live model ids as JSON text, and stays absent when the h
   // Reading the live list never writes the store and never starts anything.
   expect(present.workspace.saveSettings).not.toHaveBeenCalled();
   expect(none.workspace.saveSettings).not.toHaveBeenCalled();
-});
-
-it('mints a valid profile id in the plugin sandbox', () => {
-  const { service } = fixture();
-  expect(service.newProfileId()).toBe('profile-aaaaaaaa-0000-4000-8000-00000000000a');
 });
 
 it('carries the automatic-PDF-text pref without touching the workspace store', () => {

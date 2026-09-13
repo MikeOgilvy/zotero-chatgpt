@@ -23,7 +23,7 @@ function fixture(initial?: WorkspaceSettings, overrides: Partial<PreferencesPane
   const exportPreferences = vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve());
   const readAutomaticPdfText = vi.fn<PreferencesPaneHost['readAutomaticPdfText']>(() => pref.automaticPdfText);
   const writeAutomaticPdfText = vi.fn<PreferencesPaneHost['writeAutomaticPdfText']>(enabled => { pref.automaticPdfText = enabled; });
-  const base: PreferencesPaneHost = { read, save, setSkillEnabled, exportPreferences, profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a', readAutomaticPdfText, writeAutomaticPdfText };
+  const base: PreferencesPaneHost = { read, save, setSkillEnabled, exportPreferences, readAutomaticPdfText, writeAutomaticPdfText };
   const host: PreferencesPaneHost = { ...base, ...overrides };
   return { host, read, save, setSkillEnabled, exportPreferences, readAutomaticPdfText, writeAutomaticPdfText, pref, current: () => copy(state) };
 }
@@ -53,10 +53,20 @@ it('renders the real stored settings into native, labelled controls and tracks a
   await ready;
   expect(find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]').value).toBe('en');
   expect(find<HTMLInputElement>('[data-zcr-pref="textScale"]').value).toBe('1');
-  expect(find<HTMLInputElement>('[data-zcr-pref="preference-language"]').value).toBe('auto');
-  expect(find<HTMLSelectElement>('[data-zcr-pref="preference-detail"]').value).toBe('standard');
+  // One instructions box, carried by the existing free-text `background` field; the five other
+  // preference fields are no longer editable here.
   expect(find<HTMLTextAreaElement>('[data-zcr-pref="preference-background"]').value).toBe('');
-  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options).toHaveLength(2);
+  expect(root.querySelector('[data-zcr-pref="preference-language"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="preference-detail"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="preference-mathematics"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="preference-citationStyle"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="preference-annotationStyle"]')).toBeNull();
+  // The Research profiles block is gone from the surface, not from the store.
+  expect(root.querySelector('[data-zcr-pref="profile"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="profile-name"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="save-profile"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="update-profile"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-pref="delete-profile"]')).toBeNull();
   expect(find<HTMLInputElement>('[data-zcr-skill-enabled="user-study"]').checked).toBe(true);
   expect(find<HTMLInputElement>('[data-zcr-skill-enabled="imported-blocked"]').checked).toBe(false);
   expect(find<HTMLInputElement>('[data-zcr-skill-enabled="imported-blocked"]').disabled).toBe(true);
@@ -100,39 +110,57 @@ it('saves interface language and chat text scale through the store and reports f
   expect(scale.value).toBe('1.5');
 });
 
-it('saves the six research preferences and profiles as one validated snapshot', async () => {
+it('saves the single instructions box and carries the five no-longer-editable fields through unchanged', async () => {
   const { host, save, current } = fixture();
-  const { ready, find, change, settle } = mount(host);
+  const { ready, find, settle } = mount(host);
   await ready;
-  const language = find<HTMLInputElement>('[data-zcr-pref="preference-language"]');
-  const detail = find<HTMLSelectElement>('[data-zcr-pref="preference-detail"]');
-  const mathematics = find<HTMLSelectElement>('[data-zcr-pref="preference-mathematics"]');
-  language.value = '中文'; detail.value = 'detailed'; mathematics.value = 'formal'; change(detail);
+  const stored = current();
+  const instructions = find<HTMLTextAreaElement>('[data-zcr-pref="preference-background"]');
+  instructions.value = 'I know linear algebra; prefer SI units.';
   find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').click();
   await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
   await settle();
-  expect(save.mock.calls[0]![0].preferences).toMatchObject({ language: '中文', detail: 'detailed', mathematics: 'formal' });
-  expect(current().preferences.detail).toBe('detailed');
+  // Only the editable instructions change; the other five fields are written back from the record.
+  expect(current().preferences).toEqual({ ...stored.preferences, background: 'I know linear algebra; prefer SI units.' });
   await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toMatch(/saved/iu));
   expect(find<HTMLElement>('[data-zcr-pref="status"]').hidden).toBe(false);
+});
 
-  // A selected profile is saved into that profile only; the global preferences stay untouched.
-  const profile = find<HTMLSelectElement>('[data-zcr-pref="profile"]');
-  profile.value = 'formal'; change(profile);
-  language.value = 'formal-language'; change(language);
-  find<HTMLButtonElement>('[data-zcr-pref="update-profile"]').click();
-  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-  await settle();
-  expect(current().profiles).toEqual([{ id: 'formal', name: 'Formal', preferences: expect.objectContaining({ language: 'formal-language' }) as unknown }]);
-  expect(current().preferences.language).toBe('中文');
+it('leaves stored research profiles readable on disk without rendering or touching them', async () => {
+  // Profiles are data: the block is gone, but the record and the shipped export must keep them.
+  const stored: WorkspaceSettings = { ...defaultSettings(), profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }] };
+  const { host, current } = fixture(stored);
+  const { ready, find } = mount(host);
+  await ready;
+  expect(find('[data-zcr-pref="form"]').querySelector('[data-zcr-pref="profile"]')).toBeNull();
+  find<HTMLTextAreaElement>('[data-zcr-pref="preference-background"]').value = 'New instructions';
+  find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').click();
+  await vi.waitFor(() => expect(current().preferences.background).toBe('New instructions'));
+  // Not pruned, not migrated, not rewritten: the same profile survives a pane save byte for byte.
+  expect(current().profiles).toEqual([{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }]);
+});
 
-  // A new profile gets an id from the host and appears in the select after the reload.
-  find<HTMLInputElement>('[data-zcr-pref="profile-name"]').value = 'Formal copy';
-  find<HTMLButtonElement>('[data-zcr-pref="save-profile"]').click();
-  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(3));
-  await settle();
-  expect(current().profiles.some(item => item.id === 'profile-aaaaaaaa-0000-4000-8000-00000000000a' && item.name === 'Formal copy')).toBe(true);
-  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options).toHaveLength(3);
+it('renders only the annotate builtin while the other definitions stay installed and enabled', async () => {
+  const { host, current, save } = fixture();
+  const { ready, root, find } = mount(host);
+  await ready;
+  const rendered = [...find('[data-zcr-pref="skills"]').querySelectorAll<HTMLElement>('.zcr-preferences-skill')].map(row => row.dataset.zcrSkill);
+  // The owner's own workflows still list; only the builtin set is withdrawn to annotate.
+  expect(rendered).toEqual(['builtin-annotate', 'user-study', 'imported-blocked']);
+  for (const withdrawn of ['read', 'derive', 'compare', 'acquire', 'diagram']) {
+    expect(root.querySelector(`[data-zcr-skill="builtin-${withdrawn}"]`), withdrawn).toBeNull();
+  }
+
+  // The definition is withdrawn from the list, not from the record: a pane save keeps all six
+  // builtins, so the default path and every persisted `read` selection keep resolving.
+  find<HTMLTextAreaElement>('[data-zcr-pref="preference-background"]').value = 'Keep read installed';
+  find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').click();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(current().preferences.background).toBe('Keep read installed'));
+  expect(current().skills.filter(skill => skill.origin === 'builtin').map(skill => skill.id))
+    .toEqual(['builtin-read', 'builtin-derive', 'builtin-compare', 'builtin-annotate', 'builtin-acquire', 'builtin-diagram']);
+  // Withdrawing a row never disables the definition behind it.
+  expect(current().skills.filter(skill => skill.origin === 'builtin').every(skill => skill.enabled)).toBe(true);
 });
 
 it('owns the automatic-PDF-text opt-out in the native pane without writing the workspace store', async () => {
@@ -232,7 +260,7 @@ it('renders only the offerable model families as labelled checkbox rows with exa
   expect([...root.querySelectorAll<HTMLInputElement>('[data-zcr-model-allowed]')].filter(input => input.checked).map(input => input.dataset.zcrModelAllowed))
     .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
   // The pane states its candidate-list source honestly rather than implying live entitlements.
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/bundled with the pinned Codex runtime/u);
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/bundled catalog, not your account/u);
 });
 
 it('saves a changed allowlist through the workspace snapshot and refuses to empty it', async () => {
@@ -311,10 +339,9 @@ it('tells the truth about where the Spark models come from when no live list exi
   const first = mount(absent.host);
   await first.ready;
   const note = first.find('[data-zcr-pref="models-note"]').textContent ?? '';
-  expect(note).toMatch(/bundled with the pinned Codex runtime/u);
-  expect(note).toMatch(/not a live report of your account's entitlements/u);
-  expect(note).toMatch(/GPT-5\.3-Spark models come from the running Codex runtime/u);
-  expect(note).toMatch(/not in the bundled catalog/u);
+  expect(note).toMatch(/bundled catalog, not your account's live entitlements/u);
+  expect(note).toMatch(/GPT-5\.3-Spark models come from the running runtime/u);
+  expect(note).toMatch(/appear only after it reports them/u);
   expect(first.root.querySelector('[data-zcr-model^="gpt-5.3"]')).toBeNull();
 
   // The host has the port but no running runtime: the same honest copy, never an invented row.
@@ -330,9 +357,9 @@ it('explains the live list when the running runtime reports models', async () =>
   const { ready, find } = mount(host);
   await ready;
   const note = find('[data-zcr-pref="models-note"]').textContent ?? '';
-  expect(note).toMatch(/running Codex runtime reported/u);
+  expect(note).toMatch(/running runtime reported/u);
   // The bundled-catalog disclaimer would be false here, so it is not shown.
-  expect(note).not.toMatch(/not a live report/u);
+  expect(note).not.toMatch(/bundled catalog, not your account/u);
 });
 
 it('keeps the bundled copy when the runtime reports models none of which are offerable', async () => {
@@ -344,7 +371,7 @@ it('keeps the bundled copy when the runtime reports models none of which are off
   expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
   expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-6-astra"]').checked).toBe(true);
   const note = find('[data-zcr-pref="models-note"]').textContent ?? '';
-  expect(note).toMatch(/not in the bundled catalog/u);
+  expect(note).toMatch(/bundled catalog, not your account/u);
   expect(note).not.toMatch(/running Codex runtime reported/u);
 });
 
@@ -354,7 +381,7 @@ it('keeps the bundled catalog list when the live read fails instead of half-rend
   await ready;
   expect([...find('[data-zcr-pref="models"]').querySelectorAll<HTMLElement>('.zcr-preferences-model')].map(row => row.dataset.zcrModel))
     .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/not in the bundled catalog/u);
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/bundled catalog, not your account/u);
   expect(root.querySelector<HTMLElement>('[data-zcr-pref="error"]')?.hidden).toBe(true);
 });
 
@@ -411,35 +438,23 @@ it('renders the pane copy in the stored UI language and never translates identif
   const { ready, root, find } = mount(host);
   await ready;
   const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
-  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['外观', 'PDF 文本', '模型', '研究偏好', '研究配置', '已安装的工作流']);
+  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['外观', 'PDF 文本', '模型', 'Codex 指令', '已安装的工作流']);
   // The model note is stateful copy and follows the stored language like the rest of the pane.
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/不在随包目录中/u);
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/随包目录/u);
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('聊天字号（0.5–3）');
   expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');
-  expect(label('preference-language')).toBe('回答语言');
-  expect(label('preference-detail')).toBe('回答详细程度');
-  expect(label('preference-mathematics')).toBe('数学解释方式');
-  expect(label('preference-background')).toBe('研究背景');
-  expect(label('preference-citationStyle')).toBe('引用风格');
-  expect(label('preference-annotationStyle')).toBe('标注风格');
-  expect(label('profile')).toBe('正在编辑的研究配置');
-  expect(label('profile-name')).toBe('研究配置名称');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存偏好');
+  expect(label('preference-background')).toBe('指令');
+  // The withdrawn builtin rows are simply absent; the owner's own workflows still render.
+  expect(root.querySelector('[data-zcr-skill="builtin-read"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-skill="builtin-derive"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-skill="builtin-annotate"]')).not.toBeNull();
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存');
   expect(find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').textContent).toBe('导出偏好');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="save-profile"]').textContent).toBe('另存为新配置');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="update-profile"]').textContent).toBe('更新所选配置');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="delete-profile"]').textContent).toBe('删除所选配置');
-  expect([...find<HTMLSelectElement>('[data-zcr-pref="preference-detail"]').options].map(option => option.textContent)).toEqual(['简短', '标准', '详细']);
-  expect([...find<HTMLSelectElement>('[data-zcr-pref="preference-mathematics"]').options].map(option => option.textContent)).toEqual(['自动', '直觉优先', '形式推导']);
   // Identifiers, ids and stored values are data, not copy.
   const skillRow = (id: string): Element => find(`[data-zcr-skill-enabled="${id}"]`).closest('.zcr-preferences-skill')!;
   expect([...find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]').options].map(option => option.textContent)).toEqual(['English', '中文']);
   expect(find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]').value).toBe('zh');
-  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').value).toBe('');
-  expect([...find<HTMLSelectElement>('[data-zcr-pref="profile"]').options].map(option => option.value)).toEqual(['', 'formal']);
-  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options[1]!.textContent).toBe('Formal');
-  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options[0]!.textContent).toBe('未选择研究配置');
   expect(root.querySelector('[data-zcr-skill="user-study"]')).not.toBeNull();
   expect(skillRow('user-study').querySelector('span')?.textContent).toBe('Study');
   expect(skillRow('user-study').querySelector('.zcr-preferences-muted')?.textContent).toBe('user · v1.0 · read');
@@ -457,15 +472,15 @@ it('follows a language change in both directions and reports the outcome in that
   const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
   expect(label('uiLanguage')).toBe('Interface language');
   expect(label('textScale')).toBe('Chat text scale (0.5–3)');
-  expect(label('preference-background')).toBe('Research background');
+  expect(label('preference-background')).toBe('Instructions');
   const language = find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]');
   language.value = 'zh'; change(language);
   await settle();
   expect(current().uiLanguage).toBe('zh');
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('聊天字号（0.5–3）');
-  expect(label('preference-background')).toBe('研究背景');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存偏好');
+  expect(label('preference-background')).toBe('指令');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存');
   // The pane announces its own write in the language it is now showing.
   expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toBe('界面语言已保存。');
   expect(find<HTMLElement>('[data-zcr-pref="error"]').hidden).toBe(true);
@@ -480,5 +495,5 @@ it('follows a language change in both directions and reports the outcome in that
   expect(label('uiLanguage')).toBe('Interface language');
   expect(label('textScale')).toBe('Chat text scale (0.5–3)');
   expect(find<HTMLInputElement>('[data-zcr-pref="textScale"]').value).toBe('1.5');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('Save preferences');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('Save');
 });

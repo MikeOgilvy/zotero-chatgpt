@@ -75,7 +75,11 @@ export interface HistoryEntry {
    * Preferences pane refuses to delete such a chat for the same reason the sidebar does.
    */
   unfinishedWork?: boolean;
-  /** Present only on an archived chat; echoes {@link import('./index.ts').Conversation.archivedAt}. */
+  /**
+   * Present on a chat archived by an older build. Archive is no longer offered anywhere, so this is
+   * read-only legacy data: such a chat lists and behaves as an ordinary chat and the field is never
+   * rewritten. Echoes {@link import('./index.ts').Conversation.archivedAt}.
+   */
   archivedAt?: string;
 }
 /**
@@ -105,40 +109,6 @@ export type HistoryAction = 'archive' | 'restore' | 'delete';
  */
 export interface HistoryMutationReport {
   action: HistoryAction; requested: number; changed: string[]; failed: HistoryFailed[]; warnings: string[]; partial: boolean;
-}
-/**
- * Why a bounded storage measurement stopped early. The pane turns each code into fixed copy, so no
- * free-form host text ever reaches the owner and no partial figure is presented as exact.
- */
-export type HistoryStorageStop = 'entries' | 'bytes' | 'depth' | 'entry-type' | 'listing';
-/** One stored chat's measured footprint inside the plugin's records store. */
-export interface HistoryStorageChat { id: string; bytes: number }
-/**
- * What the History section reports about where chats live and how much space they take.
- *
- * Every number is produced by a stat-only walk of the plugin's own records store during an explicit
- * owner-triggered measurement. `bytes` splits into chat, draft and other records so the parts always
- * add up; `chats` is a per-chat subset of `chatBytes`. `complete` is false whenever a bound stopped
- * the walk, and `stoppedBy` then names that bound, so "at least" is never reported as "exactly".
- */
-export interface HistoryStorageReport {
-  /** Absolute plugin-owned directory the measurement was scoped to. */
-  location: string;
-  /** The same subtree relative to the Zotero profile, so the scope is auditable without the host. */
-  scope: string;
-  bytes: number;
-  chatBytes: number;
-  draftBytes: number;
-  otherBytes: number;
-  files: number;
-  /** Per-chat bytes, largest first, capped; `chatsComplete` says whether anything was left out. */
-  chats: HistoryStorageChat[];
-  chatsComplete: boolean;
-  complete: boolean;
-  stoppedBy: HistoryStorageStop | null;
-  /** The bounds that were applied, echoed so the owner sees the number the pane states. */
-  limits: { entries: number; bytes: number; depth: number };
-  measuredAt: string;
 }
 /**
  * The subset of the workspace the History management logic needs. `ReaderWorkspace` satisfies it.
