@@ -50,10 +50,14 @@ export interface RequestTiming {
   firstTextAt: string | null;
   settledAt: string | null;
   /**
-   * Last time any event for this request reached the view — including upstream liveness that never
-   * becomes assistant text (reasoning deltas, usage reports). Optional so timings persisted before
-   * this field existed, and callers that only know accept/first-text/settle, stay valid; absent means
-   * no activity has been observed yet, which is not the same as activity having stopped.
+   * Last time upstream showed real activity for this request, after acceptance — including liveness
+   * that never becomes assistant text (reasoning deltas, usage reports, item lifecycle). Acceptance
+   * itself is our own bookkeeping, not evidence the model started, so it must NOT stamp this mark:
+   * `acceptedAt` already carries the send time, and counting acceptance here would make "nothing heard
+   * from upstream yet" unreachable and disagree with the core, which only persists upstream activity.
+   * Optional so timings persisted before this field existed, and callers that only know
+   * accept/first-text/settle, stay valid; absent means no upstream activity observed yet, which is not
+   * the same as activity having stopped. Keep it optional and keep `accepted` out — see `requestProgress`.
    */
   lastActivityAt?: string | null;
 }
@@ -116,7 +120,8 @@ function eventText(event: ReaderEvent): string | null {
  * delivered text is stamped once by the event that carried it, and a terminal event stops the clock
  * even when the view never saw text. Returns a new array; entries are only added for requests the
  * core already described, because inventing an acceptance time mid-stream would fake the elapsed
- * value. Re-delivered events keep the earliest first-text/settle stamps and the latest activity mark.
+ * value. Re-delivered events keep the earliest first-text/settle stamps and the latest activity mark;
+ * `accepted` drives the accepted time but never stamps that mark, which tracks upstream activity only.
  */
 export function advanceRequestTiming(current: readonly RequestTiming[] | undefined, event: ReaderEvent): RequestTiming[] {
   const entries = [...(current ?? [])];
@@ -126,12 +131,16 @@ export function advanceRequestTiming(current: readonly RequestTiming[] | undefin
   const text = eventText(event);
   if (entry.firstTextAt === null && text !== null && text.length > 0) entry.firstTextAt = event.at;
   if (TERMINAL_EVENTS.has(event.type) && entry.settledAt === null) entry.settledAt = event.at;
-  // Any event for this request proves the runtime is still working on it, even when it carries no
-  // answer text (reasoning deltas, usage reports, progress pings). Activity moves forward only, so a
-  // re-delivered or out-of-order event cannot make the turn look fresher than it is.
-  const activity = Date.parse(event.at);
-  const previous = entry.lastActivityAt == null ? Number.NaN : Date.parse(entry.lastActivityAt);
-  if (!Number.isFinite(previous) || (Number.isFinite(activity) && activity >= previous)) entry.lastActivityAt = event.at;
+  // Any upstream event for this request proves the runtime is still working on it, even when it carries
+  // no answer text (reasoning deltas, usage reports, progress pings, item lifecycle). Acceptance is the
+  // one exception: it is our own bookkeeping, and the core persists only upstream activity, so stamping
+  // it here would make the displayed liveness mean something different from the stored one. Activity
+  // moves forward only, so a re-delivered or out-of-order event cannot make the turn look fresher.
+  if (event.type !== 'accepted') {
+    const activity = Date.parse(event.at);
+    const previous = entry.lastActivityAt == null ? Number.NaN : Date.parse(entry.lastActivityAt);
+    if (!Number.isFinite(previous) || (Number.isFinite(activity) && activity >= previous)) entry.lastActivityAt = event.at;
+  }
   entries[index] = entry;
   return entries;
 }

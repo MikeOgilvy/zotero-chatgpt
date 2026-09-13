@@ -77,6 +77,30 @@ describe('request liveness', () => {
     expect(requestProgress(heard[0]!, at(30))).toEqual({ requestId: REQUEST, settled: false, elapsedSeconds: 30, firstTextSeconds: null, sinceActivitySeconds: 18 });
   });
 
+  it('does not treat acceptance as upstream activity: the mark stays absent until a real notification arrives', () => {
+    // Acceptance is our own bookkeeping, not evidence that the model started. Counting it would make the
+    // mark non-null the instant the user hits send, so "nothing heard yet" would be unreachable in a live
+    // view and would disagree with the core, which only ever persists upstream activity.
+    const accepted = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(2), type: 'accepted' });
+    expect(accepted[0]!.lastActivityAt ?? null).toBeNull();
+    expect(requestProgress(accepted[0]!, at(4)).sinceActivitySeconds).toBeNull();
+
+    const heard = advanceRequestTiming(accepted, { seq: 2, conversationId: 'c', requestId: REQUEST, at: at(9), type: 'progress' });
+    expect(heard[0]!.lastActivityAt).toBe(at(9));
+    expect(requestProgress(heard[0]!, at(12)).sinceActivitySeconds).toBe(3);
+  });
+
+  it('keeps acceptance driving the timing machinery it already drives and still stamps real content', () => {
+    // Excluding `accepted` from the liveness stamp must not change anything else about it.
+    const accepted = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(2), type: 'accepted' });
+    expect(accepted[0]).toMatchObject({ requestId: REQUEST, acceptedAt: T0, firstTextAt: null, settledAt: null });
+    expect(requestProgress(accepted[0]!, at(7)).elapsedSeconds).toBe(7);
+    // `accepted` is the only exclusion; real content heard afterwards still stamps both marks.
+    const first = advanceRequestTiming(accepted, delta(4));
+    expect(first[0]!.firstTextAt).toBe(at(4));
+    expect(first[0]!.lastActivityAt).toBe(at(4));
+  });
+
   it('stamps activity from a progress ping that carries no answer text and never fakes first text', () => {
     const ping = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(3), type: 'progress' });
     expect(ping[0]).toMatchObject({ firstTextAt: null, settledAt: null, lastActivityAt: at(3) });
