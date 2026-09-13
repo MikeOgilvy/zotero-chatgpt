@@ -275,7 +275,11 @@ it('lists only editable native collections and keeps profile, library, and colle
   expect(f.source.capture).not.toHaveBeenCalled();
 });
 
-it('exports generated output images above the input limit while retaining the ordinary 2 MiB limit', async () => {
+// This test really base64-encodes and decodes a 3 MiB image (~2.5-2.7s measured in isolation on
+// this machine), which is CPU-bound and contends with every other worker under the full parallel
+// suite, so it intermittently crossed vitest's 5s default. The work and its assertions stay real;
+// only the budget is explicit.
+it('exports generated output images above the input limit while retaining the ordinary 2 MiB limit', { timeout: 15000 }, async () => {
   const f = setup(); const bytes = new Uint8Array(3 * 1024 * 1024); bytes.set(png);
   const image = { id: uuid, name: 'generated.png', mime: 'image/png' as const, dataUrl: `data:image/png;base64,${Buffer.from(bytes).toString('base64')}` };
   await expect(f.port.exportImage(image)).rejects.toThrow(/larger/iu);
