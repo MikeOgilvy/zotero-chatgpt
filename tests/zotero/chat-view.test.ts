@@ -8,7 +8,7 @@ import { mountChatView, renderReaderShell } from '../../packages/zotero/src/chat
 import { UNLOCATED_SOURCE_TEXT } from '../../packages/zotero/src/chat/source-links.ts';
 import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, type Citation, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
+import { SHAREABLE_STORAGE_LOCATION, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
 import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
@@ -48,6 +48,7 @@ async function mountReadyChat(options: {
   activeRequestId?: string | null;
   captureTimers?: boolean;
   rename?: (id: string, title: string) => Promise<Conversation>;
+  clipboardImages?: () => Promise<ImageAttachment[]>;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -133,6 +134,7 @@ async function mountReadyChat(options: {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined,
     uuid: options.uuid ?? (() => '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e'), now: () => 'now',
     ...(options.document ? { document: options.document } : {}),
+    ...(options.clipboardImages ? { readClipboardImage: options.clipboardImages } : {}),
   });
   if (options.draftCitations) {
     for (const citation of options.draftCitations) presenter.addCitation(citation);
@@ -1097,6 +1099,54 @@ it('shows the constant sentence when a failed view action has no coded message',
   expect(viewError.textContent).toBe('This action could not be completed.');
 });
 
+it('attaches a Cmd+V screenshot from the plugin clipboard when the reader paste carries no image', async () => {
+  const reads = vi.fn(() => Promise.resolve([imageA]));
+  const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView!;
+  input.focus();
+  // A reader can deliver Cmd+V to its own chrome: no DOM paste data reaches this realm at all.
+  input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'v', metaKey: true, bubbles: true, cancelable: true }));
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: [] } });
+  input.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
+  expect(reads).toHaveBeenCalledTimes(1);
+  expect(root.querySelector('[data-zcr-draft-image] img')?.getAttribute('src')).toBe(imageA.dataUrl);
+});
+
+it('never attaches the same Cmd+V screenshot twice when both clipboard routes see it', async () => {
+  const reads = vi.fn(() => Promise.resolve([imageA]));
+  const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView!;
+  const png = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
+  const file = new view.File([png], 'screenshot.png', { type: 'image/png' });
+  input.focus();
+  input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'v', metaKey: true, bubbles: true, cancelable: true }));
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], files: [file] } });
+  input.dispatchEvent(event);
+  await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
+  await new Promise(resolve => setTimeout(resolve, 1));
+  expect(presenter.snapshot().draft.images).toHaveLength(1);
+  expect(reads).not.toHaveBeenCalled();
+});
+
+it('leaves a plain-text paste to the textarea and never reads the pasteboard image', async () => {
+  const reads = vi.fn(() => Promise.resolve([imageA]));
+  const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView!;
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: ['text/plain'] } });
+  input.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  await Promise.resolve();
+  expect(presenter.snapshot().draft.images).toHaveLength(0);
+  expect(reads).not.toHaveBeenCalled();
+});
 it('keeps dock type at 1 when the open PDF zooms', async () => {
   const readerZoom = { factor: 1, ins: 0, outs: 0, resets: 0 };
   const { root } = await mountReadyChat({ messages: [], readerZoom });

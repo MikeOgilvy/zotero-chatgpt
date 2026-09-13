@@ -150,6 +150,12 @@ export function clipboardHasImage(data: ClipboardLike | null | undefined): boole
     || listedTypes(data).some(isClipboardImageFlavor);
 }
 
+/** True when the paste gesture carries text, so a reader paste of plain text keeps its default. */
+export function clipboardHasText(data: ClipboardLike | null | undefined): boolean {
+  if (!data) return false;
+  return listedTypes(data).some(type => type.toLowerCase().startsWith('text/'));
+}
+
 export async function imagesFromClipboard(
   data: ClipboardLike | null | undefined,
   uuid: () => string,
@@ -291,6 +297,25 @@ export function resolveGeckoClipboardAccess(win: Window | null | undefined): Gec
     if (access.Services?.clipboard || access.Cc?.['@mozilla.org/widget/clipboard;1']) return access;
   }
   return win ? win as GeckoClipboardAccess : null;
+}
+
+// The plugin realm (presenter) is the only place these privileged globals exist; a reader iframe
+// content realm has neither Cc nor Services, so a paste there can never reach the pasteboard.
+declare const Cc: Record<string, { createInstance?(iface: unknown): unknown; getService?(iface: unknown): unknown }> | undefined;
+declare const Ci: Record<string, unknown> | undefined;
+declare const Services: { clipboard?: GeckoClipboardService } | undefined;
+
+/**
+ * Privileged clipboard access in the plugin realm. macOS screenshots are offered as TIFF, which only
+ * this route converts because nsIClipboard is asked for `image/png`; the reader iframe cannot help.
+ */
+export function pluginClipboardAccess(): GeckoClipboardAccess | null {
+  const access: GeckoClipboardAccess = {
+    ...(typeof Cc === 'undefined' ? {} : { Cc }),
+    ...(typeof Ci === 'undefined' ? {} : { Ci }),
+    ...(typeof Services === 'undefined' ? {} : { Services }),
+  };
+  return clipboardService(access) ? access : null;
 }
 
 function bytesFromBinaryString(text: string): Uint8Array {

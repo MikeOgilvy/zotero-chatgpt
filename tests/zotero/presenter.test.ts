@@ -2,12 +2,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterState } from '../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
+import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ImageAttachment, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
 import { citationA, citationB, imageA, paperA, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 const model = { id: 'catalog-default', displayName: 'Catalog Default', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }], defaultServiceTier: 'priority' };
 const other = { id: 'other-model', displayName: 'Other Model', isDefault: false, supportedReasoningEfforts: [{ id: 'low', description: '' }], defaultReasoningEffort: 'low', serviceTiers: [] as Array<{ id: string; name: string; description: string }>, defaultServiceTier: null };
-function fixture(options: { signedIn?: boolean } = {}) {
+function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<ImageAttachment[]> } = {}) {
   let runtime: RuntimeSnapshot = { revision: 0, runtime: 'ready', account: { state: options.signedIn === false ? 'signedOut' : 'signedIn' }, login: null, models: options.signedIn === false ? [] : [model], error: null };
   const observers = new Set<(s: RuntimeSnapshot) => void>(); const listeners = new Set<(e: ReaderEvent) => void>();
   let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings, activeRequestId: null, messages: [], lastSeq: 0, createdAt: 'now', updatedAt: 'now' };
@@ -52,7 +52,7 @@ function fixture(options: { signedIn?: boolean } = {}) {
     subscribe: l => { listeners.add(l); return () => { listeners.delete(l); }; }, close: async () => {},
   };
   const states: PresenterState[] = [];
-  const services = { ensureStarted: vi.fn(() => Promise.resolve(client)), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z' };
+  const services = { ensureStarted: vi.fn(() => Promise.resolve(client)), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
   const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
@@ -438,5 +438,20 @@ describe('conversation presenter', () => {
     expect(text).not.toMatch(/\/Users|token|private@/i);
     expect(f.last().message).toContain('do not include paper text');
     expect(f.client.diagnostics).toHaveBeenCalledWith(f.conversation().id);
+  });
+});
+
+describe('clipboard paste', () => {
+  it('reads pasted images from the privileged clipboard when the host provides one', async () => {
+    const f = fixture({ clipboard: () => Promise.resolve([imageA]) });
+    await f.presenter.activate();
+    expect(await f.presenter.clipboardImages()).toEqual([imageA]);
+    expect(f.presenter.snapshot().draft.images).toEqual([]);
+  });
+  it('answers with no image instead of inventing one when the reader realm has no pasteboard', async () => {
+    const f = fixture();
+    await f.presenter.activate();
+    expect(await f.presenter.clipboardImages()).toEqual([]);
+    expect(f.presenter.snapshot().draft.images).toEqual([]);
   });
 });

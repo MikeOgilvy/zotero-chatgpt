@@ -13,6 +13,7 @@ import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/c
 import { parseAnnotationCandidates } from '../../../core/src/tasks/controller.ts';
 import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/src/workspace/export.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
+import { imagesFromGeckoClipboard, pluginClipboardAccess } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
 export interface DocumentServices {
   prepare(signal: AbortSignal, progress: (p: { done: number; total: number }) => void, range?: readonly [number, number]): Promise<DocumentContext>;
@@ -31,6 +32,11 @@ export interface PresenterServices {
   contextBudget?(input: SendInput, conversation: Conversation): ContextBudget;
   /** Test seam for the bounded '@' search; production uses the default bound. */
   searchTimeoutMs?: number;
+  /**
+   * Host seam for the privileged clipboard read the reader realm cannot do. Production leaves it
+   * unset so the presenter uses its own plugin-realm pasteboard access; tests inject a double.
+   */
+  readClipboardImage?: () => Promise<ImageAttachment[]>;
 }
 export type PresenterDependencies = PresenterServices;
 export type PresenterSkillEdit = Pick<ReaderSkill, 'name' | 'description' | 'version' | 'workflow' | 'markdown' | 'enabled'> & { id: string | null; revision?: string };
@@ -366,6 +372,16 @@ export class ConversationPresenter {
     if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while choosing images. Choose them again.');
     if (this.state.draft.images.length + images.length > LIMITS.imagesPerRequest) throw new ReaderError('PAYLOAD_TOO_LARGE', `Attach at most ${LIMITS.imagesPerRequest} images per message.`);
     for (const image of images) this.addImage(image);
+  }
+  /**
+   * Clipboard images for the reader composer. A reader iframe sees only the DOM paste data it was
+   * given; macOS screenshots (TIFF on the pasteboard) and paste events routed to the reader chrome
+   * are readable only here, in the plugin realm, so the composer asks this instead of the iframe's
+   * own Cc. An empty pasteboard returns [] and never invents or repeats an attachment.
+   */
+  clipboardImages(): Promise<ImageAttachment[]> {
+    if (this.services.readClipboardImage) return Promise.resolve(this.services.readClipboardImage());
+    return imagesFromGeckoClipboard(pluginClipboardAccess(), () => this.services.uuid());
   }
   async captureRegion(citation = this.state.draft.citations.at(-1)): Promise<void> {
     if (!this.services.library?.captureRegion) throw new ReaderError('UNSUPPORTED_INTERACTION', 'PDF region capture is unavailable.');

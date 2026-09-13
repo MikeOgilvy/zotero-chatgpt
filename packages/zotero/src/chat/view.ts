@@ -12,7 +12,7 @@ import { copyableAnswerText, followAnswerScroll, renderAnswer } from './render-a
 import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
 import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
-import { clipboardHasImage, geckoClipboardHasImage, imagesFromClipboard, imagesFromGeckoClipboard, resolveGeckoClipboardAccess, type GeckoClipboardAccess } from './pick-images.ts';
+import { clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imagesFromClipboard, imagesFromGeckoClipboard, resolveGeckoClipboardAccess, type GeckoClipboardAccess } from './pick-images.ts';
 export interface AttachmentIdentity { title: string; key: string; libraryID: number }
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
@@ -570,7 +570,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   const nextImageId = () => hooks.uuid?.() ?? (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`);
   const geckoAccess = (): GeckoClipboardAccess | null => resolveGeckoClipboardAccess(doc.defaultView);
+  /**
+   * One paste gesture can reach the composer through both the DOM paste event and the plugin-realm
+   * clipboard read (the reader iframe cannot see a macOS screenshot pasteboard). Identical bytes
+   * already in the draft are skipped so a single Cmd+V can never attach the same image twice.
+   */
+  const attachClipboardImages = (images: ImageAttachment[]) => {
+    const present = new Set(presenter.snapshot().draft.images.map(image => image.dataUrl));
+    for (const image of images) { if (present.has(image.dataUrl)) continue; present.add(image.dataUrl); presenter.addImage(image); }
+  };
+  const clipboardFromPlugin = () => presenter.clipboardImages().then(attachClipboardImages).catch(() => reportViewMessage(COPY.imageClipboardFailed));
   const seenPaste = new WeakSet<Event>();
+  let clipboardServed = false;
   const onPaste = (event: Event) => {
     const target = event.target as Node | null;
     const inComposer = !!target && 'nodeType' in target && composer.contains(target);
@@ -584,11 +595,19 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const host = geckoAccess();
     const hasDom = clipboardHasImage(clipboard);
     const hasGecko = !hasDom && geckoClipboardHasImage(host);
-    if (!hasDom && !hasGecko) return;
+    if (hasDom || hasGecko) {
+      event.preventDefault();
+      const work = hasDom ? imagesFromClipboard(clipboard, nextImageId) : imagesFromGeckoClipboard(host, nextImageId);
+      clipboardServed = true;
+      void work.then(attachClipboardImages).catch(() => reportViewMessage(COPY.imageClipboardFailed));
+      return;
+    }
+    // No paste data the iframe can see and no text to insert: the pasteboard image may still be
+    // readable in the plugin realm, which owns the privileged clipboard.
+    if (clipboardHasText(clipboard)) return;
     event.preventDefault();
-    void (hasDom ? imagesFromClipboard(clipboard, nextImageId) : imagesFromGeckoClipboard(host, nextImageId)).then(images => {
-      for (const image of images) presenter.addImage(image);
-    }).catch(() => reportViewMessage(COPY.imageClipboardFailed));
+    clipboardServed = true;
+    void clipboardFromPlugin();
   };
   composer.addEventListener('dragover', event => { if (clipboardHasImage(event.dataTransfer)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; } });
   composer.addEventListener('drop', event => {
@@ -616,6 +635,17 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   input.addEventListener('input', () => { presenter.setQuestion(input.value); resizeInput(); });
   const isComposing = (event: KeyboardEvent) => composing || event.isComposing || event.keyCode === 229;
+  input.addEventListener('keydown', event => {
+    // Cmd/Ctrl+V: Zotero's reader may route the pasteboard to its own chrome, and a screenshot
+    // (TIFF on macOS) is invisible to this content realm. The privileged plugin clipboard is read
+    // as a fallback; the DOM paste event for the same keypress wins, and identical bytes never
+    // attach twice. Text pastes are untouched because nothing is prevented here.
+    if (!isComposing(event) && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'v') {
+      clipboardServed = false;
+      // The keypress default action and its paste event run before timers, so a DOM image paste wins.
+      setTimeout(() => { if (!clipboardServed) void clipboardFromPlugin(); }, 0);
+    }
+  });
   input.addEventListener('keydown', event => {
     if (isComposing(event)) return;
     if (event.key === 'Escape' && !settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); return; }

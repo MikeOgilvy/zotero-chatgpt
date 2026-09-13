@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import {
-  clipboardHasImage, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
-  imagesFromClipboardItems, imagesFromGeckoClipboard, resolveGeckoClipboardAccess,
+  clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
+  imagesFromClipboardItems, imagesFromGeckoClipboard, pluginClipboardAccess, resolveGeckoClipboardAccess,
   type ClipboardImageItem,
 } from '../../packages/zotero/src/chat/pick-images.ts';
 import { TINY_PNG_DATA_URL } from '../contracts/factories.ts';
@@ -150,4 +150,18 @@ it('resolves Gecko clipboard access from a parent chrome window', () => {
   const host = fakeGeckoClipboard({ 'image/png': PNG });
   const iframe = { parent: host } as unknown as Window;
   expect(resolveGeckoClipboardAccess(iframe)).toBe(host);
+});
+
+it('treats only text flavors as an insertable text paste', () => {
+  expect(clipboardHasText({ types: ['text/plain', 'image/png'] })).toBe(true);
+  expect(clipboardHasText({ mozItemCount: 1, mozTypesAt: () => ['text/html'] })).toBe(true);
+  expect(clipboardHasText({ items: [], files: [], types: [] })).toBe(false);
+  expect(clipboardHasText({ types: ['public.png'] })).toBe(false);
+  expect(clipboardHasText(null)).toBe(false);
+});
+
+it('has no privileged pasteboard in a content realm and returns nothing instead of guessing', async () => {
+  // The reader iframe realm has no Cc/Services; only the plugin realm can read the pasteboard.
+  expect(pluginClipboardAccess()).toBeNull();
+  expect(await imagesFromGeckoClipboard(pluginClipboardAccess(), () => PNG_ID)).toEqual([]);
 });
