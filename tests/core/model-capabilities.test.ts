@@ -34,9 +34,10 @@ it('resolves every embedded catalog id so a manifest bump cannot silently empty 
   }
 });
 
-it('lists gpt-6-astra first, matching the newest-first runtime order that feeds the composer default', () => {
-  // model/list pages newest-first and the composer default is the first visible entry, so the
-  // embedded catalog order is the offline mirror of the account's default model.
+it('lists gpt-6-astra first, mirroring the newest-first catalog the composer rank leads with', () => {
+  // The composer no longer trusts the server array; it ranks gpt-6-astra first itself
+  // (generation-settings.ts). The embedded catalog keeps the same newest-first order so the
+  // offline mirror and the picker default cannot disagree.
   expect(Object.keys(PINNED_MODEL_CATALOG.models)[0]).toBe('gpt-6-astra');
 });
 
