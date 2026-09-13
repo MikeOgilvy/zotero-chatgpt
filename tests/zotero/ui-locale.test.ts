@@ -179,3 +179,22 @@ it('localizes completed metadata outcomes, annotation review counts and switches
   expect(speed.getAttribute('aria-label')).toBe('快速'); expect(meta.textContent).toBe('High'); expect(editHeading.textContent).toBe('编辑 Send');
   locale.update('en'); expect(summary.textContent).toBe('Acquire literature · Completed · 2 metadata item(s) · 0 PDFs attached'); expect(editHeading.textContent).toBe('Edit Send'); locale.dispose();
 });
+
+it('translates the plus section headings and each row title and description', () => {
+  const { add } = setup();
+  const group = add('div', 'zcr-plus-group');
+  add('div', 'zcr-plus-heading', 'Attach', group);
+  add('div', 'zcr-plus-heading', 'Reference', group);
+  const row = add('button', 'zcr-plus-row', '', group);
+  row.dataset.zcrAction = 'pick-images'; row.setAttribute('aria-label', 'Choose images…'); row.title = 'Choose images…';
+  const title = add('span', 'zcr-plus-row-title', 'Choose images…', row);
+  const description = add('span', 'zcr-plus-row-description', 'From your computer', row);
+  const locale = mountUILocale(group); locale.update('zh');
+  const headings = [...group.querySelectorAll<HTMLElement>('.zcr-plus-heading')].map(node => node.textContent);
+  expect(headings).toEqual(['添加附件', '引用']);
+  expect(title.textContent).toBe('选择图片…');
+  expect(description.textContent).toBe('来自你的电脑');
+  // The accessible name follows the visible title, so the row is announced in the reader language.
+  expect(row.getAttribute('aria-label')).toBe('选择图片…'); expect(row.title).toBe('选择图片…');
+  locale.update('en'); expect(title.textContent).toBe('Choose images…'); expect(description.textContent).toBe('From your computer'); locale.dispose();
+});

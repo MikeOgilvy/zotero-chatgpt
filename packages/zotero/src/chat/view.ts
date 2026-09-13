@@ -89,6 +89,12 @@ const COPY = {
   capturePage: 'Capture page',
   capturePageNumber: 'PDF page to capture',
   addReferences: 'Add references or workflows',
+  attachHeading: 'Attach',
+  referenceHeading: 'Reference',
+  chooseImagesHint: 'From your computer',
+  captureRegionHint: 'From the current PDF',
+  capturePageHint: 'The current PDF page',
+  addReferencesHint: 'Saved chats, articles and workflows',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
   imageDropFailed: 'The dropped image could not be attached.',
@@ -574,14 +580,30 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   plus.setAttribute('aria-haspopup', 'menu'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
   const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'menu'); plusMenu.setAttribute('aria-label', COPY.attach);
   const pageNumber = el('input'); pageNumber.type = 'number'; pageNumber.min = '1'; pageNumber.value = '1'; pageNumber.setAttribute('aria-label', COPY.capturePageNumber);
-  const plusReferences = button(COPY.addReferences, 'composer-references', () => { togglePlus(false); workspaceView?.openCommands(); });
-  plusMenu.append(
-    button(COPY.chooseImages, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
-    button(COPY.captureRegion, 'capture-region', () => { togglePlus(false); void presenter.captureRegion().catch(reportViewError); }),
+  // Codex-style grouped rows: a small heading, a title and a supporting description. The accessible
+  // name stays the title, never the description.
+  const plusRow = (title: string, description: string, action: string, onClick: () => void) => {
+    const row = el('button', 'zcr-plus-row');
+    row.type = 'button'; row.dataset.zcrAction = action;
+    row.append(el('span', 'zcr-plus-row-title', title), el('span', 'zcr-plus-row-description', description));
+    row.setAttribute('aria-label', title); row.title = title;
+    row.addEventListener('click', onClick);
+    return row;
+  };
+  const attachGroup = el('div', 'zcr-plus-group');
+  attachGroup.append(
+    el('div', 'zcr-plus-heading', COPY.attachHeading),
+    plusRow(COPY.chooseImages, COPY.chooseImagesHint, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
+    plusRow(COPY.captureRegion, COPY.captureRegionHint, 'capture-region', () => { togglePlus(false); void presenter.captureRegion().catch(reportViewError); }),
+    plusRow(COPY.capturePage, COPY.capturePageHint, 'capture-page', () => { togglePlus(false); void presenter.capturePage(Number(pageNumber.value) - 1).catch(reportViewError); }),
     pageNumber,
-    button(COPY.capturePage, 'capture-page', () => { togglePlus(false); void presenter.capturePage(Number(pageNumber.value) - 1).catch(reportViewError); }),
-    plusReferences,
   );
+  const referenceGroup = el('div', 'zcr-plus-group');
+  referenceGroup.append(
+    el('div', 'zcr-plus-heading', COPY.referenceHeading),
+    plusRow(COPY.addReferences, COPY.addReferencesHint, 'composer-references', () => { togglePlus(false); workspaceView?.openCommands(); }),
+  );
+  plusMenu.append(attachGroup, referenceGroup);
   composer.append(plusMenu);
   leading.append(plus);
   const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;

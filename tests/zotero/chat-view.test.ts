@@ -1913,6 +1913,29 @@ it('keeps exactly one plus control at the composer start and removes the attach 
   expect([...root.querySelectorAll('button')].filter(node => node.textContent?.trim() === '@')).toHaveLength(0);
 });
 
+it('groups the plus popover into titled sections with title and description rows', async () => {
+  const { root } = await mountReadyChat({ messages: [] });
+  const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!.click();
+  const groups = [...menu.querySelectorAll<HTMLElement>('.zcr-plus-group')];
+  expect(groups).toHaveLength(2);
+  expect(groups[0]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Attach');
+  expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
+  const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
+  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'capture-region', 'capture-page', 'composer-references']);
+  for (const row of rows) {
+    expect(row.tagName).toBe('BUTTON');
+    const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
+    const description = row.querySelector('.zcr-plus-row-description')?.textContent ?? '';
+    expect(title.trim()).not.toBe('');
+    expect(description.trim()).not.toBe('');
+    // The accessible name is the title alone, never the concatenated row text.
+    expect(row.getAttribute('aria-label')).toBe(title);
+  }
+  // The page-number field stays inside the attach group, next to the route that reads it.
+  expect(groups[0]!.querySelector('input[type="number"]')).not.toBeNull();
+});
+
 it('opens every attachment route from the plus menu and closes it after a choice', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const view = root.ownerDocument.defaultView!;
