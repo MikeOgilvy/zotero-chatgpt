@@ -1,6 +1,6 @@
 # 当前进度与验收
 
-2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当时 HEAD 通过 `typecheck`/`lint`/`test:unit`（**632 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。并入 2026-09-13 的两个功能分支后，当前 HEAD 为 **699 tests / 60 files**（见下节）。
+2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当时 HEAD 通过 `typecheck`/`lint`/`test:unit`（**632 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。并入 2026-09-13 的两个功能分支后为 **699 tests / 60 files**；本轮再补上“设置迁入原生偏好设置窗口”与“论断溯源”两处缺口后，当前工作树为 **743 tests / 67 files**（见下节）。
 
 2026-09-13 补充：在最终 0.4.0a1 开发包上重跑了专用宿主验证（`--context`、`--context --native`）与 s6 隔离树的升级/回退，并为“新 schema 回退安全拒绝”补了宿主检查与单元回归。证据目录 `.zcr-dev/verification/scope-2026-09-12/`（忽略），过程与失败报告见下节。
 
@@ -20,6 +20,31 @@
 诚实边界：以上均为代码 + 单元证据。并入重绘图标后的树重新执行 `package:dev` + `verify:artifacts`：产物 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`，**77 files PASS**，SHA-256 `24d82e17ca2f1bae5ee5b2806d69845c600bed63a848abd070fb2321e9baf534`（`dist/SHA256SUMS`），并确认包内 `content/assets/icon.svg` 与源文件逐字节一致。上节 2026-09-13 的真实宿主证据对应该合并之前的 `d33ab244…` 包；合并后的树尚未重跑真实宿主或真实模型，F 与登录/发行门槛仍未打勾。
 
 本轮交付（**代码 + 单元测试证据，非真实模型/宿主证据**）：**B 的来源身份与预算/长文/会话恢复、C 的工作区/引用/skill、UI 的四区视图、D 的原生标注任务账本、E 的获取整理，以及多模态/能力/图像输出**。真实隔离登录与真实模型回答、最终 0.4 XPI 的宿主 UI、真实图像生成和公开发行门槛仍未验证。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
+
+### 2026-09-13 设置迁入原生偏好设置窗口 + 论断溯源（代码 + 单元证据）
+
+本轮处理用户报告的最后一组产品缺口：设置应位于 **Zotero 原生偏好设置窗口**而不是侧边栏；回答中的论断应能点击 **回溯到原文并高亮**。以下均为代码 + 单元证据，未运行宿主测试、未调用真实模型。
+
+**设置（A）**
+
+- 原生面板注册：`packages/zotero/src/workspace/preferences-registration.ts` 在 `startup()` 用 `Zotero.PreferencePanes.register` 注册固定 id `zcr-prefpane-settings`，`shutdown()` 反注册。注册幂等（本次会话已注册则直接返回），失败时先清理同 id 的旧面板再重试一次，仍失败只 `logError` 并返回 `undefined`，不阻断插件其余功能；异步注册与关闭竞态由 `stopped` 守卫处理（关闭后完成的注册会被立即反注册）。
+- 面板装载：脚本 `packages/zotero/src/preferences-entry.ts` 随构建产出 `content/preferences/pane.js`，由 Zotero 以偏好设置窗口 sandbox 加载（脚本先于片段），把 pane 对象发布到共享的 `Zotero` 上；片段 `packages/zotero/preferences/preferences.xhtml` 的 `onload`/`onunload` 调用 mount/unmount——与 Zotero 内置面板同一机制（load 事件派发在 pane-container 的顶层子元素上）。重复 load 不会叠加第二个表单。
+- 端口最小化：`preferences-service.ts` 只暴露 JSON 文本函数（readSettings/writeSettings/setSkillEnabled/exportPreferences/newProfileId），面板拿不到 store 对象、路径或权限。所有读写都经过既有 WorkspaceStore：整份校验快照或单个 skill（`saveSkill` 保留 revision 冲突），写失败后用 store 自己的消息报错并重读真实状态，且清除先前的“已保存”提示，不出现互相矛盾的两个结果。
+- 展示的真实设置：界面语言、聊天字号、六项研究偏好（回答语言/详细程度/数学解释/研究背景/引用风格/标注风格）、研究配置（新增/更新/删除，id 由插件沙箱生成）、已安装工作流的可用性，以及“导出偏好”（快照定义收敛到 `packages/core/src/workspace/export.ts` 一处，侧边栏与原生面板共用同一 payload 与原生保存对话框）。
+- 侧边栏只留本文对话相关内容（研究配置选择、每对话覆盖、引用与工作流编撰）并明确指向原生偏好设置；全局偏好表单、研究配置增删改、工作流可用性开关已从侧边栏移除，避免第二处设置来源。
+- 证据：`tests/zotero/preferences-registration.test.ts`（幂等注册、失败重试、关闭竞态、反注册）、`preferences-service.test.ts`（快照读写、skill revision 冲突、导出与导出失败）、`preferences-pane.test.ts`（渲染真实片段、保存、冲突、导出失败、卸载后不再写入、失败不复用旧成功提示）、`preferences-entry.test.ts`（真实片段 + 真实 pane 模块挂到假桥上：正常挂载/卸载、宿主缺失时的诚实提示、读取失败不渲染半成品、重复 load 只挂载一次）、`tests/core/workspace-export.test.ts`、更新后的 `workspace-view.test.ts`。`scripts/verify-artifacts.mjs` 现在把两个偏好文件列为必需项（删任一即验证失败，见 `tests/build/verify-artifacts.test.ts`），这是加强而非放宽校验。
+- **只有真实偏好设置窗口能确认**：sandbox 原型链上 `Zotero` 对象写入是否对片段内联处理器可见、XUL 片段 onload/onunload 的实际派发时机、HTML 控件在 XUL 文档中的原生主题/暗色/键盘焦点表现，以及真实 store 与打开窗口的并发行为。本轮未运行宿主测试。
+
+**论断溯源（B）**
+
+- 点击路径：回答中的 `https://zcr.invalid/source/<documentId>/<pageIndex>` 由 `linkAnswerSources` 绑定；点击时把链接 title 的逐字引用经 `normalizeQuote` 归一化（空白/引号；未提供则 null）后传给 `openDocumentPage`，由 `openSourcePage` **先校验冻结 revision**，再定位、再导航。结果是 `highlighted` / `opened` / `unlocated` 三态；只有 `unlocated` 时在链接旁显示“已打开引用页，但无法定位精确段落”，不伪造高亮。
+- 定位：`packages/zotero/src/reader/locate.ts` 在冻结版本页面的字符盒上做纯函数匹配（归一化空白/连字符/引号后大小写敏感；跨行字符合并为矩形；多义、部分字形边界、几何非法都判为 unresolved）；`nativeSourceNavigator` 用原生 `getPageData` 取字符盒后再次比对 revision，再调用原生 `navigate({ position })` 做临时高亮。页号越界、页面读取失败、定位歧义都返回诚实 miss。
+- 不写文献库：`SourcePageNavigator` 端口刻意不含 annotation/library 能力，`tests/zotero/source-highlight.test.ts` 断言点击路径只发生 validate/locate/navigate 三种调用，revision 不匹配时拒绝定位（`tests/zotero/locate.test.ts`、`source-links.test.ts`、`chat-view.test.ts` 覆盖点击解析、诚实 miss 与无库写入）。
+- 策略：`packages/core/src/codex/reader-policy.ts` 的引文指令要求在链接 title 给出逐字短引用，无法逐字引用时省略 title（`tests/core/policy.test.ts` 断言）。**这是代码 + 单元证据，未跑真实模型，不能断言真实模型会遵守该指令。**
+- **只有真实宿主能确认**：Gecko/XUL 侧临时高亮的真实视觉效果、真实 reader iframe 的字符盒坐标与滚动锚点、以及长引用在真实页面上的定位质量。
+
+本轮收尾全量门禁（同一工作树）：`npm run typecheck` PASS、`npm run lint` PASS、`npm run test:unit` **743 tests / 67 files** PASS（本轮该树无 skip；`install-lifecycle` 的两条 `skipIf` 在存在 `dist/*.xpi` 时实际执行并通过）、`npm run package:dev` 产出 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`、`npm run verify:artifacts` **79 files PASS**，SHA-256 `c881ad0a3e793398f2514632d0b8ed70f50ded5103aabf22807591f46b9d53f2`（`dist/SHA256SUMS`，含 `content/preferences/preferences.xhtml` 与 `content/preferences/pane.js`）。均为代码 + 单元 + 产物证据；真实宿主与真实模型证据仍为空。
+
 
 ## 实际交付路径
 
@@ -124,9 +149,11 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | 统一 @文章/@chat、/skill、personalization | WorkspaceStore、@article 元数据先行/选定后读取、@chat 有界快照、SKILL.md 解析与 revision 冲突、偏好/研究配置已有代码与单元；第三方 skill 仍不能授予权限。真实库接线与 UI 目视未验 | C |
 | 模型/多模态/上下文 | 固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴图片、生成图 16 MiB 校验与导出、diagram 线程能力已有代码与单元；真实档位/多图/真实图像生成、文件拖拽/截图排序、精确用量与完整已发送/已引用面板仍未测 | C |
 | 标注 / 获取整理 agent | 候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验已有代码与单元；真实库原生写入/撤销、网络预览与合法全文核对未在宿主验证 | D/E |
+| 设置/偏好设置窗口：preferences-*、workspace-store | 原生面板注册/清理、面板端口与快照写入、侧边栏去重已有代码与单元；真实偏好设置窗口的 sandbox/XUL 片段加载、原生主题与键盘焦点、以及打开窗口时的 store 并发未在宿主验证 | F |
+| 论断溯源：reader/locate、reader/source-highlight、reader-policy | 冻结 revision 校验、逐字引用定位与临时高亮导航、诚实 miss、无库写入已有代码与单元；真实 Gecko `navigate({position})` 的视觉表现、真实页面定位质量、真实模型是否输出逐字引用未验证 | F |
 | 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；本轮实测 `package:dev`/`verify:artifacts`。官方新登录、真实输出/停止/在途恢复、无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成；本轮已复现 clean HEAD 重建（见上） | F |
 
-**下一条可执行任务**：在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”和真实图像生成；随后用真实宿主复核最终 0.4 XPI 的原生任务/获取 UI，再按 F 的门槛处理升级/回退、无 Node 安装与公开签名发行。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。
+**下一条可执行任务（含本轮新增）**：在真实偏好设置窗口中目视核对 `Zotero Codex Reader` 面板（暗色/亮色、键盘 Tab、保存与导出失败提示），并用真实宿主确认点击引文后的临时高亮；随后在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”和真实图像生成；随后用真实宿主复核最终 0.4 XPI 的原生任务/获取 UI，再按 F 的门槛处理升级/回退、无 Node 安装与公开签名发行。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话；未发送草稿目前仅在插件寿命内保留，重启不会恢复。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
 
@@ -158,6 +185,8 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 - [x] 多模态/能力（代码+单元）：模型目录/usage/上下文预算来源；粘贴/截图多图；固定 runtime 图像生成能力与 16 MiB 生成图校验；真实模型图像生成未验。
 - [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、无 Node/公开下载仍在对应条件成立时验收。**版本升级/回退与 schema-3 回退安全拒绝本轮已在 s6 隔离树验证（22/22）**；仍需要隔离官方登录、真实模型、真实宿主原生 UI、签名 XPI 与公开发布授权。
 - [x] 合并 `feat/usage-batch-1` 与 `fix/audit-bugs-ui` 并补完耗时 UI（代码+单元）：两侧测试均保留，全量 `test:unit` 连续两次 **699 tests / 60 files**，重打包 `verify:artifacts` **77 files**；真实宿主/模型仍未重跑。
+- [x] 设置迁移（代码+单元）：全局设置进入 Zotero 原生偏好设置面板（注册/反注册/失败与关闭竞态已测），侧边栏只保留每对话内容并指向原生设置；XPI 已含片段与脚本，`verify:artifacts` 把它们列为必需文件。真实偏好设置窗口的沙箱/主题/焦点表现仍待宿主目视。
+- [x] 论断溯源（代码+单元）：点击引文先校验冻结 revision，再按链接 title 的逐字引用在冻结页面字符盒上定位，命中才做临时高亮，未命中诚实提示；点击路径无任何库写入。真实 Gecko 高亮视觉与真实模型是否遵守逐字引用指令仍未测。
 - [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；CI/release 工作流已按真实脚本与 `.nvmrc` 加固且保持无 upload/publish；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
