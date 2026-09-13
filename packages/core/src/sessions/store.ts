@@ -6,7 +6,7 @@ import { parseThreadUsage } from '../codex/model-capabilities.ts';
 import { DOCUMENT_BYTES, documentSummary, validateDocument, validateRevision } from '../../../contracts/src/document.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
 import { encodeRequestLog, parseRequestLog } from './log.ts';
-export interface RequestRecord { requestId: UUID; hash: string; hashVersion?: 2; state: RequestState; turnId: string | null; createdAt: string; updatedAt: string; action?: 'explain' | 'ask'; firstTokenAt?: string }
+export interface RequestRecord { requestId: UUID; hash: string; hashVersion?: 2; state: RequestState; turnId: string | null; createdAt: string; updatedAt: string; action?: 'explain' | 'ask'; firstTokenAt?: string; lastEventAt?: string }
 /** Persisted shape. Requests share the conversation file so accepted state and the user message land atomically. */
 export interface StoredConversation extends Conversation { schemaVersion: 1 | 2 | 3; documents?: Record<string, DocumentContext>; logSeq: number; upstream: { threadId: string | null; permissionMode?: 'read' | 'diagram' }; requests: RequestRecord[] }
 /** Snapshot and journal metadata only. Referenced source files have not been opened or verified. */
@@ -118,6 +118,7 @@ function parseConversation(value: unknown, metadataOnly = false): StoredConversa
     if (r.hashVersion !== undefined) { if (r.hashVersion !== 2) unavailable(); record.hashVersion = 2; }
     if (r.action === 'explain' || r.action === 'ask') record.action = r.action;
     if (r.firstTokenAt !== undefined) record.firstTokenAt = str(r.firstTokenAt);
+    if (r.lastEventAt !== undefined) record.lastEventAt = str(r.lastEventAt);
     return record;
   });
   const upstream = asRecord(c.upstream);

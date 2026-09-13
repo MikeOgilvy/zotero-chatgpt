@@ -26,6 +26,10 @@ interface Run {
   conversationId: UUID; requestId: UUID; input: SendInput; resolved: ResolvedSettings;
   threadId: string | null; turnId: string | null; cancelWanted: boolean; interrupted: boolean; submitted: boolean; settled: boolean;
   items: Map<string, UUID>; pending: Map<UUID, string>; flushTimer: ReturnType<typeof setTimeout> | null;
+  /** In-memory liveness: last time any notification for this turn reached the service. */
+  lastEventAt: string | null;
+  /** Epoch ms of the last published `progress` ping; 0 before the first. See `takeProgress`. */
+  progressAt: number;
 }
 type Outcome = { kind: 'completed' } | { kind: 'cancelled' } | { kind: 'failed'; failure: TurnFailure } | { kind: 'uncertain'; message: string };
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -34,6 +38,8 @@ type Change = (conversation: StoredConversation, emit: (event: Pending) => void)
 const ACTIVE: RequestState[] = ['accepted', 'dispatching', 'running'];
 const HARMLESS_ITEMS = ['userMessage', 'reasoning', 'plan', 'contextCompaction'];
 const ANSWER_LIMIT = 1024 * 1024;
+/** At most one liveness `progress` event per run per second; reasoning deltas arrive far faster. */
+const PROGRESS_INTERVAL_MS = 1000;
 async function hashInput(input: SendInput, version: 1 | 2 = 2): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version === 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -46,6 +52,9 @@ function toPublic(conversation: StoredConversation): Conversation {
     acceptedAt: request.createdAt,
     firstTextAt: request.firstTokenAt ?? null,
     settledAt: TERMINAL_STATES.includes(request.state) ? request.updatedAt : null,
+    // Omitted until something was actually heard: an absent mark means "no activity observed", never a
+    // fabricated zero, and pre-existing records without it stay valid.
+    ...(request.lastEventAt !== undefined ? { lastActivityAt: request.lastEventAt } : {}),
   }));
   return {
     id: conversation.id,
@@ -271,7 +280,7 @@ export class ReaderService {
       });
       return null;
     }
-    const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId: conversation.upstream.threadId, turnId: request.turnId, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null };
+    const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId: conversation.upstream.threadId, turnId: request.turnId, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
     await this.commit(conversation.id, c => { c.activeRequestId = request.requestId; if (input.batch) c.activeBatchId = input.batch.id; });
     this.runs.set(run.requestId, run);
     return run;
@@ -315,7 +324,7 @@ export class ReaderService {
         c.activeRequestId = request.requestId;
         for (const message of c.messages) if (message.requestId === request.requestId && message.role === 'assistant' && message.status === 'uncertain') message.status = 'streaming';
       });
-      const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId, turnId: turn.id, cancelWanted: false, interrupted: false, submitted: true, settled: false, items: new Map(), pending: new Map(), flushTimer: null };
+      const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId, turnId: turn.id, cancelWanted: false, interrupted: false, submitted: true, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
       const assistants = (await this.load(conversation.id)).messages.filter(message => message.requestId === request.requestId && message.role === 'assistant');
       for (const message of assistants) if (message.upstreamItemId) run.items.set(message.upstreamItemId, message.id);
       // Legacy snapshots had no native item ids. Reconcile their reported order once.
@@ -509,7 +518,7 @@ export class ReaderService {
         emit({ type: 'accepted', requestId: input.requestId });
       });
       if (waiting) return { receipt: this.receipt(request, false), run: null };
-      const run: Run = { conversationId: input.conversationId, requestId: input.requestId, input, resolved: resolveSettings(input.settings, model), threadId: null, turnId: null, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null };
+      const run: Run = { conversationId: input.conversationId, requestId: input.requestId, input, resolved: resolveSettings(input.settings, model), threadId: null, turnId: null, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
       this.runs.set(input.requestId, run);
       return { receipt: this.receipt(request, false), run };
     });
@@ -635,9 +644,14 @@ export class ReaderService {
     if (typeof params.threadId !== 'string') return;
     if (method === 'thread/tokenUsage/updated') {
       const usage = parseThreadUsage(params); const route = this.usageRoutes.get(params.threadId);
+      const threadId = params.threadId;
       if (usage && route) void this.mutate(route.conversationId, (c, emit) => {
         const request = [...c.requests].reverse().find(request => request.turnId || request.requestId === c.activeRequestId);
         if (!request || request.requestId !== route.requestId || (request.turnId && request.turnId !== usage.turnId)) return;
+        // A usage report is upstream liveness too, and this commit already persists it. Its own `usage`
+        // event tells the view the turn is alive, so it needs no separate progress ping.
+        const run = this.runsByThread.get(threadId); const at = this.options.now();
+        request.lastEventAt = at; if (run) run.lastEventAt = at;
         c.usage = { model: route.model, contextWindow: usage.modelContextWindow, last: usage.last, total: usage.total };
         emit({ type: 'usage', requestId: route.requestId, usage: c.usage });
       }).catch(() => undefined);
@@ -651,6 +665,9 @@ export class ReaderService {
   private async process(run: Run, method: string, params: Record<string, unknown>): Promise<void> {
     if (run.settled) return;
     if (params.turnId !== undefined) { if (run.turnId && params.turnId !== run.turnId) return; run.turnId = string(params.turnId); }
+    // Anything that survives the turn check is liveness for this turn, including reasoning deltas and
+    // item lifecycle, which the reader never renders as answer text.
+    this.noteActivity(run);
     if (method === 'turn/started' || method === 'turn/completed') { await this.applyTurn(run, record(params.turn)); return; }
     if (method === 'error') { if (params.willRetry === true) return; await this.finish(run, { kind: 'failed', failure: describeTurnError(params.error) }); return; }
     if (method === 'item/agentMessage/delta') { await this.bufferDelta(run, string(params.itemId), string(params.delta)); return; }
@@ -718,9 +735,27 @@ export class ReaderService {
     if (total > ANSWER_LIMIT) { await this.finish(run, { kind: 'failed', failure: { code: 'PAYLOAD_TOO_LARGE', message: 'The answer exceeded the reader limit.', retryable: false } }); return; }
     run.flushTimer ??= setTimeout(() => { run.flushTimer = null; void this.serial(run.conversationId, () => this.flush(run)).catch(() => undefined); }, this.options.deltaFlushMs ?? 80);
   }
+  /**
+   * Upstream liveness for one run. Reasoning output, item lifecycle and usage reports all prove the
+   * runtime is still working on the turn even when none of them become assistant text. The stamp is
+   * in memory only; a coalesced flush publishes it, so liveness never adds a store write of its own.
+   */
+  private noteActivity(run: Run): void {
+    run.lastEventAt = this.options.now();
+    run.flushTimer ??= setTimeout(() => { run.flushTimer = null; void this.serial(run.conversationId, () => this.flush(run)).catch(() => undefined); }, this.options.deltaFlushMs ?? 80);
+  }
+  /** Consumes the throttle window: true at most once per `PROGRESS_INTERVAL_MS`, per run. */
+  private takeProgress(run: Run): boolean {
+    const now = run.lastEventAt === null ? Number.NaN : Date.parse(run.lastEventAt);
+    if (!Number.isFinite(now) || now - run.progressAt < PROGRESS_INTERVAL_MS) return false;
+    run.progressAt = now;
+    return true;
+  }
   /** Inside the queue: appends buffered increments to memory and publishes coalesced delta events. */
   private async flush(run: Run): Promise<void> {
-    if (run.pending.size === 0) return;
+    const activity = run.lastEventAt;
+    // Nothing to deliver and nothing heard from upstream: the idle case stays a no-op.
+    if (run.pending.size === 0 && activity === null) return;
     const live = await this.load(run.conversationId);
     const delivered: Array<{ messageId: UUID; text: string }> = [];
     for (const [messageId, text] of run.pending) {
@@ -731,8 +766,16 @@ export class ReaderService {
     }
     run.pending.clear();
     this.recordFirstText(live, run.requestId, delivered.length > 0);
+    // Liveness rides the record the next commit already persists, so one reasoning delta never causes
+    // a write by itself.
+    const request = live.requests.find(record => record.requestId === run.requestId);
+    if (request && activity !== null) request.lastEventAt = activity;
     for (const { messageId, text } of delivered) {
       this.publish({ type: 'delta', seq: ++live.lastSeq, conversationId: run.conversationId, requestId: run.requestId, at: this.options.now(), messageId, text });
+    }
+    // A settled run has nothing left to prove; the ping exists only to keep a live wait honest.
+    if (!run.settled && activity !== null && this.takeProgress(run)) {
+      this.publish({ type: 'progress', seq: ++live.lastSeq, conversationId: run.conversationId, requestId: run.requestId, at: activity });
     }
   }
   /**

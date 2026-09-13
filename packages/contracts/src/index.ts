@@ -49,6 +49,13 @@ export interface RequestTiming {
   acceptedAt: string;
   firstTextAt: string | null;
   settledAt: string | null;
+  /**
+   * Last time any event for this request reached the view — including upstream liveness that never
+   * becomes assistant text (reasoning deltas, usage reports). Optional so timings persisted before
+   * this field existed, and callers that only know accept/first-text/settle, stay valid; absent means
+   * no activity has been observed yet, which is not the same as activity having stopped.
+   */
+  lastActivityAt?: string | null;
 }
 
 /** What a view can honestly say about one request right now. */
@@ -63,6 +70,12 @@ export interface RequestProgress {
   elapsedSeconds: number | null;
   /** Whole seconds from acceptance to the first delivered assistant text, or null before it arrives. */
   firstTextSeconds: number | null;
+  /**
+   * Whole seconds since the last observed activity for this request, or null when none was observed
+   * or the timestamp cannot be read. Liveness only: it proves the runtime is still working on the
+   * turn (reasoning output, usage reports), not that an answer is imminent.
+   */
+  sinceActivitySeconds: number | null;
 }
 
 function wholeSeconds(from: string, to: string | number): number | null {
@@ -83,6 +96,7 @@ export function requestProgress(timing: RequestTiming, now: number | string = Da
     settled: settledAt !== null,
     elapsedSeconds: wholeSeconds(timing.acceptedAt, settledAt ?? now),
     firstTextSeconds: timing.firstTextAt === null ? null : wholeSeconds(timing.acceptedAt, timing.firstTextAt),
+    sinceActivitySeconds: timing.lastActivityAt ? wholeSeconds(timing.lastActivityAt, settledAt ?? now) : null,
   };
 }
 
@@ -102,7 +116,7 @@ function eventText(event: ReaderEvent): string | null {
  * delivered text is stamped once by the event that carried it, and a terminal event stops the clock
  * even when the view never saw text. Returns a new array; entries are only added for requests the
  * core already described, because inventing an acceptance time mid-stream would fake the elapsed
- * value. Re-delivered events keep the earliest stamps.
+ * value. Re-delivered events keep the earliest first-text/settle stamps and the latest activity mark.
  */
 export function advanceRequestTiming(current: readonly RequestTiming[] | undefined, event: ReaderEvent): RequestTiming[] {
   const entries = [...(current ?? [])];
@@ -112,6 +126,12 @@ export function advanceRequestTiming(current: readonly RequestTiming[] | undefin
   const text = eventText(event);
   if (entry.firstTextAt === null && text !== null && text.length > 0) entry.firstTextAt = event.at;
   if (TERMINAL_EVENTS.has(event.type) && entry.settledAt === null) entry.settledAt = event.at;
+  // Any event for this request proves the runtime is still working on it, even when it carries no
+  // answer text (reasoning deltas, usage reports, progress pings). Activity moves forward only, so a
+  // re-delivered or out-of-order event cannot make the turn look fresher than it is.
+  const activity = Date.parse(event.at);
+  const previous = entry.lastActivityAt == null ? Number.NaN : Date.parse(entry.lastActivityAt);
+  if (!Number.isFinite(previous) || (Number.isFinite(activity) && activity >= previous)) entry.lastActivityAt = event.at;
   entries[index] = entry;
   return entries;
 }
@@ -261,6 +281,12 @@ export type ReaderEvent = {
   | { type: 'uncertain'; message: string }
   | { type: 'usage'; usage: UsageReport }
   | { type: 'image'; messageId: UUID; image: ImageAttachment }
+  /**
+   * Liveness ping: the runtime is still working on this turn but produced nothing the reader renders
+   * (for example reasoning output). It carries no answer text and never settles the request; views use
+   * its `at` only to refresh the honest "last activity" clock.
+   */
+  | { type: 'progress' }
 );
 
 export type ErrorCode =

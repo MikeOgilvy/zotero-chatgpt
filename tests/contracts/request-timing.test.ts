@@ -11,7 +11,7 @@ const delta = (seconds: number): ReaderEvent => ({ seq: 2, conversationId: 'c', 
 describe('request progress', () => {
   it('counts whole seconds from acceptance while the request is still open', () => {
     const timing = running();
-    expect(requestProgress(timing, at(0))).toEqual({ requestId: REQUEST, settled: false, elapsedSeconds: 0, firstTextSeconds: null });
+    expect(requestProgress(timing, at(0))).toEqual({ requestId: REQUEST, settled: false, elapsedSeconds: 0, firstTextSeconds: null, sinceActivitySeconds: null });
     expect(requestProgress(timing, at(9.4)).elapsedSeconds).toBe(9);
     expect(requestProgress(timing, Date.parse(at(61))).elapsedSeconds).toBe(61);
   });
@@ -45,7 +45,7 @@ describe('advancing timing from core events', () => {
     const stopped = advanceRequestTiming([running()], { seq: 4, conversationId: 'c', requestId: REQUEST, at: at(20), type: 'failed', code: 'INTERNAL_ERROR', message: 'no answer' });
     expect(stopped[0]!.settledAt).toBe(at(20));
     expect(stopped[0]!.firstTextAt).toBeNull();
-    expect(requestProgress(stopped[0]!, at(900))).toEqual({ requestId: REQUEST, settled: true, elapsedSeconds: 20, firstTextSeconds: null });
+    expect(requestProgress(stopped[0]!, at(900))).toEqual({ requestId: REQUEST, settled: true, elapsedSeconds: 20, firstTextSeconds: null, sinceActivitySeconds: 0 });
   });
 
   it('keeps the earliest terminal stamp and ignores empty text so a blank completion cannot fake first text', () => {
@@ -63,6 +63,38 @@ describe('advancing timing from core events', () => {
     expect(advanced[1]).toEqual(entries[1]);
     const unknown = advanceRequestTiming(entries, { seq: 9, conversationId: 'c', requestId: '00000000-0000-4000-8000-000000000003', at: at(6), type: 'delta', messageId: 'm', text: 'hi' });
     expect(unknown).toEqual(entries);
+    const unknownPing = advanceRequestTiming(entries, { seq: 9, conversationId: 'c', requestId: '00000000-0000-4000-8000-000000000003', at: at(6), type: 'progress' });
+    expect(unknownPing).toEqual(entries);
     expect(advanceRequestTiming(undefined, delta(6))).toEqual([]);
+  });
+});
+
+describe('request liveness', () => {
+  it('reports no elapsed activity at all until something is heard, then counts from the last activity', () => {
+    expect(requestProgress(running(), at(30)).sinceActivitySeconds).toBeNull();
+    const heard = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(12), type: 'progress' });
+    expect(heard[0]!.lastActivityAt).toBe(at(12));
+    expect(requestProgress(heard[0]!, at(30))).toEqual({ requestId: REQUEST, settled: false, elapsedSeconds: 30, firstTextSeconds: null, sinceActivitySeconds: 18 });
+  });
+
+  it('stamps activity from a progress ping that carries no answer text and never fakes first text', () => {
+    const ping = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(3), type: 'progress' });
+    expect(ping[0]).toMatchObject({ firstTextAt: null, settledAt: null, lastActivityAt: at(3) });
+    const later = advanceRequestTiming(ping, delta(9));
+    expect(later[0]!.lastActivityAt).toBe(at(9));
+    expect(later[0]!.firstTextAt).toBe(at(9));
+  });
+
+  it('moves the activity mark forward only, so a re-delivered or out-of-order event cannot fake freshness', () => {
+    const heard = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(20), type: 'progress' });
+    const older = advanceRequestTiming(heard, { seq: 2, conversationId: 'c', requestId: REQUEST, at: at(5), type: 'progress' });
+    expect(older[0]!.lastActivityAt).toBe(at(20));
+    expect(requestProgress(older[0]!, at(30)).sinceActivitySeconds).toBe(10);
+  });
+
+  it('keeps the activity mark honest when a request settles without ever producing text', () => {
+    const stopped = advanceRequestTiming([running()], { seq: 1, conversationId: 'c', requestId: REQUEST, at: at(7), type: 'failed', code: 'INTERNAL_ERROR', message: 'no answer' });
+    expect(stopped[0]).toMatchObject({ lastActivityAt: at(7), settledAt: at(7), firstTextAt: null });
+    expect(requestProgress(stopped[0]!, at(900)).sinceActivitySeconds).toBe(0);
   });
 });

@@ -555,4 +555,71 @@ describe('attachment conversations', () => {
     expect(oneShot?.firstTextAt).toBe('2026-09-09T08:01:03.000Z');
     expect(oneShot?.settledAt).toBe('2026-09-09T08:01:03.000Z');
   });
+
+  it('records reasoning output as turn liveness and pings progress at most once per second, never as answer text', async () => {
+    const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
+    await c.refreshAccount();
+    const conversation = await c.current(paperA, 'Reasoning liveness');
+    const input: SendInput = { requestId: requestId(810), conversationId: conversation.id, action: 'ask', question: '这本书是讲什么的', citations: [], settings };
+    await c.send(input); await tick();
+    const timing = async () => (await c.get(conversation.id)).requestTiming?.find(entry => entry.requestId === input.requestId);
+    const pings = () => events.filter(event => event.type === 'progress');
+    const reasoning = (delta: string) => s.p.emit({ method: 'item/reasoning/textDelta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'reasoning-1', contentIndex: 0, delta } });
+
+    // Nothing has been heard from the model yet: an absent mark, not a fabricated zero.
+    expect(await timing()).toMatchObject({ firstTextAt: null, settledAt: null });
+    expect((await timing())?.lastActivityAt).toBeUndefined();
+
+    // Reasoning output is not answer text, but it proves the turn is genuinely still working.
+    current = '2026-09-09T08:00:01.000Z'; reasoning('考虑这本书的主题'); await tick(20);
+    expect((await timing())?.lastActivityAt).toBe('2026-09-09T08:00:01.000Z');
+    expect(pings()).toHaveLength(1);
+    expect(pings()[0]).toMatchObject({ type: 'progress', requestId: input.requestId, at: '2026-09-09T08:00:01.000Z' });
+    expect((await c.get(conversation.id)).messages.every(message => message.role === 'user')).toBe(true);
+
+    // Reasoning deltas arrive far faster than one per second; the mark advances, the ping does not.
+    current = '2026-09-09T08:00:01.400Z'; reasoning('继续推理'); await tick(20);
+    expect((await timing())?.lastActivityAt).toBe('2026-09-09T08:00:01.400Z');
+    expect(pings()).toHaveLength(1);
+
+    current = '2026-09-09T08:00:02.000Z'; reasoning('再看一遍'); await tick(20);
+    expect(pings()).toHaveLength(2);
+    expect(pings()[1]?.at).toBe('2026-09-09T08:00:02.000Z');
+
+    // A reasoning *item* stays harmless: it never becomes an assistant message and does not re-ping.
+    s.p.emit({ method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'reasoning', id: 'reasoning-1' } } }); await tick(20);
+    expect(pings()).toHaveLength(2);
+    expect((await c.get(conversation.id)).messages.every(message => message.role === 'user')).toBe(true);
+
+    // Usage reports count as liveness too, and this path already commits, so the mark is durable.
+    current = '2026-09-09T08:00:05.000Z';
+    const usage = { inputTokens: 100, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 4, totalTokens: 105 };
+    s.p.emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'turn-1', tokenUsage: { last: usage, total: usage, modelContextWindow: 121600 } } }); await tick(20);
+    expect((await timing())?.lastActivityAt).toBe('2026-09-09T08:00:05.000Z');
+    const saved = JSON.parse(new TextDecoder().decode(storage.files.get(`conversations/${conversation.id}.json`))) as { requests: Array<{ lastEventAt?: string }> };
+    expect(saved.requests[0]?.lastEventAt).toBe('2026-09-09T08:00:05.000Z');
+  });
+
+  it('throttles progress per run, so a second request pings immediately instead of inheriting the window', async () => {
+    const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
+    await c.refreshAccount();
+    const conversation = await c.current(paperA, 'Per-run throttle');
+    const send = async (n: number): Promise<SendInput> => { const input: SendInput = { requestId: requestId(n), conversationId: conversation.id, action: 'ask', question: `Question ${n}`, citations: [], settings }; await c.send(input); await tick(); return input; };
+    const reasoning = (turnId: string) => s.p.emit({ method: 'item/reasoning/textDelta', params: { threadId: 'thread-1', turnId, itemId: 'reasoning-1', contentIndex: 0, delta: 'think' } });
+
+    await send(820);
+    current = '2026-09-09T08:00:01.000Z'; reasoning('turn-1'); await tick(20);
+    expect(events.filter(event => event.type === 'progress')).toHaveLength(1);
+    complete(s.p, 'thread-1', 'turn-1', 'item-1', 'First answer'); await tick(20);
+
+    const second = await send(821);
+    current = '2026-09-09T08:00:01.100Z'; reasoning('turn-2'); await tick(20);
+    const pings = events.filter(event => event.type === 'progress');
+    expect(pings).toHaveLength(2);
+    expect(pings[1]).toMatchObject({ requestId: second.requestId, at: '2026-09-09T08:00:01.100Z' });
+  });
 });
