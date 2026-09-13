@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ReaderLayoutController, clampSidebarWidth, type LayoutHost, type Scale, type ViewPosition } from '../../packages/zotero/src/reader/layout.ts';
+import { ReaderLayoutController, clampSidebarWidth, sidebarWidthBounds, type LayoutHost, type Scale, type ViewPosition } from '../../packages/zotero/src/reader/layout.ts';
 function setup(scale: Scale = 125) {
   const state = {
     dock: { collapsed: true, mode: 'notes' as 'notes' | 'item', scrollTop: 47, width: 280 },
@@ -97,6 +97,13 @@ describe('sidebar width', () => {
     expect(clampSidebarWidth(900, 600)).toBe(240);
     expect(clampSidebarWidth(200, 600)).toBe(240);
     expect(clampSidebarWidth(2000, 1440)).toBe(1080);
+  });
+  it('reports the same bounds the clamp enforces for narrow, wide and unknown viewports', () => {
+    for (const available of [1440, 800, 600, Number.NaN]) {
+      const { min, max } = sidebarWidthBounds(available);
+      expect(clampSidebarWidth(1, available)).toBe(min);
+      expect(clampSidebarWidth(Number.MAX_SAFE_INTEGER, available)).toBe(max);
+    }
   });
   it('applies the remembered width on open and restores the previous native width on close', async () => {
     const { state, controller } = setup();

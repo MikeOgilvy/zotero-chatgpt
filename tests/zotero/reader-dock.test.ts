@@ -187,6 +187,7 @@ it('lets the dock splitter change width without locking min-width to the current
   const unbind = bindDockResize(resizer!, {
     currentWidth: () => Number.parseFloat(dock.style.width),
     setWidth: width => { applied.push(width); applyDockWidth(doc, width); },
+    measureAvailableWidth: () => 1440,
   });
   const view = doc.defaultView!;
   resizer!.dispatchEvent(new view.PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 1000, pointerId: 1 }));
@@ -208,6 +209,7 @@ it('coalesces a splitter drag into one width change per frame and flushes the re
   const unbind = bindDockResize(resizer, {
     currentWidth: () => Number.parseFloat(dock.style.width),
     setWidth: width => { applied.push(width); applyDockWidth(doc, width); },
+    measureAvailableWidth: () => 1440,
   });
   const view = doc.defaultView!;
   resizer.dispatchEvent(new view.PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 1000, pointerId: 2 }));

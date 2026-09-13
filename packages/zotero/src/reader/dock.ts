@@ -1,8 +1,11 @@
-import { MIN_SIDEBAR_WIDTH } from './layout.ts';
+import { MIN_SIDEBAR_WIDTH, sidebarWidthBounds } from './layout.ts';
 
 export const DOCK_ATTR = 'data-zcr-dock';
 export const DOCK_WIDTH_VAR = '--zcr-dock-width';
 export const DOCK_OPEN_CLASS = 'zcr-dock-open';
+/** One arrow press; Shift+Arrow moves four times as far. */
+export const DOCK_RESIZE_STEP = 16;
+export const DOCK_RESIZE_STEP_LARGE = 64;
 
 function createHtmlElement(doc: Document, tag: string): HTMLElement {
   return doc.createElement(tag);
@@ -63,6 +66,10 @@ export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLE
   const resizer = createHtmlElement(doc, 'div');
   resizer.className = 'zcr-dock-resizer';
   resizer.dataset.zcrResizer = '';
+  resizer.setAttribute('role', 'separator');
+  resizer.setAttribute('aria-orientation', 'vertical');
+  resizer.setAttribute('aria-label', 'Resize Codex sidebar');
+  resizer.setAttribute('tabindex', '0');
   const body = createHtmlElement(doc, 'div');
   body.className = 'zcr-dock-body';
   body.dataset.zcrDockBody = '';
@@ -84,12 +91,27 @@ export function applyDockWidth(doc: Document, width: number): void {
 export interface DockResizeHost {
   currentWidth(): number;
   setWidth(cssPixels: number): void;
+  measureAvailableWidth(): number;
 }
 
-/** Pointer-captured drag so moving into the PDF iframe still changes dock width.
- * Moves are coalesced into one width change per animation frame: applying a width captures the
- * PDF position and re-zooms, which is too expensive to run per pointer event on a busy drag.
- * The release always flushes the final position exactly once, so no move is dropped. */
+/** The dock sits on the right, so ArrowLeft widens it and ArrowRight narrows it. */
+const RESIZE_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+
+/** Text fields and focusable controls keep their own key handling instead of resizing the dock. */
+function reservesResizeKeys(target: EventTarget | null): boolean {
+  const element = target as (HTMLElement & { isContentEditable?: boolean }) | null;
+  if (!element || typeof element !== 'object' || !('tagName' in element)) return false;
+  const tag = String(element.tagName ?? '').toLowerCase();
+  if (element.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return true;
+  return typeof element.closest === 'function' && element.closest('[contenteditable],[role="textbox"]') !== null;
+}
+
+/** Pointer capture and keyboard resizing so the reader stays reachable without a mouse.
+ * Width changes are coalesced into one host.setWidth per animation frame: applying a width
+ * captures the PDF position and re-zooms, which is too expensive to run per event on a busy drag.
+ * Pointer release (and every keyboard press) flushes the final position exactly once, so no move
+ * is dropped. `host.setWidth` is the only write path, so keyboard and pointer both persist the
+ * width and re-anchor the PDF identically. */
 export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () => void {
   const doc = resizer.ownerDocument;
   const view = doc.defaultView;
@@ -97,12 +119,20 @@ export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () =
     ? run => view.requestAnimationFrame(() => run())
     : run => (view?.setTimeout(run, 16) ?? setTimeout(run, 16)) as unknown as number;
   const drop = (handle: number) => { if (typeof view?.cancelAnimationFrame === 'function') view.cancelAnimationFrame(handle); else view?.clearTimeout(handle); };
+  // Screen readers need the same temporary clamp the controller applies, not the raw remembered wish.
+  const syncAria = () => {
+    const { min, max } = sidebarWidthBounds(host.measureAvailableWidth());
+    const apply = (name: string, value: number) => resizer.setAttribute(name, String(value));
+    apply('aria-valuemin', min);
+    apply('aria-valuemax', max);
+    apply('aria-valuenow', Math.min(Math.max(Math.round(host.currentWidth()), min), max));
+  };
   let dragging = false;
   let startX = 0;
   let startWidth = 0;
   let pendingWidth: number | null = null;
   let handle: number | null = null;
-  const flush = () => { if (pendingWidth === null) return; const width = pendingWidth; pendingWidth = null; host.setWidth(width); };
+  const flush = () => { if (pendingWidth === null) return; const width = pendingWidth; pendingWidth = null; host.setWidth(width); syncAria(); };
   const schedule = (width: number) => {
     pendingWidth = width;
     if (handle === null) handle = frame(() => { handle = null; flush(); });
@@ -126,6 +156,7 @@ export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () =
   };
   const onDown = (event: PointerEvent) => {
     event.preventDefault();
+    settle();
     dragging = true;
     startX = event.clientX;
     startWidth = host.currentWidth();
@@ -133,12 +164,34 @@ export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () =
     doc.addEventListener('pointermove', onMove);
     doc.addEventListener('pointerup', onUp);
   };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (!RESIZE_KEYS.has(event.key) || event.defaultPrevented) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (reservesResizeKeys(event.target)) return;
+    const step = event.shiftKey ? DOCK_RESIZE_STEP_LARGE : DOCK_RESIZE_STEP;
+    const next = event.key === 'Home' ? sidebarWidthBounds(host.measureAvailableWidth()).min
+      : event.key === 'End' ? sidebarWidthBounds(host.measureAvailableWidth()).max
+        : (pendingWidth ?? host.currentWidth()) + (event.key === 'ArrowLeft' ? step : -step);
+    event.preventDefault();
+    schedule(next);
+  };
+  // A width applied outside this binding (open, viewport clamp) still refreshes aria-valuenow.
+  const Observer = (view as unknown as { ResizeObserver?: typeof ResizeObserver } | null)?.ResizeObserver;
+  const dock = resizer.parentElement;
+  const observer = dock && typeof Observer === 'function' ? new Observer(() => syncAria()) : undefined;
+  if (observer && dock) observer.observe(dock);
   resizer.addEventListener('pointerdown', onDown);
+  resizer.addEventListener('keydown', onKeyDown);
+  view?.addEventListener?.('resize', syncAria);
+  syncAria();
   return () => {
     dragging = false;
     if (handle !== null) { drop(handle); handle = null; }
     pendingWidth = null;
+    observer?.disconnect();
     resizer.removeEventListener('pointerdown', onDown);
+    resizer.removeEventListener('keydown', onKeyDown);
+    view?.removeEventListener?.('resize', syncAria);
     doc.removeEventListener('pointermove', onMove);
     doc.removeEventListener('pointerup', onUp);
   };

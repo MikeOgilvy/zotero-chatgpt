@@ -263,11 +263,13 @@ export class NativeReaderPane implements LayoutHost {
       currentWidth: () => this.currentWidth(),
       setWidth: width => {
         if (!this.controller.active) return;
-        this.draggingWidth = true;
         void this.controller.setWidth(width);
       },
+      measureAvailableWidth: () => this.measureAvailableWidth(),
     }) : undefined;
+    const startDrag = () => { this.draggingWidth = true; };
     const endDrag = () => { this.draggingWidth = false; this.lastWidth = this.currentWidth(); };
+    resizer?.addEventListener('pointerdown', startDrag);
     readerDoc?.addEventListener('pointerup', endDrag);
     this.lastAvailable = this.measureAvailableWidth();
     this.lastWidth = this.currentWidth();
@@ -276,6 +278,7 @@ export class NativeReaderPane implements LayoutHost {
       readerWin?.removeEventListener?.('resize', schedule);
       observer?.disconnect();
       unbindResize?.();
+      resizer?.removeEventListener('pointerdown', startDrag);
       readerDoc?.removeEventListener('pointerup', endDrag);
       if (this.layoutTimer !== undefined) win.clearTimeout(this.layoutTimer);
       this.layoutTimer = undefined;

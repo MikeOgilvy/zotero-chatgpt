@@ -1,6 +1,55 @@
+import { Window } from 'happy-dom';
 import { expect, it, vi } from 'vitest';
 import { NativeReaderPane } from '../../packages/zotero/src/reader/reader-pane.ts';
 import type { HostReader, ZoteroHost, ZoteroWindow } from '../../packages/zotero/src/reader/host-types.ts';
+it('resizes the open dock from the keyboard through the layout controller and persists the width', async () => {
+  const main = new Window({ url: 'https://zotero.test/' });
+  const readerWin = new Window({ url: 'https://reader.test/' });
+  const mainDoc = main.document as unknown as Document;
+  const readerDoc = readerWin.document as unknown as Document;
+  mainDoc.body.innerHTML = '<div id="zotero-context-pane"></div>';
+  readerDoc.body.innerHTML = '<div id="reader-ui"><div class="toolbar"><button class="find">Find</button></div></div><div id="split-view"><div id="primary-view"></div></div>';
+  const context = { collapsed: false, context: { mode: 'notes' as 'notes' | 'item' }, width: 280 };
+  const remembered: number[] = [];
+  const win = {
+    document: mainDoc,
+    ZoteroContextPane: context,
+    Zotero_Tabs: { selectedID: 'pdf-a' },
+    setTimeout: (callback: () => void) => { callback(); return 0; },
+    clearTimeout() {},
+    requestAnimationFrame: (callback: FrameRequestCallback) => { callback(0); return 0; },
+    cancelAnimationFrame() {},
+    addEventListener() {},
+    removeEventListener() {},
+    innerWidth: 1440,
+    ResizeObserver: class { observe() {} disconnect() {} },
+  } as unknown as ZoteroWindow;
+  const reader = {
+    itemID: 7, tabID: 'pdf-a', type: 'pdf', _window: win, _iframeWindow: readerWin,
+    zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
+  } as unknown as HostReader;
+  const zotero = {
+    Prefs: {
+      get: (key: string) => key === 'layout' ? 'standard' : 360,
+      set: (key: string, value: number) => { if (key === 'extensions.zcr.sidebarWidth') remembered.push(value); },
+    },
+    Items: { get: () => ({ key: 'PDFONE01', libraryID: 1, getField: () => 'Synthetic paper' }) },
+  } as unknown as ZoteroHost;
+  const pane = new NativeReaderPane(zotero, reader, 'codex-reader', new Set(), () => undefined);
+  await pane.controller.toggle();
+  const dock = readerDoc.querySelector<HTMLElement>('[data-zcr-dock]')!;
+  const resizer = dock.querySelector<HTMLElement>('[data-zcr-resizer]')!;
+  expect(dock.style.width).toBe('360px');
+  expect(resizer.getAttribute('role')).toBe('separator');
+
+  const event = new (readerDoc.defaultView!.KeyboardEvent)('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+  resizer.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(dock.style.width).toBe('376px'));
+  expect(remembered).toEqual([376]);
+  expect(resizer.getAttribute('aria-valuenow')).toBe('376');
+  pane.controller.close();
+});
 it('keeps chat ownership across tab switches and only closes for a native pane action on the selected reader', async () => {
   const context = { collapsed: false, context: { mode: 'item' as 'item' | 'notes' } };
   const tabs = { selectedID: 'pdf-a' };

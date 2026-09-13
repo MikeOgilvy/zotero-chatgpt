@@ -6,11 +6,19 @@ export const DEFAULT_SIDEBAR_WIDTH = 360;
 export const MIN_SIDEBAR_WIDTH = 320;
 /** Keep at least this much of the reader+sidebar strip for the PDF so the pane cannot cover it. */
 export const MIN_READER_WIDTH = 360;
-/** User-chosen width is stored separately; this only applies a temporary viewport clamp. */
-export function clampSidebarWidth(desired: number, availableWidth: number): number {
+/**
+ * The temporary viewport clamp bounds for the sidebar. `clampSidebarWidth` and the resizer's
+ * ARIA value range share this formula, so a screen reader always announces the same limits.
+ */
+export function sidebarWidthBounds(availableWidth: number): { min: number; max: number } {
   const available = Number.isFinite(availableWidth) && availableWidth > 0 ? availableWidth : DEFAULT_SIDEBAR_WIDTH + MIN_READER_WIDTH;
   const max = Math.max(0, Math.floor(available - MIN_READER_WIDTH));
   const min = Math.min(MIN_SIDEBAR_WIDTH, max);
+  return { min, max };
+}
+/** User-chosen width is stored separately; this only applies a temporary viewport clamp. */
+export function clampSidebarWidth(desired: number, availableWidth: number): number {
+  const { min, max } = sidebarWidthBounds(availableWidth);
   const target = Number.isFinite(desired) && desired > 0 ? desired : DEFAULT_SIDEBAR_WIDTH;
   return Math.min(Math.max(Math.round(target), min), Math.max(min, max));
 }
