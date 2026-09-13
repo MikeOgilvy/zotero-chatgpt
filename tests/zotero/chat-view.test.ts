@@ -10,7 +10,7 @@ import { messageTimeLabel } from '../../packages/zotero/src/chat/message-time.ts
 import { workspaceDraft } from '../../packages/zotero/src/chat/draft.ts';
 import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
+import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput, type SendReceipt } from '../../packages/contracts/src/index.ts';
 import type { HistoryEntry, ReaderWorkspace } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
@@ -53,7 +53,7 @@ async function mountReadyChat(options: {
   captureTimers?: boolean;
   rename?: (id: string, title: string) => Promise<Conversation>;
   archive?: (id: string, archived: boolean) => Promise<Conversation>;
-  cancel?: (conversationId: string, requestId: string) => Promise<void>;
+  cancel?: (conversationId: string, requestId: string) => Promise<SendReceipt>;
   clipboardImages?: () => Promise<ImageAttachment[]>;
   workspace?: ReaderWorkspace;
   closeDock?: () => void;
@@ -887,7 +887,10 @@ it('returns the stopped question, citations and images to the composer', async (
   const cancelled: string[] = [];
   const { root, presenter } = await mountReadyChat({
     messages: [],
-    cancel: (_conversationId, requestId) => { cancelled.push(requestId); return Promise.resolve(); },
+    cancel: (_conversationId, requestId) => {
+      cancelled.push(requestId);
+      return Promise.resolve({ requestId, state: 'cancelled' as const, replay: false });
+    },
   });
   presenter.addCitation(citationA);
   presenter.addImage(imageA);
