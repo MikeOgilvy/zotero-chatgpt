@@ -6,6 +6,7 @@ import { ConversationPresenter, type DocumentServices } from '../../packages/zot
 import { documentA } from '../contracts/document-fixture.ts';
 import { groupHistory, historyGroup, HISTORY_BUCKETS, mountChatView, renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
 import { UNLOCATED_SOURCE_TEXT } from '../../packages/zotero/src/chat/source-links.ts';
+import { messageTimeLabel } from '../../packages/zotero/src/chat/message-time.ts';
 import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
 import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
@@ -822,6 +823,58 @@ it('surfaces the honest text-not-ready refusal now that no panel reports coverag
   await vi.waitFor(() => expect(alert.hidden).toBe(false));
   expect(alert.textContent).toMatch(/No extractable text/iu);
   expect(sent).toHaveLength(0);
+});
+
+it('renders the Codex-like body: no labelled author header, actions in an icon-only strip', async () => {
+  const { root } = await mountReadyChat({
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What does this mean?', citations: [], status: 'completed' },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'It is a definition.', citations: [], status: 'completed' },
+    ],
+  });
+  // The labelled author row is gone: alignment and the body carry the role instead.
+  expect(root.querySelector('.zcr-message-header, .zcr-message-author')).toBeNull();
+  const assistant = root.querySelector<HTMLElement>('[data-zcr-message="a1"]')!;
+  const body = assistant.querySelector<HTMLElement>(':scope > .zcr-message-body')!;
+  expect(body).not.toBeNull();
+  expect(body.querySelector('[data-zcr-text]')?.textContent).toContain('definition');
+  // The copy control stays icon-only and accessible, inside the action strip anchored to the body.
+  const actions = body.querySelector<HTMLElement>(':scope > .zcr-message-actions')!;
+  const copy = actions.querySelector<HTMLButtonElement>('[data-zcr-action="copy-answer"]')!;
+  expect(copy.getAttribute('aria-label')).toBe('Copy');
+  // The only text is the visually-hidden feedback label, so the chip reads as an icon.
+  expect(copy.textContent?.trim()).toBe('Copy');
+  expect(copy.querySelector('[data-zcr-copy-label]')?.textContent).toBe('Copy');
+  expect(copy.querySelector('svg')).not.toBeNull();
+  // The user bubble uses the same body wrapper, and its branch action lives in the strip too.
+  const user = root.querySelector<HTMLElement>('[data-zcr-message="u1"]')!;
+  expect(user.querySelector('.zcr-message-header, .zcr-message-author')).toBeNull();
+  expect(user.querySelector('.zcr-message-body [data-zcr-action="branch-message"]')).not.toBeNull();
+});
+
+it('renders centered timestamp dividers only from recorded request timings', async () => {
+  const dayOne = '2026-08-30T02:00:00.000Z';
+  const dayTwo = '2026-08-31T02:00:00.000Z';
+  const timing = (requestId: string, acceptedAt: string) => ({ requestId, acceptedAt, firstTextAt: null, settledAt: null });
+  const { root } = await mountReadyChat({
+    requestTiming: [timing('r1', dayOne), timing('r2', dayTwo)],
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'First', citations: [], status: 'completed' },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'One', citations: [], status: 'completed' },
+      { id: 'u2', requestId: 'r9', role: 'user', phase: null, settings, text: 'No timing recorded', citations: [], status: 'completed' },
+      { id: 'u3', requestId: 'r2', role: 'user', phase: null, settings, text: 'Second day', citations: [], status: 'completed' },
+    ],
+  });
+  const dividers = [...root.querySelectorAll<HTMLElement>('[data-zcr-message-time]')];
+  // One divider per calendar day, and none for the message whose request has no timing.
+  expect(dividers).toHaveLength(2);
+  expect(dividers[0]!.textContent).toBe(messageTimeLabel(dayOne, Date.now(), 'en'));
+  expect(dividers[1]!.textContent).toBe(messageTimeLabel(dayTwo, Date.now(), 'en'));
+  expect(dividers[0]!.nextElementSibling?.getAttribute('data-zcr-message')).toBe('u1');
+  expect(dividers[1]!.nextElementSibling?.getAttribute('data-zcr-message')).toBe('u3');
+  // A transcript with no recorded request timing renders no divider rather than a fabricated time.
+  const none = await mountReadyChat({ messages: [{ id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Untimed', citations: [], status: 'completed' }] });
+  expect(none.root.querySelectorAll('[data-zcr-message-time]')).toHaveLength(0);
 });
 
 it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {

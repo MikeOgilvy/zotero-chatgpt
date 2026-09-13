@@ -10,6 +10,7 @@ import {
   applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
 } from './generation-settings.ts';
 import { copyableAnswerText, followAnswerScroll, renderAnswer } from './render-answer.ts';
+import { messageTimeLabel } from './message-time.ts';
 import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
 import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
@@ -856,8 +857,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const messageNode = (message: Message) => {
     const article = el('article', 'zcr-message'); article.dataset.zcrMessage = message.id; article.dataset.role = message.role;
     if (message.action) article.dataset.action = message.action;
-    const header = el('div', 'zcr-message-header');
-    header.append(el('div', 'zcr-message-author', message.role === 'user' ? COPY.you : COPY.assistant));
+    // Codex-like shape: the body holds the text bubble, the attachments and the hover/focus actions;
+    // the author is implied by alignment, so there is no labelled header row.
+    const body = el('div', 'zcr-message-body');
+    const text = el('div', 'zcr-message-text'); text.dataset.zcrText = '';
+    text.addEventListener('click', event => {
+      const target = event.target as Element | null;
+      const link = target?.closest?.('a[href]');
+      if (!link) return;
+      event.preventDefault();
+      const href = link.getAttribute('href'); if (href) hooks.openLink?.(href);
+    });
+    const attachments = el('div', 'zcr-message-attachments'); attachments.dataset.zcrMessageAttachments = '';
+    const taskSummary = button('Review annotation suggestions', 'review-annotations', () => {
+      const task = latestViewState.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId);
+      const card = task && [...taskPanel.querySelectorAll<HTMLDetailsElement>('[data-zcr-task-id]')].find(card => card.dataset.zcrTaskId === task.id);
+      if (card) { card.open = true; card.scrollIntoView?.({ block: 'nearest' }); }
+    }); taskSummary.hidden = true;
+    const actions = el('div', 'zcr-message-actions');
     if (message.role === 'assistant') {
       const copyAnswer = button(COPY.copy, 'copy-answer', () => {
         const latest = presenter.snapshot().conversation?.messages.find(entry => entry.id === message.id);
@@ -867,7 +884,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       const copyLabel = el('span', 'zcr-copy-label', COPY.copy);
       copyLabel.dataset.zcrCopyLabel = '';
       copyAnswer.replaceChildren(icon('copy'), copyLabel);
-      header.append(copyAnswer);
+      actions.append(copyAnswer);
     }
     const branch = button(message.role === 'assistant' ? 'Regenerate in new chat' : 'Edit in new chat', 'branch-message', () => {
       const previous = presenter.snapshot().conversation?.id;
@@ -875,29 +892,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         if (message.role === 'assistant' && presenter.snapshot().conversation?.id !== previous) await presenter.send();
       }).catch(reportViewError);
     });
-    branch.classList.add('zcr-message-action'); header.append(branch);
-    if (message.role === 'user') { const cancelQueued = button('Cancel queued question', 'cancel-queued', () => { void presenter.cancelQueuedRequest(message.requestId).catch(reportViewError); }); cancelQueued.hidden = true; header.append(cancelQueued); }
-    const text = el('div', 'zcr-message-text'); text.dataset.zcrText = '';
-    text.addEventListener('click', event => {
-      const target = event.target as Element | null;
-      const link = target?.closest?.('a[href]');
-      if (!link) return;
-      event.preventDefault();
-      const href = link.getAttribute('href'); if (href) hooks.openLink?.(href);
-    });
+    branch.classList.add('zcr-message-action'); actions.append(branch);
+    if (message.role === 'user') { const cancelQueued = button('Cancel queued question', 'cancel-queued', () => { void presenter.cancelQueuedRequest(message.requestId).catch(reportViewError); }); cancelQueued.hidden = true; actions.append(cancelQueued); }
+    body.append(text, taskSummary, attachments, actions);
     const meta = el('div', 'zcr-message-meta'); meta.dataset.zcrMeta = '';
-    const attachments = el('div', 'zcr-message-attachments'); attachments.dataset.zcrMessageAttachments = '';
-    const taskSummary = button('Review annotation suggestions', 'review-annotations', () => {
-      const task = latestViewState.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId);
-      const card = task && [...taskPanel.querySelectorAll<HTMLDetailsElement>('[data-zcr-task-id]')].find(card => card.dataset.zcrTaskId === task.id);
-      if (card) { card.open = true; card.scrollIntoView?.({ block: 'nearest' }); }
-    }); taskSummary.hidden = true;
-    article.append(header, text, taskSummary, attachments, meta); return article;
+    article.append(body, meta); return article;
   };
   let renderedConversationId: string | null = null;
   const messageNodes = new Map<string, HTMLElement>();
   const renderedMessages = new Map<string, { text: string; status: Message['status']; action: Message['action'] }>();
-  let focusToken = 0; let contentKey = ''; let chromeKey = '';
+  let focusToken = 0; let contentKey = ''; let chromeKey = ''; let messageTimeKey = '';
   const updateContext = (state: PresenterState) => {
     const title = state.conversation ? conversationLabel(state.conversation, state.conversations) : state.paperTitle || COPY.untitled;
     if (currentTitle.textContent !== title) currentTitle.textContent = title;
@@ -1164,6 +1168,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       state.draft.question.trim().length > 0,
       state.history.map(item => `${item.id}:${item.title}:${item.updatedAt}:${item.preview}`).join('\n'), state.tasks.map(task => `${task.id}:${task.revision}`).join(','), state.readingJobs.map(job => `${job.id}:${job.revision}`).join(','), state.queueing, state.conversation?.queuedRequestIds?.join(','), state.messageFocus?.token,
       list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text.length}:${m.images?.map(image => image.id).join(',') ?? ''}:${m.generatedImages?.map(image => image.id).join(',') ?? ''}`).join('\n'),
+      (state.conversation?.requestTiming ?? []).map(timing => `${timing.requestId}:${timing.acceptedAt}`).join(','),
+      state.workspace?.uiLanguage ?? 'en',
     ].join('\0');
     if (nextChrome === chromeKey) {
       if (!composing && input.value !== state.draft.question) { input.value = state.draft.question; resizeInput(); }
@@ -1207,6 +1213,37 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       if (!node) { node = messageNode(message); messageNodes.set(message.id, node); }
       if (node !== cursor) messages.insertBefore(node, cursor);
       cursor = node.nextElementSibling;
+    }
+    // Centered timestamp dividers, one per calendar-day group. The transcript persists no per-message
+    // clock, so the only honest source is the request's recorded `acceptedAt`; a message whose request
+    // has no readable timing gets no divider rather than an invented time.
+    const timings = new Map((state.conversation?.requestTiming ?? []).map(timing => [timing.requestId, timing.acceptedAt]));
+    const timeLocale = state.workspace?.uiLanguage ?? 'en';
+    const now = Date.now();
+    const dividers: Array<{ before: string; label: string }> = [];
+    let lastDay = '';
+    for (const message of list) {
+      const acceptedAt = timings.get(message.requestId);
+      if (!acceptedAt) continue;
+      const parsed = Date.parse(acceptedAt);
+      if (!Number.isFinite(parsed)) continue;
+      const day = new Date(parsed).toDateString();
+      if (day === lastDay) continue;
+      lastDay = day;
+      const label = messageTimeLabel(acceptedAt, now, timeLocale);
+      if (label) dividers.push({ before: message.id, label });
+    }
+    const dividerKey = `${timeLocale}\n${dividers.map(entry => `${entry.before}:${entry.label}`).join('\n')}`;
+    if (conversationChanged || dividerKey !== messageTimeKey) {
+      messageTimeKey = dividerKey;
+      for (const node of [...messages.querySelectorAll<HTMLElement>('[data-zcr-message-time]')]) node.remove();
+      for (const divider of dividers) {
+        const target = messageNodes.get(divider.before);
+        if (!target) continue;
+        const node = el('div', 'zcr-message-time', divider.label);
+        node.dataset.zcrMessageTime = '';
+        messages.insertBefore(node, target);
+      }
     }
     if (messages.lastElementChild !== taskPanel) messages.append(taskPanel);
     taskPanel.hidden = !state.tasks.length && !state.readingJobs.length;

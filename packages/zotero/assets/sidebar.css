@@ -283,8 +283,9 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-message-header .zcr-message-author { margin-inline-end: auto; }
 .zcr-message-author { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
 .zcr-message { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-/* Timestamp divider: centered, muted and scaled. It is presentational: the request timing it
-   renders is already announced through the meta line, so a screen reader should not repeat it. */
+/* Timestamp divider: centered, muted and scaled. The time comes from that request's own
+   `acceptedAt`, and it is the only place the time appears, so it stays readable to assistive
+   technology rather than being hidden as decoration. */
 .zcr-message-time { align-self: center; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); padding: 2px 0; }
 /* Body holds the text bubble, the attachments and the hover actions, and anchors the actions. */
 .zcr-message-body { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
