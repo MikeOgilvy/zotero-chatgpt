@@ -70,6 +70,7 @@ function mountPane(service: PreferencesService) {
     deleteHistory: () => Promise.resolve({ action: 'delete', requested: 0, changed: [], failed: [], warnings: [], partial: false }),
     // Exactly what `preferences-entry.ts` does: the port is forwarded only when the service has it.
     ...(service.readStorageReport ? { readStorageReport: async (): Promise<unknown> => JSON.parse(await service.readStorageReport!()) as unknown } : {}),
+    ...(service.readLiveModels ? { readLiveModels: async (): Promise<unknown> => JSON.parse(await service.readLiveModels!()) as unknown } : {}),
   };
   const window = new Window({ url: 'https://test.invalid' });
   const document = window.document as unknown as Document;
@@ -82,7 +83,7 @@ function mountPane(service: PreferencesService) {
     if (!found) throw new Error(`Missing ${selector}`);
     return found;
   };
-  return { ready, find };
+  return { ready, root, find };
 }
 
 it('composes the records reader into the preferences service so the pane shows a measured location and size', async () => {
@@ -141,6 +142,24 @@ it('applies the pinned bounds at the port, so a bound hit reaches the service as
   const roundTripped: unknown = JSON.parse(await service.readStorageReport!());
   expect(isHistoryStorageReport(roundTripped)).toBe(true);
   expect(roundTripped).toMatchObject({ complete: false, stoppedBy: 'entries', limits: { entries: 3 } });
+});
+
+it('forwards the runtime live list to the pane so a Spark id composes end to end, and filters excluded ids', async () => {
+  const service = createPreferencesService({ ...serviceHost(), liveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-5.3-codex-spark', 'gpt-5.5']) });
+  const { ready, root, find } = mountPane(service);
+  await ready;
+  expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull();
+  expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/running Codex runtime reported/u);
+});
+
+it('keeps the bundled families and honest copy when the service has no live model port', async () => {
+  const service = createPreferencesService(serviceHost());
+  expect('readLiveModels' in service).toBe(false);
+  const { ready, root, find } = mountPane(service);
+  await ready;
+  expect(root.querySelector('[data-zcr-model^="gpt-5.3"]')).toBeNull();
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/not in the bundled catalog/u);
 });
 
 it('keeps the port optional, so a host without the reader still lists chats and degrades honestly', async () => {

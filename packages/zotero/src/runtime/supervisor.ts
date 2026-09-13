@@ -23,6 +23,15 @@ export class RuntimeSupervisor {
     this.starting = this.restart(current).finally(() => { this.starting = null; });
     return this.starting;
   }
+  /**
+   * The client of the runtime this supervisor currently owns, or null when none is usable.
+   * Read-only: it never starts, restarts or replaces a process, so a caller such as the Preferences
+   * pane can read the last live model list without Codex-start as a side effect.
+   */
+  currentClient(): ReaderClient | null {
+    const current = this.owned;
+    return current?.usable && current.client ? current.client : null;
+  }
   private checkRunning() { if (this.stopped) throw new Error('Runtime stopped'); }
   private async restart(previous: OwnedRuntime | null): Promise<ReaderClient> {
     if (previous) {

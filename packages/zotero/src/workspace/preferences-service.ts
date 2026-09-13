@@ -19,6 +19,12 @@ export interface PreferencesServiceHost {
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /**
+   * The model ids the running Codex runtime last reported, or null when it is not running. Optional
+   * and strictly read-only: opening the Preferences window must never start a runtime, and a host
+   * without the port still renders the pane from the bundled catalog with honest copy.
+   */
+  liveModels?(): Promise<string[] | null>;
+  /**
    * Bounded measurement of the plugin's own records store, for the History section's size report.
    * Optional: a host that omits it renders an honest unavailable state instead of a made-up number.
    */
@@ -42,6 +48,12 @@ export interface PreferencesService {
    * that size is unavailable rather than a blank or an estimate.
    */
   readStorageReport?(): Promise<string>;
+  /**
+   * The runtime's live model ids as JSON text, or the JSON literal `null` when no runtime has
+   * reported any. Absent when the host has no runtime bridge; the pane then says the Spark models
+   * come from the runtime instead of inventing rows.
+   */
+  readLiveModels?(): Promise<string>;
 }
 
 /** Ids only: the pane never sends back titles, previews or paper scopes it could have forged. */
@@ -68,9 +80,13 @@ function parseSettings(json: string): WorkspaceSettings {
 export function createPreferencesService(host: PreferencesServiceHost): PreferencesService {
   // Presence, not a flag: a host without a reader simply has no `readStorageReport` to call.
   const measure = host.storageReport?.bind(host);
+  const live = host.liveModels?.bind(host);
   return {
     ...(measure ? {
       async readStorageReport(): Promise<string> { return JSON.stringify(validateHistoryStorageReport(await measure())); },
+    } : {}),
+    ...(live ? {
+      async readLiveModels(): Promise<string> { return JSON.stringify(await live()); },
     } : {}),
     async readSettings(): Promise<string> {
       return JSON.stringify(await (await host.workspace()).settings());

@@ -9,7 +9,7 @@ const copy = <T>(value: T): T => structuredClone(value);
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 
-function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error) {
+function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error, liveModels?: () => Promise<string[] | null>) {
   let settings: WorkspaceSettings = { ...defaultSettings(), skills: [...defaultSettings().skills, copy(userSkill)], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }] };
   const workspace: ReaderWorkspace = {
     settings: vi.fn(() => Promise.resolve(copy(settings))),
@@ -25,9 +25,27 @@ function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error
     exportText,
     readAutomaticPdfText: () => automaticPdfText,
     writeAutomaticPdfText: enabled => { automaticPdfText = enabled; },
+    ...(liveModels ? { liveModels } : {}),
   });
   return { service, workspace, exportText, current: () => copy(settings), automaticPdfText: () => automaticPdfText };
 }
+
+it('carries the runtime live model ids as JSON text, and stays absent when the host has no runtime', async () => {
+  // Presence, not a flag: an older host exposes nothing, so the pane cannot fabricate a live list.
+  expect('readLiveModels' in fixture().service).toBe(false);
+
+  const ids = ['gpt-6-astra', 'gpt-5.3-codex-spark'];
+  const present = fixture(undefined, undefined, () => Promise.resolve(ids));
+  expect(await present.service.readLiveModels!()).toBe(JSON.stringify(ids));
+  // The service forwards the ids verbatim; the offerable-family filter lives in core, not here.
+  expect(await present.service.readLiveModels!()).toBe('["gpt-6-astra","gpt-5.3-codex-spark"]');
+
+  const none = fixture(undefined, undefined, () => Promise.resolve(null));
+  expect(await none.service.readLiveModels!()).toBe('null');
+  // Reading the live list never writes the store and never starts anything.
+  expect(present.workspace.saveSettings).not.toHaveBeenCalled();
+  expect(none.workspace.saveSettings).not.toHaveBeenCalled();
+});
 
 it('mints a valid profile id in the plugin sandbox', () => {
   const { service } = fixture();

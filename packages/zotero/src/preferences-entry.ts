@@ -18,6 +18,11 @@ interface PreferencesBridge {
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /**
+   * The runtime's live model ids as JSON text, or the JSON literal `null` when no runtime has
+   * reported any. Optional so a plugin host that has not published it still mounts the pane.
+   */
+  readLiveModels?(): Promise<string> | string;
+  /**
    * History management, added after the first pane shipped. Optional here as well as on the pane, so
    * an older plugin host simply renders no History section instead of failing to mount the pane.
    */
@@ -74,6 +79,11 @@ function mount(root: Element): void {
     profileId: () => bridge.newProfileId(),
     readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
     writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
+    // The live model list is optional like History: an older host renders the bundled families and
+    // the honest "these come from the runtime" copy instead of failing to mount.
+    ...(bridge.readLiveModels ? {
+      readLiveModels: async (): Promise<unknown> => JSON.parse(await bridge.readLiveModels!()) as unknown,
+    } : {}),
     ...history,
   });
   panes.set(root, pane);

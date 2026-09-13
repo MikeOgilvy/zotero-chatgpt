@@ -246,6 +246,13 @@ export function startup(options: PluginContext): void {
     // One pref, one owner: the native pane and the reader opt-out read the same value.
     readAutomaticPdfText: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
     writeAutomaticPdfText: value => { Zotero.Prefs.set(AUTO_PDF_PREF, value, true); },
+    // The runtime's last live `model/list` ids, or null when it is not running. Read-only: opening
+    // the Preferences window never starts Codex, and an offerable id it reports (a GPT-5.3 Spark
+    // model) becomes selectable in the pane. Excluded families are filtered in core, not here.
+    liveModels: () => {
+      const client = runtime?.currentClient();
+      return Promise.resolve(client ? client.snapshot().models.map(model => model.id) : null);
+    },
     // The bounded, stat-only walk of the plugin's own records store that the History section's
     // "Calculate size" reports. Nothing runs until the owner asks, and no file content is read.
     storageReport: () => localServices
