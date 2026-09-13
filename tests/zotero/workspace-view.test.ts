@@ -196,3 +196,52 @@ it('opens the reference chooser from the composer plus shortcut without a visibl
   // The shortcut never rewrites the draft: it only chooses the search scope.
   expect(input.value).toBe('');
 });
+
+it('settles the chooser on empty results, an honest failure or a late abandoned answer', async () => {
+  const searches: Array<{ resolve: (value: ReaderReference[]) => void; reject: (error: unknown) => void }> = [];
+  const search = vi.fn(() => new Promise<ReaderReference[]>((resolve, reject) => { searches.push({ resolve, reject }); }));
+  const { pane, view, input, key } = setup({ searchReferences: search });
+  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+
+  // No matches is an honest empty state, never a permanent 'Searching…'.
+  view.openCommands();
+  expect(menu.textContent).toContain('Searching…');
+  searches[0]!.resolve([]);
+  await vi.waitFor(() => expect(menu.textContent).toContain('No matches'));
+  expect(menu.textContent).not.toContain('Searching…');
+
+  // A refused host search is reported verbatim instead of leaving the spinner running.
+  view.openCommands();
+  expect(menu.textContent).toContain('Searching…');
+  searches[1]!.reject(new Error('Library unavailable'));
+  await vi.waitFor(() => expect(menu.textContent).toContain('Library unavailable'));
+  expect(menu.textContent).not.toContain('Searching…');
+
+  // Escape closes while a request is unanswered; the reopened chooser owns its own newest request.
+  view.openCommands();
+  key('Escape');
+  expect(menu.hidden).toBe(true);
+  expect(menu.textContent).toContain('Searching…');
+  view.openCommands(); input.focus();
+  expect(menu.hidden).toBe(false);
+  searches[2]!.resolve([]); await Promise.resolve(); await Promise.resolve();
+  expect(menu.textContent).not.toContain('No matches');
+  searches[3]!.resolve([reference]);
+  await vi.waitFor(() => expect(menu.textContent).toContain('Shared title'));
+});
+
+it('keeps the reopened chooser on its own request when an abandoned search settles late', async () => {
+  const searches: Array<(value: ReaderReference[]) => void> = [];
+  const { pane, view, input, key } = setup({ searchReferences: vi.fn(() => new Promise<ReaderReference[]>(resolve => { searches.push(resolve); })) });
+  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  view.openCommands();
+  key('Escape');
+  expect(menu.hidden).toBe(true);
+  view.openCommands(); input.focus();
+  // The abandoned request settles after the reopen: its result must not reach the new chooser.
+  searches[0]!([{ ...reference, label: 'Abandoned source' }]);
+  await Promise.resolve(); await Promise.resolve();
+  expect(menu.textContent).not.toContain('Abandoned source');
+  searches[1]!([reference]);
+  await vi.waitFor(() => expect(menu.textContent).toContain('Shared title'));
+});

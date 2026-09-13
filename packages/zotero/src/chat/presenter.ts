@@ -29,6 +29,8 @@ export interface PresenterServices {
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
   contextBudget?(input: SendInput, conversation: Conversation): ContextBudget;
+  /** Test seam for the bounded '@' search; production uses the default bound. */
+  searchTimeoutMs?: number;
 }
 export type PresenterDependencies = PresenterServices;
 export type PresenterSkillEdit = Pick<ReaderSkill, 'name' | 'description' | 'version' | 'workflow' | 'markdown' | 'enabled'> & { id: string | null; revision?: string };
@@ -68,6 +70,22 @@ async function waitPreparation<T>(work: Promise<T>, signal: AbortSignal): Promis
   aborted(signal); let stop = () => {};
   try { return await Promise.race([work, new Promise<never>((_resolve, reject) => { stop = () => reject(new ReaderError('INVALID_REQUEST', 'Request preparation cancelled. Your draft is kept.')); signal.addEventListener('abort', stop, { once: true }); })]); }
   finally { signal.removeEventListener('abort', stop); }
+}
+/** Default bound for a host search bridge call. The bridge carries no timeout contract of its own. */
+export const REFERENCE_SEARCH_TIMEOUT_MS = 10_000;
+/**
+ * Bound a host callback so an unanswered bridge settles with an honest failure instead of leaving
+ * the composer waiting forever. Abort settles immediately; the original work is never resent.
+ */
+async function waitBounded<T>(work: Promise<T>, signal: AbortSignal, milliseconds: number, message: string): Promise<T> {
+  aborted(signal); let stop = () => {}; let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([work, new Promise<never>((_resolve, reject) => {
+      stop = () => { reject(new ReaderError('INVALID_REQUEST', 'Request preparation cancelled. Your draft is kept.')); };
+      timer = setTimeout(() => { reject(new ReaderError('READER_POLICY_UNAVAILABLE', message)); }, milliseconds);
+      signal.addEventListener('abort', stop, { once: true });
+    })]);
+  } finally { signal.removeEventListener('abort', stop); if (timer !== null) clearTimeout(timer); }
 }
 /**
  * One presenter per attachment for the plugin lifetime. It owns the unsent draft and the view's copy
@@ -234,9 +252,14 @@ export class ConversationPresenter {
   }
   async searchReferences(query: string, kind: 'all' | 'article' | 'chat' = 'all', signal = new AbortController().signal): Promise<ReaderReference[]> {
     aborted(signal); const results: ReaderReference[] = [];
-    if (kind !== 'chat' && this.services.library) results.push(...await this.services.library.search(query));
+    // Only '@' searches reach here, and both sources are host bridges. Each is bounded so the
+    // composer reports an honest failure instead of waiting on a request the host never answers.
+    const limit = this.services.searchTimeoutMs ?? REFERENCE_SEARCH_TIMEOUT_MS;
+    if (kind !== 'chat' && this.services.library) {
+      results.push(...await waitBounded(Promise.resolve(this.services.library.search(query)), signal, limit, 'The article search did not answer. Try again.'));
+    }
     if (kind !== 'article' && this.services.getWorkspace) {
-      const entries = await (await this.getWorkspace()).history(query);
+      const entries = await waitBounded(this.getWorkspace().then(workspace => workspace.history(query)), signal, limit, 'Saved chats could not be searched. Try again.');
       results.push(...entries.map(entry => ({ id: `chat-${entry.id}`, kind: 'chat' as const, label: entry.title, paper: entry.paper, identity: entry.identity, conversationId: entry.id, capturedAt: this.services.now() })));
     }
     aborted(signal); return results.map(validateReference);

@@ -13,7 +13,7 @@ import { documentA } from '../contracts/document-fixture.ts';
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 const reference: ReaderReference = { id: 'other-paper', kind: 'article', label: 'Paper B', paper: paperB, identity: { title: 'Paper B', authors: [] }, capturedAt: '2026-09-12T00:00:00Z' };
 const copy = <T>(value: T): T => structuredClone(value);
-function fixture(options: { offline?: boolean; document?: boolean } = {}) {
+function fixture(options: { offline?: boolean; document?: boolean; searchTimeoutMs?: number } = {}) {
   let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Paper A', settings, messages: [], activeRequestId: null, lastSeq: 0, createdAt: '2026-09-12T00:00:00Z', updatedAt: '2026-09-12T00:00:00Z' };
   const conversations = new Map([[conversation.id, conversation]]);
   let workspaceSettings: WorkspaceSettings = { ...defaultSettings(), skills: [userSkill], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }] };
@@ -45,7 +45,7 @@ function fixture(options: { offline?: boolean; document?: boolean } = {}) {
   };
   const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickImages: vi.fn(() => Promise.resolve([copy(imageA)])), pickSkill: vi.fn(() => Promise.resolve(userSkill.markdown)), exportText: vi.fn(() => Promise.resolve()), exportImage: vi.fn(() => Promise.resolve()) };
   let id = 0;
-  const services: PresenterServices = { ensureStarted: vi.fn(() => options.offline ? Promise.reject(new Error('Runtime unavailable')) : Promise.resolve(client)), openAuthorization: () => undefined, uuid: () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++id).padStart(12, '0')}`, now: () => '2026-09-12T00:00:00Z', getWorkspace: () => Promise.resolve(workspace), library, openHistory: vi.fn(() => Promise.resolve()), ...(options.document ? { document: { prepare: () => Promise.resolve(copy(documentA)), validate: () => Promise.resolve(), readEnabled: () => true, writeEnabled: () => {} } } : {}) };
+  const services: PresenterServices = { ensureStarted: vi.fn(() => options.offline ? Promise.reject(new Error('Runtime unavailable')) : Promise.resolve(client)), openAuthorization: () => undefined, uuid: () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++id).padStart(12, '0')}`, now: () => '2026-09-12T00:00:00Z', getWorkspace: () => Promise.resolve(workspace), library, openHistory: vi.fn(() => Promise.resolve()), ...(options.searchTimeoutMs === undefined ? {} : { searchTimeoutMs: options.searchTimeoutMs }), ...(options.document ? { document: { prepare: () => Promise.resolve(copy(documentA)), validate: () => Promise.resolve(), readEnabled: () => true, writeEnabled: () => {} } } : {}) };
   const presenter = new ConversationPresenter(paperA, 'Paper A', services);
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
   const emit = (event: Pending) => { const value: ReaderEvent = { ...event, seq: conversation.lastSeq + 1, conversationId: conversation.id, at: 'now' }; saveConversation({ ...conversation, lastSeq: value.seq, ...(['completed', 'cancelled', 'failed', 'uncertain'].includes(event.type) ? { activeRequestId: null } : {}) }); for (const listener of listeners) listener(value); };
@@ -236,4 +236,34 @@ it('keeps a new chat usable during older preparation and clears only the accepte
   expect(f.sent[0]?.conversationId).toBe(original); expect(f.presenter.snapshot().draft.question).toBe('Question B');
   await f.presenter.openConversation(original); expect(f.presenter.snapshot().draft.question).toBe('');
   await f.presenter.openConversation(next); expect(f.presenter.snapshot().draft.question).toBe('Question B'); f.presenter.dispose();
+});
+
+it('settles an unanswered @ search with an honest failure instead of waiting forever', async () => {
+  const f = fixture({ searchTimeoutMs: 20 });
+  // A host bridge that never answers must not leave the composer on 'Searching…' indefinitely.
+  f.library.search.mockImplementationOnce(() => new Promise(() => undefined));
+  await expect(f.presenter.searchReferences('never answers', 'article')).rejects.toThrow('The article search did not answer. Try again.');
+  // The same bound covers the saved-chat source searched by the workspace store.
+  vi.mocked(f.workspace.history).mockImplementationOnce(() => new Promise(() => undefined));
+  await expect(f.presenter.searchReferences('never answers', 'chat')).rejects.toThrow('Saved chats could not be searched. Try again.');
+  f.presenter.dispose();
+});
+
+it('settles an in-flight @ search as soon as the caller aborts it', async () => {
+  const f = fixture({ searchTimeoutMs: 60_000 });
+  f.library.search.mockImplementationOnce(() => new Promise(() => undefined));
+  const controller = new AbortController();
+  const pending = f.presenter.searchReferences('abandoned', 'article', controller.signal);
+  controller.abort();
+  await expect(pending).rejects.toThrow(/cancelled/u);
+  f.presenter.dispose();
+});
+
+it('lists matching articles and saved chats from both @ sources for an unfiltered query', async () => {
+  const f = fixture(); await f.presenter.activate();
+  const results = await f.presenter.searchReferences('paper');
+  expect(f.library.search).toHaveBeenCalledWith('paper');
+  expect(f.workspace.history).toHaveBeenCalledWith('paper');
+  expect(results.map(item => item.kind)).toEqual(['article', 'chat']);
+  f.presenter.dispose();
 });

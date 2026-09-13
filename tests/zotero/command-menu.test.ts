@@ -69,3 +69,18 @@ it('closes when keyboard focus leaves both the input and its chooser', () => {
   const outside = document.createElement('button'); document.body.append(outside); outside.focus();
   expect(menu.isOpen()).toBe(false);
 });
+
+it('settles the status from the newest update so a reopened chooser never keeps a stale Searching label', () => {
+  const { menu } = setup();
+  menu.update({ heading: 'References', items: [], loading: true });
+  expect(menu.element.textContent).toContain('Searching…');
+  expect(menu.element.textContent).not.toContain('No matches');
+  menu.close();
+  expect(menu.isOpen()).toBe(false);
+  menu.update({ heading: 'References', items: [{ id: 'a', label: 'A' }] });
+  expect(menu.isOpen()).toBe(true);
+  expect(menu.element.textContent).not.toContain('Searching…');
+  expect(menu.element.textContent).not.toContain('No matches');
+  menu.update({ heading: 'References', items: [] });
+  expect(menu.element.textContent).toContain('No matches');
+});
