@@ -1,5 +1,7 @@
 import type { Conversation, DocumentContext, DocumentRevision, DocumentSummary, Message, PaperScope } from '../../../contracts/src/index.ts';
 import { clone } from '../../../contracts/src/clone.ts';
+import { normalizeQuote } from '../reader/locate.ts';
+import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 
 export interface AnswerSource {
   id: string;
@@ -14,11 +16,14 @@ export type DocumentPageTarget = Pick<DocumentContext, 'paper' | 'revision'>;
 const INTERNAL_HOST = 'zcr.invalid';
 const UNAVAILABLE_TEXT = 'This source is not available in this answer.';
 const OPEN_FAILED_TEXT = 'The source could not be opened. Reopen the PDF and try again.';
+export const UNLOCATED_SOURCE_TEXT = 'Opened the cited page, but the exact passage could not be located.';
 
 interface Binding {
   source: AnswerSource;
   pageIndex: number;
-  open: (source: AnswerSource, pageIndex: number) => Promise<void>;
+  /** Normalized verbatim quote from the model's link title, or null when none was usable. */
+  quote: string | null;
+  open: (source: AnswerSource, pageIndex: number, quote: string | null) => Promise<SourceOpenOutcome | void>;
 }
 
 interface InternalAttempt {
@@ -96,7 +101,9 @@ async function openOnce(anchor: HTMLAnchorElement, binding: Binding): Promise<vo
   if (pending.has(anchor)) return;
   pending.add(anchor);
   try {
-    await binding.open(binding.source, binding.pageIndex);
+    const outcome = await binding.open(binding.source, binding.pageIndex, binding.quote);
+    if (outcome === 'unlocated') setStatus(anchor, UNLOCATED_SOURCE_TEXT);
+    else clearStatus(anchor);
   } catch {
     setStatus(anchor, OPEN_FAILED_TEXT);
   } finally {
@@ -201,7 +208,7 @@ function degrade(anchor: HTMLAnchorElement): void {
 export function linkAnswerSources(
   fragment: DocumentFragment,
   sources: AnswerSource[],
-  open: (source: AnswerSource, pageIndex: number) => Promise<void>,
+  open: (source: AnswerSource, pageIndex: number, quote: string | null) => Promise<SourceOpenOutcome | void>,
 ): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   for (const anchor of fragment.querySelectorAll('a')) {
@@ -227,7 +234,9 @@ export function linkAnswerSources(
       anchor.dataset.zcrPage = String(pageIndex);
       anchor.textContent = `p. ${page.pageLabel}`;
       clearStatus(anchor);
-      bindings.set(anchor, { source: deepFreezeSource(source), pageIndex, open });
+      // The link title is untrusted model text; it only ever becomes a literal search string.
+      const quote = normalizeQuote(anchor.getAttribute('title'));
+      bindings.set(anchor, { source: deepFreezeSource(source), pageIndex, quote, open });
     } catch {
       degrade(anchor);
     }

@@ -41,6 +41,25 @@ it('instructs the model to cite the supplied frozen document page in the reserve
   expect(instruction).toContain(document.id);
   expect(text).not.toContain('https://zcr.invalid/source//');
 });
+it('asks for a short verbatim quote in the citation link title so the cited passage can be located', () => {
+  const document: DocumentContext = {
+    id: 'aaaaaaaa-bbbb-8ccc-addd-eeeeeeeeeeee',
+    paper: paperA,
+    revision: { fingerprint: 'synthetic', size: 12, modifiedAt: 1, sha256: 'a'.repeat(64) },
+    parserVersion: 'zotero-native-text-v2',
+    totalPages: 1,
+    pages: [{ pageIndex: 0, pageLabel: '1', text: 'Synthetic evidence.', status: 'text' }],
+  };
+  const text = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings: { model: 'm', serviceTier: null, effort: null }, document });
+  const [instruction] = text.split('\n\n');
+  // The link title is the only channel for the verbatim quote; it must be requested, exact and optional.
+  expect(instruction).toContain('verbatim');
+  expect(instruction).toContain('link title');
+  expect(instruction).toMatch(/omit|omitting/u);
+  // Without a document there is no citation form and no quote request.
+  const noDoc = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings: { model: 'm', serviceTier: null, effort: null } });
+  expect(noDoc.split('\n\n')[0]).not.toContain('verbatim');
+});
 it('injects bibliographic paper identity on ask even without a citation', () => {
   const text = readingInput({
     requestId: 'r', conversationId: 'c', action: 'ask', question: '这篇在讲什么方向？', citations: [],

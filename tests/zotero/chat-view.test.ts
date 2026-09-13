@@ -5,6 +5,8 @@ import { expect, it, vi } from 'vitest';
 import { ConversationPresenter, type DocumentServices } from '../../packages/zotero/src/chat/presenter.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 import { mountChatView, renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
+import { UNLOCATED_SOURCE_TEXT } from '../../packages/zotero/src/chat/source-links.ts';
+import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
 import { SHAREABLE_STORAGE_LOCATION, type Citation, type Conversation, type DocumentRevision, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
@@ -37,7 +39,7 @@ async function mountReadyChat(options: {
   confirm?: (message: string) => boolean;
   uuid?: () => string;
   document?: DocumentServices;
-  openDocumentPage?: (document: { paper: PaperScope; revision: DocumentRevision }, pageIndex: number) => Promise<void>;
+  openDocumentPage?: (document: { paper: PaperScope; revision: DocumentRevision }, pageIndex: number, quote?: string | null) => Promise<SourceOpenOutcome | void>;
   openCitation?: (citation: Citation) => Promise<void>;
   copyText?: (text: string) => void;
   openLink?: (url: string) => void;
@@ -274,7 +276,7 @@ it('opens a cited answer page through the frozen document navigation and leaves 
   expect(cited?.dataset.zcrSource).toBe(documentA.id);
   expect(cited?.dataset.zcrPage).toBe('1');
   cited?.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: documentA.paper, revision: documentA.revision }, 1));
+  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: documentA.paper, revision: documentA.revision }, 1, null));
   expect(openLink).not.toHaveBeenCalled();
   external?.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
   expect(openLink).toHaveBeenCalledWith('https://example.com/paper');
@@ -296,7 +298,24 @@ it('resolves a citation into a persisted referenced document with that reference
   const anchor = root.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
   expect(anchor.textContent).toBe('p. i');
   anchor.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: paperB, revision: documentA.revision }, 0));
+  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: paperB, revision: documentA.revision }, 0, null));
+});
+
+it('carries the verbatim link title quote into the frozen page open and reports an honest miss', async () => {
+  const openDocumentPage = vi.fn((): Promise<SourceOpenOutcome> => Promise.resolve('unlocated'));
+  const { root } = await mountReadyChat({
+    messages: [
+      { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What is defined?', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
+      { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
+        text: `Definition [page](https://zcr.invalid/source/${documentA.id}/1 "the   exact   words")` },
+    ],
+    openDocumentPage,
+  });
+  const anchor = root.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
+  anchor.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: documentA.paper, revision: documentA.revision }, 1, 'the exact words'));
+  // The host reported the passage could not be located: the claim is traced but nothing is fabricated.
+  await vi.waitFor(() => expect(root.querySelector('[data-zcr-message="a1"] [data-zcr-text] [role="status"]')?.textContent).toBe(UNLOCATED_SOURCE_TEXT));
 });
 
 it('degrades an unresolvable answer citation without launching it externally', async () => {

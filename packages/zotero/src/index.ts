@@ -9,6 +9,7 @@ import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
+import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
@@ -130,10 +131,8 @@ function entry(reader: HostReader): ReaderEntry {
       const presenter = presenterFor(identity, reader);
       const unmount = mountChatView(root, presenter, {
         ...hooks,
-        openDocumentPage: async (document, pageIndex) => {
-          await nativeDocumentSource(Zotero, () => reader, document.paper).validate(document);
-          await reader.navigate({ pageIndex });
-        },
+        openDocumentPage: (document, pageIndex, quote) =>
+          openSourcePage(nativeSourceNavigator(Zotero, () => reader, document.paper), document, pageIndex, quote ?? null),
         zoomTargets: zoomDocuments(reader, root),
         uuid: () => crypto.randomUUID(),
         readerZoom: {

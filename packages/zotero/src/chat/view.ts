@@ -10,12 +10,13 @@ import {
 } from './generation-settings.ts';
 import { copyableAnswerText, followAnswerScroll, renderAnswer } from './render-answer.ts';
 import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
+import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
 import { clipboardHasImage, geckoClipboardHasImage, imagesFromClipboard, imagesFromGeckoClipboard, resolveGeckoClipboardAccess, type GeckoClipboardAccess } from './pick-images.ts';
 export interface AttachmentIdentity { title: string; key: string; libraryID: number }
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
-  openDocumentPage?(document: DocumentPageTarget, pageIndex: number): Promise<void>;
+  openDocumentPage?(document: DocumentPageTarget, pageIndex: number, quote?: string | null): Promise<SourceOpenOutcome | void>;
   copyText?(text: string): void;
   exportImage?(image: ImageAttachment): Promise<void>;
   openLink?(url: string): void;
@@ -180,9 +181,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const viewId = `zcr-chat-${++viewSerial}`;
   // A cited page re-opens through the same frozen-revision navigation as the PDF context panel.
   // Without an opener, bound citations stay inert (no external launch) and surface a constant status.
-  const openAnswerSource = async (source: AnswerSource, pageIndex: number): Promise<void> => {
+  const openAnswerSource = async (source: AnswerSource, pageIndex: number, quote: string | null): Promise<SourceOpenOutcome> => {
     if (!hooks.openDocumentPage) throw new Error('The source could not be opened.');
-    await hooks.openDocumentPage({ paper: source.paper, revision: source.revision }, pageIndex);
+    return (await hooks.openDocumentPage({ paper: source.paper, revision: source.revision }, pageIndex, quote)) ?? 'opened';
   };
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] => { const node = doc.createElementNS(HTML, tag) as HTMLElementTagNameMap[K]; if (className) node.className = className; if (text) node.textContent = text; return node; };
   const icon = (name: keyof typeof ICONS) => {
@@ -296,7 +297,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const accountUsage = el('p', 'zcr-account-usage'); accountUsage.dataset.zcrAccountUsage = ''; settingsContent.append(accountUsage);
   const documentPanel = el('div', 'zcr-document-panel');
   documentPanel.dataset.zcrContextSummary = '';
-  const documentView = mountDocumentContext(documentPanel, settingsContent, presenter, hooks.openDocumentPage ? (document, pageIndex) => hooks.openDocumentPage!(document, pageIndex) : undefined);
+  const documentView = mountDocumentContext(documentPanel, settingsContent, presenter, hooks.openDocumentPage ? async (document, pageIndex) => { await hooks.openDocumentPage!(document, pageIndex); } : undefined);
   documentPanel.append(contextSource);
   const historyPanel = el('div', 'zcr-history-panel');
   historyPanel.id = `${viewId}-history`;

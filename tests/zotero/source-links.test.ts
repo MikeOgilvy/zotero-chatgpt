@@ -1,7 +1,8 @@
 import { Window as HappyWindow } from 'happy-dom';
 import { expect, it, vi } from 'vitest';
 import { renderAnswer } from '../../packages/zotero/src/chat/render-answer.ts';
-import { linkAnswerSources, type AnswerSource } from '../../packages/zotero/src/chat/source-links.ts';
+import { linkAnswerSources, UNLOCATED_SOURCE_TEXT, type AnswerSource } from '../../packages/zotero/src/chat/source-links.ts';
+import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import { paperA } from '../contracts/factories.ts';
 
 const sourceId = '11111111-2222-3333-4444-555555555555';
@@ -18,12 +19,12 @@ function setup(markdown: string) {
 
 it('binds only a supplied source and page, using the frozen page label and preserving the anchor and focus', async () => {
   const { document, fragment, container, external, click } = setup(`[model says page 100](${href()})`); const anchor = fragment.querySelector('a')!;
-  const descriptor = source(); const open = vi.fn<(_source: AnswerSource, _page: number) => Promise<void>>().mockResolvedValue(undefined);
+  const descriptor = source(); const open = vi.fn<(_source: AnswerSource, _page: number, _quote: string | null) => Promise<void>>().mockResolvedValue(undefined);
   linkAnswerSources(fragment, [descriptor], open); container.append(fragment); anchor.focus();
   expect(container.querySelector('a')).toBe(anchor); expect(document.activeElement).toBe(anchor);
   expect(anchor.textContent).toBe('p. iv'); expect(anchor.dataset.zcrSource).toBe(sourceId); expect(anchor.dataset.zcrPage).toBe('0');
   const event = click(anchor); expect(event.defaultPrevented).toBe(true); expect(external).not.toHaveBeenCalled();
-  await vi.waitFor(() => expect(open).toHaveBeenCalledWith(descriptor, 0)); expect(document.activeElement).toBe(anchor);
+  await vi.waitFor(() => expect(open).toHaveBeenCalledWith(descriptor, 0, null)); expect(document.activeElement).toBe(anchor);
 });
 
 it.each([href(otherId), href(sourceId, 3), href(sourceId, '07'), href(sourceId, '-1'), href(sourceId, '9007199254740992'), `${href()}?next=https://example.com`, `${href()}#p=8`, 'https://zcr.invalid/not-a-source', `https://user@zcr.invalid/source/${sourceId}/0`, `https://zcr.invalid./source/${sourceId}/0`])('blocks unsupported internal references without allowing an external opener: %s', url => {
@@ -46,7 +47,7 @@ it('keeps click authority in its closure when DOM attributes or caller-owned sou
   linkAnswerSources(fragment, [descriptor], open); const anchor = fragment.querySelector('a')!; container.append(fragment);
   descriptor.paper.attachmentKey = 'CHANGED1'; descriptor.revision.fingerprint = 'changed'; descriptor.pages[1]!.pageLabel = '999';
   anchor.dataset.zcrSource = otherId; anchor.dataset.zcrPage = '0'; click(anchor);
-  await vi.waitFor(() => expect(open).toHaveBeenCalledWith(expected, 7)); expect(anchor.textContent).toBe('p. 8');
+  await vi.waitFor(() => expect(open).toHaveBeenCalledWith(expected, 7, null)); expect(anchor.textContent).toBe('p. 8');
   const passed = open.mock.calls[0]![0] as AnswerSource; expect(Object.isFrozen(passed)).toBe(true); expect(Object.isFrozen(passed.paper)).toBe(true); expect(Object.isFrozen(passed.pages)).toBe(true);
 });
 
@@ -95,6 +96,29 @@ it('degrades one malformed source without blanking the rest of the answer', () =
   expect(anchors[1]?.dataset.zcrSource).toBe(otherId);
   expect(anchors[0]?.hasAttribute('href')).toBe(false);
   expect(container.textContent).not.toContain('/private');
+});
+
+it('passes a whitespace-normalized verbatim quote from the link title and stays silent when highlighted', async () => {
+  const { fragment, container, click } = setup(`[page](${href()} "the   measured effect was small")`);
+  const descriptor = source();
+  const open = vi.fn<(_source: AnswerSource, _page: number, _quote: string | null) => Promise<'highlighted'>>().mockResolvedValue('highlighted');
+  linkAnswerSources(fragment, [descriptor], open); const anchor = fragment.querySelector('a')!; container.append(fragment); click(anchor);
+  await vi.waitFor(() => expect(open).toHaveBeenCalledWith(descriptor, 0, 'the measured effect was small'));
+  expect(container.querySelector('[role="status"]')).toBeNull();
+});
+
+it('reports an unlocatable cited passage honestly instead of fabricating a highlight', async () => {
+  const { document, fragment, container, click } = setup(`[page](${href()} "not actually on this page")`);
+  const descriptor = source();
+  const open = vi.fn<(_source: AnswerSource, _page: number, _quote: string | null) => Promise<SourceOpenOutcome>>().mockResolvedValue('unlocated');
+  linkAnswerSources(fragment, [descriptor], open); const anchor = fragment.querySelector('a')!; container.append(fragment); anchor.focus(); click(anchor);
+  await vi.waitFor(() => expect(container.querySelector('[role="status"]')!.textContent).toBe(UNLOCATED_SOURCE_TEXT));
+  expect(open).toHaveBeenCalledWith(descriptor, 0, 'not actually on this page');
+  expect(container.textContent).not.toContain('/private');
+  expect(document.activeElement).toBe(anchor);
+  // A later successful open clears the honest miss again.
+  open.mockResolvedValue('highlighted'); click(anchor);
+  await vi.waitFor(() => expect(container.querySelector('[role="status"]')).toBeNull());
 });
 
 it('deduplicates a pending open and safely rebinds a reused fragment against the current source list', async () => {
