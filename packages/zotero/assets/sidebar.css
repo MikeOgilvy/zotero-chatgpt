@@ -236,17 +236,6 @@ body.zcr-dock-open #split-view .primary-view,
   flex-direction: column;
 }
 .zcr-messages { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 0 12px; scrollbar-gutter: stable; }
-.zcr-empty-mark {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  color: var(--fill-secondary, GrayText);
-  opacity: .45;
-}
-.zcr-empty-mark svg { display: block; }
 .zcr-new-content { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 1; background: var(--material-menu, Canvas); border-radius: 14px; white-space: nowrap; }
 .zcr-message { display: flex; flex-direction: column; gap: 4px; }
 .zcr-message-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

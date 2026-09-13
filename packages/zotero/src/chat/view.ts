@@ -400,30 +400,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (isNearBottom()) { hasNewContent = false; newContent.hidden = true; }
     presenter.setScrollTop(messages.scrollTop);
   });
-  const emptyMark = el('div', 'zcr-empty-mark');
-  emptyMark.dataset.zcrEmpty = '';
-  emptyMark.setAttribute('aria-hidden', 'true');
-  const mark = doc.createElementNS(SVG, 'svg');
-  mark.setAttribute('viewBox', '0 0 72 56');
-  mark.setAttribute('width', '56');
-  mark.setAttribute('height', '44');
-  mark.setAttribute('aria-hidden', 'true');
-  const cloud = doc.createElementNS(SVG, 'path');
-  cloud.setAttribute('d', 'M20 42c-8 0-14-6-14-13 0-6 4-11 10-12 2-8 9-14 18-14 10 0 18 7 19 16h1c7 0 13 5 13 12 0 7-6 11-13 11H20z');
-  cloud.setAttribute('fill', 'none');
-  cloud.setAttribute('stroke', 'currentColor');
-  cloud.setAttribute('stroke-width', '2');
-  cloud.setAttribute('stroke-linejoin', 'round');
-  const prompt = doc.createElementNS(SVG, 'path');
-  prompt.setAttribute('d', 'M26 26l7 6-7 6M38 38h10');
-  prompt.setAttribute('fill', 'none');
-  prompt.setAttribute('stroke', 'currentColor');
-  prompt.setAttribute('stroke-width', '2');
-  prompt.setAttribute('stroke-linecap', 'round');
-  prompt.setAttribute('stroke-linejoin', 'round');
-  mark.append(cloud, prompt);
-  emptyMark.append(mark);
-  transcript.append(emptyMark, messages, newContent);
+  transcript.append(messages, newContent);
   const draft = el('div', 'zcr-draft');
   const draftCitations = el('div', 'zcr-draft-citations'); draftCitations.dataset.zcrDraftCitations = '';
   const draftImages = el('div', 'zcr-draft-images'); draftImages.dataset.zcrDraftImages = '';
@@ -1012,11 +989,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       historyList.dataset.options = historyKey;
       renderHistory(state);
     }
-    const empty = list.length === 0 && state.tasks.length === 0 && state.readingJobs.length === 0;
-    transcript.dataset.empty = String(empty);
-    if (empty) {
-      if (!emptyMark.isConnected) transcript.prepend(emptyMark);
-    } else emptyMark.remove();
     const nearBottom = isNearBottom();
     const conversationChanged = renderedConversationId !== (state.conversation?.id ?? null);
     if (conversationChanged) {

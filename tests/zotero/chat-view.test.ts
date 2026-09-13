@@ -676,16 +676,30 @@ it('keeps title, New chat, and history inside the sidebar pane below the native 
   expect(panel?.querySelector('[data-zcr-history-search]')).toBeTruthy();
 });
 
-it('centers a Codex mark in an empty transcript without instructional copy', async () => {
-  const { root } = await mountReadyChat({ messages: [] });
-  const mark = root.querySelector('[data-zcr-empty]');
-  expect(mark?.closest('.zcr-transcript')).toBeTruthy();
-  expect(mark?.querySelector('svg')).toBeTruthy();
+it('renders an empty transcript as plain, scrollable space with no mark and a working composer', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  applySidebarStyles(root);
+  const transcript = root.querySelector<HTMLElement>('.zcr-transcript')!;
+  const messages = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  // The empty state carries no logo, icon or placeholder box: it is just empty.
+  expect(root.querySelector('[data-zcr-empty]')).toBeNull();
+  expect(transcript.querySelectorAll('svg')).toHaveLength(0);
   expect(root.textContent).not.toMatch(/Select text in the PDF|ask a question\./iu);
   expect(root.textContent).not.toMatch(/@ chats|\/ skills|highlight/iu);
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.placeholder).toBe('Ask a question…');
-  const { root: filled } = await mountReadyChat();
-  expect(filled.querySelector('[data-zcr-empty]')).toBeNull();
+  // The transcript keeps its layout and scroll container.
+  const styles = (node: HTMLElement) => root.ownerDocument.defaultView!.getComputedStyle(node);
+  expect(styles(transcript).display).toBe('flex');
+  expect(styles(messages).overflow).toBe('auto');
+  Object.defineProperty(messages, 'scrollHeight', { configurable: true, value: 1000 });
+  Object.defineProperty(messages, 'clientHeight', { configurable: true, value: 200 });
+  messages.scrollTop = 500;
+  messages.dispatchEvent(new root.ownerDocument.defaultView!.Event('scroll'));
+  expect(presenter.snapshot().scrollTop).toBe(500);
+  // The composer still works from the empty state.
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  expect(input.placeholder).toBe('Ask a question…');
+  expect(input.disabled).toBe(false);
+  expect(root.querySelector('[data-zcr-action="send"]')).not.toBeNull();
 });
 
 it('leaves the automatic-PDF preference to Zotero Preferences instead of the sidebar', async () => {
