@@ -160,6 +160,10 @@ it('lists a record carrying archivedAt as an ordinary chat in the one listing an
   expect(f.conversations.get(archivedId)?.archivedAt).toBe('2026-09-12T00:00:00Z');
   // The sidebar owns no archive mutation: the client primitive stays available but is never called.
   expect(f.client.archiveConversation).not.toHaveBeenCalled();
+  // The other chat-search surface agrees with the one listing: '@' reaches the legacy record too, so
+  // it is not hidden from mentions while the sidebar shows it as an ordinary chat.
+  const mentioned = await f.presenter.searchReferences('Old discussion', 'chat');
+  expect(mentioned.map(reference => reference.conversationId)).toEqual([archivedId]);
   f.presenter.dispose();
 });
 

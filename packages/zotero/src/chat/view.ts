@@ -431,7 +431,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   // The current chat title carries the reference's rounded neutral chip: the title truncates and a
   // small cross sits at its right edge. Closing leaves the chat on disk and in history and asks no
   // confirmation; the destructive remove lives only on the fallback host-list row. When the close
-  // leaves no unarchived chat for this attachment, the reader collapses its whole dock through the
+  // leaves no chat at all for this attachment, the reader collapses its whole dock through the
   // reader's own close path instead of leaving an empty panel; otherwise the pane stays open in its
   // new-chat state and the `+` stays available.
   const closeCurrent = button(COPY.closeChat, 'close-conversation', () => {

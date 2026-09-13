@@ -338,9 +338,13 @@ export class ConversationPresenter {
       results.push(...await waitBounded(Promise.resolve(this.services.library.search(query)), signal, limit, 'The article search did not answer. Try again.'));
     }
     if (kind !== 'article' && this.services.getWorkspace) {
-      // Deliberately the default (unarchived) scope: '@' pulls a chat you are actively working with,
-      // while an archived chat stays reachable from the history popover's search and Archived section.
-      const entries = await waitBounded(this.getWorkspace().then(workspace => workspace.history(query)), signal, limit, 'Saved chats could not be searched. Try again.');
+      // The UI has no archive scope, so a legacy record carrying `archivedAt` is an ordinary chat and
+      // '@' reads both store scopes exactly like the sidebar's one listing. The default scope alone
+      // would hide such a record from mentions while the sidebar shows it as an ordinary chat.
+      const entries = await waitBounded(this.getWorkspace().then(async workspace => {
+        const [current, legacy] = await Promise.all([workspace.history(query), workspace.history(query, { archived: true })]);
+        return newestFirst([...current, ...legacy]);
+      }), signal, limit, 'Saved chats could not be searched. Try again.');
       results.push(...entries.map(entry => ({ id: `chat-${entry.id}`, kind: 'chat' as const, label: entry.title, paper: entry.paper, identity: entry.identity, conversationId: entry.id, capturedAt: this.services.now() })));
     }
     aborted(signal); return results.map(validateReference);

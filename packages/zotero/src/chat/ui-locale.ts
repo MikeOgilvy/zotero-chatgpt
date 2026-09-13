@@ -117,7 +117,7 @@ const CONTENT = [
 const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-button,.zcr-workspace-control,.zcr-preferences button';
 const TEXT = [
   BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
-  '.zcr-history-heading', '.zcr-history-empty', '.zcr-history-archived-label', '.zcr-status-line', '.zcr-message-meta',
+  '.zcr-history-heading', '.zcr-history-empty', '.zcr-status-line', '.zcr-message-meta',
   '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-context-disclosure > p', '.zcr-error',
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
   '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
