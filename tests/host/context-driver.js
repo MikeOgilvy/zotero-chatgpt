@@ -70,7 +70,10 @@ async function runHostSmoke(config) {
     // so a refused host replacement fails the check out loud instead of degrading into a pass.
     const t0 = Date.now();
     const observations = [];
-    const counts = { stat: 0, digest: 0, encode: 0, encodePageText: 0, encodeJson: 0 };
+    const counts = { stat: 0, digest: 0, encode: 0, encodePageText: 0, encodeJson: 0, statExpected: 0, digestExpected: 0 };
+    // The driver's own revision probe below also stats and hashes this file. That probe is not the
+    // product, so the product's own gate is counted only from after it, never including it.
+    let driverProbeAt = Infinity;
     const prefReads = [];
     const logErrors = [];
     const restoreHost = [];
@@ -100,8 +103,8 @@ async function runHostSmoke(config) {
     restoreInstrumentation = () => { Zotero.Prefs.get = nativePrefGet; Zotero.logError = nativeLogError; for (const restore of restoreHost.reverse()) restore(); };
     const expectedFile = String((await Zotero.Items.get(a.id).getFilePathAsync()) ?? '').split('/').pop();
     const armed = {
-      stat: observeHost(IOUtils, 'stat', 'stat', args => ({ file: String(args[0] ?? '').split('/').pop() }), entry => { counts.stat += 1; if (entry.file === expectedFile) counts.statExpected += 1; return entry.file === expectedFile || observations.filter(item => item.label === 'stat').length < 10; }),
-      digest: observeHost(IOUtils, 'computeHexDigest', 'computeHexDigest', args => ({ file: String(args[0] ?? '').split('/').pop(), algorithm: args[1] ?? null }), entry => { counts.digest += 1; if (entry.file === expectedFile) counts.digestExpected += 1; return true; }),
+      stat: observeHost(IOUtils, 'stat', 'stat', args => ({ file: String(args[0] ?? '').split('/').pop() }), entry => { counts.stat += 1; if (entry.file === expectedFile && entry.ms > driverProbeAt) counts.statExpected += 1; return entry.file === expectedFile || observations.filter(item => item.label === 'stat').length < 10; }),
+      digest: observeHost(IOUtils, 'computeHexDigest', 'computeHexDigest', args => ({ file: String(args[0] ?? '').split('/').pop(), algorithm: args[1] ?? null }), entry => { counts.digest += 1; if (entry.file === expectedFile && entry.ms > driverProbeAt) counts.digestExpected += 1; return entry.file === expectedFile; }),
       encode: observeHost(TextEncoder.prototype, 'encode', 'encode', args => ({ characters: typeof args[0] === 'string' ? args[0].length : null, jsonShaped: typeof args[0] === 'string' && /^[[{]/u.test(args[0]), head: typeof args[0] === 'string' ? args[0].slice(0, 40) : null }), (entry, args) => {
         counts.encode += 1;
         const text = typeof args[0] === 'string' ? args[0] : '';
@@ -156,19 +159,18 @@ async function runHostSmoke(config) {
     await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
     report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
     await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
-    // --- Diagnostic: does the product's own revision precondition hold on this host? ---
-    // capture() reads the whole loaded PDF, hashes it, and hashes the file on disk; an unequal pair
-    // rejects the preparation with "The PDF file changed while this reader was open." This probe repeats
-    // exactly that pair, before the product runs, to say which side is surprising. Not part of a check.
+    // --- Diagnostic: the disk side of the product's own revision precondition ---
+    // capture() compares a sha256 of the whole loaded PDF against a sha256 of the file on disk, and a
+    // non-match rejects the preparation with "The PDF file changed while this reader was open." This
+    // records the disk side only. The loaded side is deliberately left to the product's own `getData`
+    // call below, so this driver never reads the document data itself and cannot consume a read the
+    // product would then be the first to perform.
     try {
       const nativePath = await Zotero.Items.get(a.id).getFilePathAsync();
       const nativeStat = await IOUtils.stat(nativePath);
       const diskSha = await IOUtils.computeHexDigest(nativePath, 'sha256');
-      const raw = await pdf().pdfDocument.getData();
-      const loaded = new Uint8Array(raw);
-      const loadedSha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', loaded))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-      report.revisionPrecondition = { file: nativePath.split('/').pop(), statSize: nativeStat.size, loadedBytes: loaded.length, diskSha, loadedSha, match: loadedSha === diskSha, head: String.fromCharCode(...loaded.slice(0, 8)) };
-    } catch (error) { report.revisionPrecondition = { error: String((error && error.message) || error) }; }
+      report.revisionPrecondition = { file: nativePath.split('/').pop(), diskSize: nativeStat.size, diskSha, loadedSide: "observed from the product's own getData call below" };
+    } catch (error) { report.revisionPrecondition = { error: String((error && error.message) || error) }; } finally { driverProbeAt = Date.now() - t0; }
     // --- a3's own instrument, re-armed where a3 armed it, widened to record the whole product read ---
     // a3 wrapped only `getPageData`/`getPageLabels2`, and it armed them after reading both pages itself,
     // so a hit meant "the product read again after this point". This run keeps that wrapper and adds the
@@ -186,11 +188,50 @@ async function runHostSmoke(config) {
       };
       const numPagesValue = pdfObject.numPages; const fingerprintsValue = [...(pdfObject.fingerprints ?? [])];
       const note = entry => legacy.order.push({ ...entry, ms: Date.now() - t0, stack: frames().slice(0, 3) });
+      // A second consumer of the same promise: the product's own reference is returned untouched.
+      const watch = (result, onValue) => { void (async () => { try { onValue(await result); } catch { /* the product's rejection is its own to handle */ } })(); };
       const previousRestore = restoreInstrumentation;
       try {
-        pdfObject.getData = function (...args) { legacy.calls.getData += 1; note({ call: 'getData' }); return native.getData.apply(this, args); };
-        pdfObject.getPageLabels2 = function (...args) { legacy.calls.labels += 1; note({ call: 'getPageLabels2' }); return native.getPageLabels2.apply(this, args); };
-        pdfObject.getPageData = function (...args) { legacy.calls.pageData.push(args[0]?.pageIndex ?? null); note({ call: 'getPageData', pageIndex: args[0]?.pageIndex ?? null }); return native.getPageData.apply(this, args); };
+        pdfObject.getData = function (...args) {
+          legacy.calls.getData += 1;
+          const record = note({ call: 'getData' });
+          let result;
+          try { result = native.getData.apply(this, args); } catch (error) { record.error = String((error && error.message) || error); throw error; }
+          record.isThenable = Boolean(result && typeof result.then === 'function');
+          // The product receives this promise unchanged; this driver only watches a second consumer of
+          // it, so the read is not rerouted through the driver's realm (the way the a3 wrapper was).
+          void (async () => {
+            try {
+              const value = await result;
+              record.settled = true; record.byteLength = value?.byteLength ?? null; record.tag = Object.prototype.toString.call(value);
+              try {
+                const loaded = new Uint8Array(value);
+                record.loadedSha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', loaded))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+                record.loadedShaMatchesDisk = record.loadedSha === report.revisionPrecondition?.diskSha;
+              } catch (error) { record.hashError = String((error && error.message) || error); }
+            } catch (error) { record.settled = true; record.error = String((error && error.message) || error); }
+          })();
+          return result;
+        };
+        pdfObject.getPageLabels2 = function (...args) {
+          legacy.calls.labels += 1;
+          const record = note({ call: 'getPageLabels2' });
+          const result = native.getPageLabels2.apply(this, args);
+          void watch(result, value => { record.settled = true; record.labels = Array.isArray(value) ? value.length : null; });
+          return result;
+        };
+        pdfObject.getPageData = function (...args) {
+          const pageIndex = args[0]?.pageIndex ?? null; legacy.calls.pageData.push(pageIndex);
+          const record = note({ call: 'getPageData', pageIndex });
+          const result = native.getPageData.apply(this, args);
+          void watch(result, value => {
+            record.settled = true;
+            const chars = Array.isArray(value?.chars) ? value.chars : Array.isArray(Cu.waiveXrays(value?.chars)) ? Cu.waiveXrays(value.chars) : null;
+            record.chars = chars ? chars.length : null;
+            record.textCharacters = chars ? chars.reduce((total, char) => total + (char.ignorable ? 0 : 1), 0) : null;
+          });
+          return result;
+        };
         Object.defineProperty(pdfObject, 'numPages', { configurable: true, get() { legacy.calls.numPages += 1; note({ call: 'numPages' }); return numPagesValue; } });
         Object.defineProperty(pdfObject, 'fingerprints', { configurable: true, get() { legacy.calls.fingerprints += 1; note({ call: 'fingerprints' }); return fingerprintsValue; } });
       } catch { /* keep whatever could not be wrapped; the records then show only that */ }
@@ -213,52 +254,38 @@ async function runHostSmoke(config) {
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
     await check('title-before-or-with-connection', panel()?.textContent.includes(title));
-    const readObserved = await until(() => observedGate() && observedPageTexts().length >= 2, 'automatic-background-preparation', 60000).catch(() => null);
-    const pageTexts = observedPageTexts();
-    const gateMs = observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.ok)?.ms ?? null;
-    const statMs = observations.find(entry => entry.label === 'stat' && entry.file === expectedFile && entry.ok)?.ms ?? null;
+    // Wait on the product's own reads of both pages, not on any driver-side proxy for them. The wait
+    // is honest about failure: if the product does not read a page, or reads it with no text, nothing
+    // here can turn that into a pass.
+    const readObserved = await until(() => {
+      const settled = legacy.order.filter(entry => entry.call === 'getPageData' && entry.settled === true && (entry.chars ?? 0) > 0).map(entry => entry.pageIndex);
+      return settled.includes(0) && settled.includes(1) && counts.digestExpected >= 1;
+    }, 'automatic-background-preparation', 60000).catch(() => null);
+    const productPageCalls = legacy.order.filter(entry => entry.call === 'getPageData').map(entry => ({ pageIndex: entry.pageIndex, settled: entry.settled ?? false, chars: entry.chars ?? null, ms: entry.ms }));
+    const productGetData = legacy.order.filter(entry => entry.call === 'getData').map(entry => ({ ms: entry.ms, settled: entry.settled ?? false, byteLength: entry.byteLength ?? null, error: entry.error ?? null, loadedShaMatchesDisk: entry.loadedShaMatchesDisk ?? null, hashError: entry.hashError ?? null }));
+    const gateMs = observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.ok && entry.ms > driverProbeAt)?.ms ?? null;
+    const statMs = observations.find(entry => entry.label === 'stat' && entry.file === expectedFile && entry.ok && entry.ms > driverProbeAt)?.ms ?? null;
     const recorded = legacy.calls.pageData;
-    const missedByWrap = pageTexts.filter(entry => entry.ms < legacy.wrapMs).length;
     const legacyVerdict = recorded.includes(0) && recorded.includes(1)
       ? 'the a3 wrapper does see the product page calls; reachability was not the a3 problem'
-      : pageTexts.length >= 2
-        ? 'H2 access path: the product extracted both pages while the a3 wrapper recorded no page call'
-        : missedByWrap > 0
-          ? `H1 timing artifact: ${missedByWrap} of ${pageTexts.length} page texts were extracted before a3 armed its wrapper at ${legacy.wrapMs}ms (page indexes recorded by the wrapper: [${recorded.join(', ')}])`
-          : gateMs !== null && gateMs > legacy.wrapMs
-            ? 'H2 access path: the wrapper was armed before the product read and still recorded no page call'
-            : 'inconclusive: no product page text was observed after the wrapper was armed';
-    report.legacyInstrument = { wrapMs: legacy.wrapMs, probeRecorded: legacy.probeRecorded, calls: { ...legacy.calls, order: legacy.order.slice(0, 40) } };
-    report.backgroundPreparation = {
-      expectedFile,
-      control: optOutControl ? 'automaticPdfText-off' : null,
-      openedMs,
-      toggleClickedMs: report.toggleClickedMs,
-      statMs,
-      gateMs,
-      pageTextMs: pageTexts.map(entry => entry.ms),
-      pageTextCharacters: pageTexts.map(entry => entry.characters),
-      legacyWrapMs: legacy.wrapMs,
-      legacyProbeRecorded: legacy.probeRecorded,
-      legacyPageIndexes: [...recorded],
-      legacyCalls: { ...legacy.calls, order: legacy.order.slice(0, 40) },
-      legacyVerdict,
-      automaticPdfTextReads: prefReads.map(entry => entry.ms),
-      productLoggedErrors: logErrors,
-      productVisible: {
-        sidebarOpen: Boolean(panel()),
-        runtime: panel()?.dataset.zcrRuntime ?? null,
-        auth: panel()?.dataset.zcrAuth ?? null,
-        contextState: contextRing()?.dataset.zcrContextState ?? null,
-        errorAlert: refusalAlert()?.textContent ?? null,
-      },
-      counts: { ...counts },
-      observationLimit: OBSERVATION_LIMIT,
-      hostObservations: observations.filter(entry => entry.file === expectedFile || entry.label === 'encode').slice(0, 24),
-      note: 'The product\'s own toolbar toggle opened the sidebar, and its own capture gate and per-page text encodings were then observed on the host APIs it calls. No request was sent and no PDF method was called by this driver after the toggle.',
-    };
-    const preparationObserved = Boolean(readObserved) && observedPageTexts().length >= 2 && Boolean(observedGate());
+      : productPageCalls.length === 0
+        ? 'the product made no page call at all after its trigger: the read never started (see productGetData/productGate)'
+        : recorded.length === 0
+          ? `H2 access path: the product read ${productPageCalls.length} page(s) while the a3 wrapper recorded no page call`
+          : 'the product read fewer pages than this document has';
+    // The assertion rests only on what the product itself did: its revision gate for this file, and a
+    // settled, non-empty read of every page. `counts.*Expected` counts only after the driver's own probe.
+    const pageReads = legacy.order.filter(entry => entry.call === 'getPageData' && entry.settled === true && (entry.chars ?? 0) > 0);
+    const pageIndexesRead = [...new Set(pageReads.map(entry => entry.pageIndex))].sort((left, right) => left - right);
+    const preparationObserved = counts.statExpected >= 1 && counts.digestExpected >= 1 && pageIndexesRead.includes(0) && pageIndexesRead.includes(1);
     report.backgroundPreparation.preparationObserved = preparationObserved;
+    report.backgroundPreparation.pageReads = pageReads.map(entry => ({ pageIndex: entry.pageIndex, chars: entry.chars, textCharacters: entry.textCharacters }));
+    report.backgroundPreparation.pageIndexesRead = pageIndexesRead;
+    report.backgroundPreparation.productGate = { statCalls: counts.statExpected, digestCalls: counts.digestExpected };
+    report.backgroundPreparation.productPageCalls = productPageCalls;
+    report.backgroundPreparation.productGetData = productGetData;
+    report.backgroundPreparation.legacyVerdict = legacyVerdict;
+    report.backgroundPreparation.legacyGetters = { ...legacy.calls };
     report.backgroundPreparation.nonFatal = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-nonfatal-prep'));
     if (report.backgroundPreparation.nonFatal) await skip('automatic-whole-pdf-background-preparation-without-panel', `DIAGNOSTIC RUN (non-fatal): ${JSON.stringify({ counts, preparationObserved, gateMs: observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile)?.ms ?? null, legacy: legacy.order.slice(0, 12) })}`);
     else await check('automatic-whole-pdf-background-preparation-without-panel', preparationObserved, report.backgroundPreparation);
