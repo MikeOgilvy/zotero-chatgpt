@@ -299,7 +299,10 @@ export class ConversationPresenter {
     await this.loadLocal(); if (id !== null && !this.state.workspace?.profiles.some(profile => profile.id === id)) throw new ReaderError('NOT_FOUND', 'This research profile is unavailable.');
     this.changeDraft({ ...this.state.draft, profileId: id });
   }
-  setOverrides(overrides: Partial<Personalization>): void { this.changeDraft({ ...this.state.draft, overrides: validatePreferences(overrides) }); }
+  /**
+   * Per-chat answer overrides were removed from the sidebar. A draft saved before that removal still
+   * carries the field and keeps applying at send time, so the data model is intentionally unchanged.
+   */
   private async editWorkspace(edit: (settings: WorkspaceSettings) => WorkspaceSettings): Promise<void> {
     const workspace = await this.getWorkspace(); const settings = await workspace.settings(); await workspace.saveSettings(edit(settings));
     this.update({ workspace: await workspace.settings() });

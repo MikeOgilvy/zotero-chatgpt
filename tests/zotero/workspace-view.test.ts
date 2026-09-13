@@ -77,15 +77,10 @@ it('keeps only the per-chat profile choice here and points at the native Prefere
   expect(pane.querySelector('[data-zcr-global-hint]')?.textContent).toMatch(/Zotero's Preferences window/u);
 });
 
-it('edits only this chat through the overrides section and never a global preference', () => {
-  const setOverrides = vi.fn();
-  const { advanced, document } = setup({ setOverrides });
-  const language = advanced.querySelector<HTMLInputElement>('[name="override-language"]')!;
-  language.value = 'zh'; language.dispatchEvent(new document.defaultView!.Event('change'));
-  expect(setOverrides).toHaveBeenCalledWith({ language: 'zh' });
-  const mathematics = advanced.querySelector<HTMLSelectElement>('[name="override-mathematics"]')!;
-  mathematics.value = 'formal'; mathematics.dispatchEvent(new document.defaultView!.Event('change'));
-  expect(setOverrides).toHaveBeenLastCalledWith({ mathematics: 'formal' });
+it('no longer offers any per-chat override controls in the sidebar', () => {
+  const { advanced, pane } = setup();
+  for (const name of ['override-language', 'override-detail', 'override-mathematics']) expect(advanced.querySelector(`[name="${name}"]`)).toBeNull();
+  expect(pane.textContent).not.toMatch(/Chat overrides|Answer language for this chat|Clear chat overrides/u);
 });
 
 it('keeps an expanded workflow card open across unrelated updates', () => {

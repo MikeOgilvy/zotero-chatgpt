@@ -914,13 +914,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id),
         saveSkill: edit => presenter.saveSkill(edit), duplicateSkill: id => presenter.duplicateSkill(id),
         deleteSkill: id => presenter.deleteSkill(id), importSkill: () => presenter.importSkill(), exportSkill: id => presenter.exportSkill(id),
-        setOverrides: value => presenter.setOverrides(value),
         setReferenceRange: (id, range) => presenter.setReferenceRange(id, range),
       });
-      const nextDraftKey = `${state.draft.references.map(reference => `${reference.id}:${reference.range?.join('-') ?? ''}:${reference.capturedAt}`).join(',')}:${state.draft.skillId}:${state.draft.profileId}:${JSON.stringify(state.draft.overrides)}`;
+      const nextDraftKey = `${state.draft.references.map(reference => `${reference.id}:${reference.range?.join('-') ?? ''}:${reference.capturedAt}`).join(',')}:${state.draft.skillId}:${state.draft.profileId}`;
       if (lastWorkspace !== state.workspace || nextDraftKey !== workspaceDraftKey) {
         lastWorkspace = state.workspace; workspaceDraftKey = nextDraftKey;
-        workspaceView.update({ settings: state.workspace, draft: { references: state.draft.references, skillId: state.draft.skillId, profileId: state.draft.profileId, overrides: state.draft.overrides } });
+        workspaceView.update({ settings: state.workspace, draft: { references: state.draft.references, skillId: state.draft.skillId, profileId: state.draft.profileId } });
       }
       appearance.hidden = false;
       if (doc.activeElement !== scaleInput) { scaleInput.value = String(Math.round(state.workspace.textScale * 100)); scaleValue.textContent = `${scaleInput.value}%`; applyChatTextScale(root, state.workspace.textScale); }

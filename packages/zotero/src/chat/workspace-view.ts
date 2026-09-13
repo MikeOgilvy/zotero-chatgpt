@@ -1,9 +1,9 @@
-import type { Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowKind, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { ReaderReference, ReaderSkill, ReferenceInput, WorkflowKind, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { mountCommandMenu } from './command-menu.ts';
 
 export type ReferenceFilter = 'all' | 'article' | 'chat';
 export interface SkillEdit { id: string | null; name: string; description: string; version: string; workflow: WorkflowKind; markdown: string; enabled: boolean; revision?: string }
-export interface WorkspaceViewState { settings: WorkspaceSettings; draft: Pick<WorkspaceDraft, 'references' | 'skillId' | 'profileId'> & { overrides?: Partial<Personalization> } }
+export interface WorkspaceViewState { settings: WorkspaceSettings; draft: Pick<WorkspaceDraft, 'references' | 'skillId' | 'profileId'> }
 export interface WorkspaceViewActions {
   searchReferences: (query: string, kind: ReferenceFilter, signal: AbortSignal) => Promise<ReaderReference[]>;
   previewReference: (reference: ReaderReference, signal: AbortSignal) => Promise<ReferenceInput>;
@@ -16,7 +16,6 @@ export interface WorkspaceViewActions {
   deleteSkill: (id: string) => Promise<void>;
   importSkill: () => Promise<ReaderSkill | null>;
   exportSkill: (id: string) => Promise<void>;
-  setOverrides?: (value: Partial<Personalization>) => void;
   setReferenceRange?: (id: string, range: [number, number] | null) => Promise<void>;
 }
 export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement; settings: HTMLElement }
@@ -202,23 +201,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     if (control.tagName === 'SELECT') for (const [value, title] of choices ?? []) { const option = create('option', title); option.value = value; control.append(option); }
     label.append(control); parent.append(label); return control;
   };
-  const overrideControls = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
-  if (actions.setOverrides) {
-    const overrides = create('details'); overrides.append(create('summary', 'Chat overrides'));
-    overrideControls.set('language', labeled(overrides, 'override-language', 'Answer language for this chat', 'input'));
-    overrideControls.set('detail', labeled(overrides, 'override-detail', 'Answer detail for this chat', 'select', [['', 'Inherit'], ['brief', 'Brief'], ['standard', 'Standard'], ['detailed', 'Detailed']]));
-    overrideControls.set('mathematics', labeled(overrides, 'override-mathematics', 'Mathematics for this chat', 'select', [['', 'Inherit'], ['auto', 'Automatic'], ['intuition-first', 'Intuition first'], ['formal', 'Formal derivation']]));
-    for (const [field, control] of overrideControls) control.addEventListener('change', () => {
-      const next: Partial<Personalization> = { ...state?.draft.overrides };
-      const value = control.value.trim();
-      if (!value) delete next[field];
-      else if (field === 'language') next.language = value;
-      else if (field === 'detail' && (value === 'brief' || value === 'standard' || value === 'detailed')) next.detail = value;
-      else if (field === 'mathematics' && (value === 'auto' || value === 'intuition-first' || value === 'formal')) next.mathematics = value;
-      actions.setOverrides!(next);
-    });
-    overrides.append(button('Clear chat overrides', () => actions.setOverrides!({}))); advanced.append(overrides);
-  }
 
   const skillsDetails = create('details'); skillsDetails.append(create('summary', 'Installed workflows'));
   const skillActions = create('div', '', 'zcr-workspace-actions'); const skillList = create('div'); const editor = create('div');
@@ -306,7 +288,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
       profile.replaceChildren(none, ...next.settings.profiles.map(item => { const option = create('option', item.name); option.value = item.id; return option; }));
     }
     profile.value = next.draft.profileId ?? '';
-    for (const [field, control] of overrideControls) if (doc.activeElement !== control) control.value = next.draft.overrides?.[field] ?? '';
     const nextSkills = JSON.stringify(next.settings.skills);
     if (nextSkills !== skillsKey) { skillsKey = nextSkills; renderSkills(); if (menu.isOpen() && mode === 'skills') search(); }
   }, dispose: () => {

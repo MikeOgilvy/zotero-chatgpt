@@ -182,11 +182,13 @@ it('refuses chat deletion while native work remains without cancelling or undoin
   expect(t.port.cancel).not.toHaveBeenCalled(); expect(t.port.undo).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
-it('persists editable research profiles and overrides but refuses a stale workflow editor', async () => {
+it('persists editable research profiles but refuses a stale workflow editor', async () => {
   const f = fixture(); await f.presenter.activate();
   const profile = await f.presenter.saveProfile({ id: null, name: 'My project', preferences: { detail: 'detailed' } }); await f.presenter.selectProfile(profile.id);
-  f.presenter.setOverrides({ mathematics: 'formal' }); f.presenter.setQuestion('Explain'); await f.presenter.send();
-  expect(f.sent[0]?.workflow?.preferences).toMatchObject({ detail: 'detailed', mathematics: 'formal' });
+  f.presenter.setQuestion('Explain'); await f.presenter.send();
+  // Per-chat overrides were removed from the sidebar; only the selected profile's preferences apply.
+  expect(f.sent[0]?.workflow?.preferences).toMatchObject({ detail: 'detailed' });
+  expect(f.presenter.snapshot().draft.overrides).toEqual({});
   f.workspaceSettings().skills[0]!.revision = 'newer-file-revision';
   await expect(f.presenter.saveSkill({ ...userSkill, id: userSkill.id, revision: 'revision-one' })).rejects.toThrow(/changed/iu);
   expect(f.workspace.saveSkill).not.toHaveBeenCalled(); await f.presenter.deleteProfile(profile.id); expect(f.presenter.snapshot().draft.profileId).toBeNull(); f.presenter.dispose();
