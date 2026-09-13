@@ -79,6 +79,70 @@ it('keeps chat ownership across tab switches and only closes for a native pane a
   pane.reconcile();
   expect(pane.controller.active).toBe(false);
 });
+it('treats a repeated or post-disposal close as a no-op', async () => {
+  const context = { collapsed: false, context: { mode: 'item' as 'item' | 'notes' } };
+  const win = { ZoteroContextPane: context, Zotero_Tabs: { selectedID: 'pdf-a' }, requestAnimationFrame: () => 0 } as unknown as ZoteroWindow;
+  const reader: HostReader = {
+    itemID: 1, tabID: 'pdf-a', type: 'pdf', _window: win,
+    zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
+  };
+  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const capture = vi.spyOn(pane, 'capturePosition');
+  const unmount = vi.spyOn(pane, 'unmountChat');
+  const restore = vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
+  vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: false, mode: 'item', scrollTop: 0, width: 280 });
+  vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
+  await pane.controller.toggle();
+  expect(pane.controller.active).toBe(true);
+  capture.mockClear(); unmount.mockClear(); restore.mockClear();
+  // The first close performs the real teardown once.
+  pane.controller.close();
+  expect(capture).toHaveBeenCalledTimes(1);
+  expect(unmount).toHaveBeenCalledTimes(1);
+  expect(restore).toHaveBeenCalledTimes(1);
+  expect(pane.controller.active).toBe(false);
+  capture.mockClear(); unmount.mockClear(); restore.mockClear();
+  // A second close on the already-collapsed dock must not capture, unmount or restore anything again.
+  pane.controller.close();
+  expect(pane.controller.active).toBe(false);
+  expect(capture).not.toHaveBeenCalled();
+  expect(unmount).not.toHaveBeenCalled();
+  expect(restore).not.toHaveBeenCalled();
+  // Close during teardown: `dispose()` closes (here a no-op, already collapsed) and a further close
+  // after disposal stays a no-op as well rather than touching the host.
+  pane.controller.dispose();
+  pane.controller.close();
+  expect(pane.controller.active).toBe(false);
+  expect(capture).not.toHaveBeenCalled();
+  expect(unmount).not.toHaveBeenCalled();
+  expect(restore).not.toHaveBeenCalled();
+});
+it('closes exactly once when the pane is disposed while the dock is still open', async () => {
+  const context = { collapsed: false, context: { mode: 'item' as 'item' | 'notes' } };
+  const win = { ZoteroContextPane: context, Zotero_Tabs: { selectedID: 'pdf-a' }, requestAnimationFrame: () => 0 } as unknown as ZoteroWindow;
+  const reader: HostReader = {
+    itemID: 1, tabID: 'pdf-a', type: 'pdf', _window: win,
+    zoomPageWidth() {}, zoomPageHeight() {}, zoomAuto() {}, navigate() {},
+  };
+  const pane = new NativeReaderPane({ Prefs: { get: () => 'standard' } } as unknown as ZoteroHost, reader, 'codex', new Set(), () => undefined);
+  const capture = vi.spyOn(pane, 'capturePosition');
+  const unmount = vi.spyOn(pane, 'unmountChat');
+  vi.spyOn(pane, 'restoreDock').mockImplementation(() => {});
+  vi.spyOn(pane, 'captureDock').mockReturnValue({ collapsed: false, mode: 'item', scrollTop: 0, width: 280 });
+  vi.spyOn(pane, 'mountChat').mockResolvedValue(true);
+  await pane.controller.toggle();
+  expect(pane.controller.active).toBe(true);
+  capture.mockClear(); unmount.mockClear();
+  // Teardown while open closes the dock through the same single path.
+  pane.controller.dispose();
+  expect(pane.controller.active).toBe(false);
+  expect(capture).toHaveBeenCalledTimes(1);
+  expect(unmount).toHaveBeenCalledTimes(1);
+  // A close arriving after that disposal does not repeat the teardown.
+  pane.controller.close();
+  expect(capture).toHaveBeenCalledTimes(1);
+  expect(unmount).toHaveBeenCalledTimes(1);
+});
 it('restores fixed scale across rapid reopen when Zotero ignores destination zoom', async () => {
   const frames: FrameRequestCallback[] = [];
   const location = { pageNumber: 3, left: 12, top: 190, scale: 125 as string | number };
