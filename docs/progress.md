@@ -1,6 +1,8 @@
 # 当前进度与验收
 
-2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当前 HEAD 通过 `typecheck`/`lint`/`test:unit`（**631 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。
+2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当前 HEAD 通过 `typecheck`/`lint`/`test:unit`（**632 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。
+
+2026-09-13 补充：在最终 0.4.0a1 开发包上重跑了专用宿主验证（`--context`、`--context --native`）与 s6 隔离树的升级/回退，并为“新 schema 回退安全拒绝”补了宿主检查与单元回归。证据目录 `.zcr-dev/verification/scope-2026-09-12/`（忽略），过程与失败报告见下节。
 
 本轮交付（**代码 + 单元测试证据，非真实模型/宿主证据**）：**B 的来源身份与预算/长文/会话恢复、C 的工作区/引用/skill、UI 的四区视图、D 的原生标注任务账本、E 的获取整理，以及多模态/能力/图像输出**。真实隔离登录与真实模型回答、最终 0.4 XPI 的宿主 UI、真实图像生成和公开发行门槛仍未验证。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
 
@@ -19,18 +21,40 @@
 | 检查 | 本轮开始 | 当前结果与边界 |
 | --- | --- | --- |
 | `npm run typecheck` / `npm run lint` | PASS | PASS |
-| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **631 PASS / 57 files**；新增契约/上下文/任务/工作区/原生/图像/来源链接回归；仅为单元证据 |
-| `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，`dist/zotero-codex-reader-0.4.0a1-dev.xpi`（含固定 runtime 与项目 MIT LICENSE） |
+| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **632 PASS / 57 files**；新增契约/上下文/任务/工作区/原生/图像/来源链接回归，以及 schema-3 回退 fixture 解析回归；仅为单元证据 |
+| `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，`dist/zotero-codex-reader-0.4.0a1-dev.xpi`（含固定 runtime 与项目 MIT LICENSE）；本轮重建 digest 仍为 `d33ab244…`（与提交前一致，字节可复现） |
 | `npm run verify:artifacts` | 76 files PASS | **77 files PASS**，hash/白名单/许可/无私有记录与 Node 导入；digest 读 `dist/SHA256SUMS` |
 | 临时 `git worktree` + `npm ci` 的 clean HEAD 重建 | 未执行 | **PASS**：typecheck PASS；`test:unit` 631（无 `dist/` 时 629+2 skip）；`package:dev` → 0.4.0a1 XPI；`verify:artifacts` 77 files，digest 与主树一致；复用本地固定 runtime 缓存，未重新下载 |
 | `npm run verify:install -- build-info … --json` | 未作为基线执行 | PASS，实际本地 XPI 身份；不等于宿主升级/回退验收 |
 | `npm run release:dry-run` | 旧版曾执行 | PASS，githubRelease=null，没有公开上传；脚本说明改指 development |
-| `node scripts/prepare-host-test.mjs --context` + 专用 Zotero | 未执行 | **16/16 PASS**，下述宿主范围；signedOut，0 请求记录 |
+| `node scripts/prepare-host-test.mjs --context` + 专用 Zotero | 未执行 | 0.3.0a1 曾 **16/16 PASS**；本轮在 **0.4.0a1 复现 16/16 PASS**，signedOut，0 请求记录 |
+| `node scripts/prepare-host-test.mjs --context --native` + 专用 Zotero | 未执行 | 旧 0.3.0a1 的 12 项原生驱动；本轮在 **0.4.0a1 复现 12/12 PASS**（4 类 NOT RUN），driverIssuedModelRequests=0 |
+| `node scripts/prepare-host-test.mjs --s6 --upgrade-xpi 0.4 --rollback-xpi 0.3` + 专用 Zotero | 旧 a1→a2→a1，19/19 | **22/22 PASS**（2 NOT RUN）：0.3→0.4→0.3 版本切换、记录保留、新 schema 回退安全拒绝 |
 | 文档链接 / `git diff --check` / 构建依赖图 | 旧入口相互重复/冲突 | 12 个维护/保护文档链接目标有效；diff 无空白错误；生产图覆盖 37 个运行 TS 模块，另有必要的 host-types 纯类型模块 |
+| `.github/workflows/ci.yml` / `release.yml` | Node 只写 `24`（浮动 major），只跑 typecheck/lint/test:unit，从不打包 | Node 改为 `node-version-file: .nvmrc`（24.11.0，与 engines `>=24 <25` 一致）；`check` 跑 `npm ci`/`typecheck`/`lint`/`test:unit`，`package` 跑 `runtime-prepare`/`package:dev`/`verify:artifacts`；无 upload/publish/tag 步骤，宿主与 `--live` 明确排除 |
 
 工具链 Node 24.11.0 / npm 11.6.1。当前开发包：`dist/zotero-codex-reader-0.4.0a1-dev.xpi`；本轮 `package:dev` + `verify:artifacts` 实测 **77 files**，SHA-256 以 `dist/SHA256SUMS` 为准（本轮实测 **`d33ab244f49e24da983daa2bfdbf542b8f6f28c5b40ad5b295ffd8c613311049`**）。项目 MIT `LICENSE` 已随包。实际固定二进制 `codex-cli 0.144.1`，其生成的实验 JSON schema 在 verification/protocol。model/list 没有初始上下文窗口，tokenUsage 通知的 modelContextWindow 可为 null；当前显示未知，未猜容量。
 
 宿主实际覆盖：完整 XPI 加载；标题/输入先可用；两页文本与罗马/数字标签；本地/未发送说明；页范围遗漏；返回原页和关闭保留页；signedOut 本地会话；同父/同名附件隔离；草稿恢复；30 次开关/设置；单一 dock/按钮；无模型请求记录。报告：[本轮宿主报告](../.zcr-dev/verification/scope-2026-09-11/host-current-pdf.json)。未读取/复制认证文件，未向真实库写条目。CUA 在关闭测试实例后自动重选日常窗口，随即停止该窗口操作；之后仅按已核对的专用 PID 管理测试进程。
+
+## 0.4.0a1 真实宿主证据（2026-09-13，scope-2026-09-12）
+
+对象为 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`，SHA-256 `d33ab244f49e24da983daa2bfdbf542b8f6f28c5b40ad5b295ffd8c613311049`；驱动来自工作树 `tests/host/*`；设备 Apple M5 / macOS 26.6.2 / Zotero 9.0.6 / 1512×949 DPR 2；只用 `.zcr-dev/` 专用 profile 与合成材料。三次运行均为独立进程启动，运行前用 `ps` 核对完整 `-profile`/`-datadir` 参数后才 `TERM` 自己启动的实例；日常 Zotero 实例未被本流程的信号操作。
+
+| 运行 | 结果 | 报告（忽略目录 `.zcr-dev/verification/scope-2026-09-12/`） |
+| --- | --- | --- |
+| `--context`（当前 PDF 本地路径） | **16 executed / 16 PASS / 0 FAIL**，5 类 NOT RUN（真实模型回答、官方登录、在途停止、长期记忆、图像理解） | `host-context-0.4.0a1-16of16.json` |
+| `--context --native`（原生 API 合成探针） | **12 executed / 12 PASS / 0 FAIL**，4 类 NOT RUN（真实模型候选、OA PDF 下载、官方登录、已安装 XPI 的最终 UI 接线） | `host-native-0.4.0a1-12of12.json` |
+| s6 隔离树升级/回退（0.3.0a1 → 0.4.0a1 → 0.3.0a1） | **22 executed / 22 PASS / 0 FAIL**，2 类 NOT RUN（live-model-send、同版本 XPI 替换） | `host-s6-0.4.0a1-PASS-22of22-with-downgrade-probe.json` |
+
+与旧声明对照：`docs/progress.md` 早前记录的 `16/16` context 与 `12` 原生项来自 **0.3.0a1** 包（scope-2026-09-11）。本次在同一专用树上用 **0.4.0a1** 重跑，两者都被原样复现，未出现差异；差异只在性能数值（本机负载）与报告内的 build 身份。
+
+原生驱动证据要点：`driverIssuedModelRequests=0`，`modelProposalSource=deterministic-synthetic-fixture`（不把合成候选算作模型输出）；整篇 PDF 文本与加载字节 SHA-256 一致；quote 坐标定位；批量复审 0 个原生标注、批准后一次性写入、撤销只删任务标注、撤销保留用户后续手改；截图产物 `origin=paper`（非生成图）；文章引用的后台 reader 生命周期；DOI `10.1038/nature14539` 的**未保存**元数据预览（网络 translator，1 个候选，`libraryItemIDsUnchanged=true`、`saved=false`、`pdfDownloaded=false`）。
+
+升级/回退证据（两条真实版本，而非同版本替换）：0.3.0a1 初始安装 → `AddonManager` 升级到 0.4.0a1 后握手 ready、仍 signedOut、不生成、记录保留 → 回退安装 0.3.0a1 后版本恢复、握手 ready、记录保留。旧构建读新 schema 的**安全拒绝**现由宿主检查 `schema3-record-refused-without-rewrite-after-downgrade` 覆盖：0.3 构建读到 schema 3 会话时给出 `Saved conversation data could not be read; it was left untouched.`，记录字节不变、`schemaVersion` 仍为 3。该 fixture 同时有单元回归（`tests/core/store.test.ts`），保证它是“合法的新 schema 记录被按版本拒绝”，不是损坏文件。
+
+诚实的失败与边界：s6 首次运行在 90s 内未达到 runtime handshake 而 FAIL（`host-s6-0.4.0a1-FAILED-01-runtime-handshake.json`），随后两次运行均通过（21/21、22/22），未复现，最可能是该复用树首次启动的 runtime/account 初始化开销；为不破坏既有 profile，未做清空式排查。另外，把新 schema 会话设为某论文的“当前会话”时，旧构建会在面板上进入 not-ready 并显示上述拒读提示（记录本身不变）；这是“明确拒绝”而非静默重置，但“回退后连接状态仍为 ready”并不成立。
+
 
 ## 性能实测与失败修复
 
@@ -41,6 +65,16 @@ Apple M5 / 16 GB / macOS 26.6.2 (25G83)，Zotero 9.0.6，1000×600 CSS px，DPR 
 | 缓存 sidebar 打开可交互 | n=30 | p95 **8.25ms**，max 8.27ms |
 | 本地设置有效状态反馈 | n=30 | p95 **1.28ms**，max 1.44ms |
 | 首次插件输入出现 / 本地文本准备 | 各 n=1，PDF 已加载 | 4.80ms / 177.93ms |
+
+0.4.0a1 同一驱动重跑（2026-09-13，报告内环境 1512×949 DPR 2，同一台 M5，两页合成 PDF，未调用模型）：
+
+| 项目 | 样本 | 0.4.0a1 实测 |
+| --- | --- | --- |
+| 缓存 sidebar 打开可交互 | n=30 | p95 **22.23ms**，max 26.25ms |
+| 本地设置有效状态反馈 | n=30 | p95 **2.39ms** |
+| 首次插件输入出现 / 本地文本准备 | 各 n=1 | 9.07ms / 83.99ms |
+
+两次都满足 250ms/100ms 门槛；0.4 数值更高来自本机负载与更多的本地持久化/工作区初始化，样本仍是 DOM 可交互测量，不能外推为硬件呈现延迟或长时压力结论。
 
 该样本满足对应 250ms/100ms 初始门槛；未测整个 Zotero 冷启动、真实论文/长书、模型等待/流式渲染、长时内存/多显示器/全部主题，不能外推。
 
@@ -71,7 +105,7 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | --- | --- | --- |
 | 标题/会话/全文：reader/document、chat、core/sessions | 上述本地/协议链路已验证；真实模型问答、选区全文推理/引文质量、host 文件替换和多窗口未测 | B |
 | 预算/长文/缓存 | 本地文本缓存最多 **3 份、每份 16 MiB UTF-8**，超限要求缩小页范围；来源 ID 由文献身份/版本/解析器/页范围/文本摘要确定性生成，LRU 驱逐不改变身份；加载字节与磁盘 SHA-256 比较可发现 size/mtime 不变的替换。已接 runtime 窗口优先、否则固定 catalog 的预算与聚焦/多轮计划；自动章节/问题检索、语义坐标、OCR/页面图片仍未接。以上为代码+单元证据，真实模型预算行为未测 | B |
-| 历史/恢复：presenter/store | 离线历史、草稿/滚动持久化、改名/分支/排队、schema 3 读写与旧 schema 1/2 安全拒绝已有代码与单元回归；新 schema 的宿主升级/回退未重跑，真实模型在途恢复未测 | B/C/F |
+| 历史/恢复：presenter/store | 离线历史、草稿/滚动持久化、改名/分支/排队、schema 3 读写与旧 schema 1/2 安全拒绝已有代码与单元回归；**0.3↔0.4 宿主升级/回退与 schema-3 回退安全拒绝本轮已在 s6 隔离树验证（22/22）**，真实模型在途恢复仍未测 | B/C/F |
 | 统一 @文章/@chat、/skill、personalization | WorkspaceStore、@article 元数据先行/选定后读取、@chat 有界快照、SKILL.md 解析与 revision 冲突、偏好/研究配置已有代码与单元；第三方 skill 仍不能授予权限。真实库接线与 UI 目视未验 | C |
 | 模型/多模态/上下文 | 固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴图片、生成图 16 MiB 校验与导出、diagram 线程能力已有代码与单元；真实档位/多图/真实图像生成、文件拖拽/截图排序、精确用量与完整已发送/已引用面板仍未测 | C |
 | 标注 / 获取整理 agent | 候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验已有代码与单元；真实库原生写入/撤销、网络预览与合法全文核对未在宿主验证 | D/E |
@@ -92,7 +126,7 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | S3 选区 | 旧包，23/23 executed，2 NOT RUN；Ask 草稿/来源/A-B恢复 | 真实回答/追问停止；原始记录见 Git 基线 |
 | S4 交互 | `c1b898ac4e35de49a65c96ce56e08db6949071b62618ff7c34a01672b942a0db`，40/40，5 NOT RUN，无模型发送 | 新 in-reader dock，主题/800px/底边/发送组合；原始记录见 Git 基线 |
 | S5 恢复 | 同 c1b898ac 包，17/17，1 NOT RUN；自有进程 TERM 与 fixture uncertain 隔离 | 在途 turn resume、掉电持久性 |
-| S6 virgin/升级 | 同 a1 包：15/15；a1→a2→a1：19/19（各2 NOT RUN），a2 `445f47243bb4108a0fc73c0e7c179702cc5c1068bbefb38b96d2a2a43c7b0309` | 公开下载/Gatekeeper、无 Node、真实模型、新 schema 回退 |
+| S6 virgin/升级 | 同 a1 包：15/15；a1→a2→a1：19/19（各2 NOT RUN），a2 `445f47243bb4108a0fc73c0e7c179702cc5c1068bbefb38b96d2a2a43c7b0309` | 公开下载/Gatekeeper、无 Node、真实模型；**新 schema 回退已由 2026-09-13 的 0.3→0.4→0.3 运行补上（22/22）** |
 | 工作树副本重建 | 旧工作树 npm ci 后复现 c1b898ac；release dry-run githubRelease=null | 不等于 clean git HEAD，不等于发布；项目已采用 MIT（根 `LICENSE`） |
 | 2026-09-10 UI | 最新工作树曾 306 tests /39 files，XPI 196f0dc… 装到专用 acceptance profile，无 driver | 当时 screenshot paste、新样式真实目视、图像模型发送未完成；基线今日发现跨日失败 |
 
@@ -107,7 +141,7 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 - [x] D（代码+单元）：原生 quote 定位适配＋持久化任务 ledger；模型产生候选，审批后写入，冲突检测与撤销；真实库标注仍待宿主验证。
 - [x] E（代码+单元）：DOI/链接/列表未保存元数据、查重、指定 collection、OA PDF 校验与恢复；原生适配与 ledger 共用；网络/真实库未验。
 - [x] 多模态/能力（代码+单元）：模型目录/usage/上下文预算来源；粘贴/截图多图；固定 runtime 图像生成能力与 16 MiB 生成图校验；真实模型图像生成未验。
-- [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、版本升级回退；Node-free/公开下载仅在对应条件成立时验收。需要隔离官方登录、真实模型、真实宿主、签名 XPI 与公开发布授权。
-- [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
+- [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、无 Node/公开下载仍在对应条件成立时验收。**版本升级/回退与 schema-3 回退安全拒绝本轮已在 s6 隔离树验证（22/22）**；仍需要隔离官方登录、真实模型、真实宿主原生 UI、签名 XPI 与公开发布授权。
+- [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；CI/release 工作流已按真实脚本与 `.nvmrc` 加固且保持无 upload/publish；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。

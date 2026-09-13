@@ -38,6 +38,8 @@ npm run verify:install -- build-info \
 
 非平凡行为先观察有意义的失败回归再实现，只扩大受影响检查。普通文档/配置直接核对，不写源码字符串测试。保持一文件一负责人，保护已有未提交改动；本地提交遵循当前会话授权，不自动推送。
 
+GitHub Actions 只覆盖上述非宿主命令：`ci.yml` 的 `check` 作业跑 `npm ci`/`typecheck`/`lint`/`test:unit`，`package` 作业跑 `runtime-prepare`/`package:dev`/`verify:artifacts`；`release.yml` 是手动触发的同一组检查加 `release.mjs --dry-run`。Node 版本一律取 `.nvmrc`。宿主 GUI、原生标注、升级/回退和 `--live` 模型检查不在 CI 内，因为它们需要 macOS Zotero 界面、专用 profile 和已授权账户；工作流没有任何 upload/publish/tag 步骤。
+
 ## 专用 context 树
 
 **当前产品/原生功能验收只用 `.zcr-dev/context/{profile,data}` 和合成材料。** 安装生命周期测试另用下述 s6 隔离树；所有目标都必须是经核对的 `.zcr-dev/` 专用子树。正常 Zotero 可以继续运行。已有 `.zcr-dev/profile`、旧测试账号和其他 Codex 会话都不能被清空、复制认证或当临时垃圾处理。
@@ -89,7 +91,9 @@ npm run test:unit -- tests/runtime/generated-image.test.ts
 node scripts/prepare-host-test.mjs --s6
 ```
 
-需要两版本升级/回滚测试时，在已有明确授权下向 s6 同时传入 `--upgrade-xpi <本地新包>` 和 `--rollback-xpi <本地旧包>`；目标为 `.zcr-dev/s6-upgrade/`。这类测试的历史成功不证明当前 schema 3 或 0.4 包已通过升级。
+需要两版本升级/回滚测试时，在已有明确授权下向 s6 同时传入 `--upgrade-xpi <本地新包>` 和 `--rollback-xpi <本地旧包>`；目标为 `.zcr-dev/s6-upgrade/`。驱动会先装旧包、用 `AddonManager` 升到新包、再回退，并检查版本切换、握手、仍为 signedOut、不生成与记录保留；随后在一个新建的合成附件上写入 schema 3 会话并重新打开，要求旧包**明确拒绝且不重写该记录**（`schema3-record-refused-without-rewrite-after-downgrade`）。该检查只证明“记录了的新 schema 会话被按版本拒绝且原文件保留”，不证明回退后连接状态仍为 ready，也不替代公开签名发行的升级验收。
+
+历史注意：`834b7fc` 自身无法独立通过 `typecheck`（`tests/zotero/source-links.test.ts` 引用了当时 `DocumentRevision` 尚未提供的 `sha256` 字段）；其后的提交都可独立构建。历史不重写，`git bisect` 请以 `834b7fc^` 为已知良好基点或对该提交 `skip`。
 
 存储/恢复测试必须覆盖旧 schema 1/2、当前 schema 3、缺失/损坏来源、哈希不匹配、请求与上游 item 关联、取消竞态、批次释放及 uncertain 不重发。兼容性机制见[架构文档](module-design.md)。备份与诊断只处理明确的非认证记录；不包含 account/、原始 stdio 或未经白名单过滤的日志。草稿、聊天、原生标注、缓存和退出登录有独立寿命，不能用删除其中一种代替停止另一种任务。
 
@@ -97,6 +101,6 @@ node scripts/prepare-host-test.mjs --s6
 
 0.4.0a1 是开发预览，`update_url` 仍为 zcr-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
 
-发行前还需以实际最终包完成干净 checkout 重建、资产核验、安装/官方登录/真实输出、无 Node 环境、下载隔离属性、升级保留记录、回退安全拒绝、长期性能和多窗口等验收。**目前不能从工作树 native 驱动通过推断最终 0.4 XPI、真实图像生成或升级已通过。** 所有结果与未完成门槛只在 progress 更新。
+发行前还需以实际最终包完成干净 checkout 重建、无 Node 环境、下载隔离属性、长期性能和多窗口等验收；隔离官方登录、真实输出与图像生成仍未完成。0.3→0.4→0.3 的升级保留记录与回退安全拒绝已在 s6 隔离树验证（见 progress），但这不等于签名公开发行的升级验收。**目前不能从工作树 native 驱动通过推断最终 0.4 XPI 的原生 UI 接线、真实图像生成或公开发行已通过。** 所有结果与未完成门槛只在 progress 更新。
 
 推送、公开 Release、发布站点、启用付费新服务和操作真实文献库不在本地开发命令的隐含授权中。`release:dry-run` 只是可审查的本地计划；开发分支使用 `codex/` 前缀，实际提交/发行继续遵循当前会话授权。
