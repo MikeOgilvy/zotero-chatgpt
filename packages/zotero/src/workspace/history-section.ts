@@ -27,6 +27,13 @@ export interface HistorySection {
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const SEARCH_DEBOUNCE_MS = 200;
+/**
+ * The pane never builds an unbounded list of rows or paper options: a store may hold thousands of
+ * chats, and rendering them all would block the Preferences window. The counts always state the
+ * true totals, and the truncation is said out loud instead of being silently hidden.
+ */
+const ROW_LIMIT = 200;
+const PAPER_LIMIT = 200;
 
 interface Copy {
   legend: string;
@@ -51,6 +58,12 @@ interface Copy {
   confirmDeleteMany(count: number): string;
   listFailed: string;
   actionFailed: string;
+  /** Shown when only the newest slice of a long list is rendered; names both numbers. */
+  showing(shown: number, total: number): string;
+  /** Appended to the paper filter when the store holds more papers than the pane will render. */
+  morePapers(count: number): string;
+  /** Why a chat with a running answer cannot be deleted, shown instead of arming a confirmation. */
+  refusedUnfinished: string;
   stored(total: number, archived: number): string;
   matching(total: number, archived: number): string;
   messages(count: number): string;
@@ -82,6 +95,9 @@ const COPY: Record<'en' | 'zh', Copy> = {
     confirmDeleteMany: count => `Delete ${count} chats? This permanently removes those chats, their messages and their unsent drafts from this computer. Native task outputs and exported files are not undone. This cannot be undone.`,
     listFailed: 'The saved chat list could not be read. Nothing was changed.',
     actionFailed: 'The change could not be confirmed. Reopen this section to see what is actually stored.',
+    showing: (shown, total) => `Showing the ${shown} most recent of ${total} matching chats. Narrow the search or the paper filter to see the rest.`,
+    morePapers: count => `…and ${count} more papers — search to narrow`,
+    refusedUnfinished: 'A chat with an unfinished answer or native task was skipped: finish or cancel it before deleting.',
     stored: (total, archived) => `${total} stored ${total === 1 ? 'chat' : 'chats'} · ${archived} archived`,
     matching: (total, archived) => `${total} matching ${total === 1 ? 'chat' : 'chats'} · ${archived} archived`,
     messages: count => `${count} ${count === 1 ? 'message' : 'messages'}`,
@@ -115,6 +131,9 @@ const COPY: Record<'en' | 'zh', Copy> = {
     confirmDeleteMany: count => `删除 ${count} 个对话？将从此电脑永久移除这些对话、其中的消息及其未发送的草稿。原生任务的输出和已导出的文件不会被撤销。此操作无法撤销。`,
     listFailed: '无法读取已保存的对话列表，未做任何更改。',
     actionFailed: '无法确认更改结果。请重新打开此部分以查看实际保存的内容。',
+    showing: (shown, total) => `仅显示最近匹配的 ${total} 个对话中的 ${shown} 个。请缩小搜索范围或更改文献筛选以查看其余内容。`,
+    morePapers: count => `……还有 ${count} 篇文献，请用搜索缩小范围`,
+    refusedUnfinished: '已跳过包含未完成回答或原生任务的对话：请先完成或取消，再删除。',
     stored: (total, archived) => `已保存 ${total} 个对话 · ${archived} 个已归档`,
     matching: (total, archived) => `匹配 ${total} 个对话 · ${archived} 个已归档`,
     messages: count => `${count} 条消息`,
@@ -191,6 +210,10 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
 
   const list = el(doc, 'div');
   list.dataset.zcrHistory = 'list';
+  const truncated = el(doc, 'p');
+  truncated.className = 'zcr-preferences-muted';
+  truncated.dataset.zcrHistory = 'truncated';
+  truncated.hidden = true;
   const empty = el(doc, 'p');
   empty.className = 'zcr-preferences-muted';
   empty.dataset.zcrHistory = 'empty';
@@ -231,8 +254,17 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   confirmButtons.append(confirmDelete, cancel);
   confirm.append(confirmText, confirmButtons);
 
-  box.append(legend, intro, counts, filters, list, empty, failure, status, actions, confirm);
+  box.append(legend, intro, counts, filters, list, truncated, empty, failure, status, actions, confirm);
 
+  /** Drop listeners whose element is no longer part of the section, so refreshes cannot leak them. */
+  function pruneListeners(): void {
+    for (let index = listeners.length - 1; index >= 0; index -= 1) {
+      const entry = listeners[index]!;
+      if (box.contains(entry.element)) continue;
+      entry.element.removeEventListener(entry.type, entry.handler);
+      listeners.splice(index, 1);
+    }
+  }
   function lock(node: HTMLButtonElement | HTMLInputElement | HTMLSelectElement, locked: boolean): void {
     if (locked) node.dataset.zcrHistoryLocked = 'true'; else delete node.dataset.zcrHistoryLocked;
     node.disabled = locked || busy;
@@ -262,7 +294,9 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
 
   function renderRows(): void {
     const entries = visibleEntries();
-    const rows = entries.map(entry => {
+    // The listing is already sorted newest first, so the slice is the newest chats, not an arbitrary set.
+    const shown = entries.slice(0, ROW_LIMIT);
+    const rows = shown.map(entry => {
       const row = el(doc, 'div');
       row.className = 'zcr-preferences-history-row';
       row.dataset.zcrHistoryId = entry.id;
@@ -307,6 +341,10 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       return row;
     });
     list.replaceChildren(...rows);
+    // Rows rebuilt above are detached; their listeners would otherwise pile up on every refresh.
+    pruneListeners();
+    truncated.textContent = entries.length > shown.length ? copy.showing(shown.length, entries.length) : '';
+    truncated.hidden = entries.length <= shown.length;
     empty.textContent = copy.empty;
     empty.hidden = entries.length > 0 || !current;
     applyBusy();
@@ -330,7 +368,16 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     const papers = historyPapers(current?.entries ?? []);
     if (paper !== null && !papers.some(option => option.id === paper)) paper = null;
     const any = el(doc, 'option', copy.allPapers); any.value = '';
-    const options = papers.map(option => { const node = el(doc, 'option', option.label); node.value = option.id; node.dataset.zcrUi = 'false'; return node; });
+    // A long library would otherwise build a select with thousands of options, all at once.
+    const shown = papers.slice(0, PAPER_LIMIT);
+    const chosen = paper === null ? null : papers.find(option => option.id === paper) ?? null;
+    if (chosen && !shown.includes(chosen)) shown.push(chosen);
+    const options = shown.map(option => { const node = el(doc, 'option', option.label); node.value = option.id; node.dataset.zcrUi = 'false'; return node; });
+    if (papers.length > shown.length) {
+      const more = el(doc, 'option', copy.morePapers(papers.length - shown.length));
+      more.disabled = true; more.dataset.zcrUi = 'false';
+      options.push(more);
+    }
     paperSelect.replaceChildren(any, ...options);
     paperSelect.value = paper ?? '';
   }
@@ -371,13 +418,18 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
 
   function requestDelete(ids: string[]): void {
     if (busy || disposed || !ids.length) return;
-    pending = [...ids];
+    // Never arm a confirmation for a chat the store will refuse: say which chat was skipped instead.
+    const blocked = ids.filter(id => entryById(id)?.unfinishedWork);
+    const eligible = blocked.length ? ids.filter(id => !blocked.includes(id)) : ids;
+    if (blocked.length) showFailure(copy.refusedUnfinished);
+    if (!eligible.length) return;
+    pending = [...eligible];
     renderConfirm();
   }
 
   async function apply(action: HistoryAction, ids: string[]): Promise<void> {
     if (busy || disposed || !ids.length) return;
-    if (action === 'delete' && ids.some(id => entryById(id)?.unfinishedWork)) return;
+    if (action === 'delete' && ids.some(id => entryById(id)?.unfinishedWork)) { showFailure(copy.refusedUnfinished); return; }
     busy = true; clearMessages(); applyBusy();
     let outcome: { text: string; failure: boolean } | null = null;
     try {

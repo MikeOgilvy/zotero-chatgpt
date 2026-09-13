@@ -104,6 +104,8 @@ it('lists active chats by default, archives away from that scope and restores ba
   for (const control of find('[data-zcr-pref="history"]').querySelectorAll('input, select')) {
     expect(control.closest('label'), control.tagName).not.toBeNull();
   }
+  // A short list is fully rendered, so nothing claims to be hidden.
+  expect(find<HTMLElement>('[data-zcr-history="truncated"]').hidden).toBe(true);
 });
 
 it('locks the delete control for a chat with unfinished work while archiving stays available', async () => {
@@ -230,4 +232,59 @@ it('renders the history copy in the stored UI language', async () => {
   expect(find('[data-zcr-history="search"]').closest('label')?.firstChild?.textContent).toBe('搜索对话…');
   expect(find<HTMLButtonElement>('[data-zcr-history="archive-selected"]').textContent).toBe('归档所选项');
   expect(find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').textContent).toBe('删除所选项');
+});
+
+it('renders only the newest slice of a long listing and says how much it is not showing', async () => {
+  const many = Array.from({ length: 205 }, (_, index) => entry(index + 1, `Chat ${index + 1}`));
+  const { host } = fixture(many);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toHaveLength(200));
+  // The newest chats are the ones kept, and the counts still state the true total.
+  expect(rows()[0]).toBe(many[0]!.id);
+  expect(rows()[199]).toBe(many[199]!.id);
+  expect(find('[data-zcr-history="counts"]').textContent).toContain('205');
+  expect(find('[data-zcr-pref="history"]').querySelectorAll('[data-zcr-history-delete]')).toHaveLength(200);
+  const note = find<HTMLElement>('[data-zcr-history="truncated"]');
+  expect(note.hidden).toBe(false);
+  expect(note.textContent).toContain('200');
+  expect(note.textContent).toContain('205');
+});
+
+it('does not build a paper filter longer than it will render', async () => {
+  const papers = Array.from({ length: 205 }, (_, index) => entry(index + 1, `Chat ${index + 1}`, {
+    paper: { ...copy(paperA), attachmentKey: `K${String(index + 1).padStart(7, '0')}` },
+  }));
+  const { host } = fixture(papers);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toHaveLength(200));
+
+  const paper = find<HTMLSelectElement>('[data-zcr-history="paper"]');
+  expect(paper.options).toHaveLength(202);
+  const more = paper.options[201]!;
+  expect(more.disabled).toBe(true);
+  expect(more.textContent).toContain('5');
+});
+
+it('skips an unfinished chat in bulk removal and says so instead of arming a delete for it', async () => {
+  const idle = entry(1, 'Idle');
+  const running = { ...entry(2, 'Running'), unfinishedWork: true as const };
+  const { host, deleteHistory } = fixture([idle, running]);
+  const { ready, find, change, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([idle.id, running.id]));
+
+  const select = (target: string) => { const box = find<HTMLInputElement>(`[data-zcr-history-select="${target}"]`); box.checked = true; change(box); };
+  select(idle.id); select(running.id);
+  find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').click();
+
+  // The confirmation names only the chat that can be deleted, and the skipped chat is explained.
+  expect(find('[data-zcr-history="confirm-text"]').textContent).toContain('Idle');
+  expect(find('[data-zcr-history="confirm-text"]').textContent).not.toContain('Running');
+  expect(find('[data-zcr-history="error"]').textContent).toMatch(/unfinished/iu);
+
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(deleteHistory).toHaveBeenCalledWith([idle.id]));
+  await vi.waitFor(() => expect(rows()).toEqual([running.id]));
 });
