@@ -592,6 +592,7 @@ it('keeps the ring coverage disclosure after a UI-language switch', async () => 
   await presenter.send();
   await vi.waitFor(() => expect(presenter.snapshot().contextReport).not.toBeNull());
   const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
+  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
   expect(details.textContent).toContain('2 of 2 pages');
   await presenter.saveAppearance({ uiLanguage: 'zh' });
   await vi.waitFor(() => expect(presenter.snapshot().workspace?.uiLanguage).toBe('zh'));
@@ -604,6 +605,9 @@ it('keeps the ring coverage disclosure after a UI-language switch', async () => 
   const staticNodes = [...details.querySelectorAll<HTMLElement>('[data-zcr-ui="true"]')];
   expect(staticNodes.length).toBeGreaterThan(0);
   expect(staticNodes.map(node => node.textContent)).toContain('Context supplied to the last request');
+  // The ring's own accessible name does translate today, which proves the live language switch
+  // reached the affordance: only the disclosure's new copy still awaits its `ui-locale.ts` keys.
+  expect(ring.getAttribute('aria-label')).toMatch(/当前上下文未知/u);
 });
 
 it('closes the dock once and stays a safe no-op for a repeat close or with no chat open', async () => {
