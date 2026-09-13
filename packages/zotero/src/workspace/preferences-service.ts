@@ -1,5 +1,6 @@
 import { ReaderError } from '../../../contracts/src/index.ts';
 import type { ReaderWorkspace, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import { HistoryManager } from '../../../core/src/workspace/history.ts';
 import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/src/workspace/export.ts';
 
 /**
@@ -26,6 +27,20 @@ export interface PreferencesService {
   newProfileId(): string;
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
+  /** History management is exposed as JSON text like everything else crossing the pane boundary. */
+  readHistory(query: string): Promise<string>;
+  setHistoryArchived(idsJson: string, archived: boolean): Promise<string>;
+  deleteHistory(idsJson: string): Promise<string>;
+}
+
+/** Ids only: the pane never sends back titles, previews or paper scopes it could have forged. */
+function parseIds(json: string): string[] {
+  let value: unknown;
+  try { value = JSON.parse(json) as unknown; } catch { throw new ReaderError('INVALID_REQUEST', 'The selected chats payload is invalid JSON.'); }
+  if (!Array.isArray(value) || !value.length || value.length > 500) throw new ReaderError('INVALID_REQUEST', 'Select between 1 and 500 stored chats.');
+  if (!value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 36)) throw new ReaderError('INVALID_REQUEST', 'The selected chats payload is invalid.');
+  if (new Set(value).size !== value.length) throw new ReaderError('INVALID_REQUEST', 'The selected chats payload contains duplicates.');
+  return value as string[];
 }
 
 function parseSettings(json: string): WorkspaceSettings {
@@ -70,6 +85,17 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
     writeAutomaticPdfText(enabled: boolean): void {
       if (typeof enabled !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'Automatic PDF text is either on or off.');
       host.writeAutomaticPdfText(enabled);
+    },
+    async readHistory(query: string): Promise<string> {
+      if (typeof query !== 'string' || query.length > 1024) throw new ReaderError('INVALID_REQUEST', 'The history search is invalid.');
+      return JSON.stringify(await new HistoryManager(await host.workspace()).listing(query));
+    },
+    async setHistoryArchived(idsJson: string, archived: boolean): Promise<string> {
+      if (typeof archived !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'A stored chat is either archived or not.');
+      return JSON.stringify(await new HistoryManager(await host.workspace()).setArchivedByIds(parseIds(idsJson), archived));
+    },
+    async deleteHistory(idsJson: string): Promise<string> {
+      return JSON.stringify(await new HistoryManager(await host.workspace()).removeByIds(parseIds(idsJson)));
     },
   };
 }

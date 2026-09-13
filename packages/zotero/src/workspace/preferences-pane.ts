@@ -2,6 +2,7 @@ import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings } fr
 import { defaultAllowedModels, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
 import { mountUILocale } from '../chat/ui-locale.ts';
+import { createHistorySection, type HistorySection } from './history-section.ts';
 
 /**
  * Native Zotero Preferences pane for the global workspace settings.
@@ -24,6 +25,13 @@ export interface PreferencesPaneHost {
   /** The shared automatic-PDF-text opt-out (`extensions.zcr.automaticPdfText`), never a store copy. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
+  /**
+   * History management. All three are optional and versioned by presence: a host that has not been
+   * upgraded renders no History section rather than a broken one.
+   */
+  readHistory?(query: string): Promise<unknown>;
+  setHistoryArchived?(ids: string[], archived: boolean): Promise<unknown>;
+  deleteHistory?(ids: string[]): Promise<unknown>;
 }
 export interface PreferencesPane {
   mount(root: Element): Promise<void>;
@@ -212,10 +220,21 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
 
+    // History management sits last so listing it never delays the settings form above it.
+    if (host.readHistory && host.setHistoryArchived && host.deleteHistory) {
+      historySection = createHistorySection(doc, {
+        readHistory: query => host.readHistory!(query),
+        setHistoryArchived: (ids, archived) => host.setHistoryArchived!(ids, archived),
+        deleteHistory: ids => host.deleteHistory!(ids),
+      }, current?.uiLanguage ?? 'en');
+      container.append(historySection.element);
+    }
+
     return { form: container, uiLanguage, textScale, automaticPdfText, preferences, savePreferences, exportPreferences, models, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
   }
 
   let controls: Controls | null = null;
+  let historySection: HistorySection | null = null;
 
   function formPreferences(settings: WorkspaceSettings): Personalization {
     const next = { ...settings.preferences } as Record<keyof Personalization, string>;
@@ -324,6 +343,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     controls.deleteProfile.disabled = busy || !profile;
     for (const [id, entry] of skillRows) entry.setDisabled(busy || (current.skills.find(skill => skill.id === id)?.unsupportedDependencies.length ?? 0) > 0);
     for (const entry of modelRows.values()) entry.setDisabled(busy);
+    historySection?.setBusy(busy);
   }
 
   function sync(): void {
@@ -353,10 +373,11 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     // Language changes and every re-read both land here, so the copy follows the stored setting.
     // Runs after the skill rows exist so one pass covers the whole pane deterministically.
     localizer?.update(current.uiLanguage);
+    historySection?.setLanguage(current.uiLanguage);
     refreshDisabled();
   }
 
-  async function reload(report: boolean): Promise<void> {
+  async function reload(report: boolean, refreshHistory = false): Promise<void> {
     try {
       const value = await host.read();
       if (disposed) return;
@@ -364,12 +385,16 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       current = value;
       if (selectedProfileId && !value.profiles.some(profile => profile.id === selectedProfileId)) selectedProfileId = null;
       sync();
+      // The history listing is a separate, lazy read: a slow or unreadable history never blocks the form.
+      if (refreshHistory) void historySection?.refresh();
     } catch (caught) {
       if (!disposed && report) hardFailure(message(caught));
     }
   }
 
   function hardFailure(text: string): void {
+    historySection?.dispose();
+    historySection = null;
     frame?.remove();
     frame = null;
     controls = null;
@@ -552,7 +577,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       void commit(settings => ({ ...settings, profiles: settings.profiles.filter(item => item.id !== profile.id) }), 'Research profile deleted.');
     });
 
-    await reload(true);
+    await reload(true, true);
   }
 
   return {
@@ -561,6 +586,8 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       disposed = true;
       localizer?.dispose();
       localizer = null;
+      historySection?.dispose();
+      historySection = null;
       for (const { element: target, type, handler } of listeners) target.removeEventListener(type, handler);
       listeners.length = 0;
       skillRows.clear();

@@ -1,0 +1,212 @@
+import { Window } from 'happy-dom';
+import { expect, it, vi } from 'vitest';
+import type { PaperScope } from '../../packages/contracts/src/index.ts';
+import type { HistoryEntry, HistoryListing, HistoryMutationReport, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
+import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
+import { createPreferencesPane, type PreferencesPaneHost } from '../../packages/zotero/src/workspace/preferences-pane.ts';
+import { paperA, paperB } from '../contracts/factories.ts';
+
+const NOW = '2026-09-13T10:00:00.000Z';
+const copy = <T>(value: T): T => structuredClone(value);
+const id = (suffix: number) => `12345678-0000-4000-8000-${suffix.toString(16).padStart(12, '0')}`;
+
+function entry(suffix: number, title: string, options: { paper?: PaperScope; archived?: boolean; paperTitle?: string; preview?: string } = {}): HistoryEntry {
+  return {
+    id: id(suffix), paper: copy(options.paper ?? paperA), title, identity: { title: options.paperTitle ?? `${title} paper`, authors: ['Author'] },
+    updatedAt: NOW, createdAt: NOW, messageCount: 2, preview: options.preview ?? `${title} preview`, hasDraft: false, activeRequestId: null,
+    ...(options.archived ? { archivedAt: NOW } : {}),
+  };
+}
+
+function listingOf(entries: HistoryEntry[], query = ''): HistoryListing {
+  const search = query.normalize('NFKC').toLowerCase().trim();
+  const matched = entries.filter(item => !search || `${item.title} ${item.identity.title} ${item.preview}`.normalize('NFKC').toLowerCase().includes(search));
+  return { entries: copy(matched), activeCount: matched.filter(item => !item.archivedAt).length, archivedCount: matched.filter(item => !!item.archivedAt).length };
+}
+
+function report(action: HistoryMutationReport['action'], changed: string[], failed: HistoryMutationReport['failed'] = []): HistoryMutationReport {
+  return { action, requested: changed.length + failed.length, changed, failed, warnings: [], partial: failed.length > 0 };
+}
+
+/** A pane host whose history methods mutate an in-memory listing, mirroring the store's two scopes. */
+function fixture(initialEntries: HistoryEntry[], overrides: Partial<PreferencesPaneHost> = {}) {
+  const state = { entries: copy(initialEntries) };
+  const settings: WorkspaceSettings = { ...defaultSettings(), uiLanguage: 'en', textScale: 1 };
+  const readHistory = vi.fn<NonNullable<PreferencesPaneHost['readHistory']>>((query: string) => Promise.resolve(listingOf(state.entries, query)));
+  const setHistoryArchived = vi.fn<NonNullable<PreferencesPaneHost['setHistoryArchived']>>((ids: string[], archived: boolean) => {
+    const changed: string[] = []; const failed: HistoryMutationReport['failed'] = [];
+    for (const target of ids) {
+      const found = state.entries.find(item => item.id === target);
+      if (!found) { failed.push({ id: target, message: 'The chat is no longer stored.' }); continue; }
+      if (archived) found.archivedAt = NOW; else delete found.archivedAt;
+      changed.push(target);
+    }
+    return Promise.resolve(report(archived ? 'archive' : 'restore', changed, failed));
+  });
+  const deleteHistory = vi.fn<NonNullable<PreferencesPaneHost['deleteHistory']>>((ids: string[]) => {
+    const changed: string[] = []; const failed: HistoryMutationReport['failed'] = [];
+    for (const target of ids) {
+      if (!state.entries.some(item => item.id === target)) { failed.push({ id: target, message: 'The chat is no longer stored.' }); continue; }
+      state.entries = state.entries.filter(item => item.id !== target); changed.push(target);
+    }
+    return Promise.resolve(report('delete', changed, failed));
+  });
+  const base: PreferencesPaneHost = {
+    read: () => Promise.resolve(copy(settings)),
+    save: vi.fn<PreferencesPaneHost['save']>(value => { Object.assign(settings, copy(value)); return Promise.resolve(); }),
+    setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
+    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
+    profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a',
+    readAutomaticPdfText: () => true,
+    writeAutomaticPdfText: vi.fn(),
+    readHistory, setHistoryArchived, deleteHistory,
+  };
+  return { host: { ...base, ...overrides }, readHistory, setHistoryArchived, deleteHistory, settings, state };
+}
+
+function mount(host: PreferencesPaneHost) {
+  const window = new Window({ url: 'https://test.invalid' });
+  const document = window.document as unknown as Document;
+  document.body.innerHTML = '<vbox/>';
+  const root = document.body.firstElementChild!;
+  const pane = createPreferencesPane(host);
+  const ready = pane.mount(root);
+  const find = <T extends Element>(selector: string): T => { const found = root.querySelector<T>(selector); if (!found) throw new Error(`Missing ${selector}`); return found; };
+  const change = (element: Element) => element.dispatchEvent(new (document.defaultView as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
+  const input = (element: Element) => element.dispatchEvent(new (document.defaultView as unknown as { Event: typeof Event }).Event('input', { bubbles: true }));
+  const rows = () => [...root.querySelectorAll<HTMLElement>('[data-zcr-history-id]')].map(row => row.dataset.zcrHistoryId!);
+  return { document, root, pane, ready, find, change, input, rows };
+}
+
+it('lists active chats by default, archives away from that scope and restores back into it', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const { host, setHistoryArchived } = fixture([chat]);
+  const { ready, find, change, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  find<HTMLButtonElement>(`[data-zcr-history-archive="${chat.id}"]`).click();
+  await vi.waitFor(() => expect(setHistoryArchived).toHaveBeenCalledWith([chat.id], true));
+  // Archiving hides the chat from the default (unarchived) scope without deleting it.
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+
+  const scope = find<HTMLSelectElement>('[data-zcr-history="scope"]');
+  scope.value = 'archived'; change(scope);
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  find<HTMLButtonElement>(`[data-zcr-history-archive="${chat.id}"]`).click();
+  await vi.waitFor(() => expect(setHistoryArchived).toHaveBeenLastCalledWith([chat.id], false));
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+  scope.value = 'active'; change(scope);
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+});
+
+it('deletes exactly the target chat after an explicit confirmation and keeps the others', async () => {
+  const first = entry(1, 'First'); const second = entry(2, 'Second');
+  const { host, deleteHistory } = fixture([first, second]);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, second.id]));
+
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${first.id}"]`).click();
+  // The first click only arms the action: nothing is deleted until the confirmation is accepted.
+  expect(deleteHistory).not.toHaveBeenCalled();
+  expect(find<HTMLElement>('[data-zcr-history="confirm-actions"]').hidden).toBe(false);
+  expect(find('[data-zcr-history="confirm-text"]').textContent).toMatch(/cannot be undone/iu);
+
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(deleteHistory).toHaveBeenCalledWith([first.id]));
+  await vi.waitFor(() => expect(rows()).toEqual([second.id]));
+});
+
+it('requires a confirmation naming the count for bulk removal and does nothing on cancel', async () => {
+  const first = entry(1, 'First'); const second = entry(2, 'Second'); const third = entry(3, 'Third');
+  const { host, deleteHistory } = fixture([first, second, third]);
+  const { ready, find, change, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toHaveLength(3));
+
+  const select = (target: string) => { const box = find<HTMLInputElement>(`[data-zcr-history-select="${target}"]`); box.checked = true; change(box); };
+  select(first.id); select(second.id);
+  find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').click();
+  expect(deleteHistory).not.toHaveBeenCalled();
+  expect(find('[data-zcr-history="confirm-text"]').textContent).toContain('2');
+
+  find<HTMLButtonElement>('[data-zcr-history="cancel"]').click();
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-history="confirm-actions"]').hidden).toBe(true));
+  expect(deleteHistory).not.toHaveBeenCalled();
+  expect(rows()).toHaveLength(3);
+
+  find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').click();
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(deleteHistory).toHaveBeenCalledTimes(1));
+  expect([...deleteHistory.mock.calls[0]![0]].sort()).toEqual([first.id, second.id].sort());
+  await vi.waitFor(() => expect(rows()).toEqual([third.id]));
+});
+
+it('searches through the store, filters by paper, and states an empty result honestly', async () => {
+  const alpha = entry(1, 'Alpha', { paper: paperA, preview: 'alpha content' });
+  const beta = entry(2, 'Beta', { paper: paperB, paperTitle: 'Beta paper', preview: 'beta content' });
+  const archived = entry(3, 'Gamma', { archived: true, paper: paperA, preview: 'gamma content' });
+  const { host, readHistory } = fixture([alpha, beta, archived]);
+  const { ready, find, change, input, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([alpha.id, beta.id]));
+
+  const search = find<HTMLInputElement>('[data-zcr-history="search"]');
+  search.value = 'beta content'; input(search);
+  await vi.waitFor(() => expect(readHistory).toHaveBeenLastCalledWith('beta content'));
+  await vi.waitFor(() => expect(rows()).toEqual([beta.id]));
+
+  search.value = ''; input(search);
+  await vi.waitFor(() => expect(rows()).toHaveLength(2));
+  const paper = find<HTMLSelectElement>('[data-zcr-history="paper"]');
+  paper.value = JSON.stringify([paperA.clientId, paperA.libraryId, paperA.attachmentKey]); change(paper);
+  await vi.waitFor(() => expect(rows()).toEqual([alpha.id]));
+
+  const emptySearch = find<HTMLInputElement>('[data-zcr-history="search"]');
+  emptySearch.value = 'nothing matches this'; input(emptySearch);
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+  const empty = find<HTMLElement>('[data-zcr-history="empty"]');
+  expect(empty.hidden).toBe(false);
+  expect(empty.textContent).toMatch(/no saved chats/iu);
+});
+
+it('reports a malformed listing without half-rendering history or hiding the rest of the pane', async () => {
+  const { host } = fixture([], { readHistory: vi.fn(() => Promise.resolve({ entries: 'nope' } as unknown as HistoryListing)) });
+  const { ready, find } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-history="error"]').hidden).toBe(false));
+  expect(find('[data-zcr-history="error"]').textContent).toMatch(/could not be read/iu);
+  expect(find('[data-zcr-pref="history"]').querySelectorAll('[data-zcr-history-id]')).toHaveLength(0);
+  // The workspace settings form stays mounted and usable.
+  expect(find('[data-zcr-pref="save-preferences"]')).toBeTruthy();
+});
+
+it('renders no history section at all when the host offers no history management', async () => {
+  const noHistory: PreferencesPaneHost = {
+    read: () => Promise.resolve({ ...defaultSettings(), uiLanguage: 'en', textScale: 1 }),
+    save: vi.fn<PreferencesPaneHost['save']>(() => Promise.resolve()),
+    setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
+    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
+    profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a',
+    readAutomaticPdfText: () => true,
+    writeAutomaticPdfText: vi.fn(),
+  };
+  const { ready, root } = mount(noHistory);
+  await ready;
+  expect(root.querySelector('[data-zcr-pref="history"]')).toBeNull();
+});
+
+it('renders the history copy in the stored UI language', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const settings: WorkspaceSettings = { ...defaultSettings(), uiLanguage: 'zh', textScale: 1 };
+  const { host } = fixture([chat], { read: () => Promise.resolve(settings) });
+  const { ready, find } = mount(host);
+  await ready;
+  const legend = find<HTMLElement>('[data-zcr-pref="history"]').querySelector('legend');
+  expect(legend?.textContent).toBe('对话历史');
+  expect(find('[data-zcr-history="search"]').closest('label')?.firstChild?.textContent).toBe('搜索对话…');
+  expect(find<HTMLButtonElement>('[data-zcr-history="archive-selected"]').textContent).toBe('归档所选项');
+  expect(find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').textContent).toBe('删除所选项');
+});

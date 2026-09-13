@@ -17,6 +17,13 @@ interface PreferencesBridge {
   newProfileId(): string;
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
+  /**
+   * History management, added after the first pane shipped. Optional here as well as on the pane, so
+   * an older plugin host simply renders no History section instead of failing to mount the pane.
+   */
+  readHistory?(query: string): Promise<string> | string;
+  setHistoryArchived?(ids: string, archived: boolean): Promise<string> | string;
+  deleteHistory?(ids: string): Promise<string> | string;
 }
 interface ZoteroGlobal {
   ZoteroCodexReaderPreferencesHost?: PreferencesBridge;
@@ -44,6 +51,15 @@ function mount(root: Element): void {
     unavailable(root, 'Zotero Codex Reader preferences are unavailable because the plugin is not running.');
     return;
   }
+  // History methods cross as JSON text too. A host that has not published them yet gets a pane with
+  // no History section; a malformed payload is the section's problem, never a mount failure.
+  const history = bridge.readHistory && bridge.setHistoryArchived && bridge.deleteHistory
+    ? {
+        readHistory: async (query: string): Promise<unknown> => JSON.parse(await bridge.readHistory!(query)) as unknown,
+        setHistoryArchived: async (ids: string[], archived: boolean): Promise<unknown> => JSON.parse(await bridge.setHistoryArchived!(JSON.stringify(ids), archived)) as unknown,
+        deleteHistory: async (ids: string[]): Promise<unknown> => JSON.parse(await bridge.deleteHistory!(JSON.stringify(ids))) as unknown,
+      }
+    : {};
   const pane = createPreferencesPane({
     read: async () => JSON.parse(await bridge.readSettings()) as WorkspaceSettings,
     save: value => Promise.resolve(bridge.writeSettings(JSON.stringify(value))),
@@ -52,6 +68,7 @@ function mount(root: Element): void {
     profileId: () => bridge.newProfileId(),
     readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
     writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
+    ...history,
   });
   panes.set(root, pane);
   void pane.mount(root).catch((error: unknown) => {
