@@ -296,13 +296,9 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-copy-answer[data-zcr-copied="true"] { color: var(--fill-primary, CanvasText); }
 /* Copy is icon-only; the labelled feedback node stays in the DOM but is visually hidden. */
 .zcr-copy-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.zcr-rename-form, .zcr-appearance { width: 100%; }
+.zcr-rename-form { width: 100%; }
 .zcr-rename-form { display: flex; gap: 4px; margin-top: 6px; }
 .zcr-rename-form input { min-width: 0; flex: 1; padding: 5px; border: 1px solid var(--zcr-border); border-radius: 5px; background: Field; color: FieldText; }
-.zcr-appearance { margin-top: 8px; border-top: 1px solid var(--zcr-border); padding-top: 8px; font-size: 12px; }
-.zcr-appearance label { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.zcr-appearance input[type=range] { flex: 1; min-width: 80px; }
-.zcr-appearance select { min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
 /* The composer keeps exactly one control at its start: a plus menu with every attachment route. */
 .zcr-plus { color: var(--fill-secondary, GrayText); }
 .zcr-plus:hover, .zcr-plus[aria-expanded="true"] { background: var(--fill-quinary, ButtonFace); }
@@ -848,7 +844,6 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-workspace-settings input, .zcr-workspace-settings textarea, .zcr-workspace-settings select { width: 100%; min-width: 0; max-width: 100%; min-height: 28px; padding: 4px 6px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; }
 .zcr-workspace-settings textarea { resize: vertical; min-height: 52px; max-height: 220px; }
 .zcr-workspace-settings input[type=checkbox] { width: auto; min-height: 0; }
-.zcr-workspace-settings .zcr-workspace-check { flex-direction: row; align-items: center; }
 .zcr-workspace-settings :focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
 .zcr-workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .zcr-workspace-muted { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
