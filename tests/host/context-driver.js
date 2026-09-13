@@ -232,7 +232,7 @@ async function runHostSmoke(config) {
       };
       legacy.armedMs = Date.now() - t0;
     }
-    report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
+    report.nativePreparation = 'probe-deferred-until-after-the-product-turn';
     // Everything the product-side preparation assertion reports. Written before the trigger so a run
     // that dies inside the wait still leaves the instrument state on disk.
     report.backgroundPreparation = {
