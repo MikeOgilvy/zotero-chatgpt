@@ -268,6 +268,10 @@ async function runHostSmoke(config) {
       const settled = legacy.order.filter(entry => entry.call === 'getPageData' && entry.settled === true && (entry.chars ?? 0) > 0).map(entry => entry.pageIndex);
       return settled.includes(0) && settled.includes(1) && counts.digestExpected >= 1;
     }, 'automatic-background-preparation', 60000).catch(() => null);
+    // Snapshot the live state again: the pre-trigger copy above cannot contain the product's own errors.
+    report.preparation.productLoggedErrors = logErrors;
+    report.preparation.prefReads = prefReads;
+    report.preparation.counts = { ...counts };
     const productPageCalls = legacy.order.filter(entry => entry.call === 'getPageData').map(entry => ({ pageIndex: entry.pageIndex, settled: entry.settled ?? false, chars: entry.chars ?? null, ms: entry.ms }));
     const productGetData = legacy.order.filter(entry => entry.call === 'getData').map(entry => ({ ms: entry.ms, settled: entry.settled ?? false, byteLength: entry.byteLength ?? null, error: entry.error ?? null, loadedShaMatchesDisk: entry.loadedShaMatchesDisk ?? null, hashError: entry.hashError ?? null }));
     const gateMs = observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.ok && entry.ms > driverProbeAt)?.ms ?? null;
@@ -624,6 +628,6 @@ async function runHostSmoke(config) {
       { panesAfterReenable: panePanes()?.length ?? null, paneCountAfterStartup: identity.paneCount, preferencePaneErrors: paneErrors, loggedErrorCount: loggedErrors.length });
 
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
-  } catch (error) { report.status = 'failed'; report.failedStep = step; report.finishedAt = new Date().toISOString(); await save(); Zotero.logError(error); }
+  } catch (error) { report.status = 'failed'; report.failedStep = step; report.failure = { message: String((error && error.message) || error), stack: String((error && error.stack) || '').split('\n').slice(0, 6) }; report.finishedAt = new Date().toISOString(); await save(); Zotero.logError(error); }
   finally { restoreInstrumentation(); }
 }
