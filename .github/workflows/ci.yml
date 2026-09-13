@@ -45,4 +45,12 @@ jobs:
       - run: npm ci
       - run: node scripts/runtime-prepare.mjs
       - run: npm run package:dev
+      # Re-run the suite AFTER packaging so the packaged-XPI checks actually execute. The two
+      # `it.skipIf` cases in tests/build/install-lifecycle.test.ts are gated on `dist/` holding the
+      # current manifest version's XPI, which is only true once `package:dev` has run; the `check`
+      # job runs `test:unit` *before* packaging, so they silently skip there. Ordering matters: the
+      # XPI bytes/SHA-256 check now runs here. The Apple codesign check additionally requires
+      # `process.platform === 'darwin'` and therefore stays skipped on this linux runner (the
+      # packaged XPI is a darwin/arm64 artifact built but never host-executed on linux).
+      - run: npm run test:unit
       - run: npm run verify:artifacts
