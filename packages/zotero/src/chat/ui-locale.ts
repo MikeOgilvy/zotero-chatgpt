@@ -52,7 +52,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Read and explain': '阅读与解释', 'Review annotations': '审核标注', 'Acquire literature': '获取文献', 'Create diagram': '生成示意图',
   Enabled: '已启用', 'Save workflow': '保存工作流', 'Cancel editing': '取消编辑', Duplicate: '创建副本', Export: '导出',
   'Try in draft': '在草稿中试用', Edit: '编辑', Delete: '删除', Cancel: '取消',
-  'Preferences saved.': '偏好已保存。', 'Research profile saved.': '研究配置已保存。', 'Workflow saved.': '工作流已保存。',
+  'Preferences saved.': '偏好已保存。',
   'Name, version and SKILL.md content are required.': '请填写名称、版本和 SKILL.md 内容。', 'No workflows installed.': '尚未安装工作流。',
   References: '引用', All: '全部', Articles: '文献', Chats: '对话', Workflows: '工作流', 'Searching…': '正在搜索…', 'Adding…': '正在添加…', 'No matches': '无匹配项',
   Tasks: '任务', Include: '选中', 'Include this candidate': '选中此候选项', 'Verified metadata': '已核验的元数据',
