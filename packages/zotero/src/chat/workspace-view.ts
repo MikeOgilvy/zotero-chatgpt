@@ -26,34 +26,6 @@ export interface WorkspaceViewActions {
 }
 export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement; settings: HTMLElement }
 
-const STYLES = `
-.zcr-workspace-chips { display:flex; flex-wrap:wrap; gap:4px; }
-.zcr-workspace-chip { display:inline-flex; align-items:center; min-width:0; max-width:100%; border:1px solid var(--zcr-border,GrayText); border-radius:6px; background:var(--fill-quinary,ButtonFace); }
-.zcr-workspace-control { appearance:none; display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:28px; max-width:100%; padding:4px 8px; border:0; border-radius:5px; color:inherit; background:transparent; font:inherit; font-size:12px; line-height:18px; cursor:pointer; box-sizing:border-box; }
-.zcr-workspace-control:hover,.zcr-workspace-control[aria-pressed=true] { background:var(--fill-quinary,ButtonFace); }
-.zcr-workspace-control:disabled { opacity:.5; cursor:default; }
-.zcr-workspace-control:focus-visible { outline:2px solid AccentColor; outline-offset:-2px; }
-.zcr-workspace-chip > .zcr-workspace-control:first-child { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
-.zcr-workspace-chip > .zcr-workspace-control:last-child { flex:0 0 28px; padding:0; }
-.zcr-workspace-settings { display:flex; flex-direction:column; gap:8px; font-size:12px; }
-.zcr-workspace-settings details { border-top:1px solid var(--zcr-border,GrayText); padding-top:8px; }
-.zcr-workspace-settings summary { cursor:pointer; min-height:24px; }
-.zcr-workspace-settings label { display:flex; flex-direction:column; align-items:stretch; gap:4px; margin:8px 0; }
-.zcr-workspace-settings input,.zcr-workspace-settings textarea,.zcr-workspace-settings select { width:100%; min-width:0; max-width:100%; min-height:28px; padding:4px 6px; box-sizing:border-box; border:1px solid var(--zcr-border,GrayText); border-radius:5px; background:var(--material-background,Field); color:inherit; font:inherit; }
-.zcr-workspace-settings textarea { resize:vertical; min-height:52px; max-height:220px; }
-.zcr-workspace-settings input[type=checkbox] { width:auto; min-height:0; }
-.zcr-workspace-settings .zcr-workspace-check { flex-direction:row; align-items:center; }
-.zcr-workspace-settings :focus-visible { outline:2px solid AccentColor; outline-offset:1px; }
-.zcr-workspace-actions { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0; }
-.zcr-workspace-muted { color:var(--fill-secondary,GrayText); font-size:11px; line-height:16px; overflow-wrap:anywhere; }
-.zcr-workspace-status { margin:6px 0; font-size:12px; overflow-wrap:anywhere; }
-.zcr-workspace-preview { position:absolute; inset-inline:0; bottom:calc(100% + 6px); z-index:13; max-width:100%; max-height:280px; overflow:auto; padding:12px; box-sizing:border-box; border:1px solid var(--zcr-border,GrayText); border-radius:8px; background:var(--material-menu,var(--material-background,Canvas)); color:inherit; box-shadow:0 4px 16px #0002; }
-.zcr-workspace-preview[hidden],.zcr-workspace-status[hidden] { display:none; }
-.zcr-workspace-preview pre { margin:8px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:12px; user-select:text; }
-.zcr-workspace-preview-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.zcr-workspace-editor { margin-top:8px; }
-`;
-
 function failure(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
 function referenceDetail(reference: ReaderReference): string {
   return [reference.identity?.authors.join(', '), reference.identity?.year, reference.kind === 'chat' ? 'Chat snapshot' : reference.kind, reference.paper?.attachmentKey].filter(Boolean).join(' · ');
@@ -63,7 +35,6 @@ function referenceDetail(reference: ReaderReference): string {
 export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { update(state: WorkspaceViewState): void; dispose(): void } {
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
-  const style = create('style'); style.textContent = STYLES; doc.head.append(style);
   const chips = create('div', '', 'zcr-workspace-chips'); chips.dataset.zcrWorkspaceChips = ''; mounts.context.append(chips);
   const advanced = create('div', '', 'zcr-workspace-settings'); advanced.dataset.zcrWorkspaceSettings = ''; mounts.settings.append(advanced);
   const status = create('p', '', 'zcr-workspace-status'); status.setAttribute('role', 'status'); status.hidden = true;
@@ -360,6 +331,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   }, dispose: () => {
     if (disposed) return; disposed = true; searchController?.abort(); previewController?.abort(); querySerial++;
     input.removeEventListener('input', onInput); input.removeEventListener('click', onInput); input.removeEventListener('keyup', onCaretKey); input.removeEventListener('compositionstart', onStart); input.removeEventListener('compositionend', onEnd);
-    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); advanced.remove(); add.remove(); style.remove();
+    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); advanced.remove(); add.remove();
   } };
 }

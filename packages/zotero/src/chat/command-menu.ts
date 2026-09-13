@@ -10,26 +10,11 @@ export interface CommandMenu {
 }
 
 let serial = 0;
-const STYLES = `
-.zcr-command-menu { position:absolute; inset-inline:0; bottom:calc(100% + 6px); z-index:12; display:flex; flex-direction:column; min-width:0; max-width:100%; max-height:280px; padding:4px; box-sizing:border-box; overflow:hidden; font:inherit; font-size:12px; color:var(--fill-primary,CanvasText); background:var(--material-menu,var(--material-background,Canvas)); border:1px solid var(--zcr-border,GrayText); border-radius:8px; box-shadow:0 4px 16px #0002; }
-.zcr-command-menu[hidden] { display:none; }
-.zcr-command-heading { margin:4px 8px; color:var(--fill-secondary,GrayText); font-size:11px; }
-.zcr-command-toolbar { display:flex; flex-wrap:wrap; gap:4px; }
-.zcr-command-list { min-height:0; overflow:auto; }
-.zcr-command-option { display:flex; flex-direction:column; gap:2px; width:100%; min-height:28px; padding:6px 8px; text-align:left; font:inherit; color:inherit; background:transparent; border:0; border-radius:5px; cursor:pointer; box-sizing:border-box; }
-.zcr-command-option[aria-selected=true],.zcr-command-option:hover { background:var(--fill-quinary,ButtonFace); }
-.zcr-command-option:disabled { opacity:.55; cursor:default; }
-.zcr-command-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
-.zcr-command-description { color:var(--fill-secondary,GrayText); font-size:11px; line-height:16px; overflow-wrap:anywhere; }
-.zcr-command-status { margin:4px 8px; font-size:12px; overflow-wrap:anywhere; }
-.zcr-command-menu :focus-visible { outline:2px solid AccentColor; outline-offset:-2px; }
-`;
 
 /** One keyboard owner for every composer chooser. Candidate text is always inert. */
 export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElement, choose: (id: string) => Promise<void>): CommandMenu {
   const doc = input.ownerDocument;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string) => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.className = className; return node; };
-  const style = create('style', ''); style.textContent = STYLES; doc.head.append(style);
   const element = create('div', 'zcr-command-menu'); element.hidden = true;
   const toolbar = create('div', 'zcr-command-toolbar');
   const heading = create('div', 'zcr-command-heading');
@@ -125,6 +110,6 @@ export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElem
     doc.removeEventListener('pointerdown', outside); doc.defaultView?.removeEventListener('resize', place);
     for (const [name, value] of attributes) { if (value === null) input.removeAttribute(name); else input.setAttribute(name, value); }
     if (ownsPosition && container.style.position === 'relative') container.style.position = position;
-    element.remove(); style.remove();
+    element.remove();
   } };
 }

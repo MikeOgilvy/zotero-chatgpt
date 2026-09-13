@@ -360,6 +360,14 @@ it('offers a copy control for every fenced code block', async () => {
   expect(copy.dataset.zcrCopied).toBe('true');
 });
 
+it('gives every markdown table its own local scroll container', async () => {
+  const { root } = await mountReadyChat({ messages: [assistantMessage('| a | b |\n| - | - |\n| 1 | 2 |\n')] });
+  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const wrapper = text.querySelector<HTMLElement>('.zcr-table-block');
+  expect(wrapper?.parentElement).toBe(text);
+  expect(wrapper?.firstElementChild?.tagName).toBe('TABLE');
+});
+
 it('keeps the offline composer editable while preventing model submission', async () => {
   const f = await mountReadyChat(); f.updateRuntime({ runtime: 'error', error: 'Connection ended' });
   expect(f.root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.disabled).toBe(false);

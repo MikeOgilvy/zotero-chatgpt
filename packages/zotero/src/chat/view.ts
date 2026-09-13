@@ -229,7 +229,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     else void doc.defaultView?.navigator.clipboard?.writeText(source).catch(() => reportViewMessage(COPY.copyFailed));
     confirmCopy(trigger);
   };
-  // Each fenced block gets its own wrapper so the copy affordance never scrolls away with the code.
+  // Each fenced block and table gets its own wrapper so wide content scrolls locally and the
+  // copy affordance never scrolls away with the code.
   const enhanceCodeBlocks = (host: HTMLElement) => {
     for (const pre of [...host.querySelectorAll('pre')]) {
       const wrapper = el('div', 'zcr-code-block');
@@ -238,6 +239,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       const copy = button(COPY.copy, 'copy-code', () => copyText(source, copy));
       copy.classList.add('zcr-code-copy');
       wrapper.prepend(copy);
+    }
+    for (const table of [...host.querySelectorAll('table')]) {
+      if (table.parentElement?.classList.contains('zcr-table-block')) continue;
+      const wrapper = el('div', 'zcr-table-block');
+      table.replaceWith(wrapper); wrapper.append(table);
     }
   };
   root.querySelector('[data-zcr-chat]')?.remove();
