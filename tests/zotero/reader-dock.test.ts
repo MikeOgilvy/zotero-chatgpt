@@ -167,7 +167,8 @@ it('attaches the dock stylesheet to the reader iframe document and keeps a compo
   expect(dock.style.getPropertyPriority('min-width')).toBe('important');
   expect(dock.style.getPropertyPriority('writing-mode')).toBe('important');
   expect(dock.style.fontFamily).toBe('inherit');
-  expect(dock.style.background).toMatch(/material-background|#fff/u);
+  expect(dock.style.background).toMatch(/material-background|Canvas/u);
+  expect(dock.style.background).not.toMatch(/#fff/u);
   expect(dock.getAttribute('style') ?? '').not.toMatch(/min-width:\s*0(?:px)?(?:;|$)/u);
 
   const sidebar = renderReaderShell(body, { title: 'Paper', key: 'PDFONE01', libraryID: 1 }, () => undefined);
