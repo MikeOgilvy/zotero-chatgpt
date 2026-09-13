@@ -7,6 +7,8 @@ export interface PdfPageView { div: HTMLElement; viewport: { convertToViewportPo
 export interface PdfViewer {
   currentScale: number;
   currentScaleValue: number | string;
+  /** Committed page. pdf.js sets this synchronously on a jump, before `_location` catches up. */
+  currentPageNumber?: number;
   scrollPageIntoView(options: { pageNumber: number; destArray: [number, { name: string }, number, number, null]; allowNegativeOffset: boolean; ignoreDestinationZoom: boolean }): void;
   _location?: { pageNumber: number; left: number; top: number; scale: string | number };
   _pages?: PdfPageView[];

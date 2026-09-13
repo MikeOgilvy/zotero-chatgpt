@@ -38,16 +38,17 @@ export function capturePosition(reader: HostReader): ViewPosition | undefined {
   const scale = location.scale;
   if (typeof scale !== 'number' && scale !== 'auto' && scale !== 'page-fit' && scale !== 'page-width') return;
   // pdf.js applies a programmatic jump's scroll and sets `currentPageNumber` synchronously, but
-  // only refreshes `_location` from the visible page on the next scroll frame (viewer.mjs
-  // `#scrollIntoView`/`_setCurrentPageNumber` versus `_scrollUpdate`/`_updateLocation`). A close
+  // only refreshes `_location` from the visible page on the next scroll frame: the container's
+  // scroll listener reaches `_scrollUpdate`/`_updateLocation` through `watchScroll`'s
+  // requestAnimationFrame coalescing (viewer.mjs `#scrollIntoView` vs. `watchScroll`). A close
   // inside that window would capture the page the jump left and re-anchor the reader to it.
   const live = viewer.currentPageNumber;
-  if (live === location.pageNumber || !Number.isFinite(live)) {
-    return { scale, anchor: { pageIndex: location.pageNumber - 1, left: location.left, top: location.top } };
+  if (typeof live === 'number' && Number.isFinite(live) && live !== location.pageNumber) {
+    // The committed page is known, but the offset that belongs to it is not. Restoring the page
+    // alone is honest; the offset cannot be invented from the stale location.
+    return { scale, anchor: { pageIndex: live - 1, left: 0, top: 0 } };
   }
-  // The committed page is known, but the offset that belongs to it is not. Restoring the page
-  // alone is honest; the horizontal offset cannot be invented from the stale location.
-  return { scale, anchor: { pageIndex: live - 1, left: 0, top: 0 } };
+  return { scale, anchor: { pageIndex: location.pageNumber - 1, left: location.left, top: location.top } };
 }
 export class NativeReaderPane implements LayoutHost {
   readonly controller = new ReaderLayoutController(this);
