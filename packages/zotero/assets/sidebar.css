@@ -799,7 +799,6 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-history-chevron { display: inline-flex; flex: 0 0 auto; }
 .zcr-history-chevron svg { display: block; width: 12px; height: 12px; }
 .zcr-history-archived-toggle[aria-expanded="true"] .zcr-history-chevron { transform: rotate(90deg); }
-.zcr-history-archived-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zcr-history-archived-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 /* Expanded archived rows scroll on their own so a long archive cannot push the row off screen. */
 .zcr-history-archived-list { max-height: 45%; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 6px; }

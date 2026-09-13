@@ -256,7 +256,7 @@ it('pins the archived section below the grouped list as a hairlined, rotational,
   const chevron = el('span', 'zcr-history-chevron');
   const count = el('span', 'zcr-history-archived-count', '2');
   const list = el('div', 'zcr-history-archived-list');
-  toggle.append(chevron, el('span', 'zcr-history-archived-label', 'Archived'), count);
+  toggle.append(chevron, count);
   section.append(toggle, list); panel.append(section); doc.body.append(panel);
   // A hairline separates the section from the list and it takes no share of the popover height.
   expect(cs(section).borderTopWidth).toBe('1px');
