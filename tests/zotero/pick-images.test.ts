@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   clipboardHasImage, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
   imagesFromClipboardItems, imagesFromGeckoClipboard, resolveGeckoClipboardAccess,
+  type ClipboardImageItem,
 } from '../../packages/zotero/src/chat/pick-images.ts';
 import { TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
@@ -97,6 +98,27 @@ it('treats a macOS public.png flavor as a screenshot even when items are empty',
     mozGetDataAt: (type: string) => type === 'public.png' ? file : null,
   }, () => PNG_ID);
   expect(images).toEqual([PNG_ATTACHMENT]);
+});
+
+it('refuses an input image above the documented 2 MiB bound instead of downscaling it', () => {
+  const oversize = new Uint8Array(2 * 1024 * 1024 + 1); oversize.set([0x89, 0x50, 0x4e, 0x47]);
+  expect(imageFromBytes({ id: PNG_ID, name: 'huge.png', bytes: oversize })).toBeUndefined();
+  const empty = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+  expect(imageFromBytes({ id: PNG_ID, name: 'header-only.png', bytes: empty })).toMatchObject({ mime: 'image/png', name: 'header-only.png' });
+});
+
+it('captures every pasted image file before the paste data store can be invalidated', async () => {
+  const first = new File([PNG], 'one.png', { type: 'image/png' });
+  const second = new File([PNG], 'two.png', { type: 'image/png' });
+  let live = true;
+  const item = (file: File): ClipboardImageItem => ({ kind: 'file', type: 'image/png', getAsFile: () => (live ? file : null) });
+  let index = 0;
+  // Gecko drops access to a paste event's data store once the handler returns, so a second
+  // getAsFile() after an await returns null and that image silently disappears.
+  const pending = imagesFromClipboardItems([item(first), item(second)], () => index++ === 0 ? PNG_ID : '6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b21');
+  live = false;
+  const images = await pending;
+  expect(images.map(image => image.name)).toEqual(['one.png', 'two.png']);
 });
 
 it('reads an nsIClipboard transferable image when DOM items are empty', async () => {

@@ -101,14 +101,21 @@ export async function imagesFromClipboardItems(
   items: Iterable<ClipboardImageItem>,
   uuid: () => string,
 ): Promise<ImageAttachment[]> {
-  const images: ImageAttachment[] = [];
+  // Collect every File synchronously: Gecko invalidates a paste event's data store once the
+  // handler returns, so a getAsFile() call after the first await yields null and the image is
+  // silently lost (most visibly when several images are pasted or dropped together).
+  const files: Array<{ file: File | Blob; type: string; name?: string }> = [];
   for (const item of items) {
     if (item.kind && item.kind !== 'file') continue;
     if (!isClipboardImageFlavor(item.type) && !item.type.startsWith('image/')) continue;
     const file = item.getAsFile();
     if (!file) continue;
-    const bytes = await bytesFromBlob(file);
-    const name = ('name' in file && typeof file.name === 'string' && file.name.trim()) ? file.name : screenshotName(item.type);
+    files.push({ file, type: item.type, name: 'name' in file && typeof file.name === 'string' ? file.name : undefined });
+  }
+  const images: ImageAttachment[] = [];
+  for (const entry of files) {
+    const bytes = await bytesFromBlob(entry.file);
+    const name = entry.name?.trim() || screenshotName(entry.type);
     const image = imageFromBytes({ id: uuid(), name, bytes });
     if (image) images.push(image);
   }
