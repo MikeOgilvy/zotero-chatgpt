@@ -613,10 +613,22 @@ async function runHostSmoke(config) {
     // The pane's copy must follow the stored UI language inside the real Preferences window. The
     // check switches the stored language through the pane's own control, then restores it, so the
     // profile is left as it was found. Only the UI-language setting is written; no record is touched.
-    const paneLegend = () => String(paneRoot.querySelector('legend')?.textContent ?? '');
+    // The canary is the legend of the fieldset that owns the UI-language control, not the pane's
+    // first legend: the pane was reorganized, so positional legends now belong to another section.
+    const paneLegend = () => String(paneRoot.querySelector('[data-zcr-pref="uiLanguage"]')?.closest('fieldset')?.querySelector('legend')?.textContent ?? '');
     const paneIdentifiers = () => [...paneRoot.querySelectorAll('[data-zcr-skill]')].map(row => ({ id: String(row.getAttribute('data-zcr-skill')), name: String(row.querySelector('label span')?.textContent ?? '') }));
     const storedLanguage = async () => JSON.parse(String(await Zotero.ZoteroCodexReaderPreferencesHost.readSettings())).uiLanguage;
-    const expectedLegend = language => (language === 'zh' ? '对话' : 'Chat');
+    // That section's copy differs by build: the 0.4.0a3 bundle the profile ships renders it as "Chat";
+    // f6592a3 (17:28) renamed it "Appearance" and that rename is not in the a3 bundle. Identify the
+    // section from the copy this build renders, once, before any switch, so the language assertions
+    // below check a direction instead of reading the expected value off the pane they are checking. A
+    // section copy not in this table fails the check, so a rename has to be acknowledged deliberately.
+    const paneSectionCopy = [
+      { en: 'Chat', zh: '对话' },
+      { en: 'Appearance', zh: '外观' },
+    ];
+    const sectionCopy = paneSectionCopy.find(copy => copy.en === paneLegend() || copy.zh === paneLegend()) ?? null;
+    const expectedLegend = language => (language === 'zh' ? sectionCopy?.zh : sectionCopy?.en);
     const switchLanguage = async language => {
       const select = paneRoot.querySelector('[data-zcr-pref="uiLanguage"]');
       select.value = language;
@@ -626,22 +638,23 @@ async function runHostSmoke(config) {
     const languageBefore = await storedLanguage();
     report.preferencesPane.storedLanguage = languageBefore;
     report.preferencesPane.legend = paneLegend();
+    report.preferencesPane.sectionCopy = sectionCopy;
     report.preferencesPane.identifiersBefore = paneIdentifiers();
     await check('pref-pane-copy-matches-stored-ui-language',
-      languageBefore === String(paneRoot.querySelector('[data-zcr-pref="uiLanguage"]').value) && paneLegend() === expectedLegend(languageBefore),
-      { storedLanguage: languageBefore, legend: paneLegend() });
+      sectionCopy !== null && languageBefore === String(paneRoot.querySelector('[data-zcr-pref="uiLanguage"]').value) && paneLegend() === expectedLegend(languageBefore),
+      { storedLanguage: languageBefore, legend: paneLegend(), sectionCopy });
     await switchLanguage('zh');
     const chineseIdentifiers = paneIdentifiers();
     report.preferencesPane.legendAfterSwitch = paneLegend();
     report.preferencesPane.identifiersInChinese = chineseIdentifiers;
     await check('pref-pane-copy-follows-language-switch-with-verbatim-identifiers',
-      (await storedLanguage()) === 'zh' && paneLegend() === '对话' &&
+      (await storedLanguage()) === 'zh' && paneLegend() === expectedLegend('zh') &&
       chineseIdentifiers.length === report.preferencesPane.identifiersBefore.length &&
       chineseIdentifiers.every((row, index) => row.id === report.preferencesPane.identifiersBefore[index].id && row.name === report.preferencesPane.identifiersBefore[index].name),
       { storedLanguage: await storedLanguage(), legend: paneLegend(), identifiers: chineseIdentifiers });
     await switchLanguage('en');
     await check('pref-pane-copy-reverts-with-the-stored-language',
-      (await storedLanguage()) === 'en' && paneLegend() === 'Chat' && JSON.stringify(paneIdentifiers()) === JSON.stringify(report.preferencesPane.identifiersBefore),
+      (await storedLanguage()) === 'en' && paneLegend() === expectedLegend('en') && JSON.stringify(paneIdentifiers()) === JSON.stringify(report.preferencesPane.identifiersBefore),
       { storedLanguage: await storedLanguage(), legend: paneLegend() });
     let prefWinClosed = false;
     try { prefWin.close(); prefWinClosed = true; } catch { prefWinClosed = false; }
