@@ -132,6 +132,11 @@ it('renders the shipped item-pane icon with valid paint values and a visible mar
   expect(paints.length).toBeGreaterThan(0);
   for (const paint of paints) expect(['none', 'context-fill', 'context-stroke', 'currentColor']).toContain(paint);
   expect(svg).toMatch(/fill="context-fill"/u);
+  // The mark is a hollow page outline with a text rule and a spark, so the frame needs the
+  // even-odd rule to punch its interior out; a single solid subpath would be a plain block.
+  expect(svg).toContain('fill-rule="evenodd"');
+  const subpaths = [...svg.matchAll(/[MZ]/gu)].length;
+  expect(subpaths).toBeGreaterThanOrEqual(8);
 });
 it('reads an nsIClipboard transferable image when DOM items are empty', async () => {
   const host = fakeGeckoClipboard({ 'image/png': PNG, 'public.png': PNG });
