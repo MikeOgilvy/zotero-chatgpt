@@ -6,7 +6,6 @@ import { ReaderError } from '../../packages/contracts/src/index.ts';
 import type { ReaderSkill, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import { defaultAllowedModels } from '../../packages/core/src/workspace/allowed-models.ts';
-import { PINNED_MODEL_CATALOG } from '../../runtime/model-capabilities.ts';
 import { createPreferencesPane, type PreferencesPaneHost } from '../../packages/zotero/src/workspace/preferences-pane.ts';
 
 const copy = <T>(value: T): T => structuredClone(value);
@@ -207,23 +206,33 @@ it('toggles one workflow through setSkillEnabled and reverts the checkbox when t
   expect(toggle.disabled).toBe(false);
 });
 
-it('renders the persisted model allowlist as labelled checkbox rows with exact ids', async () => {
+it('renders only the offerable model families as labelled checkbox rows with exact ids', async () => {
   const { host } = fixture();
   const { ready, root, find } = mount(host);
   await ready;
   const rows = [...find('[data-zcr-pref="models"]').querySelectorAll<HTMLElement>('.zcr-preferences-model')];
-  expect(rows.map(row => row.dataset.zcrModel)).toEqual(Object.keys(PINNED_MODEL_CATALOG.models));
-  expect(rows).toHaveLength(11);
+  expect(rows.map(row => row.dataset.zcrModel)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+  expect(rows).toHaveLength(4);
   const astra = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-6-astra"]');
   expect(astra.checked).toBe(true);
   expect(astra.disabled).toBe(false);
   expect(astra.closest('label')?.textContent).toBe('GPT-6 Astra');
   expect(root.querySelector('[data-zcr-model="gpt-6-astra"] .zcr-preferences-muted')?.textContent).toBe('gpt-6-astra');
+  // Every rendered option keeps its exact id visible, because that id is what gets sent.
+  for (const row of rows) {
+    const id = row.querySelector('.zcr-preferences-muted')?.textContent;
+    expect(id).toBe(row.dataset.zcrModel);
+    expect(id).not.toBe('');
+  }
+  // The excluded families stay in the bundled catalog but are not offered here.
+  for (const excluded of ['gpt-daybreak-blue-latest', 'gpt-5.5', 'gpt-5.4', 'gpt-5.2', 'codex-auto-review']) {
+    expect(root.querySelector(`[data-zcr-model="${excluded}"]`), excluded).toBeNull();
+  }
   // The default allowlist is exactly GPT-6-Astra plus the GPT-5.6 family; everything else is off.
   expect([...root.querySelectorAll<HTMLInputElement>('[data-zcr-model-allowed]')].filter(input => input.checked).map(input => input.dataset.zcrModelAllowed))
     .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
   // The pane states its candidate-list source honestly rather than implying live entitlements.
-  expect(find('[data-zcr-pref="models"]').closest('fieldset')?.querySelector('.zcr-preferences-muted')?.textContent).toMatch(/bundled with the pinned Codex runtime/u);
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/bundled with the pinned Codex runtime/u);
 });
 
 it('saves a changed allowlist through the workspace snapshot and refuses to empty it', async () => {
@@ -252,19 +261,88 @@ it('saves a changed allowlist through the workspace snapshot and refuses to empt
   expect(find<HTMLElement>('[data-zcr-pref="status"]').hidden).toBe(true);
 });
 
-it('renders and preserves a stored allowed model the pinned catalog no longer lists', async () => {
-  const settings = { ...defaultSettings(), allowedModels: [...defaultAllowedModels(), { id: 'gpt-retired-x', name: 'GPT Retired X' }] };
+it('offers a runtime-reported GPT-5.3 Spark model and persists the owner\'s choice', async () => {
+  // The runtime reports the Spark family plus models the pane must not offer; only the Spark id joins.
+  const live = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark', 'gpt-5.5', 'codex-auto-review'];
+  const { host, current } = fixture(undefined, { readLiveModels: () => Promise.resolve(live) });
+  const { ready, root, find, change, settle } = mount(host);
+  await ready;
+  const spark = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.3-codex-spark"]');
+  expect(spark.checked).toBe(false);
+  expect(root.querySelector('[data-zcr-model="gpt-5.3-codex-spark"] .zcr-preferences-muted')?.textContent).toBe('gpt-5.3-codex-spark');
+  expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-model="codex-auto-review"]')).toBeNull();
+  spark.checked = true; change(spark);
+  await settle();
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark']);
+});
+
+it('keeps a saved Spark selection visible and checked without a live list', async () => {
+  const settings = { ...defaultSettings(), allowedModels: [...defaultAllowedModels(), { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' }] };
+  const { host } = fixture(settings);
+  const { ready, root, find } = mount(host);
+  await ready;
+  const spark = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.3-codex-spark"]');
+  expect(spark.checked).toBe(true);
+  // The exact id the owner saved stays on screen even though no live list reported it this time.
+  expect(root.querySelector('[data-zcr-model="gpt-5.3-codex-spark"] .zcr-preferences-muted')?.textContent).toBe('gpt-5.3-codex-spark');
+});
+
+it('never offers an excluded model from a stale allowlist, and never silently drops the stored id', async () => {
+  const settings = { ...defaultSettings(), allowedModels: [{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }, { id: 'gpt-5.5', name: 'GPT-5.5' }] };
   const { host, current } = fixture(settings);
   const { ready, root, find, change, settle } = mount(host);
   await ready;
-  const retired = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-retired-x"]');
-  expect(retired.checked).toBe(true);
-  expect(root.querySelector('[data-zcr-model="gpt-retired-x"] label')?.textContent).toBe('GPT Retired X');
-  expect(root.querySelector('[data-zcr-model="gpt-retired-x"] .zcr-preferences-muted')?.textContent).toBe('gpt-retired-x');
+  // The excluded family gets no row, so it can never be checked, offered or re-selected here.
+  expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
+  expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-6-astra"]').checked).toBe(true);
   const sol = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.6-sol"]');
-  sol.checked = false; change(sol);
+  sol.checked = true; change(sol);
   await settle();
-  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-retired-x']);
+  // The offerable selection is saved. The stored id the pane can no longer offer stays in the record
+  // instead of being silently dropped, and it is still not a row.
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']);
+  expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
+});
+
+it('tells the truth about where the Spark models come from when no live list exists', async () => {
+  // No host method at all: the bundled catalog is all the pane knows, and it says so.
+  const absent = fixture();
+  const first = mount(absent.host);
+  await first.ready;
+  const note = first.find('[data-zcr-pref="models-note"]').textContent ?? '';
+  expect(note).toMatch(/bundled with the pinned Codex runtime/u);
+  expect(note).toMatch(/not a live report of your account's entitlements/u);
+  expect(note).toMatch(/GPT-5\.3-Spark models come from the running Codex runtime/u);
+  expect(note).toMatch(/not in the bundled catalog/u);
+  expect(first.root.querySelector('[data-zcr-model^="gpt-5.3"]')).toBeNull();
+
+  // The host has the port but no running runtime: the same honest copy, never an invented row.
+  const reported = fixture(undefined, { readLiveModels: () => Promise.resolve(null) });
+  const second = mount(reported.host);
+  await second.ready;
+  expect(second.find('[data-zcr-pref="models-note"]').textContent).toBe(note);
+  expect(second.root.querySelector('[data-zcr-model^="gpt-5.3"]')).toBeNull();
+});
+
+it('explains the live list when the running runtime reports models', async () => {
+  const { host } = fixture(undefined, { readLiveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-5.3-codex-spark']) });
+  const { ready, find } = mount(host);
+  await ready;
+  const note = find('[data-zcr-pref="models-note"]').textContent ?? '';
+  expect(note).toMatch(/running Codex runtime reported/u);
+  // The bundled-catalog disclaimer would be false here, so it is not shown.
+  expect(note).not.toMatch(/not a live report/u);
+});
+
+it('keeps the bundled catalog list when the live read fails instead of half-rendering', async () => {
+  const { host } = fixture(undefined, { readLiveModels: () => Promise.reject(new Error('The runtime is unavailable.')) });
+  const { ready, root, find } = mount(host);
+  await ready;
+  expect([...find('[data-zcr-pref="models"]').querySelectorAll<HTMLElement>('.zcr-preferences-model')].map(row => row.dataset.zcrModel))
+    .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/not in the bundled catalog/u);
+  expect(root.querySelector<HTMLElement>('[data-zcr-pref="error"]')?.hidden).toBe(true);
 });
 
 it('exports through the host and reports a failed export instead of claiming success', async () => {
@@ -320,7 +398,9 @@ it('renders the pane copy in the stored UI language and never translates identif
   const { ready, root, find } = mount(host);
   await ready;
   const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
-  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['对话', '模型与生成设置', '研究偏好', '研究配置', '已安装的工作流']);
+  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['外观', 'PDF 文本', '模型', '研究偏好', '研究配置', '已安装的工作流']);
+  // The model note is stateful copy and follows the stored language like the rest of the pane.
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/不在随包目录中/u);
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('聊天字号（0.5–3）');
   expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');

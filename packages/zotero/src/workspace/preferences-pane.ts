@@ -1,5 +1,5 @@
 import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { defaultAllowedModels, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
+import { defaultAllowedModels, MODEL_ID, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
 import { mountUILocale } from '../chat/ui-locale.ts';
 import { createHistorySection, type HistorySection } from './history-section.ts';
@@ -25,6 +25,12 @@ export interface PreferencesPaneHost {
   /** The shared automatic-PDF-text opt-out (`extensions.zcr.automaticPdfText`), never a store copy. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
+  /**
+   * The model ids the running Codex runtime last reported, or null/absent when no live list is
+   * available (the runtime is not running, or an older host has no port). Reading it never starts
+   * the runtime. Ids the pane does not offer are ignored, and the pane never invents one.
+   */
+  readLiveModels?(): Promise<unknown>;
   /**
    * History management. All three are optional and versioned by presence: a host that has not been
    * upgraded renders no History section rather than a broken one.
@@ -53,6 +59,14 @@ const PREFERENCE_FIELDS: ReadonlyArray<{ key: keyof Personalization; title: stri
   { key: 'annotationStyle', title: 'Annotation style', kind: 'input' },
 ];
 
+/**
+ * Stateful copy for the model fieldset: the pane says which source the rows came from. Both
+ * sentences are exact keys in `chat/ui-locale.ts`; the GPT-5.3 Spark family is named because it is
+ * the one family that is not in the bundled catalog and can only arrive from the runtime.
+ */
+const MODELS_NOTE_BUNDLED = 'Choose which models the composer may offer. This list is the catalog bundled with the pinned Codex runtime, not a live report of your account\'s entitlements. The GPT-5.3-Spark models come from the running Codex runtime and are not in the bundled catalog, so they appear here only after a runtime has reported them; no ids are guessed. The exact id under each name is what is sent.';
+const MODELS_NOTE_LIVE = 'Choose which models the composer may offer. This list combines the models the running Codex runtime reported for this account with the GPT-6 and GPT-5.6 models in the bundled catalog. The exact id under each name is what is sent.';
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : 'The action could not be completed.';
 }
@@ -80,6 +94,9 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   let frame: HTMLElement | null = null;
   let status: HTMLElement | null = null;
   let error: HTMLElement | null = null;
+  let modelsNote: HTMLElement | null = null;
+  /** Non-null only when a runtime has actually reported an offerable id; never a guessed list. */
+  let liveModels: string[] | null = null;
   let localizer: ReturnType<typeof mountUILocale> | null = null;
   const listeners: Array<{ element: Element; type: string; handler: (event: Event) => void }> = [];
   const skillRows = new Map<string, { row: HTMLElement; update(skill: ReaderSkill): void; setDisabled(disabled: boolean): void }>();
@@ -100,6 +117,23 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   const clear = (element: HTMLElement | null): void => { if (!element) return; element.textContent = ''; element.hidden = true; };
   /** A failure replaces any earlier success message: the pane never shows two contradictory outcomes. */
   const fail = (text: string): void => { clear(status); show(error, text); };
+
+  /**
+   * The runtime's live model ids, or null when there is no live list to show. A missing port, a null
+   * report, an empty report and a failed read all mean the same thing to the pane — the bundled
+   * catalog is all it can list — so none of them can half-render a row or invent an id.
+   */
+  async function readLiveModels(): Promise<string[] | null> {
+    if (!host.readLiveModels) return null;
+    try {
+      const raw = await host.readLiveModels();
+      if (!Array.isArray(raw)) return null;
+      const ids = [...new Set(raw.filter((id): id is string => typeof id === 'string' && MODEL_ID.test(id)))];
+      return ids.length ? ids : null;
+    } catch {
+      return null;
+    }
+  }
 
   function element<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, text = ''): HTMLElementTagNameMap[K] {
     const node = doc.createElementNS(HTML_NS, tag) as unknown as HTMLElementTagNameMap[K];
@@ -163,33 +197,39 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     error.setAttribute('role', 'alert');
     error.hidden = true;
 
-    const chat = fieldset(doc, container, 'Chat');
-    const language = labelled(doc, chat, 'Interface language', 'uiLanguage', 'select', [['en', 'English'], ['zh', '中文']]);
+    // Appearance holds the interface language and the chat text scale; both are about how the reader
+    // looks, and neither is a model or research preference.
+    const appearance = fieldset(doc, container, 'Appearance');
+    const language = labelled(doc, appearance, 'Interface language', 'uiLanguage', 'select', [['en', 'English'], ['zh', '中文']]);
     const uiLanguage = language.querySelector('select') as HTMLSelectElement;
-    const scaleLabel = labelled(doc, chat, `Chat text scale (${CHAT_TEXT_SCALE_MIN}–${CHAT_TEXT_SCALE_MAX})`, 'textScale', 'input');
+    const scaleLabel = labelled(doc, appearance, `Chat text scale (${CHAT_TEXT_SCALE_MIN}–${CHAT_TEXT_SCALE_MAX})`, 'textScale', 'input');
     const textScale = scaleLabel.querySelector('input') as HTMLInputElement;
     textScale.type = 'number'; textScale.min = String(CHAT_TEXT_SCALE_MIN); textScale.max = String(CHAT_TEXT_SCALE_MAX); textScale.step = '0.05';
 
-    // The automatic-PDF-text opt-out is a plugin preference, not a workspace field: the pane reads
-    // and writes `extensions.zcr.automaticPdfText` directly so it is the single source of truth for
-    // every reader, including an already-open sidebar.
+    // PDF text holds the automatic-PDF-text opt-out. It is a plugin preference, not a workspace
+    // field: the pane reads and writes `extensions.zcr.automaticPdfText` directly so it is the
+    // single source of truth for every reader, including an already-open sidebar.
+    const pdfText = fieldset(doc, container, 'PDF text');
     const automaticPdfLabel = element(doc, 'label', 'Use current PDF text automatically');
     const automaticPdfText = element(doc, 'input');
     automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zcrPref = 'automatic-pdf-text';
     automaticPdfLabel.append(automaticPdfText);
     const automaticPdfNote = element(doc, 'p', 'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.');
     automaticPdfNote.className = 'zcr-preferences-muted';
-    chat.append(automaticPdfLabel, automaticPdfNote);
+    pdfText.append(automaticPdfLabel, automaticPdfNote);
 
     // The allowlist is a checkbox list, not a multi-select: the pane's existing controls are labels
     // plus checkboxes (skills, automatic PDF text), and a long model list stays keyboard-operable,
-    // themeable and readable with name and exact id on every row.
-    const modelsField = fieldset(doc, container, 'Model and generation settings');
-    const modelsNote = element(doc, 'p', 'Choose which models the composer may offer. This list is the model catalog bundled with the pinned Codex runtime, not a live report of your account\'s entitlements; a model your account can use but that is missing from this list cannot be selected here.');
-    modelsNote.className = 'zcr-preferences-muted';
+    // themeable and readable with name and exact id on every row. The legend names the fieldset's
+    // own contents; the note is rewritten by `syncModels` to state where the rows came from.
+    const modelsField = fieldset(doc, container, 'Models');
+    const note = element(doc, 'p', MODELS_NOTE_BUNDLED);
+    note.className = 'zcr-preferences-muted';
+    note.dataset.zcrPref = 'models-note';
+    modelsNote = note;
     const models = element(doc, 'div');
     models.dataset.zcrPref = 'models';
-    modelsField.append(modelsNote, models);
+    modelsField.append(note, models);
 
     const research = fieldset(doc, container, 'Research preferences');
     const preferences = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
@@ -296,12 +336,17 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   }
 
   /**
-   * Rows are the pinned-catalog candidates plus any stored id the catalog no longer lists, so a
-   * removed or unknown model is shown and preserved rather than dropped or treated as an error.
+   * Rows are the offerable families only: the pinned-catalog candidates, plus any runtime-reported
+   * offerable id and any offerable id the owner saved that neither source lists right now, so a saved
+   * Spark choice stays visible once seen. A stored id from an excluded family is not a row; it is
+   * carried through a save by `saveAllowedModels` and reported by `allowedModelIds`, never offered.
    */
   function syncModels(settings: WorkspaceSettings): void {
     const allowed = new Set((settings.allowedModels ?? defaultAllowedModels()).map(model => model.id));
-    const wanted = modelChoices(settings.allowedModels);
+    // A runtime-reported offerable id (a GPT-5.3 Spark model) joins the rows; an excluded family the
+    // runtime also reports never does, and a saved Spark id the runtime is not reporting right now
+    // stays visible so the owner's stored choice is not silently dropped.
+    const wanted = modelChoices(settings.allowedModels, liveModels ?? []);
     const wantedIds = new Set(wanted.map(candidate => candidate.id));
     for (const [id, entry] of modelRows) if (!wantedIds.has(id)) { entry.row.remove(); modelRows.delete(id); }
     const nodes = wanted.map(candidate => {
@@ -311,6 +356,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       entry.setDisabled(busy);
       return entry.row;
     });
+    if (modelsNote) modelsNote.textContent = liveModels ? MODELS_NOTE_LIVE : MODELS_NOTE_BUNDLED;
     const parent = controls?.models;
     if (!parent) return;
     for (const node of nodes) parent.append(node);
@@ -326,11 +372,14 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     toggle.type = 'checkbox';
     toggle.dataset.zcrModelAllowed = candidate.id;
     const name = element(doc, 'span');
-    // The exact id is shown verbatim and is never translated; the label is a local derived name.
-    const id = element(doc, 'span', candidate.id);
-    id.className = 'zcr-preferences-muted';
     label.append(toggle, name);
-    row.append(label, id);
+    // The label above is a local, id-derived display name; the exact id is what gets sent, so it is
+    // always shown verbatim, on its own line and in monospace. It is never translated or hidden.
+    const idLine = element(doc, 'div');
+    idLine.className = 'zcr-preferences-muted';
+    idLine.dataset.zcrUi = 'false';
+    idLine.append(element(doc, 'code', candidate.id));
+    row.append(label, idLine);
     listen(toggle, 'change', () => { void saveAllowedModels(); });
     return {
       row,
@@ -387,6 +436,10 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     try {
       const value = await host.read();
       if (disposed) return;
+      // Read the live list on every store read: a runtime that started while this window was open is
+      // picked up here. This never starts the runtime itself and never blocks the form on failure.
+      liveModels = await readLiveModels();
+      if (disposed) return;
       if (!isSettings(value)) { current = null; hardFailure('The stored preferences could not be read.'); return; }
       current = value;
       if (selectedProfileId && !value.profiles.some(profile => profile.id === selectedProfileId)) selectedProfileId = null;
@@ -406,6 +459,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     controls = null;
     skillRows.clear();
     modelRows.clear();
+    modelsNote = null;
     const doc = root?.ownerDocument;
     if (!doc || !root) return;
     const box = element(doc, 'div');
@@ -461,6 +515,11 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
    *
    * Stored names are kept where the id is unchanged, so a preserved unknown id keeps the label the
    * user last saw; catalog candidates use this module's derived label.
+   *
+   * Rows are only the offerable families. A stored id this build can no longer offer has no row, so
+   * it is carried through in its stored order instead of being silently dropped from the record — the
+   * same guarantee `allowedModelIds` and the store already document. It is never offered and never
+   * sent; an id the owner actually unchecked does have a row and is removed.
    */
   async function saveAllowedModels(): Promise<void> {
     if (busy || disposed || !current) return;
@@ -472,9 +531,11 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     }
     const names = new Map<string, string>([
       ...(current.allowedModels ?? defaultAllowedModels()).map(model => [model.id, model.name] as const),
-      ...modelChoices(current.allowedModels).map(candidate => [candidate.id, candidate.name] as const),
+      ...modelChoices(current.allowedModels, liveModels ?? []).map(candidate => [candidate.id, candidate.name] as const),
     ]);
-    const allowedModels: AllowedModel[] = selected.map(id => ({ id, name: names.get(id) ?? modelLabel(id) }));
+    const rendered = new Set(modelRows.keys());
+    const carried = [...new Set((current.allowedModels ?? []).map(model => model.id))].filter(id => !rendered.has(id));
+    const allowedModels: AllowedModel[] = [...selected, ...carried].map(id => ({ id, name: names.get(id) ?? modelLabel(id) }));
     await commit(settings => ({ ...settings, allowedModels }), 'Allowed models saved.');
   }
 

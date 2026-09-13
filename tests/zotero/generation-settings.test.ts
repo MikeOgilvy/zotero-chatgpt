@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import type { ModelOption } from '../../packages/contracts/src/runtime.ts';
+import { enforcedAllowedModelIds } from '../../packages/core/src/workspace/allowed-models.ts';
 import { settings } from '../contracts/factories.ts';
 import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, offeredModels, pickerSummary, resolveFastTier, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
 
@@ -310,4 +311,16 @@ it('keeps captions looking excluded models up in the full list', () => {
   // settingsCaption takes no allowlist and must stay truthful about a model the picker no longer
   // offers, so it still reads the full runtime snapshot.
   expect(settingsCaption({ model: 'gpt-5.5', serviceTier: null, effort: 'medium' }, liveModels)).toBe('GPT-5.5 · Default · medium');
+});
+
+it('offers exactly the enforced allowlist intersection, so a stale id cannot leak back in', () => {
+  // `enforcedAllowedModelIds` is the gate the composer wiring passes to `offeredModels`.
+  expect(offeredModels(liveModels, enforcedAllowedModelIds([{ id: 'gpt-6-astra', name: 'a' }, { id: 'gpt-5.5', name: 'b' }])).map(model => model.id))
+    .toEqual(['gpt-6-astra']);
+  // Nothing offerable left: degrade to the family default, never to raw catalog order.
+  expect(offeredModels(liveModels, enforcedAllowedModelIds([{ id: 'gpt-5.5', name: 'b' }])).map(model => model.id)).toEqual(offeredIds);
+  // A previously saved Spark id is offered once the runtime reports it.
+  const withSpark = enforcedAllowedModelIds([{ id: 'gpt-6-astra', name: 'a' }, { id: 'gpt-5.3-codex-spark', name: 's' }]);
+  expect(offeredModels(liveModels, withSpark).map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.3-codex-spark']);
+  expect(offeredModels(liveModels, withSpark).map(model => model.id)).not.toContain('gpt-5.5');
 });

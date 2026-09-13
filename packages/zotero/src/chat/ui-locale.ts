@@ -76,6 +76,9 @@ const COPY: Readonly<Record<string, string>> = {
   // Native Zotero Preferences pane (workspace/preferences-pane.ts). Messages the store raises
   // through the same text reach the sidebar too, so the key is deliberately shared.
   Chat: '对话', 'Research preferences': '研究偏好', 'Research profiles': '研究配置',
+  Models: '模型', 'PDF text': 'PDF 文本',
+  'Choose which models the composer may offer. This list is the catalog bundled with the pinned Codex runtime, not a live report of your account\'s entitlements. The GPT-5.3-Spark models come from the running Codex runtime and are not in the bundled catalog, so they appear here only after a runtime has reported them; no ids are guessed. The exact id under each name is what is sent.': '选择对话输入框可以提供哪些模型。此列表是固定版本 Codex 运行时随包附带的模型目录，并非你账户权限的实时报告。GPT-5.3-Spark 模型由正在运行的 Codex 运行时提供，不在随包目录中，因此只有在某个运行时报告过它们之后才会出现在这里；不会猜测任何 id。每个名称下方显示的确切 id 就是实际发送的 id。',
+  'Choose which models the composer may offer. This list combines the models the running Codex runtime reported for this account with the GPT-6 and GPT-5.6 models in the bundled catalog. The exact id under each name is what is sent.': '选择对话输入框可以提供哪些模型。此列表由正在运行的 Codex 运行时为此账户报告的模型，加上随包目录中的 GPT-6 与 GPT-5.6 模型组成。每个名称下方显示的确切 id 就是实际发送的 id。',
   'Profile being edited': '正在编辑的研究配置', 'No profile selected': '未选择研究配置',
   'Interface language saved.': '界面语言已保存。', 'Chat text scale saved.': '聊天字号已保存。',
   'Automatic PDF text preparation is on.': '已开启自动准备 PDF 文本。', 'Automatic PDF text preparation is off.': '已关闭自动准备 PDF 文本。',

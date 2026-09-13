@@ -9,15 +9,35 @@ import { PINNED_MODEL_CATALOG } from '../../../../runtime/model-capabilities.ts'
  * Preferences pane renders, and the resolver the picker consumes. It deliberately lives in core so
  * the store, the pane and the composer all agree without a second list.
  *
- * Honest boundary: the candidate list is the model catalog embedded in the pinned runtime binary,
- * not the account's live `model/list` entitlements. The Preferences window can be opened before the
- * runtime is started (and starting one just to draw a form would be a side effect), so the pane
- * cannot show live entitlements; it does not claim to. A model the account is entitled to but that
- * is absent from the pinned catalog therefore cannot be selected in the pane.
+ * Two sources feed the offerable set, and both are id-driven:
+ *
+ * - The pinned catalog embedded in the runtime binary (GPT-6 and GPT-5.6 today), which is available
+ *   even before the runtime starts because the Preferences window can be opened first.
+ * - The runtime's live `model/list`, which is the only source that can report the GPT-5.3 Spark
+ *   family. Those ids are not in the bundled catalog; they become selectable once the runtime
+ *   reports them and are then persisted in the allowlist so they keep working.
+ *
+ * The pane never invents an id: with no live list it shows only the bundled families and says the
+ * Spark models come from the runtime. Excluded families (GPT-5.5, GPT-5.4, GPT-5.2, the daybreak
+ * ids and the auto-review agent) never become candidates, however they arrive.
  */
 
 /** Exact model-id shape: runtime ids contain `.`, `-` and `_`, so the skill `identifier` shape is too strict. */
 export const MODEL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
+
+/**
+ * Family membership is derived from the exact reported id, never from a per-family list of guessed
+ * ids. The boundary group keeps near misses (`gpt-60`, `gpt-5.60-sol`) out, and the Spark marker is
+ * required for GPT-5.3 so a plain `gpt-5.3` or `gpt-5.3-codex` is not offered.
+ */
+const BUNDLED_FAMILY = /^gpt-(?:6|5\.6)(?:$|[-.])/u;
+const SPARK_FAMILY = /^gpt-5\.3(?:$|[-.])/u;
+const SPARK_MARKER = /spark/iu;
+
+/** True for exactly the ids the allowlist may offer: GPT-6, GPT-5.6, and the GPT-5.3 Spark family. */
+export function isOfferableModelId(id: string): boolean {
+  return BUNDLED_FAMILY.test(id) || (SPARK_FAMILY.test(id) && SPARK_MARKER.test(id));
+}
 
 const ACRONYMS: Readonly<Record<string, string>> = { gpt: 'GPT', ai: 'AI' };
 function titleCase(part: string): string {
@@ -26,7 +46,8 @@ function titleCase(part: string): string {
 }
 /**
  * A readable label derived from the exact id. The pinned catalog has no display names and the live
- * `model/list` display names are not persisted, so every label here is local to this reader.
+ * `model/list` display names are not persisted, so every label here is local to this reader and
+ * derived from the id it names — never a fabricated product name.
  */
 export function modelLabel(id: string): string {
   const words = id.split(/[-_]/u).filter(Boolean).map(titleCase);
@@ -45,27 +66,39 @@ export function defaultAllowedModels(): AllowedModel[] {
 
 export interface ModelCandidate { id: string; name: string }
 
-/** Every model the bundled pinned catalog knows about, in catalog order (newest listed first). */
-export function modelCandidates(): ModelCandidate[] {
-  return Object.keys(PINNED_MODEL_CATALOG.models).map(id => ({ id, name: modelLabel(id) }));
+/**
+ * Every model the pane may offer, in a stable order: the bundled catalog's offerable families first
+ * (newest listed first), then any runtime-reported id in those families that the catalog lacks — in
+ * practice the GPT-5.3 Spark models. Excluded families are filtered out on both paths, and an id is
+ * never repeated, so a live list that echoes a catalog id does not duplicate a row.
+ */
+export function modelCandidates(liveModelIds: readonly string[] = []): ModelCandidate[] {
+  const ids = Object.keys(PINNED_MODEL_CATALOG.models).filter(isOfferableModelId);
+  const known = new Set(ids);
+  for (const id of liveModelIds) {
+    if (known.has(id) || !isOfferableModelId(id)) continue;
+    known.add(id);
+    ids.push(id);
+  }
+  return ids.map(id => ({ id, name: modelLabel(id) }));
 }
 
 /**
  * The exact ids a record allows. An absent field means the default set; duplicates are collapsed.
- * Ids that the pane no longer knows about are preserved, so an unknown or removed model never
- * turns into an error or a silent drop.
+ * Ids that the pane no longer offers are preserved, so an unknown or removed model never turns into
+ * an error or a silent drop. This is the record-level honesty guarantee; the picker enforcement in
+ * `enforcedAllowedModelIds` is what keeps an offerable set restricted.
  */
 export function allowedModelIds(allowedModels: readonly AllowedModel[] | undefined): string[] {
   return [...new Set((allowedModels ?? defaultAllowedModels()).map(model => model.id))];
 }
 
 /**
- * The models the picker may offer from a runtime catalog: exactly the allowed ids the catalog
- * contains, in the catalog's own order. This is the resolver the composer wiring consumes; it is
- * deliberately pure so it can be unit-tested without a runtime.
+ * The models the picker may offer from a runtime catalog: the offerable allowed ids the catalog
+ * contains, in the catalog's own order. Pure, so it can be unit-tested without a runtime.
  */
 export function resolveAllowedModels(models: readonly ModelOption[], allowedModels: readonly AllowedModel[] | undefined): ModelOption[] {
-  const allowed = new Set(allowedModelIds(allowedModels));
+  const allowed = new Set(allowedModelIds(allowedModels).filter(isOfferableModelId));
   return models.filter(model => allowed.has(model.id));
 }
 
@@ -83,20 +116,31 @@ export function isDefaultAllowedModels(allowedModels: readonly AllowedModel[] | 
 
 /**
  * The allowlist the picker should enforce: `undefined` while the stored list is the untouched
- * default (so the pre-existing family rule stays exactly as it was), otherwise the exact ids to
- * offer. The composer wiring passes this straight to `offeredModels(models, allowedIds)`.
+ * default (so the pre-existing family rule stays exactly as it was), otherwise the offerable ids to
+ * offer. A stale id the picker no longer offers is filtered out, and a list with nothing offerable
+ * left degrades to `undefined` — the family default — rather than blanking the picker or letting an
+ * excluded family back in. The stored record itself is never rewritten by this call.
  */
 export function enforcedAllowedModelIds(allowedModels: readonly AllowedModel[] | undefined): string[] | undefined {
-  return isDefaultAllowedModels(allowedModels) ? undefined : allowedModelIds(allowedModels);
+  if (isDefaultAllowedModels(allowedModels)) return undefined;
+  const ids = allowedModelIds(allowedModels).filter(isOfferableModelId);
+  return ids.length ? ids : undefined;
 }
 
 /**
- * The union of the pinned candidates and any stored id the catalog no longer lists, in a stable
- * order (catalog first, then preserved extras). The pane renders exactly these rows.
+ * The union of the offerable bundled candidates, any offerable id the runtime reports, and any
+ * saved offerable id neither source lists (for example a Spark selection saved before the runtime
+ * stopped), in a stable order. The pane renders exactly these rows; a stored id from an excluded
+ * family is never resurrected here, but `allowedModelIds` still preserves it in the record.
  */
-export function modelChoices(allowedModels: readonly AllowedModel[] | undefined): ModelCandidate[] {
-  const candidates = modelCandidates();
+export function modelChoices(allowedModels: readonly AllowedModel[] | undefined, liveModelIds: readonly string[] = []): ModelCandidate[] {
+  const candidates = modelCandidates(liveModelIds);
   const known = new Set(candidates.map(candidate => candidate.id));
-  const extras = (allowedModels ?? []).filter(model => !known.has(model.id)).map(model => ({ id: model.id, name: model.name }));
+  const extras: ModelCandidate[] = [];
+  for (const model of allowedModels ?? []) {
+    if (!isOfferableModelId(model.id) || known.has(model.id)) continue;
+    known.add(model.id);
+    extras.push({ id: model.id, name: modelLabel(model.id) });
+  }
   return [...candidates, ...extras];
 }

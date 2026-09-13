@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { ModelOption } from '../../packages/contracts/src/runtime.ts';
 import type { AllowedModel } from '../../packages/contracts/src/workspace.ts';
 import {
-  DEFAULT_ALLOWED_MODEL_IDS, MODEL_ID, allowedModelIds, defaultAllowedModels, enforcedAllowedModelIds, isDefaultAllowedModels, modelCandidates, modelChoices, modelLabel, resolveAllowedModels,
+  DEFAULT_ALLOWED_MODEL_IDS, MODEL_ID, allowedModelIds, defaultAllowedModels, enforcedAllowedModelIds, isDefaultAllowedModels, isOfferableModelId, modelCandidates, modelChoices, modelLabel, resolveAllowedModels,
 } from '../../packages/core/src/workspace/allowed-models.ts';
 import { PINNED_MODEL_CATALOG } from '../../runtime/model-capabilities.ts';
 
@@ -23,33 +23,63 @@ it('defaults to exactly the GPT-6 + GPT-5.6 set the composer offered before the 
   expect(allowedModelIds([{ id: 'gpt-6-astra', name: 'x' }, { id: 'gpt-6-astra', name: 'y' }])).toEqual(['gpt-6-astra']);
 });
 
-it('offers every model the bundled pinned catalog knows about, newest listed first', () => {
+it('offers only the GPT-6 and GPT-5.6 families from the bundled catalog, newest listed first', () => {
   const candidates = modelCandidates();
-  expect(candidates.map(candidate => candidate.id)).toEqual(Object.keys(PINNED_MODEL_CATALOG.models));
+  expect(candidates.map(candidate => candidate.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
   expect(candidates[0]).toEqual({ id: 'gpt-6-astra', name: 'GPT-6 Astra' });
-  expect(candidates.some(candidate => candidate.id === 'gpt-daybreak-blue-latest')).toBe(true);
-  expect(candidates).toHaveLength(11);
+  expect(candidates.at(-1)).toEqual({ id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' });
+  // The catalog still carries the excluded ids for capability lookups; the picker just never offers them.
+  for (const excluded of ['gpt-daybreak-blue-latest', 'gpt-daybreak-red-latest', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'codex-auto-review']) {
+    expect(PINNED_MODEL_CATALOG.models[excluded as keyof typeof PINNED_MODEL_CATALOG.models], excluded).toBeDefined();
+    expect(candidates.map(candidate => candidate.id), excluded).not.toContain(excluded);
+  }
 });
 
-it('resolves the allowed set against a runtime catalog without inventing models', () => {
+it('derives family membership from the exact id and stays strict about it', () => {
+  for (const id of ['gpt-6-astra', 'gpt-6', 'gpt-6-terra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark', 'gpt-5.3-spark']) {
+    expect(isOfferableModelId(id), id).toBe(true);
+  }
+  for (const id of ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'gpt-daybreak-blue-latest', 'gpt-daybreak-red-latest', 'codex-auto-review', 'gpt-60', 'gpt-5.60-sol', 'gpt-5.3', 'gpt-5.3-codex', 'gpt-5.30-spark', 'gpt-7-future', '']) {
+    expect(isOfferableModelId(id), id).toBe(false);
+  }
+});
+
+it('adds runtime-reported GPT-5.3 Spark ids and never an excluded family', () => {
+  const live = ['gpt-5.6-sol', 'gpt-5.3-codex-spark', 'gpt-5.5', 'gpt-5.4', 'codex-auto-review', 'gpt-daybreak-blue-latest'];
+  expect(modelCandidates(live).map(candidate => candidate.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark']);
+  expect(modelCandidates(live).at(-1)).toEqual({ id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' });
+  // A live id already in the catalog is never duplicated.
+  expect(modelCandidates(['gpt-6-astra', 'gpt-6-astra']).map(candidate => candidate.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+});
+
+it('resolves the allowed set against a runtime catalog without leaking excluded families', () => {
   const catalog = [model('gpt-5.5'), model('gpt-6-astra', 'GPT-6-Astra'), model('gpt-5.6-sol'), model('gpt-5.4')];
   // The default allowlist keeps only its own ids, in the catalog's own order.
   expect(resolveAllowedModels(catalog, undefined).map(entry => entry.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol']);
-  // An explicit allowlist is authoritative: it adds a non-family model and drops a default one.
+  // An explicit allowlist is authoritative, but an id the picker no longer offers must not leak back in.
   const allowed: AllowedModel[] = [{ id: 'gpt-5.5', name: 'GPT-5.5' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }];
-  expect(resolveAllowedModels(catalog, allowed).map(entry => entry.id)).toEqual(['gpt-5.5', 'gpt-6-astra']);
+  expect(resolveAllowedModels(catalog, allowed).map(entry => entry.id)).toEqual(['gpt-6-astra']);
   // An allowed id the account does not offer is never invented.
   expect(resolveAllowedModels(catalog, [{ id: 'gpt-7-future', name: 'GPT-7 Future' }])).toEqual([]);
 });
 
-it('preserves unknown or removed allowed ids instead of dropping them or erroring', () => {
+it('preserves unknown or removed allowed ids in the record without offering them', () => {
   const stored: AllowedModel[] = [{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }, { id: 'gpt-retired-x', name: 'GPT Retired X' }];
+  // The honesty guarantee: an id the picker no longer knows is preserved, never dropped or errored.
   expect(allowedModelIds(stored)).toEqual(['gpt-6-astra', 'gpt-retired-x']);
-  // The pane renders the catalog first and keeps the preserved extra as its own row.
-  const choices = modelChoices(stored);
-  expect(choices.slice(0, modelCandidates().length).map(candidate => candidate.id)).toEqual(modelCandidates().map(candidate => candidate.id));
-  expect(choices.at(-1)).toEqual({ id: 'gpt-retired-x', name: 'GPT Retired X' });
+  // The pane renders only offerable ids, so a removed family does not come back as a row.
+  expect(modelChoices(stored).map(candidate => candidate.id)).toEqual(modelCandidates().map(candidate => candidate.id));
+  // The picker enforces only the still-offerable part.
+  expect(enforcedAllowedModelIds(stored)).toEqual(['gpt-6-astra']);
   expect(modelChoices(undefined)).toEqual(modelCandidates());
+});
+
+it('keeps a saved Spark id as a row without inventing one when no runtime has reported it', () => {
+  const stored: AllowedModel[] = [...defaultAllowedModels(), { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' }, { id: 'gpt-5.5', name: 'GPT-5.5' }];
+  expect(modelChoices(stored).map(candidate => candidate.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark']);
+  expect(modelChoices(stored).some(candidate => candidate.id === 'gpt-5.5')).toBe(false);
+  // With no live list and no saved Spark id, no Spark row is created from nothing.
+  expect(modelChoices(undefined).some(candidate => candidate.id.startsWith('gpt-5.3'))).toBe(false);
 });
 
 it('accepts exact dotted runtime ids and rejects malformed ones', () => {
@@ -57,6 +87,7 @@ it('accepts exact dotted runtime ids and rejects malformed ones', () => {
   for (const id of ['', '.starts-with-dot', 'has space', 'x'.repeat(129)]) expect(MODEL_ID.test(id), id).toBe(false);
   expect(modelLabel('codex-auto-review')).toBe('Codex Auto Review');
   expect(modelLabel('gpt-daybreak-blue-latest')).toBe('GPT Daybreak Blue Latest');
+  expect(modelLabel('gpt-5.3-codex-spark')).toBe('GPT-5.3 Codex Spark');
 });
 
 it('leaves the pre-existing family rule in force until the owner edits the allowlist', () => {
@@ -72,7 +103,18 @@ it('leaves the pre-existing family rule in force until the owner edits the allow
   const narrowed = defaultAllowedModels().filter(entry => entry.id !== 'gpt-5.6-luna');
   expect(isDefaultAllowedModels(narrowed)).toBe(false);
   expect(enforcedAllowedModelIds(narrowed)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']);
-  const widened = [...defaultAllowedModels(), { id: 'gpt-5.5', name: 'GPT-5.5' }];
-  expect(isDefaultAllowedModels(widened)).toBe(false);
-  expect(enforcedAllowedModelIds(widened)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']);
+  const withSpark = [...defaultAllowedModels(), { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' }];
+  expect(isDefaultAllowedModels(withSpark)).toBe(false);
+  expect(enforcedAllowedModelIds(withSpark)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.3-codex-spark']);
+});
+
+it('keeps an excluded id out of the picker and degrades to the family default when nothing is left', () => {
+  // A stale entry is filtered; the still-offerable part of the list survives untouched.
+  expect(enforcedAllowedModelIds([{ id: 'gpt-6-astra', name: 'a' }, { id: 'gpt-5.5', name: 'b' }])).toEqual(['gpt-6-astra']);
+  expect(enforcedAllowedModelIds([{ id: 'gpt-5.6-luna', name: 'a' }, { id: 'codex-auto-review', name: 'b' }, { id: 'gpt-5.4', name: 'c' }])).toEqual(['gpt-5.6-luna']);
+  // A list with nothing offerable left degrades to the family default instead of blanking the picker.
+  expect(enforcedAllowedModelIds([{ id: 'gpt-5.5', name: 'a' }, { id: 'gpt-5.2', name: 'b' }])).toBeUndefined();
+  expect(enforcedAllowedModelIds([{ id: 'gpt-retired-x', name: 'a' }])).toBeUndefined();
+  // Nothing is dropped from the record itself: only the picker enforcement narrows.
+  expect(allowedModelIds([{ id: 'gpt-5.5', name: 'a' }, { id: 'gpt-5.2', name: 'b' }])).toEqual(['gpt-5.5', 'gpt-5.2']);
 });
