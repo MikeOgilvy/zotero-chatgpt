@@ -1,4 +1,4 @@
-import { requestProgress, type Citation, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
+import { requestProgress, type Citation, type ContextReport, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
 import type { HistoryEntry } from '../../../contracts/src/workspace.ts';
 import { currentContextUsage, mountContextRing } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
@@ -104,6 +104,26 @@ const COPY = {
   /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
   sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
   continueWithPdf: 'Continue with current PDF',
+  // Context coverage disclosure on the composer ring. Every string here is user-facing copy awaiting
+  // unification into `ui-locale.ts`; the static ones carry `data-zcr-ui="true"` so `mountUILocale`
+  // picks them up the moment the keys exist. The dynamic ones are listed for the coordinator too.
+  contextDetail: 'Context supplied to the last request',
+  contextDetailMode: 'Mode',
+  contextDetailModeFull: 'Whole source',
+  contextDetailModeFocused: 'Question-focused selection',
+  contextDetailModeMultiPass: 'Multi-pass reading',
+  contextDetailPages: 'Pages supplied',
+  contextDetailPageSet: 'Page numbers',
+  contextDetailWindow: 'Model window',
+  contextDetailWindowUnknown: 'unknown',
+  contextDetailAllowance: 'Text allowance',
+  contextDetailAllowanceUnknown: 'not asserted',
+  contextDetailNoFit: 'Fit was not asserted: model capacity or retained history is unknown.',
+  contextDetailCoverage: 'What was supplied and what was not',
+  contextDetailPagesValue: (supplied: number, total: number) => `${supplied} of ${total} pages`,
+  contextDetailWindowValue: (tokens: number, provenance: 'runtime-reported' | 'pinned-catalog') => `${tokens.toLocaleString('en-US')} tokens (${provenance === 'runtime-reported' ? 'runtime reported' : 'bundled catalog estimate'})`,
+  contextDetailAllowanceValue: (tokens: number) => `${tokens.toLocaleString('en-US')} tokens`,
+  contextDetailMore: (count: number) => `and ${count} more`,
 } as const;
 const VIEW_ACTION_FAILED = COPY.actionFailed;
 /** Stable English section labels; `mountUILocale` translates the rendered heading text. */
@@ -229,6 +249,58 @@ export function historyStatus(entry: { activeRequestId: string | null; messages?
   if (entry.activeRequestId) return 'active';
   const count = entry.messageCount ?? entry.messages?.length ?? 0;
   return count === 0 ? 'draft' : 'done';
+}
+/**
+ * Page indexes are 0-based in the contract and 1-based in front of a reader, so each supplied index
+ * is shown as `index + 1`. Contiguous runs collapse into ranges and a long set is truncated with its
+ * remainder counted, so nothing is silently dropped without saying so.
+ */
+function pageSetLabel(indexes: number[]): string {
+  const numbers = [...new Set(indexes.map(index => index + 1))].sort((a, b) => a - b);
+  if (!numbers.length) return '—';
+  const parts: string[] = [];
+  let start = numbers[0]!; let end = start;
+  for (const value of numbers.slice(1)) {
+    if (value === end + 1) { end = value; continue; }
+    parts.push(start === end ? String(start) : `${start}–${end}`); start = value; end = value;
+  }
+  parts.push(start === end ? String(start) : `${start}–${end}`);
+  return parts.length <= 12 ? parts.join(', ') : `${parts.slice(0, 12).join(', ')}, ${COPY.contextDetailMore(parts.length - 12)}`;
+}
+/**
+ * The last request's concrete context report, rendered for the ring's hover/focus disclosure. Every
+ * field comes from {@link ContextReport} exactly as the planner recorded it: nothing is re-derived,
+ * and a field the report leaves unknown is shown as unknown rather than guessed. Static strings carry
+ * `data-zcr-ui="true"` so `mountUILocale` translates them as soon as their keys are unified into
+ * `ui-locale.ts`; strings built from counts stay verbatim until a pattern rule exists for them.
+ */
+function contextDetailNodes(doc: Document, report: ContextReport): HTMLElement {
+  const node = (tag: string, className: string, text = ''): HTMLElement => {
+    const element = doc.createElementNS(HTML, tag);
+    element.className = className; if (text) element.textContent = text;
+    return element;
+  };
+  const line = (label: string, value: string, staticValue: boolean) => {
+    const row = node('p', 'zcr-context-detail');
+    const name = node('span', 'zcr-context-detail-label', label); name.setAttribute('data-zcr-ui', 'true');
+    const text = node('span', 'zcr-context-detail-value', value); if (staticValue) text.setAttribute('data-zcr-ui', 'true');
+    row.append(name, doc.createTextNode(' '), text);
+    return row;
+  };
+  const body = node('div', 'zcr-context-details-body');
+  const title = node('p', 'zcr-context-details-title', COPY.contextDetail); title.setAttribute('data-zcr-ui', 'true');
+  const mode = report.mode === 'full' ? COPY.contextDetailModeFull : report.mode === 'focused' ? COPY.contextDetailModeFocused : COPY.contextDetailModeMultiPass;
+  const windowKnown = report.capacity !== null;
+  const allowanceKnown = report.textBudgetTokens !== null;
+  body.append(title, line(COPY.contextDetailMode, mode, true));
+  body.append(line(COPY.contextDetailPages, COPY.contextDetailPagesValue(report.selectedPages.length, report.totalPages), false));
+  if (report.selectedPages.length < report.totalPages) body.append(line(COPY.contextDetailPageSet, pageSetLabel(report.selectedPages), false));
+  body.append(line(COPY.contextDetailWindow, windowKnown ? COPY.contextDetailWindowValue(report.capacity!, report.provenance === 'pinned-catalog' ? 'pinned-catalog' : 'runtime-reported') : COPY.contextDetailWindowUnknown, !windowKnown));
+  body.append(line(COPY.contextDetailAllowance, allowanceKnown ? COPY.contextDetailAllowanceValue(report.textBudgetTokens!) : COPY.contextDetailAllowanceUnknown, !allowanceKnown));
+  if (!allowanceKnown || report.provenance === 'unknown') { const noFit = node('p', 'zcr-context-detail zcr-context-detail-nofit', COPY.contextDetailNoFit); noFit.setAttribute('data-zcr-ui', 'true'); body.append(noFit); }
+  const coverage = node('p', 'zcr-context-detail-label', COPY.contextDetailCoverage); coverage.setAttribute('data-zcr-ui', 'true');
+  body.append(coverage, node('p', 'zcr-context-detail-reason', report.reason));
+  return body;
 }
 interface HistoryRowSource {
   id: string;
@@ -564,13 +636,17 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   bar.append(leading, trailing);
   const menu = el('div', 'zcr-picker-menu'); menu.dataset.zcrPickerMenu = ''; menu.hidden = true; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', COPY.settings);
   menu.id = `${viewId}-models`;
-  composer.append(composerContext, input, bar, menu);
+  // The ring's coverage disclosure sits with the other composer popovers: anchored above the card,
+  // hidden until hover or focus, and carrying no interactive content.
+  composer.append(composerContext, input, bar, menu, contextRing.details);
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
   chat.append(chrome, settingsMenu, contextSource, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
+  /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
+  let contextReportKey: string | null = null;
   let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
   let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
   // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
@@ -1356,6 +1432,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     picker.disabled = !signedIn;
     const usage = currentContextUsage(state.draft.settings?.model ?? state.conversation?.settings.model, state.conversation?.usage);
     contextRing.update(usage);
+    // The ring's details are the only renderer of `state.contextReport`; they are rebuilt only when
+    // the report changes, and cleared to null on a new chat so nothing is invented before a request.
+    const reportKey = state.contextReport ? JSON.stringify(state.contextReport) : null;
+    if (reportKey !== contextReportKey) { contextReportKey = reportKey; contextRing.report(state.contextReport ? contextDetailNodes(doc, state.contextReport) : null); }
     const hasInput = state.draft.question.trim().length > 0;
     const canSend = state.connection === 'ready' && account === 'signedIn' && !state.generating && hasInput;
     send.disabled = !canSend; send.hidden = state.generating; stop.hidden = !state.generating;

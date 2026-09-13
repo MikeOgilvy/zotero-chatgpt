@@ -13,6 +13,7 @@ import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/
 import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput, type SendReceipt } from '../../packages/contracts/src/index.ts';
 import type { HistoryEntry, ReaderWorkspace } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
+import type { ContextBudget } from '../../packages/core/src/codex/model-capabilities.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
 import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
@@ -57,6 +58,7 @@ async function mountReadyChat(options: {
   clipboardImages?: () => Promise<ImageAttachment[]>;
   workspace?: ReaderWorkspace;
   closeDock?: () => void;
+  contextBudget?: (input: SendInput, conversation: Conversation) => ContextBudget;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -162,6 +164,7 @@ async function mountReadyChat(options: {
     ...(options.document ? { document: options.document } : {}),
     ...(options.clipboardImages ? { readClipboardImage: options.clipboardImages } : {}),
     ...(options.workspace ? { getWorkspace: () => Promise.resolve(options.workspace!) } : {}),
+    ...(options.contextBudget ? { contextBudget: options.contextBudget } : {}),
   });
   if (options.draftCitations) {
     for (const citation of options.draftCitations) presenter.addCitation(citation);
@@ -501,6 +504,124 @@ it('fills the ring from the last runtime report and keeps the numbers in the too
   const filled = ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')!.split(' ').map(Number);
   expect(filled[1]).toBeCloseTo(50.27, 2);
   expect(filled[0]! / filled[1]!).toBeCloseTo(12345 / 128000, 4);
+});
+
+it('shows the concrete context report on the ring, only after a request and only on hover or focus', async () => {
+  const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({
+    messages: [], sent,
+    document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
+  // Before any request the ring stays in its neutral unknown state and invents no coverage.
+  expect(details.hidden).toBe(true);
+  expect(details.textContent).toBe('');
+  expect(ring.getAttribute('aria-describedby')).toBeNull();
+  expect(ring.title).not.toBe('');
+  expect(ring.tabIndex).toBe(0);
+  presenter.setQuestion('What does this paper claim?');
+  await presenter.send();
+  await vi.waitFor(() => expect(presenter.snapshot().contextReport).not.toBeNull());
+  expect(sent).toHaveLength(1);
+  // The report is described but stays closed until the reader asks for it.
+  expect(details.hidden).toBe(true);
+  expect(ring.getAttribute('aria-describedby')).toBe(details.id);
+  expect(details.getAttribute('role')).toBe('tooltip');
+  expect(details.textContent).toContain('Whole source');
+  expect(details.textContent).toContain('2 of 2 pages');
+  expect(details.textContent).toContain('Model window unknown');
+  expect(details.textContent).toContain('Text allowance not asserted');
+  expect(details.textContent).toContain('Fit was not asserted');
+  expect(details.textContent).toContain('All locally extracted authorized text is supplied');
+  // The native title would double up with the disclosure on hover, so it is cleared while one exists.
+  expect(ring.title).toBe('');
+  // Keyboard first: focus opens the same disclosure a pointer gets.
+  ring.focus();
+  expect(details.hidden).toBe(false);
+  ring.blur();
+  expect(details.hidden).toBe(true);
+  const view = root.ownerDocument.defaultView!;
+  ring.dispatchEvent(new view.Event('mouseenter'));
+  expect(details.hidden).toBe(false);
+  ring.dispatchEvent(new view.Event('mouseleave'));
+  expect(details.hidden).toBe(true);
+  // A new chat clears the report rather than leaving the last request's coverage on screen.
+  await presenter.newConversation();
+  expect(presenter.snapshot().contextReport).toBeNull();
+  expect(details.hidden).toBe(true);
+  expect(details.textContent).toBe('');
+});
+
+it('names the supplied page set and the excluded pages on the ring for a focused send', async () => {
+  const long = { ...structuredClone(documentA), pages: [
+    { ...documentA.pages[0]!, text: 'Definition: x denotes the hidden state.\n\n'.repeat(80) },
+    { ...documentA.pages[1]!, text: 'A source paragraph about many other things.\n\n'.repeat(80) },
+  ] };
+  const { root, presenter } = await mountReadyChat({
+    messages: [],
+    document: { prepare: () => Promise.resolve(long), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+    contextBudget: () => ({ capacity: 100000, provenance: 'runtime-reported', accuracy: 'estimate', textBudgetTokens: 1500, reservations: { history: 0, instructions: 1000, workflow: 1000, images: 0, question: 100, output: 1000, safety: 1000, total: 4100 }, overBudget: false, assumptions: ['synthetic test budget'] }),
+  });
+  presenter.setQuestion('What is the definition of x?');
+  await presenter.send();
+  await vi.waitFor(() => expect(presenter.snapshot().contextReport?.mode).toBe('focused'));
+  const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
+  expect(details.textContent).toContain('Question-focused selection');
+  // The report's own counts, and the concrete page indexes it selected, are visible rather than implied.
+  expect(details.textContent).toContain('1 of 2 pages');
+  expect(details.textContent).toContain('Page numbers 1');
+  // The reason is the planner's, so the pages it left out are named instead of merely implied.
+  expect(details.textContent).toContain('Excluded pages: ii');
+  expect(details.textContent).toContain('other authorized pages were not included');
+});
+
+it('keeps the ring coverage disclosure after a UI-language switch', async () => {
+  let language: 'en' | 'zh' = 'en';
+  const base = historyWorkspace([]);
+  const workspace: ReaderWorkspace = {
+    ...base,
+    settings: () => Promise.resolve({ ...defaultSettings(), uiLanguage: language }),
+    saveSettings: value => { language = value.uiLanguage; return Promise.resolve(); },
+  };
+  const { root, presenter } = await mountReadyChat({
+    messages: [], workspace,
+    document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  presenter.setQuestion('What does this paper claim?');
+  await presenter.send();
+  await vi.waitFor(() => expect(presenter.snapshot().contextReport).not.toBeNull());
+  const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
+  expect(details.textContent).toContain('2 of 2 pages');
+  await presenter.saveAppearance({ uiLanguage: 'zh' });
+  await vi.waitFor(() => expect(presenter.snapshot().workspace?.uiLanguage).toBe('zh'));
+  // The disclosure survives the switch in place: it is not torn down, emptied or rebuilt from scratch.
+  expect(root.querySelector<HTMLElement>('.zcr-context-details')).toBe(details);
+  expect(details.textContent).toContain('2 of 2 pages');
+  expect(details.textContent).toContain('All locally extracted authorized text is supplied');
+  // Its static copy is marked as UI text, which is the hook `mountUILocale` already selects; the
+  // translated values arrive when the keys are unified into `ui-locale.ts`.
+  const staticNodes = [...details.querySelectorAll<HTMLElement>('[data-zcr-ui="true"]')];
+  expect(staticNodes.length).toBeGreaterThan(0);
+  expect(staticNodes.map(node => node.textContent)).toContain('Context supplied to the last request');
+});
+
+it('closes the dock once and stays a safe no-op for a repeat close or with no chat open', async () => {
+  const closeDock = vi.fn();
+  const { root, presenter, teardown } = await mountReadyChat({ messages: [], closeDock });
+  const closeCurrent = root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!;
+  closeCurrent.click();
+  expect(presenter.snapshot().conversation).toBeNull();
+  expect(closeDock).toHaveBeenCalledTimes(1);
+  // A second close finds no open chat: no second collapse, no throw, and the `+` stays available.
+  closeCurrent.click();
+  expect(closeDock).toHaveBeenCalledTimes(1);
+  expect(presenter.closeConversation()).toBe(false);
+  expect(closeDock).toHaveBeenCalledTimes(1);
+  // A close arriving after the view is torn down is still a no-op rather than a crash.
+  teardown();
+  expect(presenter.closeConversation()).toBe(false);
+  expect(closeDock).toHaveBeenCalledTimes(1);
 });
 
 it('counts the wait in whole seconds and refreshes it on each tick', async () => {

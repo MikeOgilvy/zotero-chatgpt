@@ -52,18 +52,40 @@ export function contextRingRatio(usage: ContextUsage | null): number | null {
   return Math.min(1, Math.max(0, usage.usedTokens / usage.window));
 }
 
-export interface ContextRing { element: HTMLElement; update(usage: ContextUsage | null): void }
+export interface ContextRing {
+  element: HTMLElement;
+  /**
+   * Detail affordance for the last request. The caller fills it with the concrete coverage report;
+   * the ring owns visibility, focus wiring and nothing else. It is never placed inside the ring, so
+   * the ring's own text stays empty.
+   */
+  details: HTMLElement;
+  update(usage: ContextUsage | null): void;
+  /**
+   * Publishes the last request's coverage report. `null` means no request has been sent yet: the
+   * disclosure stays unavailable rather than inventing coverage the runtime never reported.
+   */
+  report(content: HTMLElement | null): void;
+}
+let ringSerial = 0;
 /**
  * A small ring instead of a text chip. The ring is a state indicator, not a loading affordance:
  * with no honest proportion (no runtime report for this model, or no window known) it draws a
  * complete, unbroken ring in a neutral tone; once a window is known the ring is released into a
  * used/window arc. The numbers live in the hover title and the accessible name, so no token figure
- * occupies the composer's control row.
+ * occupies the composer's control row. Once a request has been sent the hover title is replaced by
+ * the caller's coverage disclosure, which is reachable by keyboard focus as well as hover.
  */
 export function mountContextRing(parent: HTMLElement): ContextRing {
   const doc = parent.ownerDocument;
   const element = doc.createElementNS(HTML_NS, 'span');
   element.className = 'zcr-context-ring'; element.dataset.zcrContextUsage = ''; element.setAttribute('role', 'status');
+  // Hover-only would exclude keyboard users, so the ring is a tab stop with the disclosure as its
+  // description. The disclosure holds no interactive content: it is a tooltip, never a menu.
+  element.tabIndex = 0;
+  const details = doc.createElement('div');
+  details.className = 'zcr-context-details'; details.hidden = true; details.setAttribute('role', 'tooltip');
+  details.id = `zcr-context-details-${++ringSerial}`;
   const svg = doc.createElementNS(SVG_NS, 'svg');
   for (const [name, value] of [['viewBox', '0 0 20 20'], ['width', '16'], ['height', '16'], ['aria-hidden', 'true'], ['focusable', 'false']] as const) svg.setAttribute(name, value);
   const circle = (className: string) => {
@@ -75,6 +97,24 @@ export function mountContextRing(parent: HTMLElement): ContextRing {
   const fill = circle('zcr-context-ring-fill');
   fill.setAttribute('transform', 'rotate(-90 10 10)');
   svg.append(track, fill); element.append(svg); parent.append(element);
+  let usageTitle = contextUsageTitle(null);
+  let content: HTMLElement | null = null;
+  const syncDescription = () => {
+    // With a coverage disclosure available, the native title would double up with it on hover, so the
+    // ring keeps only the accessible name until the report is cleared. Without one the title stays.
+    const title = content === null ? usageTitle : '';
+    if (element.title !== title) element.title = title;
+    if (element.getAttribute('aria-label') !== usageTitle) element.setAttribute('aria-label', usageTitle);
+    if (content === null) { if (element.hasAttribute('aria-describedby')) element.removeAttribute('aria-describedby'); }
+    else if (element.getAttribute('aria-describedby') !== details.id) element.setAttribute('aria-describedby', details.id);
+  };
+  const show = () => { if (content !== null) details.hidden = false; };
+  const hide = () => { details.hidden = true; };
+  element.addEventListener('mouseenter', show);
+  element.addEventListener('mouseleave', hide);
+  element.addEventListener('focus', show);
+  element.addEventListener('blur', hide);
+  element.addEventListener('keydown', event => { if (event.key === 'Escape' && !details.hidden) hide(); });
   const update = (usage: ContextUsage | null) => {
     const ratio = contextRingRatio(usage);
     element.dataset.zcrContextState = ratio === null ? 'unknown' : usage!.provenance;
@@ -82,10 +122,16 @@ export function mountContextRing(parent: HTMLElement): ContextRing {
     // gap, which reads as a deliberately solid "unknown" ring rather than an empty placeholder.
     if (ratio === null) fill.setAttribute('stroke-dasharray', 'none');
     else fill.setAttribute('stroke-dasharray', `${(RING_CIRCUMFERENCE * ratio).toFixed(2)} ${RING_CIRCUMFERENCE.toFixed(2)}`);
-    const title = contextUsageTitle(usage);
-    if (element.title !== title) element.title = title;
-    if (element.getAttribute('aria-label') !== title) element.setAttribute('aria-label', title);
+    usageTitle = contextUsageTitle(usage);
+    syncDescription();
+  };
+  const report = (next: HTMLElement | null) => {
+    content = next;
+    details.replaceChildren(...(next ? [next] : []));
+    hide();
+    syncDescription();
   };
   update(null);
-  return { element, update };
+  report(null);
+  return { element, details, update, report };
 }

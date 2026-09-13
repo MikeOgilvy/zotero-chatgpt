@@ -317,7 +317,7 @@ it('makes every composer popover an opaque, shadowed surface stacked above the t
   const css = shippedCss();
   // happy-dom drops the `var()`/`Canvas` background declarations, so read the shipped block text.
   const block = (selector: string) => new RegExp(`${selector.replace(/\./gu, '\\.')}\\s*\\{([^}]*)\\}`, 'u').exec(css)?.[1] ?? '';
-  for (const selector of ['.zcr-plus-menu', '.zcr-picker-menu', '.zcr-command-menu']) {
+  for (const selector of ['.zcr-plus-menu', '.zcr-picker-menu', '.zcr-command-menu', '.zcr-context-details']) {
     const rule = shippedRule(doc, selector);
     // A see-through popover is the reported defect: the surface must carry the material token and
     // it must not be transparent anywhere.
@@ -333,9 +333,11 @@ it('makes every composer popover an opaque, shadowed surface stacked above the t
     expect(surface, `${selector} paints over an opaque base`).toMatch(/background-color:\s*Canvas/u);
     expect(surface, `${selector} layers the material over that base`).toMatch(/background-image:\s*linear-gradient\(var\(--material-menu/u);
   }
-  // The composer itself owns a layer above the transcript so nothing bleeds through it.
+  // The composer itself owns a layer above the transcript so nothing bleeds through it. It also must
+  // not clip: the ring's disclosure is anchored above the card and would be cut off by an overflow.
   const draft = shippedRule(doc, '.zcr-draft');
   expect(Number.parseInt(draft.zIndex, 10)).toBeGreaterThanOrEqual(1);
+  expect(css).not.toMatch(/\.zcr-composer\s*\{[^}]*overflow/u);
 });
 
 it('no longer carries bridge rules for the labelled header or the flat plus rows', () => {
