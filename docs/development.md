@@ -97,6 +97,21 @@ node scripts/prepare-host-test.mjs --s6
 
 存储/恢复测试必须覆盖旧 schema 1/2、当前 schema 3、缺失/损坏来源、哈希不匹配、请求与上游 item 关联、取消竞态、批次释放及 uncertain 不重发。兼容性机制见[架构文档](module-design.md)。备份与诊断只处理明确的非认证记录；不包含 account/、原始 stdio 或未经白名单过滤的日志。草稿、聊天、原生标注、缓存和退出登录有独立寿命，不能用删除其中一种代替停止另一种任务。
 
+## 人工登录的模型目录实测
+
+`--live-model` 是与 `--context` 并列的独立阶段，只在 `.zcr-dev/live/{profile,data}` 合成树上测量运行时实际解析出的模型目录：选择器中的模型 id、每个可选模型的推理强度档位与速度开关、以及当前选中的模型。报告写入 `.zcr-dev/live/host-report.json`，只含模型 id 与非识别性目录元数据。
+
+该阶段**不发任何模型请求**：没有 `turn/start`、没有问题、没有图像生成，也不读取、复制、记录或截图任何凭据文件。它必须有操作者在场，且只做**一次**由人完成的官方登录——driver 只等待侧栏变为 `signedIn`，绝不点击登录按钮、绝不输入凭据、绝不代替人走 OAuth 流程；等待超时（默认 30 分钟）时以 `login-not-completed` 结束，而不是伪造通过。driver 只被打进 `.zcr-dev/live/` 的隔离测试插件（`zcr-host-test@local`），**从不进入产品 XPI**。
+
+```sh
+node scripts/prepare-host-test.mjs --live-model
+/Applications/Zotero.app/Contents/MacOS/zotero \
+  -no-remote -profile "$PWD/.zcr-dev/live/profile" \
+  -datadir "$PWD/.zcr-dev/live/data"
+```
+
+`--live-model` 与 `--context`、`--native`、`--live`、`--acceptance` 互斥，也不在 CI 内（需要 macOS GUI 与操作者本人授权）。阶段名与 `.zcr-dev/live/` 树的映射由 `tests/build/host-test-stage.test.ts` 固定；具体模型、档位与账户能力一律以当次报告为准。
+
 ## 发行边界
 
 0.4.0a2 是开发预览，`update_url` 仍为 zcr-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
