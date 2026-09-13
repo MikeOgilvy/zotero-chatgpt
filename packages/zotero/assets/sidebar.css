@@ -263,11 +263,28 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-appearance label { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .zcr-appearance input[type=range] { flex: 1; min-width: 80px; }
 .zcr-appearance select { min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
-.zcr-input-actions { display: flex; min-width: 0; font-size: 12px; }
-.zcr-attachment-menu { position: relative; }
-.zcr-attachment-menu > summary { cursor: pointer; padding: 4px; line-height: 20px; }
-.zcr-attachment-menu[open] { position: absolute; bottom: calc(100% + 6px); inset-inline-start: 0; z-index: 14; display: flex; flex-direction: column; gap: 4px; width: min(240px, 90%); padding: 8px; border: 1px solid var(--zcr-border); border-radius: 8px; background: var(--material-menu, Canvas); box-shadow: 0 4px 16px color-mix(in srgb, CanvasText 14%, transparent); }
-.zcr-attachment-menu > input { min-width: 0; max-width: 100%; color: inherit; background: Field; border: 1px solid var(--zcr-border); border-radius: 5px; }
+/* The composer keeps exactly one control at its start: a plus menu with every attachment route. */
+.zcr-plus { color: var(--fill-secondary, GrayText); }
+.zcr-plus:hover, .zcr-plus[aria-expanded="true"] { background: var(--fill-quinary, ButtonFace); }
+.zcr-plus-menu {
+  position: absolute;
+  inset-inline-start: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--zcr-border);
+  border-radius: 10px;
+  background: var(--material-menu, Canvas);
+  box-shadow: 0 4px 16px color-mix(in srgb, CanvasText 14%, transparent);
+}
+.zcr-plus-menu[hidden] { display: none; }
+.zcr-plus-menu > input { min-width: 0; max-width: 100%; padding: 4px 6px; color: inherit; background: Field; border: 1px solid var(--zcr-border); border-radius: 5px; }
+.zcr-plus-menu > .zcr-button { justify-content: flex-start; }
+.zcr-plus-menu :focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
 .zcr-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: 11px; min-width: 0; }
 .zcr-acquisition-target select { min-width: 0; width: 100%; max-width: 100%; min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
 .zcr-history-preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fill-secondary, GrayText); font-size: 11px; font-weight: 400; margin-top: 2px; }

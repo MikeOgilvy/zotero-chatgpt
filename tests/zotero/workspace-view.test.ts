@@ -25,7 +25,7 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
   const key = (key: string) => input.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   const button = (label: string) => [...pane.querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === label || node.textContent === label)!;
-  return { document, pane, context, input, advanced, actions, view, state, type, key, button };
+  return { document, pane, context, input, leading, advanced, actions, view, state, type, key, button };
 }
 
 it('searches @ objects with a type filter and adds the selected snapshot without sending', async () => {
@@ -180,4 +180,19 @@ it('supports explicit @chat and /skill entrypoints in the same composer', async 
   await vi.waitFor(() => expect(actions.searchReferences).toHaveBeenLastCalledWith('recent', 'chat', expect.any(AbortSignal)));
   type('/skill Der'); key('Enter');
   await vi.waitFor(() => expect(actions.selectSkill).toHaveBeenCalledWith('derive'));
+});
+
+it('opens the reference chooser from the composer plus shortcut without a visible @ button', async () => {
+  const { pane, input, leading, actions, view } = setup();
+  // The composer's single plus button is the only attachment/context trigger; no '@' control is mounted here.
+  expect([...leading.querySelectorAll('button')]).toHaveLength(0);
+  expect([...pane.querySelectorAll('button')].some(node => node.textContent?.trim() === '@')).toBe(false);
+  view.openCommands();
+  await vi.waitFor(() => expect(actions.searchReferences).toHaveBeenCalledWith('', 'all', expect.any(AbortSignal)));
+  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  expect(menu.hidden).toBe(false);
+  expect(menu.textContent).toContain('References');
+  expect(input.ownerDocument.activeElement).toBe(input);
+  // The shortcut never rewrites the draft: it only chooses the search scope.
+  expect(input.value).toBe('');
 });

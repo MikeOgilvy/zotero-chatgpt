@@ -34,7 +34,7 @@ function referenceDetail(reference: ReaderReference): string {
 }
 
 /** Scoped controls only. Persistence, library reads and workflow execution stay in explicit ports. */
-export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { update(state: WorkspaceViewState): void; dispose(): void } {
+export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { openCommands(): void; update(state: WorkspaceViewState): void; dispose(): void } {
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
   const chips = create('div', '', 'zcr-workspace-chips'); chips.dataset.zcrWorkspaceChips = ''; mounts.context.append(chips);
@@ -106,7 +106,8 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     const control = button(label, () => { mode = kind === 'skills' ? 'skills' : 'references'; if (kind !== 'skills') filter = kind; search(); input.focus(); });
     filterControls.set(kind, control); menu.toolbar.append(control);
   }
-  const add = button('Add references or workflows', () => { trigger = null; query = ''; mode = 'references'; search(); input.focus(); }, '@'); mounts.leading.append(add);
+  /** The composer's single plus button routes here; no visible '@' trigger is mounted. */
+  const openCommands = () => { trigger = null; query = ''; mode = 'references'; search(); input.focus(); };
   const onInput = () => {
     if (composing) return;
     const end = input.selectionStart; const prefix = input.value.slice(0, end);
@@ -295,7 +296,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     placeChildren(skillList, nodes);
     if (!nodes.length) skillList.append(create('p', 'No workflows installed.', 'zcr-workspace-muted'));
   };
-  return { update: next => {
+  return { openCommands, update: next => {
     if (disposed) return; state = next;
     const nextChips = JSON.stringify([next.draft, next.settings.skills.map(skill => [skill.id, skill.name, skill.revision]), next.settings.profiles]);
     if (nextChips !== chipsKey) { chipsKey = nextChips; renderChips(); }
@@ -311,6 +312,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   }, dispose: () => {
     if (disposed) return; disposed = true; searchController?.abort(); previewController?.abort(); querySerial++;
     input.removeEventListener('input', onInput); input.removeEventListener('click', onInput); input.removeEventListener('keyup', onCaretKey); input.removeEventListener('compositionstart', onStart); input.removeEventListener('compositionend', onEnd);
-    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); advanced.remove(); add.remove();
+    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); advanced.remove();
   } };
 }

@@ -1142,3 +1142,57 @@ it('closes the model popover on Escape and click outside', async () => {
   root.ownerDocument.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true }));
   expect(menu.hidden).toBe(true);
 });
+
+it('keeps exactly one plus control at the composer start and removes the attach and @ buttons', async () => {
+  const { root } = await mountReadyChat();
+  const leading = root.querySelector<HTMLElement>('[data-zcr-composer-leading]')!;
+  const controls = [...leading.querySelectorAll<HTMLElement>('button, details, summary')];
+  expect(controls).toHaveLength(1);
+  const plus = controls[0] as HTMLButtonElement;
+  expect(plus.dataset.zcrPlus).toBe('');
+  expect(plus.dataset.zcrAction).toBe('composer-plus');
+  expect(plus.getAttribute('aria-label')).toBe('Add images or context');
+  // The old Attach details and the literal '@' trigger are gone, not merely hidden.
+  expect(root.querySelector('.zcr-attachment-menu, .zcr-input-actions')).toBeNull();
+  expect([...root.querySelectorAll('button')].filter(node => node.textContent?.trim() === '@')).toHaveLength(0);
+});
+
+it('opens every attachment route from the plus menu and closes it after a choice', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const view = root.ownerDocument.defaultView!;
+  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
+  const menuSelector = '[data-zcr-plus-menu]';
+  const menu = root.querySelector<HTMLElement>(menuSelector)!;
+  expect(menu.hidden).toBe(true);
+  expect(plus.getAttribute('aria-expanded')).toBe('false');
+  plus.click();
+  expect(menu.hidden).toBe(false);
+  expect(plus.getAttribute('aria-expanded')).toBe('true');
+  const route = (action: string) => [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.dataset.zcrAction === action)!;
+
+  const pick = vi.spyOn(presenter, 'pickImages').mockResolvedValue(undefined);
+  route('pick-images').click();
+  await vi.waitFor(() => expect(pick).toHaveBeenCalledTimes(1));
+  expect(menu.hidden).toBe(true);
+
+  plus.click();
+  const region = vi.spyOn(presenter, 'captureRegion').mockResolvedValue(undefined);
+  route('capture-region').click();
+  await vi.waitFor(() => expect(region).toHaveBeenCalledTimes(1));
+
+  plus.click();
+  const page = vi.spyOn(presenter, 'capturePage').mockResolvedValue(undefined);
+  menu.querySelector<HTMLInputElement>('input[type="number"]')!.value = '4';
+  route('capture-page').click();
+  // The page-number input stays one-based for the reader; the presenter takes a zero-based index.
+  await vi.waitFor(() => expect(page).toHaveBeenCalledWith(3));
+
+  plus.click();
+  plus.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(true);
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  input.focus(); plus.click();
+  expect(menu.hidden).toBe(false);
+  root.ownerDocument.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true }));
+  expect(menu.hidden).toBe(true);
+});

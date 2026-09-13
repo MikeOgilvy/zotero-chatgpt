@@ -67,6 +67,12 @@ const COPY = {
   copyFailed: 'The answer could not be copied.',
   actionFailed: 'This action could not be completed.',
   sourceOpenFailed: 'The source could not be opened.',
+  attach: 'Add images or context',
+  chooseImages: 'Choose images…',
+  captureRegion: 'Capture selected region',
+  capturePage: 'Capture page',
+  capturePageNumber: 'PDF page to capture',
+  addReferences: 'Add references or workflows',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
   imageDropFailed: 'The dropped image could not be attached.',
@@ -453,11 +459,23 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   for (const [value, label] of [['en', 'English'], ['zh', '简体中文']] as const) { const option = el('option', '', label); option.value = value; language.append(option); }
   languageLabel.append(language); language.addEventListener('change', () => { void presenter.saveAppearance({ uiLanguage: language.value === 'zh' ? 'zh' : 'en' }).catch(reportViewError); });
   appearance.append(scaleLabel, languageLabel); settingsContent.append(appearance);
-  const inputActions = el('div', 'zcr-input-actions'); inputActions.hidden = true;
-  const attachmentMenu = el('details', 'zcr-attachment-menu'); attachmentMenu.append(el('summary', '', 'Attach'));
-  attachmentMenu.append(button('Choose images…', 'pick-images', () => { void presenter.pickImages().catch(reportViewError); attachmentMenu.open = false; }), button('Capture selected region', 'capture-region', () => { void presenter.captureRegion().catch(reportViewError); attachmentMenu.open = false; }));
-  const pageNumber = el('input'); pageNumber.type = 'number'; pageNumber.min = '1'; pageNumber.value = '1'; pageNumber.setAttribute('aria-label', 'PDF page to capture');
-  attachmentMenu.append(pageNumber, button('Capture page', 'capture-page', () => { void presenter.capturePage(Number(pageNumber.value) - 1).catch(reportViewError); attachmentMenu.open = false; })); inputActions.append(attachmentMenu); leading.append(inputActions);
+  // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
+  // lives behind it; the reference/workflow chooser stays reachable by typing '@' or '/'.
+  const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
+  plus.dataset.zcrPlus = '';
+  plus.setAttribute('aria-haspopup', 'menu'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
+  const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'menu'); plusMenu.setAttribute('aria-label', COPY.attach);
+  const pageNumber = el('input'); pageNumber.type = 'number'; pageNumber.min = '1'; pageNumber.value = '1'; pageNumber.setAttribute('aria-label', COPY.capturePageNumber);
+  const plusReferences = button(COPY.addReferences, 'composer-references', () => { togglePlus(false); workspaceView?.openCommands(); });
+  plusMenu.append(
+    button(COPY.chooseImages, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
+    button(COPY.captureRegion, 'capture-region', () => { togglePlus(false); void presenter.captureRegion().catch(reportViewError); }),
+    pageNumber,
+    button(COPY.capturePage, 'capture-page', () => { togglePlus(false); void presenter.capturePage(Number(pageNumber.value) - 1).catch(reportViewError); }),
+    plusReferences,
+  );
+  composer.append(plusMenu);
+  leading.append(plus);
   const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;
   const collection = el('select'); collection.dataset.zcrCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
   collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });
@@ -510,7 +528,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const next = open ?? menu.hidden;
     menu.hidden = !next;
     picker.setAttribute('aria-expanded', String(next));
-    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); settingsMenu.hidden = true; overflow.setAttribute('aria-expanded', 'false'); }
+    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); settingsMenu.hidden = true; overflow.setAttribute('aria-expanded', 'false'); togglePlus(false); }
   };
   const toggleSettings = (open?: boolean) => {
     const next = open ?? settingsMenu.hidden;
@@ -521,6 +539,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       historyBtn.setAttribute('aria-expanded', 'false');
       menu.hidden = true;
       picker.setAttribute('aria-expanded', 'false');
+      togglePlus(false);
     }
   };
   const toggleHistory = (open?: boolean) => {
@@ -532,7 +551,19 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       picker.setAttribute('aria-expanded', 'false');
       settingsMenu.hidden = true;
       overflow.setAttribute('aria-expanded', 'false');
+      togglePlus(false);
       historySearch.focus();
+    }
+  };
+  /** The composer plus menu; only the picker button, an outside click or Escape closes it. */
+  const togglePlus = (open?: boolean) => {
+    const next = open ?? plusMenu.hidden;
+    plusMenu.hidden = !next;
+    plus.setAttribute('aria-expanded', String(next));
+    if (next) {
+      menu.hidden = true; picker.setAttribute('aria-expanded', 'false');
+      settingsMenu.hidden = true; overflow.setAttribute('aria-expanded', 'false');
+      historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
     }
   };
   const nextImageId = () => hooks.uuid?.() ?? (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`);
@@ -621,10 +652,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   bindMenuKeys(menu, picker, () => togglePicker(false));
   bindMenuKeys(settingsMenu, overflow, () => toggleSettings(false));
   bindMenuKeys(historyPanel, historyBtn, () => toggleHistory(false));
+  bindMenuKeys(plusMenu, plus, () => togglePlus(false));
   for (const [trigger, panel, open] of [
     [picker, menu, () => togglePicker(true)],
     [overflow, settingsMenu, () => toggleSettings(true)],
     [historyBtn, historyPanel, () => toggleHistory(true)],
+    [plus, plusMenu, () => togglePlus(true)],
   ] as const) trigger.addEventListener('keydown', event => {
     if (isComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
     event.preventDefault(); open(); focusMenu(panel, event.key === 'ArrowUp');
@@ -635,10 +668,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!menu.hidden && target && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
     if (!historyPanel.hidden && target && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
     if (!settingsMenu.hidden && target && !settingsMenu.contains(target) && !overflow.contains(target)) toggleSettings(false);
+    if (!plusMenu.hidden && target && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
-    if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
+    if (!plusMenu.hidden) { event.preventDefault(); togglePlus(false); plus.focus(); }
+    else if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
     else if (!settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); overflow.focus(); }
     else if (!historyPanel.hidden) { event.preventDefault(); toggleHistory(false); historyBtn.focus(); }
   };
@@ -888,7 +923,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         lastWorkspace = state.workspace; workspaceDraftKey = nextDraftKey;
         workspaceView.update({ settings: state.workspace, draft: { references: state.draft.references, skillId: state.draft.skillId, profileId: state.draft.profileId, overrides: state.draft.overrides } });
       }
-      appearance.hidden = false; inputActions.hidden = false;
+      appearance.hidden = false;
       if (doc.activeElement !== scaleInput) { scaleInput.value = String(Math.round(state.workspace.textScale * 100)); scaleValue.textContent = `${scaleInput.value}%`; applyChatTextScale(root, state.workspace.textScale); }
       language.value = state.workspace.uiLanguage;
       const acquire = state.workspace.skills.find(skill => skill.id === state.draft.skillId)?.workflow === 'acquire'; acquisition.hidden = !acquire;

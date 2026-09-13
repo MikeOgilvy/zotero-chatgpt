@@ -18,7 +18,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Queue question': '将问题加入队列', 'Cancel queued question': '取消排队的问题',
   'Regenerate in new chat': '在新对话中重新生成', 'Edit in new chat': '在新对话中编辑',
   'Review annotation suggestions': '审核标注建议',
-  Attach: '添加附件', 'Choose images…': '选择图片…', 'Capture selected region': '截取所选区域',
+  Attach: '添加附件', 'Add images or context': '添加图片或上下文', 'Choose images…': '选择图片…', 'Capture selected region': '截取所选区域',
   'Capture page': '截取页面', 'PDF page to capture': '要截取的 PDF 页码', 'Save literature to': '文献保存位置',
   'Target collection': '目标分类', 'Choose a collection…': '选择分类…', 'Preview image': '预览图片',
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
@@ -111,7 +111,7 @@ const TEXT = [
   '.zcr-workspace-settings select[name="workflow"] option', '.zcr-workspace-settings select[name="override-detail"] option',
   '.zcr-workspace-settings select[name="override-mathematics"] option', '[data-zcr-profile] option[value=""]',
   '[data-zcr-collection-target] option[value=""]', '.zcr-appearance > summary', '.zcr-appearance label',
-  '.zcr-attachment-menu > summary', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
+  '.zcr-plus-menu', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-usage', '.zcr-request-timing-text',
@@ -123,7 +123,7 @@ const TEXT = [
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
   '.zcr-document-context > summary', '.zcr-context-range input', '.zcr-appearance input', '.zcr-appearance select',
-  '.zcr-attachment-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
+  '.zcr-plus-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-usage',
 ].join(',');
 const STATUS: Readonly<Record<string, string>> = {
