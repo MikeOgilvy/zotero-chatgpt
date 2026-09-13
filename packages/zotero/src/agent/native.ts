@@ -3,6 +3,7 @@ import { NATIVE_ANNOTATION_PROVENANCE, NativeAgentError, type NativeAcquisitionR
 import type { DocumentRevision, PaperScope, Rect } from '../../../contracts/src/index.ts';
 import { nativeDocumentSource } from '../reader/document.ts';
 import type { ZoteroHost } from '../reader/host-types.ts';
+import { lineRects } from '../reader/locate.ts';
 import type { AgentDocumentSource, AgentEnvironment, AgentHostItem, AgentHTTPOptions, AgentHTTPResponse, AgentPageChar, NativeAgentHost } from './host.ts';
 
 export interface NativeAgentOptions {
@@ -59,18 +60,6 @@ function position(value: unknown): NativeAnnotationPosition {
     result.nextPageRects = parseRects(p.nextPageRects);
   }
   return result;
-}
-function lineRects(chars: AgentPageChar[], viewBox: number[]): Rect[] | null {
-  const bounds = rect(viewBox); if (!bounds || !chars.length) return null;
-  const results: Rect[] = []; let line: Rect | null = null;
-  for (const char of chars) {
-    const r = rect(char.inlineRect); const glyph = rect(char.rect);
-    if (!r || !glyph || r[0] < bounds[0] - 1 || r[1] < bounds[1] - 1 || r[2] > bounds[2] + 1 || r[3] > bounds[3] + 1) return null;
-    line = line ? [Math.min(line[0], r[0]), Math.min(line[1], r[1]), Math.max(line[2], r[2]), Math.max(line[3], r[3])] : r;
-    if (char.lineBreakAfter) { results.push(line); line = null; }
-  }
-  if (line) results.push(line);
-  return results.length <= 1000 ? results.map(r => r.map(v => Math.round(v * 1000) / 1000) as Rect) : null;
 }
 async function waitRead<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
   checkSignal(signal); if (!signal) return work;
