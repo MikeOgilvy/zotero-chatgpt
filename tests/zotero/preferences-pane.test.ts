@@ -22,6 +22,10 @@ function fixture(initial?: WorkspaceSettings, overrides: Partial<PreferencesPane
   return { host, read, save, setSkillEnabled, exportPreferences, current: () => copy(state) };
 }
 
+/** The same fixture settings in a chosen UI language; profile and skill names stay data. */
+function localized(language: 'en' | 'zh'): WorkspaceSettings {
+  return { ...defaultSettings(), skills: [...defaultSettings().skills, copy(userSkill), copy(blockedSkill)], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }], uiLanguage: language, textScale: 1 };
+}
 function mount(host: PreferencesPaneHost, markup = '<vbox/>') {
   const window = new Window({ url: 'https://test.invalid' });
   const document = window.document as unknown as Document;
@@ -84,7 +88,8 @@ it('saves interface language and chat text scale through the store and reports f
   scale.value = '9'; change(scale);
   await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-pref="error"]').hidden).toBe(false));
   await settle();
-  expect(find<HTMLElement>('[data-zcr-pref="error"]').textContent).toMatch(/0\.5 to 3/u);
+  // The UI language is already zh, so the refusal is rendered in the language the pane now shows.
+  expect(find<HTMLElement>('[data-zcr-pref="error"]').textContent).toBe('请选择 0.5 到 3 之间的聊天字号。');
   expect(save).toHaveBeenCalledTimes(2);
   expect(scale.value).toBe('1.5');
 });
@@ -204,4 +209,75 @@ it('stops writing after unmount so a closed Preferences window cannot race the s
   scale.value = '2'; change(scale);
   await Promise.resolve();
   expect(save).toHaveBeenCalledTimes(1);
+});
+
+it('renders the pane copy in the stored UI language and never translates identifiers', async () => {
+  const { host } = fixture(localized('zh'));
+  const { ready, root, find } = mount(host);
+  await ready;
+  const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
+  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['对话', '研究偏好', '研究配置', '已安装的工作流']);
+  expect(label('uiLanguage')).toBe('界面语言');
+  expect(label('textScale')).toBe('聊天字号（0.5–3）');
+  expect(label('preference-language')).toBe('回答语言');
+  expect(label('preference-detail')).toBe('回答详细程度');
+  expect(label('preference-mathematics')).toBe('数学解释方式');
+  expect(label('preference-background')).toBe('研究背景');
+  expect(label('preference-citationStyle')).toBe('引用风格');
+  expect(label('preference-annotationStyle')).toBe('标注风格');
+  expect(label('profile')).toBe('正在编辑的研究配置');
+  expect(label('profile-name')).toBe('研究配置名称');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存偏好');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').textContent).toBe('导出偏好');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-profile"]').textContent).toBe('另存为新配置');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="update-profile"]').textContent).toBe('更新所选配置');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="delete-profile"]').textContent).toBe('删除所选配置');
+  expect([...find<HTMLSelectElement>('[data-zcr-pref="preference-detail"]').options].map(option => option.textContent)).toEqual(['简短', '标准', '详细']);
+  expect([...find<HTMLSelectElement>('[data-zcr-pref="preference-mathematics"]').options].map(option => option.textContent)).toEqual(['自动', '直觉优先', '形式推导']);
+  // Identifiers, ids and stored values are data, not copy.
+  const skillRow = (id: string): Element => find(`[data-zcr-skill-enabled="${id}"]`).closest('.zcr-preferences-skill')!;
+  expect([...find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]').options].map(option => option.textContent)).toEqual(['English', '中文']);
+  expect(find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]').value).toBe('zh');
+  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').value).toBe('');
+  expect([...find<HTMLSelectElement>('[data-zcr-pref="profile"]').options].map(option => option.value)).toEqual(['', 'formal']);
+  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options[1]!.textContent).toBe('Formal');
+  expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options[0]!.textContent).toBe('未选择研究配置');
+  expect(root.querySelector('[data-zcr-skill="user-study"]')).not.toBeNull();
+  expect(skillRow('user-study').querySelector('span')?.textContent).toBe('Study');
+  expect(skillRow('user-study').querySelector('.zcr-preferences-muted')?.textContent).toBe('user · v1.0 · read');
+  expect(skillRow('imported-blocked').querySelector('span')?.textContent).toBe('Blocked');
+  expect(skillRow('imported-blocked').querySelector('.zcr-preferences-muted')?.textContent).toBe('imported · v1.0 · read · 不可用：mcp');
+});
+
+it('follows a language change in both directions and reports the outcome in that language', async () => {
+  const { host, current } = fixture(localized('en'));
+  const { ready, find, change, settle } = mount(host);
+  await ready;
+  const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
+  expect(label('uiLanguage')).toBe('Interface language');
+  expect(label('textScale')).toBe('Chat text scale (0.5–3)');
+  expect(label('preference-background')).toBe('Research background');
+  const language = find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]');
+  language.value = 'zh'; change(language);
+  await settle();
+  expect(current().uiLanguage).toBe('zh');
+  expect(label('uiLanguage')).toBe('界面语言');
+  expect(label('textScale')).toBe('聊天字号（0.5–3）');
+  expect(label('preference-background')).toBe('研究背景');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存偏好');
+  // The pane announces its own write in the language it is now showing.
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toBe('界面语言已保存。');
+  expect(find<HTMLElement>('[data-zcr-pref="error"]').hidden).toBe(true);
+  // Switching back restores the English copy instead of leaving the pane half-translated.
+  const scale = find<HTMLInputElement>('[data-zcr-pref="textScale"]');
+  scale.value = '1.5'; change(scale);
+  await settle();
+  language.value = 'en'; change(language);
+  await settle();
+  expect(current().uiLanguage).toBe('en');
+  expect(current().textScale).toBe(1.5);
+  expect(label('uiLanguage')).toBe('Interface language');
+  expect(label('textScale')).toBe('Chat text scale (0.5–3)');
+  expect(find<HTMLInputElement>('[data-zcr-pref="textScale"]').value).toBe('1.5');
+  expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('Save preferences');
 });
