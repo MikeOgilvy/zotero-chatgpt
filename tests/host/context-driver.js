@@ -46,7 +46,75 @@ async function runHostSmoke(config) {
     win.Zotero_Tabs.closeAll(); await until(() => Zotero.Reader._readers.length === 0, 'close-only-this-profile-tabs');
     Zotero.Prefs.set('extensions.zcr.automaticPdfText', true, true);
     Zotero.Prefs.set('extensions.zcr.pdfTextDisclosureSeen', false, true);
+    // Falsifiability control, off unless its marker file is present: with the product's own opt-out
+    // stored before the reader opens, its presenter is built with document reading disabled and must
+    // not read this PDF at all. The run then fails at the preparation check with no host observation,
+    // which is what keeps that check able to fail. Nothing else about the driver changes.
+    const optOutControl = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-opt-out'));
+    if (optOutControl) Zotero.Prefs.set('extensions.zcr.automaticPdfText', false, true);
+    // --- The product's own automatic whole-PDF preparation, observed on the host APIs it calls ---
+    // The a3 check wrapped the reader's own PDF object and waited for the product's page calls after
+    // reading both pages itself. It timed out, and the archived report explains why such an instrument
+    // could not succeed: its positive control only proved that a call through the driver's own
+    // reference lands in the wrapper, while the product's background read had already run and its
+    // result was cached (`DocumentReader` keys [paperId, revision, parser, first, last]), so no second
+    // page read was ever going to arrive. This check observes the product through host objects it
+    // looks up itself, armed before the reader is opened so no read can happen unobserved:
+    //   * `io.stat(path)` and `io.computeHexDigest(path, 'sha256')` are the revision gate of the
+    //     product's `capture()` (packages/zotero/src/reader/document.ts); the digest runs only after
+    //     the whole loaded PDF has been read out of the reader and hashed;
+    //   * `TextEncoder.prototype.encode` sees each page's text as `DocumentReader` measures it, so two
+    //     page-sized non-JSON encodings are the product extracting both pages, which can only follow a
+    //     whole-file read whose digest matched the file on disk.
+    // This driver never calls any of those three on this PDF, and the arming is verified by identity,
+    // so a refused host replacement fails the check out loud instead of degrading into a pass.
+    const t0 = Date.now();
+    const observations = [];
+    const prefReads = [];
+    const logErrors = [];
+    const restoreHost = [];
+    const observeHost = (target, name, label, detail) => {
+      const original = target[name];
+      if (typeof original !== 'function') return false;
+      const wrapper = function (...args) {
+        const entry = { label, ms: Date.now() - t0 };
+        try { Object.assign(entry, detail(args) ?? {}); } catch { /* the detail is best effort */ }
+        observations.push(entry);
+        let result;
+        try { result = original.apply(this, args); } catch (error) { entry.error = String((error && error.message) || error); throw error; }
+        if (result && typeof result.then === 'function') return result.then(value => { entry.ok = true; return value; }, error => { entry.error = String((error && error.message) || error); throw error; });
+        entry.ok = true; return result;
+      };
+      try { target[name] = wrapper; } catch { return false; }
+      if (target[name] !== wrapper) return false;
+      restoreHost.push(() => { target[name] = original; });
+      return true;
+    };
+    const nativePrefGet = Zotero.Prefs.get;
+    Zotero.Prefs.get = function (pref, global) { const value = nativePrefGet.call(this, pref, global); if (String(pref).includes('automaticPdfText')) prefReads.push({ ms: Date.now() - t0, enabled: value !== false }); return value; };
+    const nativeLogError = Zotero.logError;
+    Zotero.logError = function (error) { logErrors.push({ ms: Date.now() - t0, message: String((error && error.message) || error) }); return nativeLogError.call(this, error); };
+    restoreInstrumentation = () => { Zotero.Prefs.get = nativePrefGet; Zotero.logError = nativeLogError; for (const restore of restoreHost.reverse()) restore(); };
+    const armed = {
+      stat: observeHost(IOUtils, 'stat', 'stat', args => ({ file: String(args[0] ?? '').split('/').pop() })),
+      digest: observeHost(IOUtils, 'computeHexDigest', 'computeHexDigest', args => ({ file: String(args[0] ?? '').split('/').pop(), algorithm: args[1] ?? null })),
+      encode: observeHost(TextEncoder.prototype, 'encode', 'encode', args => ({ characters: typeof args[0] === 'string' ? args[0].length : null, jsonShaped: typeof args[0] === 'string' && /^[[{]/u.test(args[0]) })),
+    };
+    const expectedFile = String((await Zotero.Items.get(a.id).getFilePathAsync()) ?? '').split('/').pop();
+    const observedGate = () => observations.find(entry => entry.label === 'stat' && entry.file === expectedFile && entry.ok)
+      && observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.algorithm === 'sha256' && entry.ok);
+    const observedPageTexts = () => observations.filter(entry => entry.label === 'encode' && entry.jsonShaped === false && (entry.characters ?? 0) >= 200);
+    await check('read-observation-armed-on-shared-host-apis', Boolean(armed.stat && armed.digest && armed.encode && expectedFile), { armed, file: expectedFile, optOutControl });
+    const preparation = {
+      expectedFile,
+      optOutControl,
+      automaticPdfTextReads: prefReads,
+      productLoggedErrors: logErrors,
+      note: 'Assertion source: IOUtils.stat + IOUtils.computeHexDigest + TextEncoder.prototype.encode, all called by the product on this PDF. This driver never calls them on this PDF.',
+    };
+    report.preparation = preparation;
     const opened = await Zotero.Reader.open(a.id); let tabId = opened.tabID;
+    const openedMs = Date.now() - t0;
     const reader = () => Zotero.Reader.getByTabID(tabId);
     const rdoc = () => reader()?._iframeWindow?.document;
     const panel = () => rdoc()?.querySelector('[data-zcr-chat]');
@@ -67,7 +135,7 @@ async function runHostSmoke(config) {
     const panelSelectorsAbsent = () => { const doc = rdoc(); return Boolean(doc) && REMOVED_PANEL_SELECTORS.every(selector => !doc.querySelector(selector)); };
     await until(() => reader()?._internalReader?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfDocument, 'pdf-loaded');
     await until(() => toggle(), 'toolbar-toggle');
-    // --- Native whole-PDF text and page labels, observed directly on the host PDF object ---
+    // --- The driver's own native read of both pages, exactly where a3 did it: before its wrapper ---
     const extractPage = async pageIndex => {
       const raw = await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex }, viewWin()));
       return (raw?.chars ?? []).map(char => char.ignorable ? '' : char.c + (char.paragraphBreakAfter ? '\n\n' : char.lineBreakAfter ? '\n' : char.spaceAfter ? ' ' : '')).join('').trim();
@@ -77,38 +145,69 @@ async function runHostSmoke(config) {
     await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
     report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
     await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
-    // --- Instrument the host PDF object so the product's own automatic preparation is observable ---
-    let productCalls = null;
+    // --- The a3 instrument itself, re-armed at exactly the point a3 armed it, as a diagnostic only ---
+    // Its reachability probe is a3's own: a call through the product's access path must land in the
+    // wrapper, or the instrument reports not-observable. Nothing below is part of the assertion, which
+    // rests on the host-API observations collected since before the reader was opened.
+    const legacy = { wrapMs: Date.now() - t0, probeRecorded: false, calls: { pageData: [], labels: 0 } };
     {
       const pdfObject = pdf().pdfDocument;
       const nativePageData = pdfObject.getPageData; const nativeGetLabels = pdfObject.getPageLabels2;
-      const calls = { pageData: [], labels: 0 };
       const wrap = (original, record) => function (...args) { record(...args); return original.apply(this, args); };
       const waived = Cu.waiveXrays(pdfObject);
+      const previousRestore = restoreInstrumentation;
       try {
-        waived.getPageData = wrap(nativePageData, options => calls.pageData.push(options?.pageIndex));
-        waived.getPageLabels2 = wrap(nativeGetLabels, () => { calls.labels += 1; });
-      } catch { /* keep the native methods; the preparation check falls back to not-run */ }
-      restoreInstrumentation = () => { try { delete waived.getPageData; delete waived.getPageLabels2; } catch { /* the reader may already be gone */ } };
-      // A driver-side probe lands in `calls` only when the reader's own Xray lookup resolves the
-      // wrapper too, so a recorded preparation cannot be a false positive.
+        waived.getPageData = wrap(nativePageData, options => legacy.calls.pageData.push(options?.pageIndex));
+        waived.getPageLabels2 = wrap(nativeGetLabels, () => { legacy.calls.labels += 1; });
+      } catch { /* keep the native methods; the diagnostic then reports not-observable */ }
+      restoreInstrumentation = () => { previousRestore(); try { delete waived.getPageData; delete waived.getPageLabels2; } catch { /* the reader may already be gone */ } };
       try { await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch { /* probe only */ }
-      if (calls.pageData.includes(0)) { calls.pageData = []; productCalls = calls; }
-      else restoreInstrumentation();
+      legacy.probeRecorded = legacy.calls.pageData.includes(0);
+      if (legacy.probeRecorded) legacy.calls.pageData = [];
     }
-    report.nativePreparation = productCalls ? 'observable' : 'not-observable';
+    report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
+    report.legacyInstrument = { wrapMs: legacy.wrapMs, probeRecorded: legacy.probeRecorded, note: 'a3 ran this wrapper after its own page reads and cleared the probe record the same way; kept only to decide whether that failure was a timing artifact.' };
+    // --- Did the product read the whole PDF by itself, with the sidebar still closed? ---
+    const readObserved = await until(() => observedGate() && observedPageTexts().length >= 2, 'automatic-background-preparation', 60000).catch(() => null);
+    const pageTexts = observedPageTexts();
+    const gateMs = observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.ok)?.ms ?? null;
+    const statMs = observations.find(entry => entry.label === 'stat' && entry.file === expectedFile && entry.ok)?.ms ?? null;
+    const recorded = legacy.calls.pageData;
+    const missedByWrap = pageTexts.filter(entry => entry.ms < legacy.wrapMs).length;
+    const legacyVerdict = recorded.includes(0) && recorded.includes(1)
+      ? 'the a3 wrapper does see the product page calls; reachability was not the a3 problem'
+      : missedByWrap > 0
+        ? `H1 timing artifact: ${missedByWrap} of ${pageTexts.length} page texts were extracted before a3 armed its wrapper at ${legacy.wrapMs}ms (page indexes recorded by the wrapper: [${recorded.join(', ')}])`
+        : gateMs !== null && gateMs > legacy.wrapMs
+          ? 'H2 access path: the wrapper was armed before the product read and still recorded no page call'
+          : 'inconclusive: no product page text was observed before the wrapper was armed';
+    report.backgroundPreparation = {
+      expectedFile,
+      control: optOutControl ? 'automaticPdfText-off' : null,
+      openedMs,
+      statMs,
+      gateMs,
+      pageTextMs: pageTexts.map(entry => entry.ms),
+      pageTextCharacters: pageTexts.map(entry => entry.characters),
+      legacyWrapMs: legacy.wrapMs,
+      legacyProbeRecorded: legacy.probeRecorded,
+      legacyPageIndexes: [...recorded],
+      legacyVerdict,
+      sidebarOpenAtCheck: Boolean(panel()),
+      automaticPdfTextReads: prefReads.map(entry => entry.ms),
+      productLoggedErrors: logErrors,
+      hostObservations: observations.filter(entry => entry.file === expectedFile || entry.label === 'encode').slice(0, 20),
+      note: 'The product read this PDF and encoded both pages while this driver had neither opened the sidebar nor sent anything.',
+    };
+    await check('automatic-whole-pdf-background-preparation-without-panel',
+      Boolean(readObserved) && observedPageTexts().length >= 2 && Boolean(observedGate()),
+      report.backgroundPreparation);
+    report.toggleClickedMs = Date.now() - t0;
     const coldStart = win.performance.now(); toggle().click();
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
     await check('title-before-or-with-connection', panel()?.textContent.includes(title));
-    if (productCalls) {
-      await until(() => productCalls.pageData.includes(0) && productCalls.pageData.includes(1), 'automatic-background-preparation', 60000);
-      report.productPreparationMs = win.performance.now() - coldStart;
-      await check('automatic-whole-pdf-background-preparation-without-panel', panelSelectorsAbsent(), { pageIndexes: [...productCalls.pageData], labelsCalls: productCalls.labels, removedSelectorsAbsent: REMOVED_PANEL_SELECTORS });
-    } else {
-      await check('removed-document-panel-stays-off-the-chat-surface', panelSelectorsAbsent(), { removedSelectorsAbsent: REMOVED_PANEL_SELECTORS });
-      await skip('automatic-whole-pdf-background-preparation-without-panel', 'The host PDF object could not be instrumented across the reader realm, so the product-side native extraction calls were not observable from this driver.');
-    }
+    await check('removed-document-panel-stays-off-the-chat-surface', panelSelectorsAbsent(), { removedSelectorsAbsent: REMOVED_PANEL_SELECTORS });
     // --- The context ring is honest: unknown is a solid neutral ring, never a percentage or empty arc ---
     await until(() => contextRing(), 'context-ring');
     const ringLabel = contextRing()?.getAttribute('aria-label') ?? '';
