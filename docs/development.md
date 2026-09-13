@@ -64,8 +64,8 @@ node scripts/prepare-host-test.mjs --context --acceptance
 
 | 准备命令 | 会自动执行的内容 |
 | --- | --- |
-| `node scripts/prepare-host-test.mjs --context` | 当前 PDF 本地提取、页面标签/范围、原生 UI/会话/附件切换及合成性能样本；不发模型请求 |
-| `node scripts/prepare-host-test.mjs --context --native` | 将工作树生产模块编入独立测试 driver；新建合成条目、PDF、collection 和标注，执行审批/撤销/冲突、SHA、截图、后台引用；还会尝试固定公开 DOI 的**未保存网络元数据预览**，不调用模型或下载 OA PDF |
+| `node scripts/prepare-host-test.mjs --context` | 当前 PDF 本地提取、页面标签/范围、原生 UI/会话/附件切换及合成性能样本；重启会话后还预检原生偏好设置面板（注册身份、真实打开 Preferences 窗口并挂载面板、禁用/启用不叠加面板）且不写业务记录；不发模型请求 |
+| `node scripts/prepare-host-test.mjs --context --native` | 将工作树生产模块编入独立测试 driver；新建合成条目、PDF、collection 和标注，执行审批/撤销/冲突、SHA、截图、后台引用；并对冻结 revision 用合成 quote 实跑临时高亮导航（不写文献库）；还会尝试固定公开 DOI 的**未保存网络元数据预览**，不调用模型或下载 OA PDF |
 | `node scripts/prepare-host-test.mjs --context --live` | 本地检查后对合成 PDF **真实调用已登录账户的模型**，检查回答来源及停止/完成竞态；会消耗实际可用额度，执行前必须有对应授权 |
 | `node scripts/prepare-host-test.mjs --context --acceptance` | 无自动 driver 的人工试用 |
 

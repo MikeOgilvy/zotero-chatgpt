@@ -45,6 +45,23 @@
 
 本轮收尾全量门禁（同一工作树）：`npm run typecheck` PASS、`npm run lint` PASS、`npm run test:unit` **743 tests / 67 files** PASS（本轮该树无 skip；`install-lifecycle` 的两条 `skipIf` 在存在 `dist/*.xpi` 时实际执行并通过）、`npm run package:dev` 产出 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`、`npm run verify:artifacts` **79 files PASS**，SHA-256 `c881ad0a3e793398f2514632d0b8ed70f50ded5103aabf22807591f46b9d53f2`（`dist/SHA256SUMS`，含 `content/preferences/preferences.xhtml` 与 `content/preferences/pane.js`）。均为代码 + 单元 + 产物证据；真实宿主与真实模型证据仍为空。
 
+### 2026-09-13 最终 0.4 宿主验收（真实宿主证据，scope-2026-09-13）
+
+对象仍为 `c881ad0a…` 的最终 0.4.0a1 开发包；只用 `.zcr-dev/context/{profile,data}` 与合成材料，GUI 经 LaunchServices 完全分离启动、按完整 `-profile`/`-datadir` 核对后 `TERM`；未 `--live`、未登录、0 模型请求。证据目录（忽略）`.zcr-dev/verification/scope-2026-09-13/`。
+
+| 运行 | 结果 | 与上一轮（`d33ab244…`，`scope-2026-09-12`）对照 |
+| --- | --- | --- |
+| `--context` | **16 executed / 16 PASS / 0 FAIL**，5 类 NOT RUN | 检查名、通过状态、NOT RUN 列表逐项相同；无新增/删除/翻转。**无回归** |
+| `--context --native` | **12 executed / 12 PASS / 0 FAIL**，4 类 NOT RUN | 同上，逐项相同；**无回归** |
+
+**新增有界宿主预检（driver 补充，不改变上述 16/12 检查）**
+
+- 原生偏好设置面板：`pref-pane-registered-once-after-startup`（`pluginPanes` 中恰有一个 `zcr-prefpane-settings`，pluginID 为被测插件，src/scripts 落在已装 XPI 内，label 正确）、`pref-pane-window-mounts-real-form`（真实 `Zotero.Utilities.Internal.openPreferences('zcr-prefpane-settings')` 打开 Preferences 窗口，**沙箱脚本写到 `Zotero` 上的 pane 桥对片段内联 `onload` 可见**，面板挂载真实表单 15 个控件/6 个设置字段，无“不可用”提示，窗口正常关闭）、`pref-pane-no-duplicates-across-disable-enable`（禁用后 0 个、重新启用后恰 1 个，不叠加；无偏好面板相关错误日志）。三个独立会话均 PASS。仍不可验证：面板的暗色/亮色与键盘焦点的**实际视觉**（未截图、未目视），以及 `remove()` 与 Zotero 自身“插件关闭自动反注册”的隔离（1→0 只证明可观察终态，注册器逻辑由 `tests/zotero/preferences-registration.test.ts` 单元覆盖）。
+- 论断溯源：`citation-quote-navigation-on-frozen-revision` 用生产 `nativeSourceNavigator` + `openSourcePage` 在冻结 revision 上实跑合成 quote（`quoteIsSyntheticFixture=true`、`modelProducedQuote=false`）：先移到第 2 页，再回到第 1 页且 `outcome=highlighted`；不存在的 quote 返回诚实 `unlocated`；`libraryWrite=false`、标注数不变。仍不可验证：点击真实模型回答里引用链接的完整路径（需要已授权真实模型输出逐字引用），列为 NOT RUN。
+
+**诚实的失败**：`close-preserves-current-page` 在一次 `--context` 运行中 FAIL（关闭侧边栏后 `currentPageNumber` 不是 2）。该失败报告原样保留（`host-context-0.4.0a1-FAILED-close-preserves-current-page.json`），随后 4 次运行均 PASS（通过时为 `{"page":2}`），未复现，按间歇性页面位置问题报告，**未解决、也不宣称本轮新增代码导致**。
+
+**同树本地门禁复核**：`typecheck` PASS、`lint` PASS、`test:unit` **743 / 67 files** PASS、`verify:artifacts` 79 files PASS 且 digest 仍为 `c881ad0a…`。`package:dev` 为父级已产出、未重建，故宿主所测包与已验证 digest 字节一致。仍未运行：隔离官方登录、真实模型回答/停止、真实图像生成、真实文献库写入、签名公开升级与公开发行。
 
 ## 实际交付路径
 
@@ -149,11 +166,11 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 | 统一 @文章/@chat、/skill、personalization | WorkspaceStore、@article 元数据先行/选定后读取、@chat 有界快照、SKILL.md 解析与 revision 冲突、偏好/研究配置已有代码与单元；第三方 skill 仍不能授予权限。真实库接线与 UI 目视未验 | C |
 | 模型/多模态/上下文 | 固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴图片、生成图 16 MiB 校验与导出、diagram 线程能力已有代码与单元；真实档位/多图/真实图像生成、文件拖拽/截图排序、精确用量与完整已发送/已引用面板仍未测 | C |
 | 标注 / 获取整理 agent | 候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验已有代码与单元；真实库原生写入/撤销、网络预览与合法全文核对未在宿主验证 | D/E |
-| 设置/偏好设置窗口：preferences-*、workspace-store | 原生面板注册/清理、面板端口与快照写入、侧边栏去重已有代码与单元；真实偏好设置窗口的 sandbox/XUL 片段加载、原生主题与键盘焦点、以及打开窗口时的 store 并发未在宿主验证 | F |
-| 论断溯源：reader/locate、reader/source-highlight、reader-policy | 冻结 revision 校验、逐字引用定位与临时高亮导航、诚实 miss、无库写入已有代码与单元；真实 Gecko `navigate({position})` 的视觉表现、真实页面定位质量、真实模型是否输出逐字引用未验证 | F |
+| 设置/偏好设置窗口：preferences-*、workspace-store | 原生面板注册/清理、面板端口与快照写入、侧边栏去重已有代码与单元；**2026-09-13 已在真实宿主预检：注册身份正确、真实 Preferences 窗口能挂载面板（沙箱桥对片段可见）、禁用/启用不叠加、无错误日志**（详见上节）；仍缺面板的暗色/亮色与键盘焦点**目视**、以及打开窗口时真实 store 并发 | F |
+| 论断溯源：reader/locate、reader/source-highlight、reader-policy | 冻结 revision 校验、逐字引用定位与临时高亮导航、诚实 miss、无库写入已有代码与单元；**2026-09-13 已在真实宿主用生产 `nativeSourceNavigator`+`openSourcePage` 以合成 quote 实跑：回到引用页 `highlighted`、缺失 quote 诚实 `unlocated`、无库写入**；仍缺真实 Gecko 高亮**视觉**、长引用真实定位质量、以及真实模型是否输出逐字引用（点击真实回答链接的完整路径未验） | F |
 | 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；本轮实测 `package:dev`/`verify:artifacts`。官方新登录、真实输出/停止/在途恢复、无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成；本轮已复现 clean HEAD 重建（见上） | F |
 
-**下一条可执行任务（含本轮新增）**：在真实偏好设置窗口中目视核对 `Zotero Codex Reader` 面板（暗色/亮色、键盘 Tab、保存与导出失败提示），并用真实宿主确认点击引文后的临时高亮；随后在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”和真实图像生成；随后用真实宿主复核最终 0.4 XPI 的原生任务/获取 UI，再按 F 的门槛处理升级/回退、无 Node 安装与公开签名发行。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。
+**下一条可执行任务（含本轮新增）**：`--context` 已能程序化打开真实偏好设置窗口并确认 `Zotero Codex Reader` 面板挂载、禁用/启用不叠加；剩余的是**目视**核对面板（暗色/亮色、键盘 Tab、保存与导出失败提示）与真实 Gecko 临时高亮的**视觉**表现，需人工对照；随后在用户通过官方流程登录的隔离 profile 中，仅用合成材料验证“无需选区提问＋跨页定义＋More details＋停止＋模型设置切换”和真实图像生成（含真实模型回答里引用链接的点击路径）；随后用真实宿主复核最终 0.4 XPI 的原生任务/获取 UI，再按 F 的门槛处理升级/回退、无 Node 安装与公开签名发行。本轮未调用真实模型，不能把过去限额日期当作现在的阻塞证据。
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话；未发送草稿目前仅在插件寿命内保留，重启不会恢复。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
 
@@ -185,8 +202,8 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 - [x] 多模态/能力（代码+单元）：模型目录/usage/上下文预算来源；粘贴/截图多图；固定 runtime 图像生成能力与 16 MiB 生成图校验；真实模型图像生成未验。
 - [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、无 Node/公开下载仍在对应条件成立时验收。**版本升级/回退与 schema-3 回退安全拒绝本轮已在 s6 隔离树验证（22/22）**；仍需要隔离官方登录、真实模型、真实宿主原生 UI、签名 XPI 与公开发布授权。
 - [x] 合并 `feat/usage-batch-1` 与 `fix/audit-bugs-ui` 并补完耗时 UI（代码+单元）：两侧测试均保留，全量 `test:unit` 连续两次 **699 tests / 60 files**，重打包 `verify:artifacts` **77 files**；真实宿主/模型仍未重跑。
-- [x] 设置迁移（代码+单元）：全局设置进入 Zotero 原生偏好设置面板（注册/反注册/失败与关闭竞态已测），侧边栏只保留每对话内容并指向原生设置；XPI 已含片段与脚本，`verify:artifacts` 把它们列为必需文件。真实偏好设置窗口的沙箱/主题/焦点表现仍待宿主目视。
-- [x] 论断溯源（代码+单元）：点击引文先校验冻结 revision，再按链接 title 的逐字引用在冻结页面字符盒上定位，命中才做临时高亮，未命中诚实提示；点击路径无任何库写入。真实 Gecko 高亮视觉与真实模型是否遵守逐字引用指令仍未测。
+- [x] 设置迁移（代码+单元+**2026-09-13 宿主预检**）：全局设置进入 Zotero 原生偏好设置面板（注册/反注册/失败与关闭竞态已测），侧边栏只保留每对话内容并指向原生设置；XPI 已含片段与脚本，`verify:artifacts` 把它们列为必需文件。**真实宿主已确认面板注册身份、Preferences 窗口挂载与禁用/启用幂等**；真实偏好设置窗口的原生主题/键盘焦点**视觉**仍待宿主目视。
+- [x] 论断溯源（代码+单元+**2026-09-13 宿主预检**）：点击引文先校验冻结 revision，再按链接 title 的逐字引用在冻结页面字符盒上定位，命中才做临时高亮，未命中诚实提示；点击路径无任何库写入。**真实宿主已用生产 `nativeSourceNavigator`+`openSourcePage` 与合成 quote 确认回到引用页的临时高亮导航、诚实 miss 与无库写入**；真实 Gecko 高亮**视觉**与真实模型是否遵守逐字引用指令仍未测。
 - [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；CI/release 工作流已按真实脚本与 `.nvmrc` 加固且保持无 upload/publish；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
