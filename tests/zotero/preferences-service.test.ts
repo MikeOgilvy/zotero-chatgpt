@@ -9,7 +9,7 @@ const copy = <T>(value: T): T => structuredClone(value);
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 
-function fixture(overrides: Partial<ReaderWorkspace> = {}) {
+function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error) {
   let settings: WorkspaceSettings = { ...defaultSettings(), skills: [...defaultSettings().skills, copy(userSkill)], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }] };
   const workspace: ReaderWorkspace = {
     settings: vi.fn(() => Promise.resolve(copy(settings))),
@@ -17,7 +17,8 @@ function fixture(overrides: Partial<ReaderWorkspace> = {}) {
     saveSkill: vi.fn<ReaderWorkspace['saveSkill']>(value => { const next = { ...copy(value), revision: 'revision-two' }; settings.skills = [...settings.skills.filter(item => item.id !== value.id), next]; return Promise.resolve(next); }),
     ...overrides,
   } as ReaderWorkspace;
-  return { service: createPreferencesService({ workspace: () => Promise.resolve(workspace), uuid: () => 'aaaaaaaa-0000-4000-8000-00000000000a' }), workspace, current: () => copy(settings) };
+  const exportText = vi.fn(() => exportFailure === undefined ? Promise.resolve() : Promise.reject(exportFailure));
+  return { service: createPreferencesService({ workspace: () => Promise.resolve(workspace), uuid: () => 'aaaaaaaa-0000-4000-8000-00000000000a', exportText }), workspace, exportText, current: () => copy(settings) };
 }
 
 it('mints a valid profile id in the plugin sandbox', () => {
@@ -75,4 +76,19 @@ it('surfaces a conflict when the stored workflow revision changed underneath the
   const conflict = new ReaderError('REQUEST_CONFLICT', 'This workflow has changed since it was opened. Load the newer revision before editing it.');
   const { service } = fixture({ saveSkill: vi.fn<ReaderWorkspace['saveSkill']>().mockRejectedValue(conflict) });
   await expect(service.setSkillEnabled('user-study', false)).rejects.toBe(conflict);
+});
+
+it('exports the same preference snapshot the sidebar exports, through the native export port', async () => {
+  const { service, exportText, current } = fixture();
+  await expect(service.exportPreferences()).resolves.toBeUndefined();
+  expect(exportText).toHaveBeenCalledWith(
+    'reading-preferences.json',
+    JSON.stringify({ preferences: current().preferences, profiles: current().profiles }, null, 2),
+  );
+});
+
+it('reports a failed export instead of pretending the file was written', async () => {
+  const failure = new ReaderError('UNSUPPORTED_INTERACTION', 'The selected export file could not be written.');
+  const { service } = fixture({}, failure);
+  await expect(service.exportPreferences()).rejects.toBe(failure);
 });

@@ -877,11 +877,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       if (!workspaceView) workspaceView = mountWorkspaceView({ input, context: composerContext, leading, settings: settingsContent }, {
         searchReferences: (query, kind, signal) => presenter.searchReferences(query, kind, signal), previewReference: (reference, signal) => presenter.previewReference(reference, signal),
         addReference: async reference => { await presenter.addReference(reference); }, removeReference: async id => { await presenter.removeReference(id); },
-        selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id), savePreferences: value => presenter.savePreferences(value),
-        saveSkill: edit => presenter.saveSkill(edit), duplicateSkill: id => presenter.duplicateSkill(id), setSkillEnabled: (id, enabled) => presenter.setSkillEnabled(id, enabled),
+        selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id),
+        saveSkill: edit => presenter.saveSkill(edit), duplicateSkill: id => presenter.duplicateSkill(id),
         deleteSkill: id => presenter.deleteSkill(id), importSkill: () => presenter.importSkill(), exportSkill: id => presenter.exportSkill(id),
-        saveProfile: value => presenter.saveProfile(value), deleteProfile: id => presenter.deleteProfile(id), setOverrides: value => presenter.setOverrides(value),
-        setReferenceRange: (id, range) => presenter.setReferenceRange(id, range), exportPreferences: () => presenter.exportPreferences(),
+        setOverrides: value => presenter.setOverrides(value),
+        setReferenceRange: (id, range) => presenter.setReferenceRange(id, range),
       });
       const nextDraftKey = `${state.draft.references.map(reference => `${reference.id}:${reference.range?.join('-') ?? ''}:${reference.capturedAt}`).join(',')}:${state.draft.skillId}:${state.draft.profileId}:${JSON.stringify(state.draft.overrides)}`;
       if (lastWorkspace !== state.workspace || nextDraftKey !== workspaceDraftKey) {

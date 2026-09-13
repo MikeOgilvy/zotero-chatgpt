@@ -13,6 +13,7 @@ interface PreferencesBridge {
   readSettings(): Promise<string> | string;
   writeSettings(json: string): Promise<void> | void;
   setSkillEnabled(id: string, enabled: boolean): Promise<void> | void;
+  exportPreferences(): Promise<void> | void;
   newProfileId(): string;
 }
 interface ZoteroGlobal {
@@ -45,6 +46,7 @@ function mount(root: Element): void {
     read: async () => JSON.parse(await bridge.readSettings()) as WorkspaceSettings,
     save: value => Promise.resolve(bridge.writeSettings(JSON.stringify(value))),
     setSkillEnabled: (id, enabled) => Promise.resolve(bridge.setSkillEnabled(id, enabled)),
+    exportPreferences: () => Promise.resolve(bridge.exportPreferences()),
     profileId: () => bridge.newProfileId(),
   });
   panes.set(root, pane);

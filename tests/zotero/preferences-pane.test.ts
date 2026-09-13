@@ -16,8 +16,10 @@ function fixture(initial?: WorkspaceSettings, overrides: Partial<PreferencesPane
   const read = vi.fn(() => Promise.resolve(copy(state)));
   const save = vi.fn<PreferencesPaneHost['save']>(value => { state = copy(value); return Promise.resolve(); });
   const setSkillEnabled = vi.fn<PreferencesPaneHost['setSkillEnabled']>((id, enabled) => { state = { ...state, skills: state.skills.map(skill => (skill.id === id ? { ...skill, enabled } : skill)) }; return Promise.resolve(); });
-  const host: PreferencesPaneHost = { read, save, setSkillEnabled, profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a', ...overrides };
-  return { host, read, save, setSkillEnabled, current: () => copy(state) };
+  const exportPreferences = vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve());
+  const base: PreferencesPaneHost = { read, save, setSkillEnabled, exportPreferences, profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a' };
+  const host: PreferencesPaneHost = { ...base, ...overrides };
+  return { host, read, save, setSkillEnabled, exportPreferences, current: () => copy(state) };
 }
 
 function mount(host: PreferencesPaneHost, markup = '<vbox/>') {
@@ -154,6 +156,24 @@ it('toggles one workflow through setSkillEnabled and reverts the checkbox when t
   await settle();
   expect(toggle.checked).toBe(false);
   expect(toggle.disabled).toBe(false);
+});
+
+it('exports through the host and reports a failed export instead of claiming success', async () => {
+  const { host, exportPreferences } = fixture();
+  const { ready, find, settle } = mount(host);
+  await ready;
+  find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').click();
+  await vi.waitFor(() => expect(exportPreferences).toHaveBeenCalledTimes(1));
+  await settle();
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toMatch(/exported/iu);
+
+  const failure = new ReaderError('UNSUPPORTED_INTERACTION', 'The selected export file could not be written.');
+  exportPreferences.mockRejectedValueOnce(failure);
+  find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').click();
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-pref="error"]').textContent).toBe(failure.message));
+  await settle();
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).not.toMatch(/exported/iu);
+  expect(find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').disabled).toBe(false);
 });
 
 it('reports an unreadable or malformed store without rendering a form', async () => {

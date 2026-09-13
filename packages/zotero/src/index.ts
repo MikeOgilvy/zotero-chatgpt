@@ -236,7 +236,17 @@ export function startup(options: PluginContext): void {
   const workspace = () => localServices
     ? localServices.getWorkspace()
     : Promise.reject(new ReaderError('BUSY', 'Zotero Codex Reader is stopping.'));
-  preferencesBridge().ZoteroCodexReaderPreferencesHost = createPreferencesService({ workspace, uuid: () => crypto.randomUUID() });
+  preferencesBridge().ZoteroCodexReaderPreferencesHost = createPreferencesService({
+    workspace,
+    uuid: () => crypto.randomUUID(),
+    exportText: async (name, text) => {
+      const services = localServices;
+      if (!services) throw new ReaderError('BUSY', 'Zotero Codex Reader is stopping.');
+      const exportText = services.library.exportText?.bind(services.library);
+      if (!exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Preference export is unavailable.');
+      await exportText(name, text);
+    },
+  });
   preferencePanes = createPreferencePaneRegistrar({
     panes: Zotero.PreferencePanes, pluginID: options.pluginID, rootURI: options.rootURI,
     logError: error => Zotero.logError(error),

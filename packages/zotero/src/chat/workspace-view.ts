@@ -1,4 +1,4 @@
-import type { Personalization, ReaderReference, ReaderSkill, ReferenceInput, ResearchProfile, WorkflowKind, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowKind, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { mountCommandMenu } from './command-menu.ts';
 
 export type ReferenceFilter = 'all' | 'article' | 'chat';
@@ -11,18 +11,13 @@ export interface WorkspaceViewActions {
   removeReference: (id: string) => Promise<void>;
   selectSkill: (id: string | null) => Promise<void>;
   selectProfile: (id: string | null) => Promise<void>;
-  savePreferences: (preferences: Personalization) => Promise<void>;
   saveSkill: (edit: SkillEdit) => Promise<ReaderSkill>;
   duplicateSkill: (id: string) => Promise<ReaderSkill>;
-  setSkillEnabled: (id: string, enabled: boolean) => Promise<void>;
   deleteSkill: (id: string) => Promise<void>;
   importSkill: () => Promise<ReaderSkill | null>;
   exportSkill: (id: string) => Promise<void>;
-  saveProfile?: (value: { id: string | null; name: string; preferences: Partial<Personalization> }) => Promise<ResearchProfile>;
-  deleteProfile?: (id: string) => Promise<void>;
   setOverrides?: (value: Partial<Personalization>) => void;
   setReferenceRange?: (id: string, range: [number, number] | null) => Promise<void>;
-  exportPreferences?: () => Promise<void>;
 }
 export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement; settings: HTMLElement }
 
@@ -191,58 +186,21 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   const profile = create('select'); profile.dataset.zcrProfile = ''; profileLabel.append(profile); advanced.append(profileLabel);
   profile.addEventListener('change', () => {
     const selected = profile.value || null;
-    // Switching profile adopts that profile: pending edits belong to the previous one and must not
-    // be refreshed back into the controls (or saved into the new profile).
-    preferencesDirty = false;
     void run(async () => {
       try { await actions.selectProfile(selected); }
       catch (error) { profile.value = state?.draft.profileId ?? ''; throw error; }
     }, profile);
   });
-  const preferenceDetails = create('details'); preferenceDetails.append(create('summary', 'Global preferences'));
-  const preferenceForm = create('div'); preferenceDetails.append(preferenceForm); advanced.append(preferenceDetails);
-  const preferenceControls = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
+  // Global answer preferences, research profiles and workflow availability live in Zotero's own
+  // Preferences window; this pane only chooses what applies to the current chat.
+  const globalHint = create('p', "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.", 'zcr-workspace-muted');
+  globalHint.dataset.zcrGlobalHint = '';
+  advanced.append(globalHint);
   const labeled = (parent: HTMLElement, name: string, title: string, kind: 'input' | 'textarea' | 'select', choices?: Array<[string, string]>) => {
     const label = create('label', title); const control = create(kind); control.name = name;
     if (control.tagName === 'SELECT') for (const [value, title] of choices ?? []) { const option = create('option', title); option.value = value; control.append(option); }
     label.append(control); parent.append(label); return control;
   };
-  preferenceControls.set('language', labeled(preferenceForm, 'language', 'Answer language', 'input'));
-  preferenceControls.set('detail', labeled(preferenceForm, 'detail', 'Answer detail', 'select', [['brief', 'Brief'], ['standard', 'Standard'], ['detailed', 'Detailed']]));
-  preferenceControls.set('mathematics', labeled(preferenceForm, 'mathematics', 'Mathematical explanation', 'select', [['auto', 'Automatic'], ['intuition-first', 'Intuition first'], ['formal', 'Formal derivation']]));
-  preferenceControls.set('background', labeled(preferenceForm, 'background', 'Research background', 'textarea'));
-  preferenceControls.set('citationStyle', labeled(preferenceForm, 'citationStyle', 'Citation style', 'input'));
-  preferenceControls.set('annotationStyle', labeled(preferenceForm, 'annotationStyle', 'Annotation style', 'input'));
-  let preferencesDirty = false;
-  preferenceForm.addEventListener('input', () => { preferencesDirty = true; }); preferenceForm.addEventListener('change', () => { preferencesDirty = true; });
-  const formPreferences = (): Personalization => {
-    const next = { ...state!.settings.preferences };
-    next.language = preferenceControls.get('language')!.value.trim(); next.background = preferenceControls.get('background')!.value;
-    next.citationStyle = preferenceControls.get('citationStyle')!.value; next.annotationStyle = preferenceControls.get('annotationStyle')!.value;
-    const detail = preferenceControls.get('detail')!.value; if (detail === 'brief' || detail === 'standard' || detail === 'detailed') next.detail = detail;
-    const mathematics = preferenceControls.get('mathematics')!.value; if (mathematics === 'auto' || mathematics === 'intuition-first' || mathematics === 'formal') next.mathematics = mathematics;
-    return next;
-  };
-  const savePreferences = button(actions.saveProfile ? 'Save global preferences' : 'Save preferences', () => {
-    if (!state) return;
-    const next = formPreferences();
-    void run(async () => {
-      for (const control of preferenceControls.values()) control.disabled = true;
-      try { await actions.savePreferences(next); preferencesDirty = false; status.textContent = 'Preferences saved.'; status.hidden = false; }
-      finally { for (const control of preferenceControls.values()) control.disabled = false; }
-    }, savePreferences);
-  }); preferenceForm.append(savePreferences);
-  if (actions.exportPreferences) preferenceForm.append(button('Export preferences', () => { void run(() => actions.exportPreferences!()); }));
-  const profileName = actions.saveProfile ? labeled(preferenceForm, 'profile-name', 'Research profile name', 'input') : null;
-  if (actions.saveProfile && profileName) {
-    const save = (replace: boolean) => {
-      if (!state || !profileName.value.trim()) { profileName.focus(); return; }
-      const value = { id: replace ? state.draft.profileId : null, name: profileName.value.trim(), preferences: formPreferences() };
-      void run(async () => { const saved = await actions.saveProfile!(value); await actions.selectProfile(saved.id); preferencesDirty = false; status.textContent = 'Research profile saved.'; status.hidden = false; });
-    };
-    preferenceForm.append(button('Save as new profile', () => save(false)), button('Update selected profile', () => { if (state?.draft.profileId) save(true); }));
-    if (actions.deleteProfile) preferenceForm.append(button('Delete selected profile', () => { const id = state?.draft.profileId; if (id) void run(async () => { await actions.deleteProfile!(id); await actions.selectProfile(null); }); }));
-  }
   const overrideControls = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
   if (actions.setOverrides) {
     const overrides = create('details'); overrides.append(create('summary', 'Chat overrides'));
@@ -298,7 +256,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     const row = create('details'); row.dataset.zcrSkillId = skill.id;
     const summary = create('summary'); const description = create('p', '', 'zcr-workspace-muted');
     const unsupported = create('p', '', 'zcr-workspace-muted');
-    const enabledLabel = create('label', 'Enabled', 'zcr-workspace-check'); const enabled = create('input'); enabled.type = 'checkbox'; enabled.dataset.zcrSkillEnabled = skill.id; enabledLabel.prepend(enabled);
     const controls = create('div', '', 'zcr-workspace-actions');
     const duplicate = button('Duplicate', () => { void run(async () => { const copy = await actions.duplicateSkill(skill.id); if (!disposed) openEditor(copy); }, duplicate); }, 'Duplicate');
     const exportSkill = button('Export', () => { void run(() => actions.exportSkill(skill.id), exportSkill); }, 'Export');
@@ -308,23 +265,13 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     const prompt = create('span'); const edit = button('Edit', () => openEditor(skill), 'Edit'); const askDelete = button('Delete', () => { confirm.hidden = false; }, 'Delete'); const cancel = button('Cancel', () => { confirm.hidden = true; }, 'Cancel');
     confirm.append(prompt, remove, cancel);
     controls.append(trySkill, duplicate, exportSkill);
-    row.append(summary, description, unsupported, enabledLabel, controls, confirm);
-    enabled.addEventListener('change', () => {
-      const next = enabled.checked;
-      void run(async () => {
-        try {
-          await actions.setSkillEnabled(skill.id, next);
-          [...skillList.querySelectorAll<HTMLInputElement>('[data-zcr-skill-enabled]')].find(control => control.dataset.zcrSkillEnabled === skill.id)?.focus();
-        } catch (error) { enabled.checked = state?.settings.skills.find(item => item.id === skill.id)?.enabled ?? skill.enabled; throw error; }
-      }, enabled);
-    });
+    row.append(summary, description, unsupported, controls, confirm);
     const update = (next: ReaderSkill) => {
       skill = next;
       summary.textContent = next.name;
       description.textContent = `${next.description}\n${next.origin} · v${next.version} · ${next.workflow}`;
       unsupported.textContent = next.unsupportedDependencies.length ? `Unavailable: ${next.unsupportedDependencies.join(', ')}` : '';
       unsupported.hidden = !next.unsupportedDependencies.length;
-      enabled.checked = next.enabled;
       trySkill.disabled = !next.enabled || !!next.unsupportedDependencies.length;
       duplicate.setAttribute('aria-label', `Duplicate ${next.name}`); exportSkill.setAttribute('aria-label', `Export ${next.name}`);
       trySkill.setAttribute('aria-label', `Try ${next.name} in draft`); prompt.textContent = `Delete ${next.name}?`;
@@ -358,10 +305,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
       profile.replaceChildren(none, ...next.settings.profiles.map(item => { const option = create('option', item.name); option.value = item.id; return option; }));
     }
     profile.value = next.draft.profileId ?? '';
-    const selectedProfile = next.settings.profiles.find(item => item.id === next.draft.profileId);
-    if (profileName && doc.activeElement !== profileName) profileName.value = selectedProfile?.name ?? '';
     for (const [field, control] of overrideControls) if (doc.activeElement !== control) control.value = next.draft.overrides?.[field] ?? '';
-    if (!preferencesDirty) for (const [name, control] of preferenceControls) control.value = actions.saveProfile && selectedProfile ? { ...next.settings.preferences, ...selectedProfile.preferences }[name] : next.settings.preferences[name];
     const nextSkills = JSON.stringify(next.settings.skills);
     if (nextSkills !== skillsKey) { skillsKey = nextSkills; renderSkills(); if (menu.isOpen() && mode === 'skills') search(); }
   }, dispose: () => {

@@ -13,6 +13,7 @@ export interface PreferencesPaneHost {
   read(): Promise<WorkspaceSettings>;
   save(value: WorkspaceSettings): Promise<void>;
   setSkillEnabled(id: string, enabled: boolean): Promise<void>;
+  exportPreferences(): Promise<void>;
   /** A fresh, valid profile id; minted in the plugin sandbox, never in the pane. */
   profileId(): string;
 }
@@ -66,6 +67,8 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   };
   const show = (element: HTMLElement | null, text: string): void => { if (!element) return; element.textContent = text; element.hidden = false; };
   const clear = (element: HTMLElement | null): void => { if (!element) return; element.textContent = ''; element.hidden = true; };
+  /** A failure replaces any earlier success message: the pane never shows two contradictory outcomes. */
+  const fail = (text: string): void => { clear(status); show(error, text); };
 
   function element<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, text = ''): HTMLElementTagNameMap[K] {
     const node = doc.createElementNS(HTML_NS, tag) as unknown as HTMLElementTagNameMap[K];
@@ -104,6 +107,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     textScale: HTMLInputElement;
     preferences: Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>;
     savePreferences: HTMLButtonElement;
+    exportPreferences: HTMLButtonElement;
     profile: HTMLSelectElement;
     profileName: HTMLInputElement;
     saveProfile: HTMLButtonElement;
@@ -142,7 +146,9 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     }
     const savePreferences = element(doc, 'button', 'Save preferences');
     savePreferences.type = 'button'; savePreferences.dataset.zcrPref = 'save-preferences';
-    research.append(savePreferences);
+    const exportPreferences = element(doc, 'button', 'Export preferences');
+    exportPreferences.type = 'button'; exportPreferences.dataset.zcrPref = 'export-preferences';
+    research.append(savePreferences, exportPreferences);
 
     const profiles = fieldset(doc, container, 'Research profiles');
     const editing = labelled(doc, profiles, 'Profile being edited', 'profile', 'select');
@@ -165,7 +171,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
 
-    return { form: container, uiLanguage, textScale, preferences, savePreferences, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
+    return { form: container, uiLanguage, textScale, preferences, savePreferences, exportPreferences, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
   }
 
   let controls: Controls | null = null;
@@ -227,7 +233,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   function refreshDisabled(): void {
     if (!controls || !current) return;
     const profile = selectedProfile(current);
-    for (const control of [controls.uiLanguage, controls.textScale, controls.savePreferences, controls.saveProfile, controls.profileName, controls.profile, ...controls.preferences.values()]) control.disabled = busy;
+    for (const control of [controls.uiLanguage, controls.textScale, controls.savePreferences, controls.exportPreferences, controls.saveProfile, controls.profileName, controls.profile, ...controls.preferences.values()]) control.disabled = busy;
     controls.updateProfile.disabled = busy || !profile;
     controls.deleteProfile.disabled = busy || !profile;
     for (const [id, entry] of skillRows) entry.setDisabled(busy || (current.skills.find(skill => skill.id === id)?.unsupportedDependencies.length ?? 0) > 0);
@@ -300,7 +306,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       return true;
     } catch (caught) {
       // Report the store's own message, then re-read so the form matches what was actually stored.
-      if (!disposed) { show(error, message(caught)); await reload(false); }
+      if (!disposed) { fail(message(caught)); await reload(false); }
       return false;
     } finally {
       busy = false;
@@ -316,7 +322,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       await reload(false);
       if (!disposed) show(status, 'Workflow updated.');
     } catch (caught) {
-      if (!disposed) { show(error, message(caught)); await reload(false); }
+      if (!disposed) { fail(message(caught)); await reload(false); }
     } finally {
       busy = false;
       if (!disposed) sync();
@@ -340,6 +346,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       textScale: form.querySelector('[data-zcr-pref="textScale"]') as HTMLInputElement,
       preferences: new Map(PREFERENCE_FIELDS.map(field => [field.key, form.querySelector(`[data-zcr-pref="preference-${field.key}"]`) as HTMLInputElement])),
       savePreferences: form.querySelector('[data-zcr-pref="save-preferences"]') as HTMLButtonElement,
+      exportPreferences: form.querySelector('[data-zcr-pref="export-preferences"]') as HTMLButtonElement,
       profile: form.querySelector('[data-zcr-pref="profile"]') as HTMLSelectElement,
       profileName: form.querySelector('[data-zcr-pref="profile-name"]') as HTMLInputElement,
       saveProfile: form.querySelector('[data-zcr-pref="save-profile"]') as HTMLButtonElement,
@@ -355,7 +362,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     listen(controls.textScale, 'change', () => {
       const requested = Number(controls!.textScale.value);
       if (!Number.isFinite(requested) || requested < CHAT_TEXT_SCALE_MIN || requested > CHAT_TEXT_SCALE_MAX) {
-        show(error, `Choose a chat text scale from ${CHAT_TEXT_SCALE_MIN} to ${CHAT_TEXT_SCALE_MAX}.`);
+        fail(`Choose a chat text scale from ${CHAT_TEXT_SCALE_MIN} to ${CHAT_TEXT_SCALE_MAX}.`);
         if (current) controls!.textScale.value = String(current.textScale);
         return;
       }
@@ -366,6 +373,14 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       const preferences = formPreferences(current);
       void commit(settings => ({ ...settings, preferences }), 'Preferences saved.');
     });
+    listen(controls.exportPreferences, 'click', () => {
+      if (busy || disposed) return;
+      busy = true; clear(error); refreshDisabled();
+      void host.exportPreferences()
+        .then(() => { if (!disposed) show(status, 'Preferences exported.'); })
+        .catch((caught: unknown) => { if (!disposed) fail(message(caught)); })
+        .finally(() => { busy = false; if (!disposed) sync(); });
+    });
     listen(controls.profile, 'change', () => {
       selectedProfileId = controls!.profile.value || null;
       sync();
@@ -373,7 +388,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     listen(controls.saveProfile, 'click', () => {
       if (!current) return;
       const name = controls!.profileName.value.trim();
-      if (!name) { show(error, 'Name this research profile.'); controls!.profileName.focus(); return; }
+      if (!name) { fail('Name this research profile.'); controls!.profileName.focus(); return; }
       const preferences = formPreferences(current);
       const id = host.profileId();
       void commit(settings => ({ ...settings, profiles: [...settings.profiles.filter(profile => profile.id !== id), { id, name, preferences }] }), 'Research profile saved.').then(saved => {

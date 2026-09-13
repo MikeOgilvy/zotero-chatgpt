@@ -1,4 +1,5 @@
 import { Window } from 'happy-dom';
+/* eslint-disable @typescript-eslint/unbound-method -- assertions inspect injected spies without invoking them. */
 import { expect, it, vi } from 'vitest';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 
@@ -73,7 +74,7 @@ it('reports an honest message instead of throwing when the plugin host is not ru
     const alert = element.querySelector('[role="alert"]');
     expect(alert?.textContent).toMatch(/not running/u);
   } finally {
-    shared.Zotero!.ZoteroCodexReaderPreferencesHost = host;
+    if (host) shared.Zotero!.ZoteroCodexReaderPreferencesHost = host;
   }
   pane().unmount(element);
 });

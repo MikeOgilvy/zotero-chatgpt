@@ -50,6 +50,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
   'Reference first PDF page': '引用 PDF 起始页', 'Reference last PDF page': '引用 PDF 结束页',
   'Research profile for this chat': '此对话的研究配置', 'Global preferences': '全局偏好',
+  "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.": '回答偏好、研究配置和工作流可用性位于 Zotero 的偏好设置窗口中。',
   'Answer language': '回答语言', 'Answer detail': '回答详细程度', 'Mathematical explanation': '数学解释方式',
   'Research background': '研究背景', 'Citation style': '引用风格', 'Annotation style': '标注风格',
   Brief: '简短', Standard: '标准', Detailed: '详细', Automatic: '自动', 'Intuition first': '直觉优先', 'Formal derivation': '形式推导',

@@ -15,8 +15,8 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   pane.append(context, input, leading, advanced); document.body.append(pane);
   const actions: WorkspaceViewActions = {
     searchReferences: vi.fn().mockResolvedValue([reference]), previewReference: vi.fn().mockResolvedValue(reference),
-    addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined), selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined), savePreferences: vi.fn().mockResolvedValue(undefined),
-    saveSkill: vi.fn().mockResolvedValue(skill), duplicateSkill: vi.fn().mockResolvedValue({ ...skill, id: 'copy', name: 'Derive copy' }), setSkillEnabled: vi.fn().mockResolvedValue(undefined), deleteSkill: vi.fn().mockResolvedValue(undefined), importSkill: vi.fn().mockResolvedValue(skill), exportSkill: vi.fn().mockResolvedValue(undefined),
+    addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined), selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined),
+    saveSkill: vi.fn().mockResolvedValue(skill), duplicateSkill: vi.fn().mockResolvedValue({ ...skill, id: 'copy', name: 'Derive copy' }), deleteSkill: vi.fn().mockResolvedValue(undefined), importSkill: vi.fn().mockResolvedValue(skill), exportSkill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
   const view = mountWorkspaceView({ input, context, leading, settings: advanced }, actions);
@@ -66,30 +66,26 @@ it('previews reference and skill chips as inert text and removes them through ca
   await vi.waitFor(() => { expect(actions.removeReference).toHaveBeenCalledWith('paper-one'); expect(actions.selectSkill).toHaveBeenCalledWith(null); });
 });
 
-it('persists explicit profile and preference edits while preserving unsaved fields across updates', async () => {
-  const { advanced, actions, view, state, document, button } = setup();
+it('keeps only the per-chat profile choice here and points at the native Preferences window', async () => {
+  const { advanced, actions, pane, document } = setup();
   const profile = advanced.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
   profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
   await vi.waitFor(() => expect(actions.selectProfile).toHaveBeenCalledWith('math'));
-  const background = advanced.querySelector<HTMLTextAreaElement>('[name="background"]')!;
-  background.value = 'I know linear algebra'; background.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true }));
-  view.update({ ...state, draft: { ...state.draft, profileId: 'math' } });
-  expect(background.value).toBe('I know linear algebra');
-  button('Save preferences').click();
-  await vi.waitFor(() => expect(actions.savePreferences).toHaveBeenCalledWith({ ...preferences, background: 'I know linear algebra' }));
+  // The global controls moved to Zotero's own Preferences window, not the sidebar.
+  expect(advanced.querySelector('[name="background"]')).toBeNull();
+  expect(advanced.querySelector('[name="profile-name"]')).toBeNull();
+  expect(pane.querySelector('[data-zcr-global-hint]')?.textContent).toMatch(/Zotero's Preferences window/u);
 });
-it('adopts the newly selected profile instead of keeping stale preference edits', async () => {
-  const saveProfile = vi.fn().mockResolvedValue({ id: 'math', name: 'Mathematics', preferences });
-  const { advanced, actions, view, state, document } = setup({ saveProfile });
-  const background = advanced.querySelector<HTMLTextAreaElement>('[name="background"]')!;
-  background.value = 'unsaved draft text';
-  background.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true }));
-  const profile = advanced.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
-  profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
-  await vi.waitFor(() => expect(actions.selectProfile).toHaveBeenCalledWith('math'));
-  view.update({ ...state, draft: { ...state.draft, profileId: 'math' } });
-  expect(advanced.querySelector<HTMLTextAreaElement>('[name="background"]')!.value).toBe('');
-  expect(advanced.querySelector<HTMLSelectElement>('[name="mathematics"]')!.value).toBe('formal');
+
+it('edits only this chat through the overrides section and never a global preference', () => {
+  const setOverrides = vi.fn();
+  const { advanced, document } = setup({ setOverrides });
+  const language = advanced.querySelector<HTMLInputElement>('[name="override-language"]')!;
+  language.value = 'zh'; language.dispatchEvent(new document.defaultView!.Event('change'));
+  expect(setOverrides).toHaveBeenCalledWith({ language: 'zh' });
+  const mathematics = advanced.querySelector<HTMLSelectElement>('[name="override-mathematics"]')!;
+  mathematics.value = 'formal'; mathematics.dispatchEvent(new document.defaultView!.Event('change'));
+  expect(setOverrides).toHaveBeenLastCalledWith({ mathematics: 'formal' });
 });
 
 it('keeps an expanded workflow card open across unrelated updates', () => {
@@ -104,20 +100,17 @@ it('keeps an expanded workflow card open across unrelated updates', () => {
   expect(pane.querySelector('[data-zcr-skill-id="second"]')).not.toBeNull();
 });
 
-it('creates research profiles and sets explicit chat overrides without changing global preferences', async () => {
-  const saveProfile = vi.fn().mockResolvedValue({ id: 'new-profile', name: 'Control theory', preferences });
-  const setOverrides = vi.fn();
-  const f = setup({ saveProfile, deleteProfile: vi.fn().mockResolvedValue(undefined), setOverrides });
-  const name = f.advanced.querySelector<HTMLInputElement>('[name="profile-name"]')!;
-  expect(name).not.toBeNull(); name.value = 'Control theory'; f.button('Save as new profile').click();
-  await vi.waitFor(() => expect(saveProfile).toHaveBeenCalledWith({ id: null, name: 'Control theory', preferences }));
-  expect(f.actions.savePreferences).not.toHaveBeenCalled();
-  const language = f.advanced.querySelector<HTMLInputElement>('[name="override-language"]')!; language.value = 'zh'; language.dispatchEvent(new f.document.defaultView!.Event('change'));
-  expect(setOverrides).toHaveBeenCalledWith({ language: 'zh' });
+it('offers no global preference, research-profile or workflow-availability control in the sidebar', () => {
+  const { advanced, pane, button } = setup();
+  for (const label of ['Save preferences', 'Export preferences', 'Save as new profile', 'Update selected profile', 'Delete selected profile']) expect(button(label), label).toBeUndefined();
+  expect(advanced.querySelector('[name="language"]')).toBeNull();
+  expect(pane.querySelector('[data-zcr-skill-enabled="derive"]')).toBeNull();
+  // Workflow authoring stays here: the sidebar owns the library of installed workflows.
+  expect(pane.querySelector('[data-zcr-skill-id="derive"]')).not.toBeNull();
 });
 
-it('creates, edits, duplicates, toggles, imports, exports, and tries skills through real handlers', async () => {
-  const { pane, actions, document, button } = setup();
+it('creates, edits, duplicates, imports, exports, and tries skills through real handlers', async () => {
+  const { pane, actions, button } = setup();
   button('Create workflow').click();
   const name = pane.querySelector<HTMLInputElement>('[data-zcr-skill-editor] [name="name"]')!;
   const markdown = pane.querySelector<HTMLTextAreaElement>('[data-zcr-skill-editor] [name="markdown"]')!;
@@ -129,10 +122,8 @@ it('creates, edits, duplicates, toggles, imports, exports, and tries skills thro
   button('Cancel editing').click(); button('Duplicate Derive').click();
   await vi.waitFor(() => expect(actions.duplicateSkill).toHaveBeenCalledWith('derive'));
   button('Cancel editing').click();
-  const enabled = pane.querySelector<HTMLInputElement>('[data-zcr-skill-enabled="derive"]')!;
-  enabled.checked = false; enabled.dispatchEvent(new document.defaultView!.Event('change'));
   button('Export Derive').click(); button('Import workflow').click(); button('Try Derive in draft').click();
-  await vi.waitFor(() => { expect(actions.setSkillEnabled).toHaveBeenCalledWith('derive', false); expect(actions.exportSkill).toHaveBeenCalledWith('derive'); expect(actions.importSkill).toHaveBeenCalled(); expect(actions.selectSkill).toHaveBeenCalledWith('derive'); });
+  await vi.waitFor(() => { expect(actions.exportSkill).toHaveBeenCalledWith('derive'); expect(actions.importSkill).toHaveBeenCalled(); expect(actions.selectSkill).toHaveBeenCalledWith('derive'); });
 });
 
 it('requires an inline delete confirmation and leaves failed saves editable', async () => {
@@ -145,16 +136,12 @@ it('requires an inline delete confirmation and leaves failed saves editable', as
   expect(pane.querySelector('[data-zcr-skill-editor]')).not.toBeNull();
 });
 
-it('restores profile and enabled controls when persistence rejects the change', async () => {
-  const { advanced, pane, document } = setup({ selectProfile: vi.fn().mockRejectedValue(new Error('Profile unavailable')), setSkillEnabled: vi.fn().mockRejectedValue(new Error('Save failed')) });
+it('restores the chat profile control when selecting a profile is refused', async () => {
+  const { advanced, pane, document } = setup({ selectProfile: vi.fn().mockRejectedValue(new Error('Profile unavailable')) });
   const profile = advanced.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
   profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
   await vi.waitFor(() => expect(pane.textContent).toContain('Profile unavailable'));
   expect(profile.value).toBe('');
-  const enabled = pane.querySelector<HTMLInputElement>('[data-zcr-skill-enabled="derive"]')!;
-  enabled.checked = false; enabled.dispatchEvent(new document.defaultView!.Event('change'));
-  await vi.waitFor(() => expect(pane.textContent).toContain('Save failed'));
-  expect(enabled.checked).toBe(true);
 });
 
 it('leaves a newer query and its open menu intact when an earlier selection finishes', async () => {
