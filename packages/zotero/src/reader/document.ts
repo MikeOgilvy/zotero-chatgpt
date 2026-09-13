@@ -21,6 +21,17 @@ async function digestBytes(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 async function digest(text: string): Promise<string> {
   return digestBytes(new TextEncoder().encode(text));
 }
+/** Largest prefix of `text` whose UTF-8 encoding fits `room` bytes, cut only at code-point boundaries. */
+function clipToBytes(text: string, room: number): string {
+  if (room <= 0) return '';
+  let output = ''; let used = 0;
+  for (const character of text) {
+    const size = new TextEncoder().encode(character).length;
+    if (used + size > room) break;
+    output += character; used += size;
+  }
+  return output;
+}
 function identifier(hash: string): string { return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`; }
 export function cancelled(): ReaderError { return new ReaderError('INVALID_REQUEST', 'PDF preparation cancelled. Your question is kept.'); }
 function checkSignal(signal: AbortSignal): void { if (signal.aborted) throw cancelled(); }
@@ -39,7 +50,7 @@ async function interruptible<T>(work: Promise<T>, signal: AbortSignal): Promise<
 export class ReaderDocumentCache {
   private entries = new Map<string, DocumentContext>();
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(private options: { yield(): Promise<void>; maxEntries?: number }) {}
+  constructor(private options: { yield(): Promise<void>; maxEntries?: number; maxBytes?: number }) {}
   read(paper: PaperScope, source: DocumentSource, signal: AbortSignal, progress: (p: DocumentProgress) => void, range?: PageRange): Promise<DocumentContext> {
     const revision = { ...source.revision }; const scope = { ...paper };
     const selected = range ? [...range] as [number, number] : undefined;
@@ -47,13 +58,19 @@ export class ReaderDocumentCache {
       checkSignal(signal);
       const total = source.pdf.numPages;
       const [first, last] = selected ?? [1, total];
-      if (!Number.isSafeInteger(total) || total < 1 || total > 10_000 || !Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last < first || last > total) throw new ReaderError('INVALID_REQUEST', 'Choose a valid PDF page range.');
+      if (!Number.isSafeInteger(total) || total < 1 || total > 10_000 || !Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last < first || last > total) throw new ReaderError('INVALID_REQUEST', 'The requested PDF page range is not valid for this document.');
       const key = JSON.stringify([paperId(scope), revision, PARSER, first, last]);
       const cached = this.entries.get(key);
       if (cached) { this.entries.delete(key); this.entries.set(key, cached); progress({ done: cached.pages.length, total: last - first + 1 }); return clone(cached); }
       progress({ done: 0, total: last - first + 1 });
       const labels = await interruptible(source.pdf.getPageLabels2().catch(() => null), signal);
-      const pages: DocumentPage[] = []; const hashes: string[] = []; let bytes = 0;
+      const label = (number: number) => labels?.[number - 1] || String(number);
+      // The local ceiling bounds memory, not the model's context window. Reaching it must not discard
+      // the pages already extracted: keep every page that fits, clip the page that straddles the
+      // ceiling as `partial`, and record every page after it as an explicit unread gap. A throw here
+      // used to send nothing at all, which is the refusal the owner asked us to remove.
+      const maxBytes = this.options.maxBytes ?? DOCUMENT_BYTES;
+      const pages: DocumentPage[] = []; let bytes = 0; let unread: number | null = null;
       for (let number = first; number <= last; number++) {
         checkSignal(signal); await this.options.yield(); checkSignal(signal);
         let text = ''; let status: DocumentPage['status'] = 'empty'; let partial = false;
@@ -63,15 +80,25 @@ export class ReaderDocumentCache {
           text = content.chars.map(char => char.ignorable ? '' : char.c + (char.paragraphBreakAfter ? '\n\n' : char.lineBreakAfter ? '\n' : char.spaceAfter ? ' ' : '')).join('').trim();
           status = text ? 'text' : 'empty';
         } catch { checkSignal(signal); status = 'error'; }
-        bytes += new TextEncoder().encode(text).length;
-        if (bytes > DOCUMENT_BYTES) throw new ReaderError('PAYLOAD_TOO_LARGE', 'This PDF exceeds the local text limit. Nothing was truncated or sent. Choose a page range in Context.');
-        const page: DocumentPage = { pageIndex: number - 1, pageLabel: labels?.[number - 1] || String(number), text, status, ...(partial ? { partial: true } : {}) };
-        pages.push(page);
-        hashes.push(await digest(JSON.stringify(page)));
+        const encoded = new TextEncoder().encode(text).length;
+        if (bytes + encoded > maxBytes) {
+          // Keep the code-point-aligned prefix that fits and mark it partial, so no reader can mistake
+          // it for the page's complete text. A page with no room for even one code point becomes a gap.
+          const clipped = text ? clipToBytes(text, maxBytes - bytes) : '';
+          if (clipped.trim()) {
+            pages.push({ pageIndex: number - 1, pageLabel: label(number), text: clipped, status: 'text', partial: true });
+            bytes += new TextEncoder().encode(clipped).length;
+            unread = number + 1;
+          } else unread = number;
+          break;
+        }
+        bytes += encoded;
+        pages.push({ pageIndex: number - 1, pageLabel: label(number), text, status, ...(partial ? { partial: true } : {}) });
         progress({ done: pages.length, total: last - first + 1 });
       }
+      if (unread !== null) for (let number = unread; number <= last; number++) pages.push({ pageIndex: number - 1, pageLabel: label(number), text: '', status: 'error' });
       checkSignal(signal);
-      const document = validateDocument({ id: identifier(await digest(JSON.stringify([key, hashes]))), paper: scope, revision, parserVersion: PARSER, totalPages: total, pages });
+      const document = validateDocument({ id: identifier(await digest(JSON.stringify([key, pages]))), paper: scope, revision, parserVersion: PARSER, totalPages: total, pages });
       // Retry transient extraction failures; an empty/scanned page is a stable, explicit gap.
       if (!pages.some(p => p.status === 'error' || p.partial)) {
         this.entries.set(key, document);

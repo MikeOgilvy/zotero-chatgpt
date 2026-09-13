@@ -1,8 +1,13 @@
 import { ReaderError, type DocumentContext, type DocumentRevision, type DocumentSummary } from './index.ts';
 import { validatePaperScope } from './validation.ts';
 
-/** Resource guard, not a model context-window promise. No silent clipping. */
-/** Local extraction cap, separate from the much smaller per-turn model budget. */
+/**
+ * Local extraction ceiling, not a model context-window promise and not the per-turn send budget.
+ * 16 MiB of UTF-8 text is ~4M tokens under the conservative bytes-as-tokens estimate, far above the
+ * smallest pinned window (272000), so it only bounds local memory; the much smaller model budget is
+ * applied later by the context planner. The reader fills up to this ceiling and then records the
+ * remaining pages as explicit unread gaps instead of throwing the extracted work away.
+ */
 export const DOCUMENT_BYTES = 16 * 1024 * 1024;
 function invalid(): never { throw new ReaderError('INVALID_REQUEST', 'The PDF context is invalid.'); }
 function record(value: unknown, keys: string[]): Record<string, unknown> {
@@ -39,7 +44,7 @@ export function validateDocument(value: unknown): DocumentContext {
     if (typeof page.text !== 'string' || !['text', 'empty', 'error'].includes(String(page.status))) invalid();
     if (page.status === 'text' ? !page.text.trim() : page.text !== '') invalid();
     bytes += new TextEncoder().encode(page.text).length;
-    if (bytes > DOCUMENT_BYTES) throw new ReaderError('PAYLOAD_TOO_LARGE', 'This PDF exceeds the local text limit. No text was truncated or sent; use a smaller page range.');
+    if (bytes > DOCUMENT_BYTES) throw new ReaderError('PAYLOAD_TOO_LARGE', 'This document exceeds the local text limit before it can be stored. Nothing was sent.');
     return { pageIndex: index, pageLabel: label(page.pageLabel, 64), text: page.text, status: page.status as DocumentContext['pages'][number]['status'], ...(page.partial ? { partial: true as const } : {}) };
   });
   return { id, paper: validatePaperScope(doc.paper), revision, parserVersion: label(doc.parserVersion, 64), totalPages: Number(doc.totalPages), pages, ...(doc.sourceId ? { sourceId: doc.sourceId } : {}) };

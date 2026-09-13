@@ -70,11 +70,36 @@ it('never expands an authorized page range and keeps extraction gaps visible', a
   expect(plan.documents[0]?.pages[0]?.status).toBe('error');
 });
 
-it('refuses an unknown or unusable budget without selecting arbitrary text', async () => {
-  const document = source(['Some text.']);
+it('supplies bounded context with an unverified-fit note when the model window is unknown', async () => {
+  const document = source(['x'.repeat(40_000)]);
   const unknown = buildContextBudget({ modelId: 'unlisted', instructionBytes: 0, workflowBytes: 0, imageCount: 0, questionBytes: 0 });
-  await expect(planContext({ document, question: 'Read', budget: unknown })).rejects.toThrow();
+  expect(unknown.accuracy).toBe('unknown');
+  const plan = await planContext({ document, question: 'What is the meaning?', budget: unknown });
+  expect(plan.mode).not.toBe('multi-pass'); expect(plan.documents).toHaveLength(1);
+  expect(plan.coverage.reason).toMatch(/unknown|not asserted|unverified/i);
+  // The planner's documented unknown-window bound; the document is strictly larger, so this is a real bound.
+  expect(bytes(plan.documents[0])).toBeLessThanOrEqual(32 * 1024);
+  expect(bytes(plan.documents[0])).toBeLessThan(bytes(document));
+});
+it('still refuses a budget that leaves no room for any source fragment', async () => {
+  const document = source(['Some text.']);
   await expect(planContext({ document, question: 'Read', budget: { ...budget(), textBudgetTokens: 2 } })).rejects.toThrow();
+});
+it('refuses a document with no extractable text at all', async () => {
+  const document = source(['', '']);
+  document.pages = [
+    { pageIndex: 0, pageLabel: '1', text: '', status: 'empty' },
+    { pageIndex: 1, pageLabel: '2', text: '', status: 'error' },
+  ];
+  await expect(planContext({ document, question: 'Explain this', budget: budget(10000) })).rejects.toThrow(/no extractable text/i);
+});
+it('discloses locally unread page gaps in the coverage reason', async () => {
+  const document = source(['Alpha '.repeat(4000)]);
+  document.pages.push({ pageIndex: 9, pageLabel: '10', text: '', status: 'error' });
+  document.totalPages = 10;
+  const plan = await planContext({ document, question: 'Summarize the entire document', budget: budget(3000) });
+  expect(plan.mode).toBe('multi-pass');
+  expect(plan.coverage.reason).toMatch(/page 10|no text|unread|gap/i);
 });
 
 it('keeps leading paragraph whitespace attached to text when dividing a large first paragraph', async () => {

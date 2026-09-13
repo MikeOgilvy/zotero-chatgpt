@@ -49,3 +49,33 @@ it('cancels while a PDF worker is pending without destroying the reader', async 
   const pending = cache().read(paperA, f.source, abort.signal, () => {});
   abort.abort(); await expect(pending).rejects.toThrow(/cancel/i);
 });
+const bounded = (maxBytes: number) => new ReaderDocumentCache({ yield: async () => {}, maxBytes });
+it('keeps the pages it already extracted and reports unread pages as gaps at the local limit', async () => {
+  const f = source(['A'.repeat(120), 'B'.repeat(120), 'C'.repeat(120), 'D'.repeat(120)]);
+  const progress: number[] = [];
+  const result = await bounded(240).read(paperA, f.source, new AbortController().signal, p => progress.push(p.done));
+  expect(result.totalPages).toBe(4);
+  expect(result.pages.map(page => [page.pageIndex, page.status, page.pageLabel])).toEqual([
+    [0, 'text', 'iv'], [1, 'text', 'v'], [2, 'error', 'vi'], [3, 'error', '4'],
+  ]);
+  expect(result.pages[0]!.text).toBe('A'.repeat(120)); expect(result.pages[1]!.text).toBe('B'.repeat(120));
+  expect(result.pages.slice(2).every(page => page.text === '')).toBe(true);
+  expect(progress).toEqual([0, 1, 2]); expect(JSON.stringify(result)).not.toContain('/private');
+});
+it('marks a page whose text was clipped at the local limit as partial and reports the rest as unread', async () => {
+  const f = source(['Q'.repeat(200), 'R'.repeat(10)]);
+  const result = await bounded(50).read(paperA, f.source, new AbortController().signal, () => {});
+  expect(result.pages).toEqual([
+    { pageIndex: 0, pageLabel: 'iv', text: 'Q'.repeat(50), status: 'text', partial: true },
+    { pageIndex: 1, pageLabel: 'v', text: '', status: 'error' },
+  ]);
+});
+it('clips an oversized page at a Unicode code-point boundary and never emits a lone surrogate', async () => {
+  const text = '数学🙂'.repeat(60); const f = source([text, 'tail']);
+  const result = await bounded(25).read(paperA, f.source, new AbortController().signal, () => {});
+  const page = result.pages[0]!;
+  expect(page.partial).toBe(true); expect(page.text.startsWith('数学🙂')).toBe(true);
+  expect(new TextEncoder().encode(page.text).length).toBeLessThanOrEqual(25);
+  expect(page.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+  expect(result.pages[1]).toMatchObject({ pageIndex: 1, status: 'error', text: '' });
+});
