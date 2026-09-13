@@ -47,7 +47,7 @@ const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const RING_RADIUS = 8;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-/** How much of the ring is filled: used/window when a window is known, otherwise nothing. */
+/** Used/window when a window is known; null means no proportion can be shown honestly. */
 export function contextRingRatio(usage: ContextUsage | null): number | null {
   if (!usage || usage.window === null || usage.window <= 0) return null;
   return Math.min(1, Math.max(0, usage.usedTokens / usage.window));
@@ -55,9 +55,11 @@ export function contextRingRatio(usage: ContextUsage | null): number | null {
 
 export interface ContextRing { element: HTMLElement; update(usage: ContextUsage | null): void }
 /**
- * A small ring instead of a text chip. It fills by used/window when the runtime or the pinned
- * catalog reports a window, and stays neutral when the window is unknown. The numbers live in the
- * hover title and the accessible name, so no token figure occupies the composer's control row.
+ * A small ring instead of a text chip. The ring is a state indicator, not a loading affordance:
+ * with no honest proportion (no runtime report for this model, or no window known) it draws a
+ * complete, unbroken ring in a neutral tone; once a window is known the ring is released into a
+ * used/window arc. The numbers live in the hover title and the accessible name, so no token figure
+ * occupies the composer's control row.
  */
 export function mountContextRing(parent: HTMLElement): ContextRing {
   const doc = parent.ownerDocument;
@@ -77,7 +79,10 @@ export function mountContextRing(parent: HTMLElement): ContextRing {
   const update = (usage: ContextUsage | null) => {
     const ratio = contextRingRatio(usage);
     element.dataset.zcrContextState = ratio === null ? 'unknown' : usage!.provenance;
-    fill.setAttribute('stroke-dasharray', `${(RING_CIRCUMFERENCE * (ratio ?? 0)).toFixed(2)} ${RING_CIRCUMFERENCE.toFixed(2)}`);
+    // Unknown has no proportion to draw, so the whole stroke stays whole: no dash pattern means no
+    // gap, which reads as a deliberately solid "unknown" ring rather than an empty placeholder.
+    if (ratio === null) fill.setAttribute('stroke-dasharray', 'none');
+    else fill.setAttribute('stroke-dasharray', `${(RING_CIRCUMFERENCE * ratio).toFixed(2)} ${RING_CIRCUMFERENCE.toFixed(2)}`);
     const title = contextUsageTitle(usage);
     if (element.title !== title) element.title = title;
     if (element.getAttribute('aria-label') !== title) element.setAttribute('aria-label', title);

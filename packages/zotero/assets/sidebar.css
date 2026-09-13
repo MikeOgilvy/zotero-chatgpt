@@ -494,7 +494,8 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-context-ring-fill { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .zcr-context-ring[data-zcr-context-state="runtime-reported"] { color: var(--fill-primary, CanvasText); }
 .zcr-context-ring[data-zcr-context-state="pinned-catalog"] { color: var(--fill-secondary, GrayText); }
-.zcr-context-ring[data-zcr-context-state="unknown"] .zcr-context-ring-fill { stroke: transparent; }
+/* Unknown context is a complete, closed ring in a neutral tone: a state, not a loading placeholder. */
+.zcr-context-ring[data-zcr-context-state="unknown"] { color: var(--fill-secondary, GrayText); }
 .zcr-send {
   width: var(--zcr-toolbar-button-size, 28px);
   min-width: var(--zcr-toolbar-button-size, 28px);

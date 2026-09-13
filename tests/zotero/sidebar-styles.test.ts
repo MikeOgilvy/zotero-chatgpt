@@ -151,3 +151,12 @@ it('gives the dock resizer a visible keyboard focus ring with a negative offset'
   expect(shippedCss()).toMatch(/\.zcr-dock-resizer:focus-visible\s*\{\s*outline:\s*2px solid AccentColor;\s*outline-offset:\s*-2px;\s*\}/u);
   expect(shippedRule(doc, '.zcr-dock-resizer:focus-visible').outlineOffset).toBe('-2px');
 });
+
+it('keeps the unknown context ring a solid neutral band instead of hiding the fill', () => {
+  const { doc } = stylesheetDom();
+  const unknown = shippedRule(doc, '.zcr-context-ring[data-zcr-context-state="unknown"]');
+  // A neutral/secondary tone, so the complete ring reads as a state rather than an empty slot.
+  expect(unknown.color).not.toBe('');
+  // Regression guard: the unknown state must never blank the fill stroke back to an empty ring.
+  expect(shippedCss()).not.toMatch(/\[data-zcr-context-state="unknown"\][^{}]*\.zcr-context-ring-fill\s*\{[^}]*stroke:\s*transparent/u);
+});

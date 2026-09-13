@@ -424,7 +424,7 @@ it('gives every markdown table its own local scroll container', async () => {
   expect(wrapper?.firstElementChild?.tagName).toBe('TABLE');
 });
 
-it('shows an honest context ring: unfilled and neutral until the runtime reports usage', async () => {
+it('draws a complete solid ring while the context is unknown, never a percentage or empty placeholder', async () => {
   const { root } = await mountReadyChat();
   const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
   // The composer holds no token text at all: the ring is the whole indicator.
@@ -434,7 +434,24 @@ it('shows an honest context ring: unfilled and neutral until the runtime reports
   expect(ring.getAttribute('role')).toBe('status');
   expect(ring.title).toContain('unknown');
   expect(ring.getAttribute('aria-label')).toBe(ring.title);
-  expect(ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('0.00 50.27');
+  // 'none' leaves one unbroken stroke, so the unknown ring is solid rather than an empty arc.
+  expect(ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
+});
+
+it('keeps the solid ring and the honest number when a usage report has no window', async () => {
+  const { root } = await mountReadyChat({
+    usage: {
+      model: 'catalog-default', contextWindow: null,
+      last: { inputTokens: 12300, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12600 },
+      total: { inputTokens: 12300, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12600 },
+    },
+  });
+  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  expect(ring.dataset.zcrContextState).toBe('unknown');
+  expect(ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
+  expect(ring.getAttribute('aria-label')).toContain('12,300');
+  expect(ring.getAttribute('aria-label')).toContain('window is unknown');
+  expect(ring.getAttribute('aria-label')).not.toContain('%');
 });
 
 it('fills the ring from the last runtime report and keeps the numbers in the tooltip only', async () => {
