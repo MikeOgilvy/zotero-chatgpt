@@ -1,5 +1,5 @@
 import { ReaderError, paperId, type Conversation, type ImageAttachment, type PaperIdentity, type PaperScope } from '../../../contracts/src/index.ts';
-import type { HistoryEntry, ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { HistoryEntry, HistoryScope, ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
 import type { AgentTaskRecord } from '../../../contracts/src/tasks.ts';
 import { clone } from '../../../contracts/src/clone.ts';
@@ -52,7 +52,7 @@ function savedDraft(value: unknown): SavedDraft {
   };
 }
 function publicConversation(value: Conversation): Conversation {
-  return clone({ ...(value.paperIdentity ? { paperIdentity: value.paperIdentity } : {}), ...(value.usage ? { usage: value.usage } : {}), ...(value.titleCustomized ? { titleCustomized: true } : {}), ...(value.parentConversationId ? { parentConversationId: value.parentConversationId, forkMessageId: value.forkMessageId } : {}), ...(value.activeBatchId ? { activeBatchId: value.activeBatchId } : {}), ...(value.queuedRequestIds ? { queuedRequestIds: value.queuedRequestIds } : {}), id: value.id, paper: value.paper, title: value.title, settings: value.settings, activeRequestId: value.activeRequestId, messages: value.messages, lastSeq: value.lastSeq, createdAt: value.createdAt, updatedAt: value.updatedAt });
+  return clone({ ...(value.paperIdentity ? { paperIdentity: value.paperIdentity } : {}), ...(value.usage ? { usage: value.usage } : {}), ...(value.titleCustomized ? { titleCustomized: true } : {}), ...(value.parentConversationId ? { parentConversationId: value.parentConversationId, forkMessageId: value.forkMessageId } : {}), ...(value.archivedAt ? { archivedAt: value.archivedAt } : {}), ...(value.activeBatchId ? { activeBatchId: value.activeBatchId } : {}), ...(value.queuedRequestIds ? { queuedRequestIds: value.queuedRequestIds } : {}), id: value.id, paper: value.paper, title: value.title, settings: value.settings, activeRequestId: value.activeRequestId, messages: value.messages, lastSeq: value.lastSeq, createdAt: value.createdAt, updatedAt: value.updatedAt });
 }
 function identityOf(conversation: Conversation, saved: SavedDraft | null = null): PaperIdentity {
   const reported = conversation.paperIdentity ?? conversation.messages.find(message => message.paper)?.paper;
@@ -311,8 +311,9 @@ export class WorkspaceStore implements ReaderWorkspace {
     }
     return result;
   }
-  history(query = ''): Promise<HistoryEntry[]> {
+  history(query = '', scope: HistoryScope = {}): Promise<HistoryEntry[]> {
     const search = text(query, 1024).normalize('NFKC').toLowerCase().trim();
+    const archivedScope = scope.archived === true;
     return this.serial(async () => {
       if (!this.storage.list) unavailable();
       let files: string[]; try { files = await this.storage.list('conversations'); } catch { unavailable(); }
@@ -324,6 +325,8 @@ export class WorkspaceStore implements ReaderWorkspace {
       const tasksByConversation = await this.historyTasks(conversations);
       const entries: HistoryEntry[] = []; const currentByPaper = new Map<string, string | null>();
       for (const c of conversations.values()) {
+        // Exactly one scope per chat: archive state is the only difference between the two queries.
+        if (!!c.archivedAt !== archivedScope) continue;
         const tasks = tasksByConversation.get(c.id) ?? [];
         let saved = await this.loadDraft(c.paper, c.id);
         if (!saved) {
@@ -338,7 +341,7 @@ export class WorkspaceStore implements ReaderWorkspace {
         if (search && !searchable.includes(search)) continue;
         const updatedAt = [c.updatedAt, ...(draftPresent && saved ? [saved.updatedAt] : []), ...tasks.map(task => task.updatedAt)].sort().at(-1)!;
         const previews = [{ at: c.updatedAt, text: c.messages.findLast(message => message.text.trim())?.text ?? '' }, ...(draftPresent && saved ? [{ at: saved.updatedAt, text: saved.draft.question }] : []), ...tasks.map(task => ({ at: task.updatedAt, text: task.question }))].filter(item => item.text.trim()).sort((a, b) => b.at.localeCompare(a.at));
-        entries.push({ id: c.id, paper: clone(c.paper), title: c.title, identity, updatedAt, createdAt: c.createdAt, messageCount: c.messages.length, taskCount: tasks.length, preview: preview(previews[0]?.text ?? ''), hasDraft: draftPresent, activeRequestId: c.activeRequestId });
+        entries.push({ id: c.id, paper: clone(c.paper), title: c.title, identity, updatedAt, createdAt: c.createdAt, messageCount: c.messages.length, taskCount: tasks.length, preview: preview(previews[0]?.text ?? ''), hasDraft: draftPresent, activeRequestId: c.activeRequestId, ...(c.archivedAt ? { archivedAt: c.archivedAt } : {}) });
       }
       return entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
     });

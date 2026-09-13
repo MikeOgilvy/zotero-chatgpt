@@ -26,6 +26,60 @@ it('searches original paper titles and message text while omitting contentless c
   expect((await store.history('posterior'))[0]).toMatchObject({ title: 'Renamed discussion', identity: { title: 'Original title' } });
   expect(await store.history('Original title')).toHaveLength(1);
 });
+it('loads a pre-archive record as unarchived and partitions history into exactly one of two scopes', async () => {
+  const storage = new MemoryStorage(); const conversations = new ConversationStore(storage, uniqueClock());
+  const legacy = await conversations.create(paperA, 'Legacy discussion', settings);
+  legacy.messages.push({ id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Legacy content', citations: [], status: 'completed' });
+  await conversations.save(legacy);
+  // A legacy record on disk carries schema 3 and no archive field: reading it must not invent one.
+  const bytes = new TextDecoder().decode(storage.files.get(`conversations/${legacy.id}.json`));
+  const stored = JSON.parse(bytes) as { schemaVersion: number; archivedAt?: string };
+  expect(stored).not.toHaveProperty('archivedAt');
+  expect(stored.schemaVersion).toBe(3);
+  const store = new WorkspaceStore(storage, clock);
+  expect((await store.history()).map(entry => entry.id)).toEqual([legacy.id]);
+  expect((await store.history()).every(entry => entry.archivedAt === undefined)).toBe(true);
+  expect(await store.history('', { archived: true })).toEqual([]);
+  // Archiving is an additive field on the same schema-3 record: it persists and flips the scope.
+  legacy.archivedAt = clock.now();
+  await conversations.save(legacy);
+  const archived = await store.history('', { archived: true });
+  expect(archived.map(entry => entry.id)).toEqual([legacy.id]);
+  expect(archived[0]?.archivedAt).toBe(clock.now());
+  expect(await store.history()).toEqual([]);
+  expect(await store.history('Legacy content')).toEqual([]);
+  expect((await store.history('Legacy content', { archived: true }))[0]).toMatchObject({ id: legacy.id, archivedAt: clock.now() });
+  // Restoring deletes the field and returns the chat to the default scope unchanged.
+  delete legacy.archivedAt;
+  await conversations.save(legacy);
+  expect((await store.history()).map(entry => entry.id)).toEqual([legacy.id]);
+  expect(await store.history('', { archived: true })).toEqual([]);
+});
+
+it('never drops a conversation from both history scopes and never lists one twice', async () => {
+  const storage = new MemoryStorage(); const conversations = new ConversationStore(storage, uniqueClock());
+  const make = async (paper: typeof paperA, title: string, archived: boolean) => {
+    const c = await conversations.create(paper, title, settings);
+    c.messages.push({ id: `${title}-m1`, requestId: `${title}-r1`, role: 'user', phase: null, settings, text: `${title} question`, citations: [], status: 'completed' });
+    if (archived) c.archivedAt = clock.now();
+    await conversations.save(c);
+    return c.id;
+  };
+  const activeIds = [await make(paperA, 'Active A', false), await make(paperB, 'Active B', false)];
+  const archivedIds = [await make(paperA, 'Archived A', true), await make(paperB, 'Archived B', true)];
+  const store = new WorkspaceStore(storage, clock);
+  const active = await store.history();
+  const archived = await store.history('', { archived: true });
+  expect(active.map(entry => entry.id).sort()).toEqual([...activeIds].sort());
+  expect(archived.map(entry => entry.id).sort()).toEqual([...archivedIds].sort());
+  expect(active.filter(entry => entry.archivedAt !== undefined)).toEqual([]);
+  expect(archived.filter(entry => entry.archivedAt === undefined)).toEqual([]);
+  // Every stored chat is listed exactly once across the two scopes.
+  const listed = [...active, ...archived].map(entry => entry.id);
+  expect(listed.sort()).toEqual([...activeIds, ...archivedIds].sort());
+  expect(new Set(listed).size).toBe(listed.length);
+});
+
 it('lists saved conversation summaries without reading PDF bodies but still validates sources when opened', async () => {
   class ObservedStorage extends MemoryStorage {
     reads: string[] = [];

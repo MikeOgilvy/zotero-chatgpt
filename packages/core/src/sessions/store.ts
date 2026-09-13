@@ -22,6 +22,11 @@ function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Sa
 function storageFailure(): never { throw new ReaderError('INTERNAL_ERROR', 'Conversation data could not be saved.'); }
 function asRecord(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) unavailable(); return value as Record<string, unknown>; }
 function str(value: unknown): string { if (typeof value !== 'string') unavailable(); return value; }
+function timestamp(value: unknown): string {
+  const result = str(value);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(result) || !Number.isFinite(Date.parse(result))) unavailable();
+  return result;
+}
 function nullableStr(value: unknown): string | null { return value === null ? null : str(value); }
 function int(value: unknown): number { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) unavailable(); return value; }
 function settingsOf(value: unknown): GenerationSettings { try { return validateSettings(value); } catch { return unavailable(); } }
@@ -122,6 +127,9 @@ function parseConversation(value: unknown, metadataOnly = false): StoredConversa
   if (c.activeBatchId !== undefined) { if (!UUID_PATTERN.test(str(c.activeBatchId))) unavailable(); result.activeBatchId = str(c.activeBatchId); }
   if (c.parentConversationId !== undefined) { if (!UUID_PATTERN.test(str(c.parentConversationId))) unavailable(); result.parentConversationId = str(c.parentConversationId); }
   if (c.forkMessageId !== undefined) result.forkMessageId = str(c.forkMessageId);
+  // Additive optional field: legacy records omit it and therefore load as unarchived. It is not a
+  // schema change, so the record stays schema 3 and older builds keep reading it.
+  if (c.archivedAt !== undefined) result.archivedAt = timestamp(c.archivedAt);
   if (c.usage !== undefined) {
     const usage = asRecord(c.usage); const checked = parseThreadUsage({ threadId: 'stored', turnId: 'stored', tokenUsage: { last: usage.last, total: usage.total, modelContextWindow: usage.contextWindow } });
     if (!checked) unavailable(); result.usage = { model: str(usage.model), contextWindow: checked.modelContextWindow, last: checked.last, total: checked.total };

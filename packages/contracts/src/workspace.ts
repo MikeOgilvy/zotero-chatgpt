@@ -57,7 +57,15 @@ export interface HistoryEntry {
   updatedAt: string; createdAt: string; messageCount: number; preview: string;
   hasDraft: boolean; activeRequestId: string | null;
   taskCount?: number;
+  /** Present only on an archived chat; echoes {@link import('./index.ts').Conversation.archivedAt}. */
+  archivedAt?: string;
 }
+/**
+ * `history` partitions every listed chat into exactly one scope. The default scope is unarchived;
+ * `{ archived: true }` returns only archived chats. A chat that appears in one never appears in the
+ * other. An empty query lists everything in that scope.
+ */
+export interface HistoryScope { archived?: boolean }
 export interface ReaderWorkspace {
   settings(): Promise<WorkspaceSettings>;
   saveSettings(value: WorkspaceSettings): Promise<void>;
@@ -67,7 +75,7 @@ export interface ReaderWorkspace {
   saveDraft(value: SavedDraft): Promise<void>;
   readDraft(paper: PaperScope, conversationId: string | null): Promise<SavedDraft | null>;
   deleteDraft(paper: PaperScope, conversationId: string | null): Promise<void>;
-  history(query?: string): Promise<HistoryEntry[]>;
+  history(query?: string, scope?: HistoryScope): Promise<HistoryEntry[]>;
   readConversation(id: string): Promise<import('./index.ts').Conversation>;
   currentConversation(paper: PaperScope): Promise<import('./index.ts').Conversation | null>;
   snapshotChat(conversationId: string, messageIds?: string[]): Promise<ReaderReference>;

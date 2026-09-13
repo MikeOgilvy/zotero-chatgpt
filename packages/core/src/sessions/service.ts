@@ -55,6 +55,7 @@ function toPublic(conversation: StoredConversation): Conversation {
     ...(conversation.paperIdentity ? { paperIdentity: clone(conversation.paperIdentity) } : {}),
     ...(conversation.titleCustomized ? { titleCustomized: true } : {}),
     ...(conversation.parentConversationId ? { parentConversationId: conversation.parentConversationId, forkMessageId: conversation.forkMessageId } : {}),
+    ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}),
     ...(conversation.usage ? { usage: clone(conversation.usage) } : {}),
     settings: clone(conversation.settings),
     activeRequestId: conversation.activeRequestId,
@@ -153,6 +154,15 @@ export class ReaderService {
   async renameConversation(conversationId: string, title: string): Promise<Conversation> {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > 1024) throw new ReaderError('INVALID_REQUEST', 'Enter a chat name between 1 and 1024 characters.');
     await this.mutate(conversationId, c => { c.title = title.trim(); c.titleCustomized = true; });
+    return toPublic(await this.load(conversationId));
+  }
+  /**
+   * Archive/unarchive is a metadata toggle through the same single-writer queue as rename. Nothing
+   * is removed from disk, so a restore returns the chat to the default listing unchanged. An open
+   * request is left running; archiving never cancels work or becomes a disguised delete.
+   */
+  async archiveConversation(conversationId: string, archived: boolean): Promise<Conversation> {
+    await this.mutate(conversationId, c => { if (archived) c.archivedAt = this.options.now(); else delete c.archivedAt; });
     return toPublic(await this.load(conversationId));
   }
   async branchConversation(conversationId: string, messageId: string): Promise<Conversation> {

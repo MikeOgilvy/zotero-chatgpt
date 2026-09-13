@@ -81,6 +81,8 @@ export interface ReaderClient {
   request(conversationId: string, requestId: string): Promise<SendReceipt>;
   cancel(conversationId: string, requestId: string): Promise<SendReceipt>;
   deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation>;
+  /** Non-destructive archive toggle. The record and its files remain; only the listed scope changes. */
+  archiveConversation?(conversationId: string, archived: boolean): Promise<Conversation>;
   renameConversation?(conversationId: string, title: string): Promise<Conversation>;
   branchConversation?(conversationId: string, messageId: string): Promise<Conversation>;
   diagnostics(conversationId: string): Promise<ShareableDiagnostics>;

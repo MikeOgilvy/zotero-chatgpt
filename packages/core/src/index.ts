@@ -248,6 +248,7 @@ class RuntimeSession implements ReaderClient {
   get(conversationId: string): Promise<Conversation> { return this.service.get(conversationId); }
   select(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.select(paper, conversationId); }
   renameConversation(conversationId: string, title: string): Promise<Conversation> { return this.service.renameConversation(conversationId, title); }
+  archiveConversation(conversationId: string, archived: boolean): Promise<Conversation> { return this.service.archiveConversation(conversationId, archived); }
   branchConversation(conversationId: string, messageId: string): Promise<Conversation> { return this.service.branchConversation(conversationId, messageId); }
   deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.deleteConversation(paper, conversationId); }
   send(input: SendInput): Promise<SendReceipt> { return this.service.send(input); }

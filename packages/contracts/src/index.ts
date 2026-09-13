@@ -214,6 +214,12 @@ export interface Conversation {
   parentConversationId?: UUID;
   forkMessageId?: UUID;
   usage?: UsageReport;
+  /**
+   * ISO timestamp set when this chat is archived. Archiving is non-destructive: the record still
+   * loads and can be restored by removing this field. Absent on every pre-archive record, so an old
+   * conversation is not archived. Archived chats leave the default history listing but stay on disk.
+   */
+  archivedAt?: string;
 }
 
 export interface SendInput {
