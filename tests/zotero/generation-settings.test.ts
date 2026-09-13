@@ -20,7 +20,50 @@ const catalog: ModelOption[] = [
   },
 ];
 
-it('takes catalog defaults from the default model, not a hardcoded menu', () => {
+/**
+ * The pinned runtime pages `model/list` newest-first: the first entry is the newest model the
+ * account can select, while an older entry carries the catalog's start-up `isDefault` flag.
+ */
+const newestFirst: ModelOption[] = [
+  {
+    id: 'gpt-5.6-sol', displayName: 'GPT-5.6-Sol', isDefault: false,
+    supportedReasoningEfforts: [{ id: 'high', description: 'Deeper' }],
+    defaultReasoningEffort: 'high',
+    serviceTiers: [], defaultServiceTier: null,
+  },
+  {
+    id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: false,
+    supportedReasoningEfforts: [{ id: 'medium', description: 'Balanced' }],
+    defaultReasoningEffort: 'medium',
+    serviceTiers: [], defaultServiceTier: null,
+  },
+  {
+    id: 'gpt-5.3-codex-spark', displayName: 'GPT-5.3-Codex-Spark', isDefault: true,
+    supportedReasoningEfforts: [{ id: 'low', description: 'Faster' }],
+    defaultReasoningEffort: 'low',
+    serviceTiers: [], defaultServiceTier: null,
+  },
+];
+
+it('takes catalog defaults from the newest listed model, not the catalog isDefault flag', () => {
+  expect(catalogDefaultSettings(catalog)).toEqual({ model: 'catalog-default', serviceTier: 'priority', effort: 'medium' });
+  expect(catalogDefaultSettings(newestFirst)).toEqual({ model: 'gpt-5.6-sol', serviceTier: null, effort: 'high' });
+  expect(catalogDefaultSettings([])).toBeNull();
+});
+
+it('keeps an explicit legal model and only falls back to the newest when that model is gone', () => {
+  const chosen = { model: 'gpt-5.5', serviceTier: null, effort: 'medium' };
+  expect(alignSettings(newestFirst, chosen)).toEqual(chosen);
+  expect(alignSettings(newestFirst, { model: 'retired-model', serviceTier: null, effort: 'medium' }))
+    .toEqual({ model: 'gpt-5.6-sol', serviceTier: null, effort: 'high' });
+});
+
+it('offers every visible model the runtime reports, in the runtime order', () => {
+  expect(composerControls(newestFirst, null)[0]?.options.map(option => option.value))
+    .toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.3-codex-spark']);
+});
+
+it('returns no default from an empty catalog instead of a hardcoded menu', () => {
   expect(catalogDefaultSettings(catalog)).toEqual({ model: 'catalog-default', serviceTier: 'priority', effort: 'medium' });
   expect(catalogDefaultSettings([])).toBeNull();
 });

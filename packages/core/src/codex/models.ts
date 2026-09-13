@@ -8,6 +8,12 @@ function modalities(value: unknown): Array<'text' | 'image'> | undefined {
   for (const raw of value) { const item: unknown = raw; if (item !== 'text' && item !== 'image') return undefined; if (!result.includes(item)) result.push(item); }
   return result;
 }
+/**
+ * One catalog entry. `hidden` is the runtime's own "not user-selectable" marker (deprecated or
+ * internal models); dropped here with no plugin-side list of its own, so the picker can only ever
+ * offer models this account may actually select. `isDefault` is kept for the CLI's start-up
+ * preference but is not the newest model, so the composer derives its own default from list order.
+ */
 export function parseModel(value: unknown): ModelOption | null {
   const model = record(value);
   if (typeof model.hidden !== 'boolean' || typeof model.isDefault !== 'boolean' || !Array.isArray(model.supportedReasoningEfforts) || !Array.isArray(model.serviceTiers)) throw new Error('Protocol model invalid');

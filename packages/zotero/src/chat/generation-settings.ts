@@ -14,8 +14,17 @@ export interface ComposerControl {
 function modelOf(models: readonly ModelOption[], id: string): ModelOption | undefined {
   return models.find(model => model.id === id);
 }
+/**
+ * The newest model the runtime offers. `model/list` (requested with includeHidden: false) is paged
+ * newest-first by the pinned binary — observed order GPT-5.6-Sol/Terra/Luna, GPT-5.5,
+ * GPT-5.3-Codex-Spark — so the first visible entry is the newest. The catalog's `isDefault` flag
+ * describes the CLI's own start-up preference and can lag behind, so it is never the default here.
+ */
+function newestModel(models: readonly ModelOption[]): ModelOption | undefined {
+  return models[0];
+}
 function defaultModel(models: readonly ModelOption[]): ModelOption | undefined {
-  return models.find(model => model.isDefault) ?? models[0];
+  return newestModel(models);
 }
 function encode(value: string | null): string { return value ?? ''; }
 function supportedTier(model: ModelOption, tier: string | null): boolean {
