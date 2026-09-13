@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { PINNED_RUNTIME } from './runtime-assets.mjs';
 import yauzl from 'yauzl';
 
-const SUBJECT_ID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
+// Exported so the real-profile development install tool (`scripts/install-dev-xpi.ts`) shares one
+// add-on id literal with this isolated-tree lifecycle tool instead of copying it.
+export const SUBJECT_ID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
 const RECORDS_RELATIVE = 'zotero-codex-reader/v1/records';
 
 function requireNode24() {

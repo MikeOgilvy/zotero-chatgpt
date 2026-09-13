@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "allowImportingTsExtensions": true,
+    "allowJs": true,
     "exactOptionalPropertyTypes": true,
     "lib": ["ES2024", "DOM"],
     "module": "NodeNext",
@@ -17,6 +18,7 @@
   "include": [
     "packages/**/*.ts",
     "packages/**/*.d.ts",
+    "scripts/**/*.ts",
     "tests/**/*.ts",
     "vitest.config.ts"
   ]

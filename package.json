@@ -20,6 +20,7 @@
     "package:dev": "npm run build && node scripts/package.mjs",
     "verify:artifacts": "node scripts/verify-artifacts.mjs",
     "verify:install": "node scripts/install-lifecycle.mjs",
+    "install:dev": "node scripts/install-dev-xpi.ts",
     "release:dry-run": "node scripts/release.mjs --dry-run"
   },
   "devDependencies": {
