@@ -38,6 +38,19 @@ export interface Citation {
 export type RequestState = 'accepted' | 'dispatching' | 'running' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
 export type MessageStatus = 'pending' | 'streaming' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
 
+/**
+ * Local, honest timing of one request. `firstTextAt` is the first delivered assistant text, not a
+ * tokenizer measurement: the core coalesces deltas, so it may lag the upstream first token slightly.
+ * `settledAt` stays null until the request reaches a terminal state; views must not infer completion
+ * from elapsed time.
+ */
+export interface RequestTiming {
+  requestId: UUID;
+  acceptedAt: string;
+  firstTextAt: string | null;
+  settledAt: string | null;
+}
+
 export interface PaperIdentity {
   title: string;
   authors: string[];
@@ -129,6 +142,8 @@ export interface Conversation {
   lastSeq: number;
   createdAt: string;
   updatedAt: string;
+  /** Per-request accept/first-text/settle times so a reopened view can show honest elapsed time. */
+  requestTiming?: RequestTiming[];
   paperIdentity?: PaperIdentity;
   titleCustomized?: boolean;
   parentConversationId?: UUID;

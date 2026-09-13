@@ -39,9 +39,17 @@ async function hashInput(input: SendInput, version: 1 | 2 = 2): Promise<string> 
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
+const TERMINAL_STATES: RequestState[] = ['completed', 'cancelled', 'failed', 'uncertain'];
 function toPublic(conversation: StoredConversation): Conversation {
+  const requestTiming = conversation.requests.map(request => ({
+    requestId: request.requestId,
+    acceptedAt: request.createdAt,
+    firstTextAt: request.firstTokenAt ?? null,
+    settledAt: TERMINAL_STATES.includes(request.state) ? request.updatedAt : null,
+  }));
   return {
     id: conversation.id,
+    requestTiming,
     paper: clone(conversation.paper),
     title: conversation.title,
     ...(conversation.paperIdentity ? { paperIdentity: clone(conversation.paperIdentity) } : {}),
@@ -324,6 +332,7 @@ export class ReaderService {
           emit({ type: 'failed', requestId: request.requestId, code: 'INTERNAL_ERROR', message: 'The model completed without an answer.' });
           return;
         }
+        this.recordFirstText(c, request.requestId, true);
         const settings = c.messages.find(m => m.requestId === request.requestId && m.role === 'user')?.settings ?? c.settings;
         const existing = c.messages.filter(m => m.requestId === request.requestId && m.role === 'assistant');
         let lastId = existing.at(-1)?.id ?? this.options.uuid();
@@ -390,6 +399,7 @@ export class ReaderService {
         return;
       }
       const messageId = c.messages.find(message => message.requestId === request.requestId && message.role === 'assistant')?.id ?? this.options.uuid();
+      this.recordFirstText(c, request.requestId, caption.length > 0);
       c.messages = c.messages.filter(message => message.requestId !== request.requestId || message.role !== 'assistant');
       c.messages.push({ id: messageId, requestId: request.requestId, role: 'assistant', phase: 'final', settings, text: caption, citations: [], status: 'completed', generatedImages: images });
       record.state = 'completed';
@@ -678,6 +688,7 @@ export class ReaderService {
     run.pending.delete(messageId);
     await this.commit(run.conversationId, (c, emit) => {
       const message = c.messages.find(m => m.id === messageId); if (!message) return;
+      this.recordFirstText(c, run.requestId, text.length > 0);
       message.text = text; message.phase = phase; message.status = 'completed';
       emit({ type: 'messageCompleted', requestId: run.requestId, messageId, finalText: text, phase });
     });
@@ -701,13 +712,28 @@ export class ReaderService {
   private async flush(run: Run): Promise<void> {
     if (run.pending.size === 0) return;
     const live = await this.load(run.conversationId);
+    const delivered: Array<{ messageId: UUID; text: string }> = [];
     for (const [messageId, text] of run.pending) {
       const message = live.messages.find(m => m.id === messageId);
       if (!message) continue;
       message.text += text;
-      this.publish({ type: 'delta', seq: ++live.lastSeq, conversationId: run.conversationId, requestId: run.requestId, at: this.options.now(), messageId, text });
+      delivered.push({ messageId, text });
     }
     run.pending.clear();
+    this.recordFirstText(live, run.requestId, delivered.length > 0);
+    for (const { messageId, text } of delivered) {
+      this.publish({ type: 'delta', seq: ++live.lastSeq, conversationId: run.conversationId, requestId: run.requestId, at: this.options.now(), messageId, text });
+    }
+  }
+  /**
+   * Record, once, when assistant text first becomes visible. Both streamed deltas and a
+   * single-shot completed item count: views derive time-to-first-text from this plus the
+   * accepted time and never invent a value.
+   */
+  private recordFirstText(conversation: StoredConversation, requestId: UUID, hasText: boolean): void {
+    if (!hasText) return;
+    const request = conversation.requests.find(r => r.requestId === requestId);
+    if (request && !request.firstTokenAt) request.firstTokenAt = this.options.now();
   }
   private settle(run: Run, outcome: Outcome): Promise<void> { return this.serial(run.conversationId, () => this.finish(run, outcome)); }
   /** Inside the queue: flush increments, persist, publish exactly one terminal event. */
