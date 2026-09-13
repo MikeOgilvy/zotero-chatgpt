@@ -160,3 +160,60 @@ it('keeps the unknown context ring a solid neutral band instead of hiding the fi
   // Regression guard: the unknown state must never blank the fill stroke back to an empty ring.
   expect(shippedCss()).not.toMatch(/\[data-zcr-context-state="unknown"\][^{}]*\.zcr-context-ring-fill\s*\{[^}]*stroke:\s*transparent/u);
 });
+
+it('bounds the history list so the popover scrolls inside the dock', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const panel = el('div', 'zcr-history-panel');
+  const list = el('div', 'zcr-history-list');
+  panel.append(list); doc.body.append(panel);
+  // The list owns the only scrollbar and is bounded by the dock-sized panel.
+  expect(cs(list).overflowY).toBe('auto');
+  expect(cs(list).maxHeight).not.toBe('');
+  expect(cs(panel).maxHeight).not.toBe('');
+});
+
+it('separates history groups with hairlines and keeps roomy single-line rows', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const list = el('div', 'zcr-history-list');
+  const first = el('div', 'zcr-history-group');
+  const second = el('div', 'zcr-history-group');
+  const heading = el('div', 'zcr-history-heading', 'Yesterday');
+  const row = el('div', 'zcr-history-row');
+  const item = el('button', 'zcr-history-item');
+  const title = el('span', 'zcr-history-title', 'A chat');
+  item.append(title); row.append(item); second.append(heading, row);
+  list.append(first, second); doc.body.append(list);
+  // The first section sits under the search field without a rule; later sections get a hairline.
+  expect(cs(first).borderTopWidth).toBe('0px');
+  expect(cs(second).borderTopWidth).toBe('1px');
+  // Small and muted: the heading uses the secondary fill token, not a hardcoded color.
+  expect(shippedRule(doc, '.zcr-history-heading').color).toContain('var(--fill-secondary');
+  expect(Number.parseFloat(cs(item).minHeight)).toBeGreaterThanOrEqual(28);
+  expect(cs(row).borderTopLeftRadius).not.toBe('');
+  // Single-line rows truncate the title rather than wrapping into a second line.
+  expect(cs(title).whiteSpace).toBe('nowrap');
+  expect(cs(title).textOverflow).toBe('ellipsis');
+});
+
+it('gives history rows a neutral keyboard focus ring instead of the accent outline', () => {
+  const { doc } = stylesheetDom();
+  const focused = shippedRule(doc, '.zcr-history-item:focus-visible');
+  expect(focused.outlineWidth).toBe('2px');
+  expect(focused.outlineStyle).toBe('solid');
+  expect(focused.outlineColor).not.toContain('AccentColor');
+  expect(shippedCss()).not.toMatch(/\.zcr-history-item:focus-visible\s*\{[^}]*AccentColor/u);
+});
+
+it('keeps history copy and rows on the chat text scale', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const sidebar = el('div', 'zcr-sidebar');
+  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
+  const item = el('button', 'zcr-history-item');
+  const heading = el('div', 'zcr-history-heading', 'Today');
+  sidebar.append(item, heading); doc.body.append(sidebar);
+  expect(cs(item).fontSize).toBe('calc(13px * 1.5)');
+  expect(cs(heading).fontSize).toBe('calc(11px * 1.5)');
+});

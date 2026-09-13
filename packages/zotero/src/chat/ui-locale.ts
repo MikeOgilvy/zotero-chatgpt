@@ -7,7 +7,7 @@ const COPY: Readonly<Record<string, string>> = {
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
   More: '更多', 'Chat options': '对话选项', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
   'Model and generation settings': '模型与生成设置', Effort: '推理强度', Options: '选项', Fast: '快速', Model: '模型',
-  Low: '低', Medium: '中', High: '高', 'Extra High': '极高', Today: '今天', Yesterday: '昨天', Older: '更早',
+  Low: '低', Medium: '中', High: '高', 'Extra High': '极高', Today: '今天', Yesterday: '昨天', 'Previous 7 days': '过去 7 天', Older: '更早',
   'Open the Codex sidebar to connect.': '打开 Codex 侧栏以连接。', 'Starting Codex…': '正在启动 Codex…',
   'Codex is unavailable': 'Codex 暂不可用', 'Finish signing in to ChatGPT in your browser.': '请在浏览器中完成 ChatGPT 登录。',
   'Sign in with ChatGPT to ask a question.': '使用 ChatGPT 登录后即可提问。', 'Responding…': '正在回答…',

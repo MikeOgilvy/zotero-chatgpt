@@ -277,7 +277,6 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-plus-menu :focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
 .zcr-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: 11px; min-width: 0; }
 .zcr-acquisition-target select { min-width: 0; width: 100%; max-width: 100%; min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
-.zcr-history-preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fill-secondary, GrayText); font-size: 11px; font-weight: 400; margin-top: 2px; }
 .zcr-tasks { min-width: 0; }
 .zcr-message-author { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
 .zcr-message-header .zcr-icon-button,
@@ -584,11 +583,13 @@ body.zcr-dock-open #split-view .primary-view,
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-height: 100%;
   background: var(--material-background, var(--color-background, Canvas));
   border-bottom: 0;
 }
 .zcr-history-search {
-  margin: 8px 10px 4px;
+  flex: 0 0 auto;
+  margin: 8px 10px 6px;
   padding: 6px 8px;
   font: inherit;
   font-size: calc(13px * var(--zcr-chat-text-scale, 1));
@@ -598,61 +599,70 @@ body.zcr-dock-open #split-view .primary-view,
   border-radius: 6px;
 }
 .zcr-history-search:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
-.zcr-history-list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 4px 0 12px; }
+/* The list owns the only scrollbar; bounded by the dock-sized panel so the popover cannot grow. */
+.zcr-history-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 0 10px;
+}
+/* Thin hairlines separate the time groups; there are no per-row separators. */
+.zcr-history-group { border-top-width: 1px; border-top-style: solid; border-top-color: var(--zcr-border); }
+.zcr-history-group:first-child { border-top-width: 0; }
 .zcr-history-heading {
   padding: 10px 12px 4px;
-  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  font-weight: 500;
   color: var(--fill-secondary, GrayText);
 }
 .zcr-history-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px 10px;
+  margin: 1px 6px;
+  border-radius: 6px;
 }
-.zcr-history-row[data-current] { background: var(--fill-quinary, ButtonFace); }
-.zcr-history-row:hover { background: var(--fill-quinary, ButtonFace); }
+.zcr-history-row[data-current], .zcr-history-row:hover { background: var(--fill-quinary, ButtonFace); }
 .zcr-history-status {
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid var(--fill-secondary, GrayText);
-  border-radius: 50%;
-  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fill-secondary, GrayText);
 }
-.zcr-history-status-done {
-  background: transparent;
-  border-color: var(--fill-secondary, GrayText);
-}
-.zcr-history-status-done::after {
-  content: '';
-  display: block;
-  width: 7px;
-  height: 4px;
-  margin: 3px 0 0 2px;
-  border-left: 1.5px solid var(--fill-secondary, GrayText);
-  border-bottom: 1.5px solid var(--fill-secondary, GrayText);
-  transform: rotate(-45deg);
-}
-.zcr-history-status-draft { border-style: dashed; }
-.zcr-history-status-active { border-style: solid; opacity: .7; }
+.zcr-history-status svg { display: block; width: 16px; height: 16px; }
 .zcr-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font: inherit;
   font-size: calc(13px * var(--zcr-chat-text-scale, 1));
   color: inherit;
   background: transparent;
   border: 0;
-  padding: 0;
-  text-align: left;
+  border-radius: 6px;
+  text-align: start;
   cursor: pointer;
 }
-.zcr-history-item:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+/* Single-line title: truncate rather than wrap into a second line. */
+.zcr-history-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A neutral ring, not the accent outline the owner rejected. */
+.zcr-history-item:focus-visible {
+  outline-width: 2px;
+  outline-style: solid;
+  outline-color: var(--fill-secondary, GrayText);
+  outline-offset: -2px;
+}
 .zcr-history-row .zcr-icon-button { opacity: .7; }
 
 /* Current PDF context uses the same native spacing and colors as chat chrome. */

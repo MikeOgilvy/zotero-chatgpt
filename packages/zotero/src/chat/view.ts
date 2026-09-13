@@ -61,7 +61,9 @@ const COPY = {
   model: 'Model',
   today: 'Today',
   yesterday: 'Yesterday',
+  previous7Days: 'Previous 7 days',
   older: 'Older',
+  noSavedChats: 'No saved chats match this search.',
   page: (label: string) => `p. ${label}`,
   copied: 'Copied',
   copyFailed: 'The answer could not be copied.',
@@ -81,6 +83,8 @@ const COPY = {
   elapsedUnknown: 'Elapsed time unavailable',
 } as const;
 const VIEW_ACTION_FAILED = COPY.actionFailed;
+/** Stable English section labels; `mountUILocale` translates the rendered heading text. */
+const HISTORY_BUCKET_LABELS: Record<HistoryBucket, string> = { Today: COPY.today, Yesterday: COPY.yesterday, 'Previous 7 days': COPY.previous7Days, Older: COPY.older };
 const ICONS = {
   send: 'M8 13V3M4.5 6.5 8 3l3.5 3.5',
   stop: 'M5 5h6v6H5z',
@@ -91,6 +95,8 @@ const ICONS = {
   source: 'M8 3v8M5 8l3 3 3-3',
   remove: 'M4 4l8 8M12 4l-8 8',
   check: 'M3.5 8.25 6.5 11.25 12.5 4.75',
+  historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
+  historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
 } as const;
 const STATUS_LINE = {
   idle: 'Open the Codex sidebar to connect.',
@@ -136,7 +142,16 @@ export function conversationLabel(conversation: Pick<Conversation, 'id' | 'title
   const index = same.findIndex(entry => entry.id === conversation.id) + 1;
   return index > 1 ? `${title} · ${index}` : title;
 }
-export function historyGroup(iso: string, now = Date.now()): 'Today' | 'Yesterday' | 'Older' {
+export type HistoryBucket = 'Today' | 'Yesterday' | 'Previous 7 days' | 'Older';
+/** Render order for the time-grouped history sections. */
+export const HISTORY_BUCKETS: readonly HistoryBucket[] = ['Today', 'Yesterday', 'Previous 7 days', 'Older'];
+/**
+ * Calendar bucketing that keeps the reference's Today / Yesterday / Previous 7 days shape without
+ * silently hiding older chats: everything past the seven days before yesterday lands in `Older`.
+ * An unparseable timestamp is shown under Today rather than dropped. All arithmetic is on local
+ * midnight, matching how a reader reads "yesterday".
+ */
+export function historyGroup(iso: string, now = Date.now()): HistoryBucket {
   const date = Date.parse(iso);
   if (!Number.isFinite(date)) return 'Today';
   const start = new Date(now);
@@ -144,14 +159,61 @@ export function historyGroup(iso: string, now = Date.now()): 'Today' | 'Yesterda
   const today = start.getTime();
   if (date >= today) return 'Today';
   if (date >= today - 86_400_000) return 'Yesterday';
+  if (date >= today - 7 * 86_400_000) return 'Previous 7 days';
   return 'Older';
+}
+/**
+ * Assign every item to exactly one bucket, in render order, dropping empty sections only. Callers
+ * can flatten the result to prove that no item was lost.
+ */
+export function groupHistory<T>(items: readonly T[], updatedAt: (item: T) => string, now = Date.now()): Array<{ bucket: HistoryBucket; items: T[] }> {
+  const buckets = new Map<HistoryBucket, T[]>(HISTORY_BUCKETS.map(bucket => [bucket, []]));
+  for (const item of items) buckets.get(historyGroup(updatedAt(item), now))!.push(item);
+  return HISTORY_BUCKETS.flatMap(bucket => { const group = buckets.get(bucket)!; return group.length ? [{ bucket, items: group }] : []; });
+}
+/** How far the dropped preview line is echoed into `aria-label`/`title` before it is truncated. */
+const HISTORY_DESCRIPTION_LIMIT = 240;
+/**
+ * The single visible line is the chat title. The paper title and the old second-line preview move
+ * into the accessible name and hover tooltip so they are not silently lost.
+ */
+export function historyRowDescription(row: { title: string; paperTitle?: string; preview?: string }): string {
+  const parts = [row.title.trim() || row.title];
+  const paper = row.paperTitle?.trim();
+  if (paper && paper !== row.title) parts.push(paper);
+  const preview = row.preview?.trim();
+  if (preview && preview !== row.title) parts.push([...preview].slice(0, HISTORY_DESCRIPTION_LIMIT).join(''));
+  return parts.join(' · ');
+}
+/** Newest first, then by id, so rebuilt lists keep a stable order inside every bucket. */
+function newestFirst<T extends { id: string; updatedAt: string; createdAt: string }>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt) || a.id.localeCompare(b.id));
 }
 function hiddenExplainText(message: Message): boolean {
   return message.role === 'user' && (message.action === 'explain' || message.text === EXPLAIN_QUESTION);
 }
-function historyStatus(conversation: Conversation): 'draft' | 'active' | 'done' {
-  if (conversation.activeRequestId) return 'active';
-  return conversation.messages.length === 0 ? 'draft' : 'done';
+export type HistoryStatus = 'draft' | 'active' | 'done';
+/**
+ * Works for both a full Conversation (`messages`) and a workspace HistoryEntry (`messageCount`).
+ * A live request reads as in progress even before its first answer; an empty chat is a draft.
+ */
+export function historyStatus(entry: { activeRequestId: string | null; messages?: readonly unknown[]; messageCount?: number }): HistoryStatus {
+  if (entry.activeRequestId) return 'active';
+  const count = entry.messageCount ?? entry.messages?.length ?? 0;
+  return count === 0 ? 'draft' : 'done';
+}
+interface HistoryRowSource {
+  id: string;
+  /** The one visible line. */
+  title: string;
+  paperTitle: string;
+  preview: string;
+  status: HistoryStatus;
+  updatedAt: string;
+  current: boolean;
+  open(): void;
+  /** Present only where the row can be deleted; the workspace history port owns no delete today. */
+  remove?: () => void;
 }
 export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentity, close: () => void): HTMLElement {
   const doc = body.ownerDocument;
@@ -778,53 +840,72 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     contextSource.hidden = !citation;
   };
-  const renderHistory = (state: PresenterState) => {
-    if (state.workspace) {
-      const nodes: HTMLElement[] = [];
-      for (const entry of state.history) {
-        const row = el('div', 'zcr-history-row'); row.setAttribute('role', 'listitem'); row.dataset.zcrHistoryLabel = `${entry.title} ${entry.identity.title} ${entry.preview}`;
-        const choice = el('button', 'zcr-history-item'); choice.type = 'button'; choice.dataset.zcrConversationId = entry.id;
-        choice.append(el('span', '', entry.title), el('small', 'zcr-history-preview', entry.preview || entry.identity.title));
-        choice.setAttribute('aria-label', entry.title); choice.addEventListener('click', () => { void presenter.openHistoryEntry(entry.id); toggleHistory(false); });
-        row.append(choice); if (entry.id === state.conversation?.id) row.dataset.current = '';
-        nodes.push(row);
-      }
-      if (!nodes.length) nodes.push(el('p', 'zcr-history-empty', 'No saved chats match this search.'));
-      historyList.replaceChildren(...nodes); return;
+  const historyRow = (source: HistoryRowSource) => {
+    const row = el('div', 'zcr-history-row');
+    row.setAttribute('role', 'listitem');
+    // The local search fallback hides rows by this label, so it keeps title + paper + preview.
+    row.dataset.zcrHistoryLabel = [source.title, source.paperTitle, source.preview].filter(Boolean).join(' ');
+    if (source.current) row.dataset.current = '';
+    const choice = el('button', 'zcr-history-item');
+    choice.type = 'button';
+    choice.dataset.zcrConversationId = source.id;
+    const mark = el('span', `zcr-history-status zcr-history-status-${source.status}`);
+    mark.dataset.zcrHistoryStatus = source.status;
+    mark.setAttribute('aria-hidden', 'true');
+    // A calm glyph, not an animation: done is a checked ring, a draft is a pencil, a live request
+    // is the same clock the timing line uses.
+    mark.append(icon(source.status === 'done' ? 'historyDone' : source.status === 'draft' ? 'historyDraft' : 'clock'));
+    const title = el('span', 'zcr-history-title', source.title);
+    choice.append(mark, title);
+    const description = historyRowDescription({ title: source.title, paperTitle: source.paperTitle, preview: source.preview });
+    choice.setAttribute('aria-label', description);
+    choice.title = description;
+    choice.addEventListener('click', () => { source.open(); toggleHistory(false); });
+    row.append(choice);
+    if (source.remove) {
+      const drop = button(COPY.deleteChat, 'delete-conversation', source.remove, 'remove');
+      drop.dataset.zcrConversationId = source.id;
+      row.append(drop);
     }
-    const groups: Record<'Today' | 'Yesterday' | 'Older', Conversation[]> = { Today: [], Yesterday: [], Older: [] };
-    const ordered = [...state.conversations].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt) || a.id.localeCompare(b.id));
-    for (const conversation of ordered) groups[historyGroup(conversation.updatedAt || conversation.createdAt)].push(conversation);
+    return row;
+  };
+  const renderHistory = (state: PresenterState) => {
+    const rows: HistoryRowSource[] = state.workspace
+      ? newestFirst(state.history).map(entry => ({
+        id: entry.id,
+        title: entry.title || COPY.untitled,
+        paperTitle: entry.identity.title,
+        preview: entry.preview,
+        status: historyStatus(entry),
+        updatedAt: entry.updatedAt || entry.createdAt,
+        current: entry.id === state.conversation?.id,
+        open: () => { void presenter.openHistoryEntry(entry.id); },
+      }))
+      : newestFirst(state.conversations).map(conversation => ({
+        id: conversation.id,
+        title: conversationLabel(conversation, state.conversations),
+        paperTitle: conversation.paperIdentity?.title ?? '',
+        preview: conversation.messages.at(-1)?.text ?? '',
+        status: historyStatus(conversation),
+        updatedAt: conversation.updatedAt || conversation.createdAt,
+        current: conversation.id === state.conversation?.id,
+        open: () => { void presenter.openConversation(conversation.id); },
+        remove: () => { if (confirmDelete()) void presenter.deleteConversation(conversation.id); },
+      }));
+    const sections = groupHistory(rows, row => row.updatedAt);
+    if (!sections.length) { historyList.replaceChildren(el('p', 'zcr-history-empty', COPY.noSavedChats)); return; }
     const nodes: HTMLElement[] = [];
-    for (const name of [COPY.today, COPY.yesterday, COPY.older] as const) {
-      const items = groups[name];
-      if (!items.length) continue;
+    for (const { bucket, items } of sections) {
       const group = el('div', 'zcr-history-group');
-      group.dataset.zcrHistoryGroup = name;
-      group.append(el('div', 'zcr-history-heading', name));
-      for (const conversation of items) {
-        const label = conversationLabel(conversation, state.conversations);
-        const row = el('div', 'zcr-history-row');
-        row.setAttribute('role', 'listitem');
-        row.dataset.zcrHistoryLabel = label;
-        if (conversation.id === state.conversation?.id) row.dataset.current = '';
-        const statusMark = el('span', `zcr-history-status zcr-history-status-${historyStatus(conversation)}`);
-        statusMark.setAttribute('aria-hidden', 'true');
-        const choice = el('button', 'zcr-history-item', label);
-        choice.type = 'button'; choice.dataset.zcrConversationId = conversation.id;
-        choice.setAttribute('aria-label', conversation.title || label);
-        choice.addEventListener('click', () => { void presenter.openConversation(conversation.id); toggleHistory(false); });
-        const drop = button(COPY.deleteChat, 'delete-conversation', () => {
-          if (confirmDelete()) void presenter.deleteConversation(conversation.id);
-        }, 'remove');
-        drop.dataset.zcrConversationId = conversation.id;
-        row.append(statusMark, choice, drop);
-        group.append(row);
-      }
+      group.dataset.zcrHistoryGroup = bucket;
+      group.append(el('div', 'zcr-history-heading', HISTORY_BUCKET_LABELS[bucket]));
+      for (const row of items) group.append(historyRow(row));
       nodes.push(group);
     }
     historyList.replaceChildren(...nodes);
-    applyHistoryFilter();
+    // The presenter already filtered a workspace search (it also matches message text), so the
+    // local row-label filter only runs for the host-list fallback.
+    if (!state.workspace) applyHistoryFilter();
   };
   const renderPicker = (state: PresenterState, signedIn: boolean) => {
     const models = state.runtime?.models ?? [];
