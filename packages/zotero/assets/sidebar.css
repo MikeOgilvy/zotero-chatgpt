@@ -220,6 +220,9 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
 
 .zcr-status-line { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); padding: 6px 0 0; }
+.zcr-request-timing { display: flex; align-items: center; gap: 4px; color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); padding: 4px 0 0; }
+.zcr-request-timing-glyph { display: inline-flex; }
+.zcr-request-timing-glyph svg { width: 14px; height: 14px; }
 .zcr-auth { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 0; }
 .zcr-error { color: var(--fill-primary, CanvasText); margin: 6px 0 0; padding-left: 0; overflow-wrap: anywhere; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
 

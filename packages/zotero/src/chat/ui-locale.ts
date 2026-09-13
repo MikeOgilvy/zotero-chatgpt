@@ -44,6 +44,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Collections could not be loaded.': '无法加载分类列表。',
   Copied: '已复制',
   'The answer could not be copied.': '无法复制回答。',
+  'Elapsed time unavailable': '耗时无法确定',
   'Context unknown': '上下文用量未知',
   'Add references or workflows': '添加引用或工作流', 'Close preview': '关闭预览', 'Reference preview': '引用预览',
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
@@ -104,7 +105,7 @@ const TEXT = [
   '.zcr-attachment-menu > summary', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
-  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-usage',
+  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-usage', '.zcr-request-timing-text',
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
@@ -120,7 +121,11 @@ const STATUS: Readonly<Record<string, string>> = {
 };
 
 function progress(text: string): string {
-  let match = /^Preparing PDF · (\d+)\/(\d+|\?)$/u.exec(text);
+  let match = /^Waiting (\d+)s$/u.exec(text);
+  if (match) return `等待 ${match[1]} 秒`;
+  match = /^Answered in (\d+)s$/u.exec(text);
+  if (match) return `回答用时 ${match[1]} 秒`;
+  match = /^Preparing PDF · (\d+)\/(\d+|\?)$/u.exec(text);
   if (match) return `正在准备 PDF · ${match[1]}/${match[2]}`;
   match = /^Current PDF · (\d+)\/(\d+) pages with text$/u.exec(text);
   if (match) return `当前 PDF · ${match[1]}/${match[2]} 页有文本`;

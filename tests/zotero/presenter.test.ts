@@ -92,6 +92,20 @@ describe('conversation presenter', () => {
     expect(() => f.presenter.setQuestion('仍然更新')).not.toThrow();
     expect(seen).toBe('仍然更新');
   });
+  it('advances request timing from core events and freezes it on a terminal event', async () => {
+    const f = fixture();
+    const requestId = '11111111-1111-4111-8111-111111111111';
+    f.setConversation({ ...f.conversation(), activeRequestId: requestId, requestTiming: [{ requestId, acceptedAt: '2026-09-13T00:00:00.000Z', firstTextAt: null, settledAt: null }] });
+    await f.presenter.activate();
+    expect(f.last().conversation?.requestTiming?.[0]).toMatchObject({ firstTextAt: null, settledAt: null });
+    f.emit({ type: 'delta', requestId, messageId: 'a1', text: '重连' });
+    expect(f.last().conversation?.requestTiming?.[0]?.firstTextAt).toBe('now');
+    f.emit({ type: 'completed', requestId, messageId: 'a1', finalText: '重连' });
+    expect(f.last().conversation?.requestTiming?.[0]?.settledAt).toBe('now');
+    // Re-delivered events keep the earliest stamps, so a settled request cannot start ticking again.
+    f.emit({ type: 'delta', requestId, messageId: 'a1', text: ' and more' });
+    expect(f.last().conversation?.requestTiming?.[0]).toMatchObject({ firstTextAt: 'now', settledAt: 'now' });
+  });
   it('freezes the question, settings and conversation while PDF preparation is pending, and keeps newer input', async () => {
     const f = fixture(); let resolve!: (value: typeof documentA) => void;
     const prepare = () => new Promise<typeof documentA>(r => { resolve = r; });

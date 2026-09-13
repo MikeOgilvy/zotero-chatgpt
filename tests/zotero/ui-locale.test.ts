@@ -121,6 +121,19 @@ it('localizes the context usage chip and its accessible report', () => {
   expect(unknown.textContent).toBe('Context unknown'); locale.dispose();
 });
 
+it('localizes the honest elapsed-time states while keeping the measured seconds verbatim', () => {
+  const { root, add } = setup();
+  const waiting = add('p', 'zcr-request-timing'); add('span', 'zcr-request-timing-text', 'Waiting 7s', waiting);
+  const answered = add('p', 'zcr-request-timing'); add('span', 'zcr-request-timing-text', 'Answered in 42s', answered);
+  const unknown = add('p', 'zcr-request-timing'); add('span', 'zcr-request-timing-text', 'Elapsed time unavailable', unknown);
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(waiting.textContent).toBe('等待 7 秒');
+  expect(answered.textContent).toBe('回答用时 42 秒');
+  expect(unknown.textContent).toBe('耗时无法确定');
+  locale.update('en');
+  expect(waiting.textContent).toBe('Waiting 7s'); expect(answered.textContent).toBe('Answered in 42s'); locale.dispose();
+});
+
 it('stays inside its pane and stops observing after disposal', async () => {
   const { document, root, add } = setup(); const outside = add('button', 'zcr-button', 'Send', document.body); const inside = add('button', 'zcr-button', 'Send');
   const locale = mountUILocale(root); locale.update('zh'); expect(inside.textContent).toBe('发送'); expect(outside.textContent).toBe('Send');

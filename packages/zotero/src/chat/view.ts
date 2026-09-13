@@ -1,4 +1,4 @@
-import type { Citation, Conversation, ImageAttachment, Message } from '../../../contracts/src/index.ts';
+import { requestProgress, type Citation, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
 import { contextUsageLabel, contextUsageTitle, currentContextUsage, mountDocumentContext } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
@@ -70,6 +70,8 @@ const COPY = {
   imageClipboardFailed: 'The clipboard image could not be attached.',
   imageDropFailed: 'The dropped image could not be attached.',
   collectionsFailed: 'Collections could not be loaded.',
+  /** Shown when a live request has no readable timing: an honest unknown, never an invented duration. */
+  elapsedUnknown: 'Elapsed time unavailable',
 } as const;
 const VIEW_ACTION_FAILED = COPY.actionFailed;
 const ICONS = {
@@ -311,6 +313,45 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historyList.setAttribute('role', 'list');
   historyPanel.append(historySearch, historyList);
   const status = el('p', 'zcr-status-line'); status.setAttribute('role', 'status');
+  // Honest elapsed time. The counter ticks only while a request is unsettled, freezes at the first
+  // delivered text, and stops at the settle stamp. Missing timing shows an explicit unknown rather
+  // than an invented duration: an idle local counter would wrongly imply this app is the wait when
+  // the real delay can be upstream quota or queueing.
+  const requestTiming = el('p', 'zcr-request-timing'); requestTiming.dataset.zcrRequestTiming = ''; requestTiming.setAttribute('role', 'status'); requestTiming.hidden = true;
+  const requestTimingGlyph = el('span', 'zcr-request-timing-glyph'); requestTimingGlyph.setAttribute('aria-hidden', 'true'); requestTimingGlyph.append(icon('clock'));
+  const requestTimingText = el('span', 'zcr-request-timing-text'); requestTimingText.dataset.zcrRequestTimingText = '';
+  requestTiming.append(requestTimingGlyph, requestTimingText);
+  let timingInterval: number | null = null;
+  let paintedTiming = '';
+  const clearTimingInterval = () => { const id = timingInterval; timingInterval = null; if (id !== null) doc.defaultView?.clearInterval(id); };
+  const describeTiming = (state: PresenterState, now: number): { text: string; ticking: boolean } | null => {
+    const conversation = state.conversation;
+    const timings = conversation?.requestTiming ?? [];
+    const activeId = conversation?.activeRequestId ?? null;
+    let timing: RequestTiming | null;
+    if (activeId) {
+      timing = timings.find(entry => entry.requestId === activeId) ?? null;
+      if (!timing) return { text: COPY.elapsedUnknown, ticking: false };
+    } else {
+      const last = timings.at(-1);
+      if (!last || last.settledAt === null) return null;
+      timing = last;
+    }
+    const progress = requestProgress(timing, now);
+    if (progress.settled) return { text: progress.elapsedSeconds === null ? COPY.elapsedUnknown : `Answered in ${progress.elapsedSeconds}s`, ticking: false };
+    const seconds = progress.firstTextSeconds ?? progress.elapsedSeconds;
+    if (seconds === null) return { text: COPY.elapsedUnknown, ticking: false };
+    // Before the first text the count is live; after it, the value freezes at the first-text mark.
+    return { text: `Waiting ${seconds}s`, ticking: true };
+  };
+  const paintTiming = (state: PresenterState) => {
+    const described = describeTiming(state, Date.now());
+    if (!described) { requestTiming.hidden = true; if (paintedTiming) { paintedTiming = ''; requestTimingText.textContent = ''; } clearTimingInterval(); return; }
+    requestTiming.hidden = false;
+    if (paintedTiming !== described.text) { paintedTiming = described.text; requestTimingText.textContent = described.text; }
+    if (described.ticking) { if (timingInterval === null) timingInterval = doc.defaultView?.setInterval(() => paintTiming(latestViewState), 1000) ?? null; }
+    else clearTimingInterval();
+  };
   const auth = el('div', 'zcr-auth');
   const login = button(COPY.login, 'login', () => { void presenter.login(); });
   const cancelLogin = button(COPY.cancelLogin, 'cancel-login', () => { void presenter.cancelLogin(); });
@@ -396,7 +437,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   composer.append(composerContext, input, bar, menu);
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
-  main.append(historyPanel, status, auth, alert, viewError, transcript, draft);
+  main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
   chat.append(chrome, settingsMenu, documentPanel, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
@@ -825,6 +866,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   const update = (state: PresenterState) => {
     latestViewState = state;
+    paintTiming(state);
     const uiLanguage = state.workspace?.uiLanguage ?? 'en';
     if (lastLanguage !== uiLanguage) { lastLanguage = uiLanguage; localizer.update(uiLanguage); }
     documentView.update(state);
@@ -1018,7 +1060,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   const unbind = presenter.bind(update);
   return () => {
-    presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose();
+    presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose(); clearTimingInterval();
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKey);
     for (const target of pasteDocuments) target.removeEventListener('paste', onPaste, true);

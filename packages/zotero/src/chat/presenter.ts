@@ -1,6 +1,6 @@
 import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runtime.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput } from '../../../contracts/src/index.ts';
+import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import type { AgentTaskChoices, AgentTaskRecord, AgentTasks, AnnotationProposal } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/agent.ts';
@@ -656,7 +656,9 @@ export class ConversationPresenter {
   private apply(event: ReaderEvent): void {
     const conversation = this.state.conversation;
     if (!conversation || event.seq <= conversation.lastSeq) return;
-    const next: Conversation = { ...conversation, messages: conversation.messages.map(m => ({ ...m })), lastSeq: event.seq };
+    // Spread alone keeps the stale timing, which would let a settled request keep ticking: every
+    // event advances the honest accept/first-text/settle stamps the view renders.
+    const next: Conversation = { ...conversation, messages: conversation.messages.map(m => ({ ...m })), lastSeq: event.seq, requestTiming: advanceRequestTiming(conversation.requestTiming, event) };
     const settleMessages = (status: Message['status']) => { for (const m of next.messages) if (m.requestId === event.requestId && m.role === 'assistant' && (m.status === 'streaming' || m.status === 'pending')) m.status = status; };
     let message = this.state.message;
     switch (event.type) {

@@ -42,17 +42,21 @@ async function mountReadyChat(options: {
   copyText?: (text: string) => void;
   openLink?: (url: string) => void;
   usage?: Conversation['usage'];
+  requestTiming?: Conversation['requestTiming'];
+  activeRequestId?: string | null;
+  captureTimers?: boolean;
   rename?: (id: string, title: string) => Promise<Conversation>;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
-    activeRequestId: null,
+    activeRequestId: options.activeRequestId ?? null,
     messages: options.messages ?? [{
       id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What does this mean?',
       citations: [citationA], status: 'completed',
     }],
     lastSeq: 0, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
     ...(options.usage ? { usage: options.usage } : {}),
+    ...(options.requestTiming ? { requestTiming: options.requestTiming } : {}),
   };
   const runtime: RuntimeSnapshot = {
     revision: 0, runtime: 'ready', account: { state: 'signedIn' }, login: null,
@@ -140,7 +144,8 @@ async function mountReadyChat(options: {
   doc.body.append(body);
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   const scale = options.textScale ?? { value: 1 };
-  mountChatView(root, presenter, {
+  const timers = options.captureTimers ? captureIntervalTimers(doc.defaultView as unknown as ViewWindow) : null;
+  const teardown = mountChatView(root, presenter, {
     openCitation: options.openCitation ?? (() => Promise.resolve()),
     readTextScale: () => scale.value,
     writeTextScale: value => { scale.value = value; },
@@ -159,7 +164,7 @@ async function mountReadyChat(options: {
     } : {}),
   });
   await Promise.resolve();
-  return { root, presenter, scale, client, emit: (event: ReaderEvent) => onEvent(event), updateRuntime: (patch: Partial<RuntimeSnapshot>) => { Object.assign(runtime, patch); onRuntime(structuredClone(runtime)); } };
+  return { root, presenter, scale, client, teardown, timers, emit: (event: ReaderEvent) => onEvent(event), updateRuntime: (patch: Partial<RuntimeSnapshot>) => { Object.assign(runtime, patch); onRuntime(structuredClone(runtime)); } };
 }
 
 const assistantMessage = (text: string): Conversation['messages'][number] => ({
@@ -172,6 +177,27 @@ function applySidebarStyles(root: HTMLElement): CSSStyleDeclaration {
   style.textContent = readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/sidebar.css'), 'utf8');
   doc.head.append(style);
   return doc.defaultView!.getComputedStyle(root);
+}
+
+/**
+ * The view schedules its elapsed-time ticker on the happy-dom window, whose timers are bound to
+ * `globalThis` when happy-dom loads, so vitest fake timers cannot drive them. Spy on the concrete
+ * window instance instead: capture the callbacks and invoke them after moving `Date.now`.
+ */
+type ViewWindow = {
+  setInterval: (handler: () => void, delay?: number) => number;
+  clearInterval: (id: number) => void;
+};
+function captureIntervalTimers(view: ViewWindow) {
+  const callbacks = new Map<number, () => void>();
+  let next = 0;
+  const set = vi.spyOn(view, 'setInterval').mockImplementation(handler => {
+    const id = ++next;
+    callbacks.set(id, handler);
+    return id;
+  });
+  const clear = vi.spyOn(view, 'clearInterval').mockImplementation(id => { callbacks.delete(id); });
+  return { callbacks, restore: () => { clear.mockRestore(); set.mockRestore(); } };
 }
 
 it('uses an in-pane sidebar without impersonating the reader toolbar or adding a close control', () => {
@@ -400,6 +426,95 @@ it('shows the last runtime context report with its window and never a remaining-
   expect(chip.getAttribute('aria-label')).toContain('12,345');
   expect(chip.getAttribute('aria-label')).toContain('128,000');
   expect(chip.getAttribute('aria-label')).toContain('not remaining context.');
+});
+
+it('counts the wait in whole seconds and refreshes it on each tick', async () => {
+  const base = Date.parse('2026-09-13T00:00:00.000Z');
+  const now = vi.spyOn(Date, 'now').mockReturnValue(base);
+  const requestId = '11111111-1111-4111-8111-111111111111';
+  try {
+    const { root, timers } = await mountReadyChat({
+      captureTimers: true, messages: [], activeRequestId: requestId,
+      requestTiming: [{ requestId, acceptedAt: new Date(base - 3000).toISOString(), firstTextAt: null, settledAt: null }],
+    });
+    const timer = root.querySelector<HTMLElement>('[data-zcr-request-timing]')!;
+    const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+    expect(timer.hidden).toBe(false);
+    expect(timer.querySelector('svg')).toBeTruthy();
+    expect(text.textContent).toBe('Waiting 3s');
+    expect(timers!.callbacks.size).toBe(1);
+    now.mockReturnValue(base + 2000);
+    for (const tick of timers!.callbacks.values()) tick();
+    expect(text.textContent).toBe('Waiting 5s');
+  } finally { vi.restoreAllMocks(); }
+});
+
+it('freezes the wait at the first delivered text instead of counting the stream', async () => {
+  const base = Date.parse('2026-09-13T00:00:00.000Z');
+  const now = vi.spyOn(Date, 'now').mockReturnValue(base);
+  const requestId = '22222222-2222-4222-8222-222222222222';
+  try {
+    const { root, emit, timers } = await mountReadyChat({
+      captureTimers: true, messages: [], activeRequestId: requestId,
+      requestTiming: [{ requestId, acceptedAt: new Date(base - 4000).toISOString(), firstTextAt: null, settledAt: null }],
+    });
+    const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+    expect(text.textContent).toBe('Waiting 4s');
+    emit({ seq: 1, conversationId: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId, at: new Date(base - 1000).toISOString(), type: 'delta', messageId: 'a1', text: '答' });
+    expect(text.textContent).toBe('Waiting 3s');
+    now.mockReturnValue(base + 30000);
+    for (const tick of timers!.callbacks.values()) tick();
+    expect(text.textContent).toBe('Waiting 3s');
+  } finally { vi.restoreAllMocks(); }
+});
+
+it('reports the settled answer duration once and stops ticking', async () => {
+  const base = Date.parse('2026-09-13T00:00:00.000Z');
+  const now = vi.spyOn(Date, 'now').mockReturnValue(base);
+  const requestId = '33333333-3333-4333-8333-333333333333';
+  try {
+    const { root, emit, timers } = await mountReadyChat({
+      captureTimers: true, messages: [], activeRequestId: requestId,
+      requestTiming: [{ requestId, acceptedAt: new Date(base - 40000).toISOString(), firstTextAt: null, settledAt: null }],
+    });
+    const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+    expect(text.textContent).toBe('Waiting 40s');
+    emit({ seq: 1, conversationId: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId, at: new Date(base - 37000).toISOString(), type: 'delta', messageId: 'a1', text: '答' });
+    emit({ seq: 2, conversationId: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId, at: new Date(base - 10000).toISOString(), type: 'completed', messageId: 'a1', finalText: '答' });
+    expect(text.textContent).toBe('Answered in 30s');
+    expect(timers!.callbacks.size).toBe(0);
+    now.mockReturnValue(base + 90000);
+    for (const tick of [...timers!.callbacks.values()]) tick();
+    expect(text.textContent).toBe('Answered in 30s');
+  } finally { vi.restoreAllMocks(); }
+});
+
+it('clears the elapsed-time interval on teardown so the view leaks no timer', async () => {
+  const base = Date.parse('2026-09-13T00:00:00.000Z');
+  const requestId = '44444444-4444-4444-8444-444444444444';
+  try {
+    const { teardown, timers } = await mountReadyChat({
+      captureTimers: true, messages: [], activeRequestId: requestId,
+      requestTiming: [{ requestId, acceptedAt: new Date(base - 1000).toISOString(), firstTextAt: null, settledAt: null }],
+    });
+    expect(timers!.callbacks.size).toBe(1);
+    teardown();
+    expect(timers!.callbacks.size).toBe(0);
+  } finally { vi.restoreAllMocks(); }
+});
+
+it('shows an explicit unknown instead of a fabricated duration when timing is missing', async () => {
+  const { root } = await mountReadyChat({ messages: [], activeRequestId: '55555555-5555-4555-8555-555555555555' });
+  const timer = root.querySelector<HTMLElement>('[data-zcr-request-timing]')!;
+  const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+  expect(timer.hidden).toBe(false);
+  expect(text.textContent).toBe('Elapsed time unavailable');
+  expect(text.textContent).not.toMatch(/\d/u);
+});
+
+it('hides the elapsed-time indicator when no request timing exists at all', async () => {
+  const { root } = await mountReadyChat({ messages: [] });
+  expect(root.querySelector<HTMLElement>('[data-zcr-request-timing]')!.hidden).toBe(true);
 });
 
 it('keeps the offline composer editable while preventing model submission', async () => {
