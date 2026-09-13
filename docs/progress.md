@@ -1,8 +1,23 @@
 # 当前进度与验收
 
-2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当前 HEAD 通过 `typecheck`/`lint`/`test:unit`（**632 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。
+2026-09-12 全量迭代收尾，分支 `codex/product-agent-v0.4`。基于 `38b047c` 的开发工作已按功能拆成小提交落在本地（未推送）；当时 HEAD 通过 `typecheck`/`lint`/`test:unit`（**632 tests / 57 files**）。下列早期迭代证据仍保留其原始范围，不代表本轮新证据。并入 2026-09-13 的两个功能分支后，当前 HEAD 为 **699 tests / 60 files**（见下节）。
 
 2026-09-13 补充：在最终 0.4.0a1 开发包上重跑了专用宿主验证（`--context`、`--context --native`）与 s6 隔离树的升级/回退，并为“新 schema 回退安全拒绝”补了宿主检查与单元回归。证据目录 `.zcr-dev/verification/scope-2026-09-12/`（忽略），过程与失败报告见下节。
+
+### 2026-09-13 分支合并与耗时 UI（代码 + 单元证据）
+
+把两个独立完成、各自在各自工作树验证过的分支并入本分支（均基于 `c2822f2`）：
+
+- `feat/usage-batch-1`：数学/货币渲染不再破坏正文；core 记录每请求 `acceptedAt`/`firstTextAt`/`settledAt` 并派生诚实进度；库级跨库 `@` 搜索；模型省略 comment 时仍保留可定位的标注候选；打开面板即准备当前 PDF；剪贴板/拖放多图全部保留；条目面板图标重绘。
+- `fix/audit-bugs-ui`：修复引用渲染经 `structuredClone` 后回答被清空（用户报告“回答变空白”）；运行时重连后重新订阅；单个视图异常不再污染会话状态；回答/代码复制入口可见；回答排版与每视图统一样式表；composer 卡片间距；切换研究配置后生效；剩余动态模板本地化；诚实的当前上下文 chip；同一论文复用空会话而非叠加；非法/反向页范围拒绝与重试；splitter 拖动按帧合并；dock 首屏不再闪白（暗色回退）。
+
+合并仅做两个 `--no-ff`；`tests/zotero/presenter.test.ts` 两侧新增用例经 Git 自动合并后逐侧核对，双方用例均保留，未删除或放宽任何断言。合并后立即 `typecheck` 与 `render-answer`/`chat-view`/`request-timing` 测试通过，用于排查语义（非文本）冲突。
+
+补完推迟的耗时 UI：presenter 的 `apply` 现在对每个事件调用 `advanceRequestTiming`（此前仅展开会保留旧计时，完成后计数器仍会继续走）；view 复用现有 clock 图标，渲染“等待 N 秒 / 首字到达即冻结 / 用 N 秒回答”，仅在未完成时以单个 `setInterval(…, 1000)` 计时，并在既有 teardown 中清除。计时数据缺失时显示明确的“耗时无法确定”，既不编造时长，也不在回答语言与 UI 语言之间做假设，更不暗示本地应用是上游配额/排队的等待原因。DOM 单元测试覆盖：等待计时、首字冻结、完成后不再计时、teardown 无泄漏、无数据不臆造。
+
+修复真实 flaky：`tests/zotero/reader-library.test.ts` 的 3 MiB 生成图导出测试在并行全量下偶发超过 vitest 默认 5s（隔离实测约 2.5–2.7s，属 CPU 竞争敏感而非损坏）。只给该用例显式 `{ timeout: 15000 }` 并注明实测值与原因；断言与真实工作量不变。全量 `npm run test:unit` 连续两次 **699 tests / 60 files** 均通过。
+
+诚实边界：以上均为代码 + 单元证据。并入重绘图标后的树重新执行 `package:dev` + `verify:artifacts`：产物 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`，**77 files PASS**，SHA-256 `24d82e17ca2f1bae5ee5b2806d69845c600bed63a848abd070fb2321e9baf534`（`dist/SHA256SUMS`），并确认包内 `content/assets/icon.svg` 与源文件逐字节一致。上节 2026-09-13 的真实宿主证据对应该合并之前的 `d33ab244…` 包；合并后的树尚未重跑真实宿主或真实模型，F 与登录/发行门槛仍未打勾。
 
 本轮交付（**代码 + 单元测试证据，非真实模型/宿主证据**）：**B 的来源身份与预算/长文/会话恢复、C 的工作区/引用/skill、UI 的四区视图、D 的原生标注任务账本、E 的获取整理，以及多模态/能力/图像输出**。真实隔离登录与真实模型回答、最终 0.4 XPI 的宿主 UI、真实图像生成和公开发行门槛仍未验证。唯一产品行为权威为 [规格](zotero-codex-user-flow.md)，架构/迁移在 [module-design](module-design.md)，复现命令在 [development](development.md)。不把目标、代码、单元、宿主、模型或发行证据混为一谈。
 
@@ -21,7 +36,7 @@
 | 检查 | 本轮开始 | 当前结果与边界 |
 | --- | --- | --- |
 | `npm run typecheck` / `npm run lint` | PASS | PASS |
-| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **632 PASS / 57 files**；新增契约/上下文/任务/工作区/原生/图像/来源链接回归，以及 schema-3 回退 fixture 解析回归；仅为单元证据 |
+| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **699 PASS / 60 files**（合并后连续两次无 flake）；含新增契约/上下文/任务/工作区/原生/图像/来源链接/请求计时回归，以及 schema-3 回退 fixture 解析回归；仅为单元证据 |
 | `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，`dist/zotero-codex-reader-0.4.0a1-dev.xpi`（含固定 runtime 与项目 MIT LICENSE）；本轮重建 digest 仍为 `d33ab244…`（与提交前一致，字节可复现） |
 | `npm run verify:artifacts` | 76 files PASS | **77 files PASS**，hash/白名单/许可/无私有记录与 Node 导入；digest 读 `dist/SHA256SUMS` |
 | 临时 `git worktree` + `npm ci` 的 clean HEAD 重建 | 未执行 | **PASS**：typecheck PASS；`test:unit` 631（无 `dist/` 时 629+2 skip）；`package:dev` → 0.4.0a1 XPI；`verify:artifacts` 77 files，digest 与主树一致；复用本地固定 runtime 缓存，未重新下载 |
@@ -33,7 +48,7 @@
 | 文档链接 / `git diff --check` / 构建依赖图 | 旧入口相互重复/冲突 | 12 个维护/保护文档链接目标有效；diff 无空白错误；生产图覆盖 37 个运行 TS 模块，另有必要的 host-types 纯类型模块 |
 | `.github/workflows/ci.yml` / `release.yml` | Node 只写 `24`（浮动 major），只跑 typecheck/lint/test:unit，从不打包 | Node 改为 `node-version-file: .nvmrc`（24.11.0，与 engines `>=24 <25` 一致）；`check` 跑 `npm ci`/`typecheck`/`lint`/`test:unit`，`package` 跑 `runtime-prepare`/`package:dev`/`verify:artifacts`；无 upload/publish/tag 步骤，宿主与 `--live` 明确排除 |
 
-工具链 Node 24.11.0 / npm 11.6.1。当前开发包：`dist/zotero-codex-reader-0.4.0a1-dev.xpi`；本轮 `package:dev` + `verify:artifacts` 实测 **77 files**，SHA-256 以 `dist/SHA256SUMS` 为准（本轮实测 **`d33ab244f49e24da983daa2bfdbf542b8f6f28c5b40ad5b295ffd8c613311049`**）。项目 MIT `LICENSE` 已随包。实际固定二进制 `codex-cli 0.144.1`，其生成的实验 JSON schema 在 verification/protocol。model/list 没有初始上下文窗口，tokenUsage 通知的 modelContextWindow 可为 null；当前显示未知，未猜容量。
+工具链 Node 24.11.0 / npm 11.6.1。当前开发包：`dist/zotero-codex-reader-0.4.0a1-dev.xpi`；`package:dev` + `verify:artifacts` 实测 **77 files**，SHA-256 以 `dist/SHA256SUMS` 为准。**2026-09-13 分支合并后的树**实测 **`24d82e17ca2f1bae5ee5b2806d69845c600bed63a848abd070fb2321e9baf534`**（含重绘 icon.svg）；上节宿主证据对应的合并前构建为 **`d33ab244f49e24da983daa2bfdbf542b8f6f28c5b40ad5b295ffd8c613311049`**。项目 MIT `LICENSE` 已随包。实际固定二进制 `codex-cli 0.144.1`，其生成的实验 JSON schema 在 verification/protocol。model/list 没有初始上下文窗口，tokenUsage 通知的 modelContextWindow 可为 null；当前显示未知，未猜容量。
 
 宿主实际覆盖：完整 XPI 加载；标题/输入先可用；两页文本与罗马/数字标签；本地/未发送说明；页范围遗漏；返回原页和关闭保留页；signedOut 本地会话；同父/同名附件隔离；草稿恢复；30 次开关/设置；单一 dock/按钮；无模型请求记录。报告：[本轮宿主报告](../.zcr-dev/verification/scope-2026-09-11/host-current-pdf.json)。未读取/复制认证文件，未向真实库写条目。CUA 在关闭测试实例后自动重选日常窗口，随即停止该窗口操作；之后仅按已核对的专用 PID 管理测试进程。
 
@@ -142,6 +157,7 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 - [x] E（代码+单元）：DOI/链接/列表未保存元数据、查重、指定 collection、OA PDF 校验与恢复；原生适配与 ledger 共用；网络/真实库未验。
 - [x] 多模态/能力（代码+单元）：模型目录/usage/上下文预算来源；粘贴/截图多图；固定 runtime 图像生成能力与 16 MiB 生成图校验；真实模型图像生成未验。
 - [ ] F（BLOCKED）：真实隔离登录/问答/停止/恢复、各用户路径、主题/窄窗/大字/压力、无 Node/公开下载仍在对应条件成立时验收。**版本升级/回退与 schema-3 回退安全拒绝本轮已在 s6 隔离树验证（22/22）**；仍需要隔离官方登录、真实模型、真实宿主原生 UI、签名 XPI 与公开发布授权。
+- [x] 合并 `feat/usage-batch-1` 与 `fix/audit-bugs-ui` 并补完耗时 UI（代码+单元）：两侧测试均保留，全量 `test:unit` 连续两次 **699 tests / 60 files**，重打包 `verify:artifacts` **77 files**；真实宿主/模型仍未重跑。
 - [ ] 收尾：版本升级与小提交本轮完成；干净 checkout 重建本轮已在临时 worktree 复现（typecheck/单元/package:dev/verify:artifacts 与主树同 digest）；CI/release 工作流已按真实脚本与 `.nvmrc` 加固且保持无 upload/publish；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
