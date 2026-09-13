@@ -47,12 +47,32 @@ function paintDockColumn(dock: HTMLElement, width?: number): void {
   pin('line-height', '1.4');
 }
 
+/**
+ * Zotero 9.0.6's reader FocusManager installs a CAPTURE-phase `keydown` listener on the same
+ * reader window our dock is mounted into, and before the event reaches the composer target it
+ * runs (resource/reader/reader.js:72538, `FocusManager._handleKeyDown`):
+ *   if (pressedNextKey(e) && !e.target.closest('[contenteditable], input[type="text"], .preview-popup')) {
+ *     e.preventDefault(); this.tabToItem();
+ *   }
+ * and the mirror branch for ArrowLeft (reader.js:72541). Because capture runs on the window
+ * first, our `<textarea>` composer would lose the caret and the reader would switch panes.
+ * `closest('[contenteditable]')` matches any ancestor that merely carries the attribute, whatever
+ * its value, so an explicit non-editable `contenteditable="false"` on the dock exempts every
+ * control inside it; form controls are unaffected by an ancestor's contenteditable state and keep
+ * native editing. Do not remove: without it ArrowLeft/ArrowRight in the composer stop moving the
+ * caret, and the dock splitter's own ArrowLeft/ArrowRight binding sees `defaultPrevented`.
+ */
+function exemptFromReaderFocusManager(dock: HTMLElement): void {
+  dock.setAttribute('contenteditable', 'false');
+}
+
 export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLElement } | undefined {
   const split = readerContentRoot(doc);
   const toolbar = doc.querySelector('.toolbar');
   if (!split || !toolbar) return undefined;
   const existing = split.querySelector<HTMLElement>(`[${DOCK_ATTR}]`);
   if (existing) {
+    exemptFromReaderFocusManager(existing);
     markDockOpen(doc, split);
     const current = Number.parseFloat(existing.style.width || existing.style.flexBasis);
     paintDockColumn(existing, Number.isFinite(current) && current > 0 ? current : undefined);
@@ -63,6 +83,7 @@ export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLE
   dock.setAttribute(DOCK_ATTR, '');
   dock.setAttribute('role', 'complementary');
   dock.setAttribute('aria-label', 'Codex');
+  exemptFromReaderFocusManager(dock);
   const resizer = createHtmlElement(doc, 'div');
   resizer.className = 'zcr-dock-resizer';
   resizer.dataset.zcrResizer = '';
@@ -103,7 +124,10 @@ function reservesResizeKeys(target: EventTarget | null): boolean {
   if (!element || typeof element !== 'object' || !('tagName' in element)) return false;
   const tag = String(element.tagName ?? '').toLowerCase();
   if (element.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return true;
-  return typeof element.closest === 'function' && element.closest('[contenteditable],[role="textbox"]') !== null;
+  // Only a genuinely editable ancestor reserves the keys. The dock carries an explicit
+  // `contenteditable="false"` marker for Zotero's FocusManager guard (see mountReaderDock), so a
+  // bare `[contenteditable]` match would wrongly treat the dock's own splitter as a text field.
+  return typeof element.closest === 'function' && element.closest('[contenteditable="true"], [contenteditable=""], [role="textbox"]') !== null;
 }
 
 /** Pointer capture and keyboard resizing so the reader stays reachable without a mouse.
