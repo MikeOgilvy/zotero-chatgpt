@@ -276,16 +276,20 @@ it('lists only editable native collections and keeps profile, library, and colle
 });
 
 // This test really base64-encodes and decodes an image just over the ordinary 2 MiB limit and
-// compares the exported bytes (measured ~1.8s in isolation, ~3.5-4.3s under the full parallel suite on
-// this machine), which is CPU-bound and contends with every other worker, so it intermittently
-// crossed vitest's 5s default. The payload is the exact 2 MiB + 1 boundary rather than an arbitrary
-// 3 MiB so the real multi-MiB work stays as small as the coverage allows; the work and its
-// assertions stay real, only the budget is explicit.
+// compares the exported bytes. The comparison is byte-exact but no longer uses vitest's generic
+// deep equality over the multi-MiB `Uint8Array` (that was the measured timeout root cause); it now
+// checks the target and length, then one `Buffer.equals` memcmp. The payload stays the exact
+// 2 MiB + 1 boundary, and the explicit budget stays as defence for slower shared CI runners — the
+// real work and the strength of the assertion are unchanged.
 it('exports generated output images above the input limit while retaining the ordinary 2 MiB limit', { timeout: 15000 }, async () => {
   const f = setup(); const bytes = new Uint8Array(2 * 1024 * 1024 + 1); bytes.set(png);
   const image = { id: uuid, name: 'generated.png', mime: 'image/png' as const, dataUrl: `data:image/png;base64,${Buffer.from(bytes).toString('base64')}` };
   await expect(f.port.exportImage(image)).rejects.toThrow(/larger/iu);
   expect(f.io.write).not.toHaveBeenCalled();
   await f.port.exportImage({ ...image, origin: { kind: 'generated', model: 'image-model' } });
-  expect(f.io.write).toHaveBeenCalledWith('/synthetic/SKILL.md', bytes);
+  const write = (f.io.write.mock.calls as unknown as Array<[string, Uint8Array]>).find(([target]) => target === '/synthetic/SKILL.md');
+  expect(write, 'exports to the SKILL.md target').toBeDefined();
+  const writtenBytes = write![1];
+  expect(writtenBytes.length).toBe(bytes.length);
+  expect(Buffer.from(writtenBytes).equals(Buffer.from(bytes))).toBe(true);
 });

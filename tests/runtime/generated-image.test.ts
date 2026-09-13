@@ -63,12 +63,16 @@ it('rejects a corrupt file with an image suffix and checks its size before readi
   await expect(f.load(item('', file), 'model')).rejects.toThrow(); expect(f.reads).toEqual([]);
 });
 // This test really base64-encodes a 2 MiB round trip plus the 16 MiB+1 boundary (~22 MB of base64
-// text), which is CPU-bound and contends with every other worker under the full parallel suite, so
-// it intermittently crossed vitest's 5s default (measured ~1.7s isolated, ~3.0-4.5s under the
-// parallel suite on this machine). The work and its assertions stay real; only the budget is explicit.
+// text). The multi-MiB comparison no longer uses vitest's generic deep equality over the multi-MiB
+// `Uint8Array` (the measured timeout root cause); it checks length then one `Buffer.equals` memcmp.
+// The work and the strength of the assertions stay real; the explicit budget stays as defence for
+// slower shared CI runners.
 it('keeps valid outputs larger than the 2MiB input limit without shrinking them and caps at16MiB', { timeout: 15000 }, async () => {
   const f = await setup(); const bytes = new Uint8Array(2 * 1024 * 1024 + 1); bytes.set(codec.decode(PNG));
-  const result = await f.load(item(codec.encode(bytes)), 'model'); expect(codec.decode(result.dataUrl.split(',')[1]!)).toEqual(bytes);
+  const result = await f.load(item(codec.encode(bytes)), 'model');
+  const decoded = codec.decode(result.dataUrl.split(',')[1]!);
+  expect(decoded.length).toBe(bytes.length);
+  expect(Buffer.from(decoded).equals(Buffer.from(bytes))).toBe(true);
   const tooBig = new Uint8Array(16 * 1024 * 1024 + 1); tooBig.set(codec.decode(PNG));
   await expect(f.load(item(codec.encode(tooBig)), 'model')).rejects.toThrow();
 });
