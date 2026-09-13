@@ -90,7 +90,6 @@ const ICONS = {
   copy: 'M6 6h7v7H6zM3 3h7v2',
   source: 'M8 3v8M5 8l3 3 3-3',
   remove: 'M4 4l8 8M12 4l-8 8',
-  trash: 'M3 5h10M6 5V3h4v2M5 5l.5 8h5L11 5',
   check: 'M3.5 8.25 6.5 11.25 12.5 4.75',
 } as const;
 const STATUS_LINE = {
@@ -275,7 +274,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   overflow.setAttribute('aria-haspopup', 'dialog');
   overflow.setAttribute('aria-expanded', 'false');
   overflow.setAttribute('aria-controls', `${viewId}-options`);
-  actions.append(fresh, historyBtn, overflow);
+  // Deletion lives on the chrome itself as a plain cross (the Cursor behavior); More owns no
+  // destructive action and the confirmation still states exactly what is removed.
+  const deleteCurrent = button(COPY.deleteChat, 'delete-current-conversation', () => {
+    const id = presenter.snapshot().conversation?.id;
+    if (!id || !confirmDelete()) return;
+    void presenter.deleteConversation(id);
+  }, 'remove');
+  actions.append(fresh, historyBtn, overflow, deleteCurrent);
   chrome.append(context, actions);
   const settingsMenu = el('div', 'zcr-settings-menu');
   settingsMenu.id = `${viewId}-options`;
@@ -285,13 +291,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   settingsMenu.setAttribute('aria-label', COPY.chatOptions);
   const conversationActions = el('div', 'zcr-conversation-actions');
   conversationActions.dataset.zcrConversationActions = '';
-  const deleteCurrent = button(COPY.deleteChat, 'delete-conversation', () => {
-    const id = presenter.snapshot().conversation?.id;
-    if (!id || !confirmDelete()) return;
-    toggleSettings(false);
-    void presenter.deleteConversation(id);
-  });
-  conversationActions.append(deleteCurrent);
   const renameForm = el('div', 'zcr-rename-form'); renameForm.hidden = true;
   const renameInput = el('input'); renameInput.type = 'text'; renameInput.maxLength = 1024; renameInput.setAttribute('aria-label', 'Chat name');
   const rename = button('Rename chat', 'rename-conversation', () => { renameForm.hidden = !renameForm.hidden; renameInput.value = presenter.snapshot().conversation?.title ?? ''; if (!renameForm.hidden) { renameInput.focus(); renameInput.select(); } });
@@ -751,7 +750,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (currentTitle.textContent !== title) currentTitle.textContent = title;
     currentTitle.title = state.conversation?.title || state.paperTitle || COPY.untitled;
     conversationActions.hidden = !state.conversation;
-    deleteCurrent.disabled = !state.conversation;
+    deleteCurrent.hidden = !state.conversation;
     const citation = latestCitation(state);
     const sourceKey = citation ? `${citation.id}:${pageLabel(citation)}` : '';
     if (contextSource.dataset.rendered !== sourceKey) {
@@ -804,7 +803,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         choice.addEventListener('click', () => { void presenter.openConversation(conversation.id); toggleHistory(false); });
         const drop = button(COPY.deleteChat, 'delete-conversation', () => {
           if (confirmDelete()) void presenter.deleteConversation(conversation.id);
-        }, 'trash');
+        }, 'remove');
         drop.dataset.zcrConversationId = conversation.id;
         row.append(statusMark, choice, drop);
         group.append(row);

@@ -753,6 +753,43 @@ it('uses icon-only New chat and history-row delete actions with accessible names
   const removeChat = root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]');
   expect(removeChat?.getAttribute('aria-label')).toMatch(/Delete chat/u);
   expect(removeChat?.textContent?.trim()).toBe('');
+  // History deletion is a cross, not a trash can.
+  expect(removeChat?.querySelector('svg path')?.getAttribute('d')).toBe('M4 4l8 8M12 4l-8 8');
+});
+
+it('deletes only the current chat from the chrome cross after confirmation, never from More', async () => {
+  const first: Conversation = {
+    id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
+    activeRequestId: null, messages: [], lastSeq: 0,
+    createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
+  };
+  const second: Conversation = {
+    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
+    createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
+  };
+  const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+  const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, second], confirm });
+  const chrome = root.querySelector('.zcr-chrome')!;
+  const close = chrome.querySelector<HTMLButtonElement>('[data-zcr-action="delete-current-conversation"]')!;
+  expect(close.getAttribute('aria-label')).toBe('Delete chat');
+  expect(close.textContent?.trim()).toBe('');
+  expect(close.querySelector('svg path')?.getAttribute('d')).toBe('M4 4l8 8M12 4l-8 8');
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
+  // More keeps rename only: no destructive action for the current chat.
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]')!.click();
+  const menu = root.querySelector<HTMLElement>('[data-zcr-settings-menu]')!;
+  expect(menu.querySelector('[data-zcr-action="delete-conversation"], [data-zcr-action="delete-current-conversation"]')).toBeNull();
+  expect(menu.querySelector('[data-zcr-action="rename-conversation"]')).not.toBeNull();
+  // Cancelling keeps the chat; accepting deletes exactly the current one.
+  close.click();
+  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
+  close.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversations.map(entry => entry.id)).not.toContain(second.id));
+  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(first.id);
+  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
+  expect(confirm).toHaveBeenCalledWith('Delete this chat? This only removes the local history for this PDF.');
 });
 
 it('hides the More details prompt in the transcript while keeping the citation', async () => {
@@ -1011,7 +1048,7 @@ it('keeps dock type at 1 when the open PDF zooms', async () => {
   expect(root.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
 });
 
-it('shows one current title and deletes only the current chat from More after confirmation', async () => {
+it('shows one current title and keeps the chat switch reachable from history', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
     activeRequestId: null, messages: [], lastSeq: 0,
@@ -1021,12 +1058,7 @@ it('shows one current title and deletes only the current chat from More after co
     ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
-  const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
-  const { root, presenter } = await mountReadyChat({
-    messages: [],
-    conversations: [first, second],
-    confirm,
-  });
+  const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, second] });
   const chrome = root.querySelector('.zcr-chrome')!;
   expect(chrome.querySelectorAll('[data-zcr-current-title]')).toHaveLength(1);
   expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
@@ -1035,19 +1067,6 @@ it('shows one current title and deletes only the current chat from More after co
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A · 2');
-  const more = root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]')!;
-  more.click();
-  const drop = root.querySelector<HTMLButtonElement>('[data-zcr-settings-menu] [data-zcr-action="delete-conversation"]')!;
-  expect(drop).toBeTruthy();
-  drop.click();
-  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
-  if (root.querySelector<HTMLElement>('[data-zcr-settings-menu]')!.hidden) more.click();
-  drop.click();
-  await vi.waitFor(() => {
-    expect(presenter.snapshot().conversations.map(entry => entry.id)).not.toContain(second.id);
-  });
-  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(first.id);
-  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
 });
 
 it('keeps local history reachable when the account signs out and the runtime becomes unavailable', async () => {
