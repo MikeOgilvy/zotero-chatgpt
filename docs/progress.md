@@ -9,9 +9,18 @@
 - **工作树**：干净。本轮只改被跟踪的 `packages/zotero/assets/sidebar.css`（死代码）与本页/其它文档；`dist/`、`build/`、`.zcr-dev/` 的清理不产生提交。
 - **开发版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a4`（未提升）。
 - **门禁（2026-09-14 同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` PASS（**计数与条件见下『测试计数（唯一权威）』**）；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（**92,661,386 bytes**，SHA-256 `061f46801f494b900d2fc27445f05ad1e57052a7f3f3962a0f72a014d652ea6e`）；`npm run verify:artifacts` **79 files PASS**，与 `dist/SHA256SUMS` 一致。均为代码 + 单元 + 产物证据。
-- **产物诚实边界**：owner 安装且完成真实宿主 `--context` **32/32** 的是**上一份** a4 字节（92,661,563 bytes，SHA-256 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`，构建于 `96f8c2c`）。本次清理后重打的同版本 a4（`061f4680…`）**取代**其 digest：源码差异只有**可证死代码**的 CSS 规则删除（`f1e8044` 的 `.zcr-history-archived-label`，加上本轮删掉的 `.zcr-appearance*` 与 `.zcr-workspace-check`——均无渲染路径、无行为变化），故**未重跑宿主**。宿主已验证的旧字节原样保存在忽略路径 `.zcr-dev/artifact-backup/zotero-codex-reader-0.4.0a4-dev.host-verified-5a6bb161.xpi`，需要时可还原。**同版本重装脚枪**：owner profile 装的仍是 `5a6bb161` 字节，若再侧载 `061f4680` 而同为 `0.4.0a4`，Zotero 会按同版本 no-op 而看不到变化——下一次要 owner 可见应提升版本号。
+- **产物诚实边界**：见下 [产物边界（重要）](#产物边界重要)。
 - **本轮删除（忽略目录，不产生提交）**：`dist/` 旧包 `0.3.0a1`（102,969,823 B）/ `0.4.0a1`（92,643,635 B）/ `0.4.0a2`（92,643,635 B）/ `0.4.0a3`（92,668,286 B）、`build/`（215 MB）、`.zcr-dev/` 旧日志 37 份（11 MB）与旧报告/ `build-info-*.json` 6 份。保留 `dist/0.4.0a4` + `SHA256SUMS`，以及 `.zcr-dev/{profile,data,context,live,verification,pin-bump,probes,fixtures,s6-virgin,s6-upgrade,runtime-cache}` 与新增的 `artifact-backup/`。删除前已用 `ps` 确认无 Zotero 进程使用任何 `.zcr-dev/` profile，且逐文件 `rg` 确认无仓库引用。
 - **安装状态**：owner 正常 profile 当前装的是宿主已验证的 a4（`5a6bb161…`，构建于 `96f8c2c`）供验收。
+
+### 产物边界（重要）
+
+- **canonical `dist` 产物 = 重打包的 `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（92,661,386 bytes，SHA-256 `061f46801f494b900d2fc27445f05ad1e57052a7f3f3962a0f72a014d652ea6e`）**。owner 已决定保留它，因为它与 HEAD 的源码一致、可从干净 checkout 复现——**这是记录，不再重议**。
+- **(a) 本 `dist` 里的 a4 未经过任何真实宿主验证。** 完成真实宿主 `--context` **32/32** 的是**上一份** a4 字节（92,661,563 bytes，SHA-256 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`，构建于 `96f8c2c`），**不是** `061f4680…`。
+- **(b) 宿主已验证字节已备份**在忽略路径 `.zcr-dev/artifact-backup/zotero-codex-reader-0.4.0a4-dev.host-verified-5a6bb161.xpi`，需要时可还原。
+- **(c) owner profile 当前装的仍是 `5a6bb161` 字节，但版本串同为 `0.4.0a4`**：若再侧载 `061f4680` 而同为 `0.4.0a4`，Zotero 会按“同版本”no-op，看不到任何变化——**同版本重装脚枪仍然成立**。
+- **(d) 下一次 owner 可见的改动必须先提升版本号**，不得在 `0.4.0a4` 下再换字节。
+- 两者为何不同：`061f4680` 相对 `5a6bb161` 只有**可证死代码**的 CSS 规则删除（`f1e8044` 的 `.zcr-history-archived-label`，加上本轮删掉的 `.zcr-appearance*` 与 `.zcr-workspace-check`——均无渲染路径、无行为变化），因此**未重跑宿主**。这些是“代码 + 单元 + 产物”证据，**不是**“宿主已验证”证据。
 
 ### 测试计数（唯一权威，2026-09-14 实测）
 
