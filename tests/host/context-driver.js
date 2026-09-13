@@ -216,9 +216,13 @@ async function runHostSmoke(config) {
           const result = native.getPageData.apply(this, args);
           void watch(result, value => {
             record.settled = true;
-            const chars = Array.isArray(value?.chars) ? value.chars : Array.isArray(Cu.waiveXrays(value?.chars)) ? Cu.waiveXrays(value.chars) : null;
-            record.chars = chars ? chars.length : null;
-            record.textCharacters = chars ? chars.reduce((total, char) => total + (char.ignorable ? 0 : 1), 0) : null;
+            // The resolved value is a native object; reading its array across Xrays can be refused. The
+            // refusal must be recorded, never thrown from this observer, or it would kill the run.
+            try {
+              const chars = Array.isArray(value?.chars) ? value.chars : Cu.waiveXrays(value?.chars);
+              record.chars = Array.isArray(chars) ? chars.length : null;
+              record.textCharacters = Array.isArray(chars) ? chars.reduce((total, char) => total + (char.ignorable ? 0 : 1), 0) : null;
+            } catch (error) { record.charsError = String((error && error.message) || error); }
           });
           return result;
         };
@@ -292,6 +296,24 @@ async function runHostSmoke(config) {
       if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
     }
     report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
+    // --- Mechanism probe, run only after the product's own verdict is decided ---
+    // Is the loaded-bytes read unavailable to everyone at this moment, or only to the product? The
+    // driver asks the same host method twice: once right now, once after a page read has made the
+    // document serviceable. A bounded race keeps a hang from stalling the rest of the stage.
+    const bounded = async (label, work) => {
+      let timer = null;
+      const deadline = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), 20000); });
+      try {
+        const outcome = await Promise.race([work.then(value => `settled:${value?.byteLength ?? value?.chars?.length ?? 'value'}`, error => `error:${(error && error.message) || error}`), deadline]);
+        return `${label}=${outcome}`;
+      } catch (error) { return `${label}=threw:${(error && error.message) || error}`; }
+      finally { if (timer) clearTimeout(timer); }
+    };
+    const probes = [];
+    probes.push(await bounded('getData-before-page-read', pdf().pdfDocument.getData()));
+    await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())).catch(() => null);
+    probes.push(await bounded('getData-after-page-read', pdf().pdfDocument.getData()));
+    report.mechanismProbe = probes;
     // --- The driver's own native read, for comparison: same calls, but after the product's turn ---
     const extractPage = async pageIndex => {
       const raw = await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex }, viewWin()));
