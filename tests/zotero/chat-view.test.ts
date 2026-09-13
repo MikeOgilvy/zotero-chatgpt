@@ -41,6 +41,7 @@ async function mountReadyChat(options: {
   openCitation?: (citation: Citation) => Promise<void>;
   copyText?: (text: string) => void;
   openLink?: (url: string) => void;
+  usage?: Conversation['usage'];
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -50,6 +51,7 @@ async function mountReadyChat(options: {
       citations: [citationA], status: 'completed',
     }],
     lastSeq: 0, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
+    ...(options.usage ? { usage: options.usage } : {}),
   };
   const runtime: RuntimeSnapshot = {
     revision: 0, runtime: 'ready', account: { state: 'signedIn' }, login: null,
@@ -366,6 +368,29 @@ it('gives every markdown table its own local scroll container', async () => {
   const wrapper = text.querySelector<HTMLElement>('.zcr-table-block');
   expect(wrapper?.parentElement).toBe(text);
   expect(wrapper?.firstElementChild?.tagName).toBe('TABLE');
+});
+
+it('shows an honest context indicator: an explicit unknown until the runtime reports usage', async () => {
+  const { root } = await mountReadyChat();
+  const chip = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  expect(chip.textContent).toBe('Context unknown');
+  expect(chip.getAttribute('aria-label')).toContain('unknown');
+  expect(chip.getAttribute('role')).toBe('status');
+});
+
+it('shows the last runtime context report with its window and never a remaining-space claim', async () => {
+  const { root } = await mountReadyChat({
+    usage: {
+      model: 'catalog-default', contextWindow: 128000,
+      last: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
+      total: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
+    },
+  });
+  const chip = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  expect(chip.textContent).toBe('Context 12.3k / 128k tokens');
+  expect(chip.getAttribute('aria-label')).toContain('12,345');
+  expect(chip.getAttribute('aria-label')).toContain('128,000');
+  expect(chip.getAttribute('aria-label')).toContain('not remaining context.');
 });
 
 it('keeps the offline composer editable while preventing model submission', async () => {

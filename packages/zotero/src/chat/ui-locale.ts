@@ -44,6 +44,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Collections could not be loaded.': '无法加载分类列表。',
   Copied: '已复制',
   'The answer could not be copied.': '无法复制回答。',
+  'Context unknown': '上下文用量未知',
   'Add references or workflows': '添加引用或工作流', 'Close preview': '关闭预览', 'Reference preview': '引用预览',
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
   'Reference first PDF page': '引用 PDF 起始页', 'Reference last PDF page': '引用 PDF 结束页',
@@ -103,13 +104,13 @@ const TEXT = [
   '.zcr-attachment-menu > summary', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
-  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]',
+  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-usage',
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
   '.zcr-document-context > summary', '.zcr-context-range input', '.zcr-appearance input', '.zcr-appearance select',
   '.zcr-attachment-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
-  '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]',
+  '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-usage',
 ].join(',');
 const STATUS: Readonly<Record<string, string>> = {
   queued: '已排队', reserved: '待开始', running: '运行中', completed: '已完成', paused: '已暂停', uncertain: '未确认', cancelled: '已取消', failed: '失败',
@@ -156,6 +157,10 @@ function progress(text: string): string {
   if (match) return `来源：${match[1]}\n权限：${match[2] === 'none' ? '无' : match[2]}\n不支持的依赖：${match[3] === 'none' ? '无' : match[3]}`;
   match = /^Delete (.+)\?$/u.exec(text);
   if (match) return `删除 ${match[1]}？`;
+  match = /^Context ([\d.]+k?) \/ ([\d.]+k?) tokens$/u.exec(text);
+  if (match) return `上下文 ${match[1]} / ${match[2]} 词元`;
+  match = /^Context ([\d.]+k?) tokens · window unknown$/u.exec(text);
+  if (match) return `上下文 ${match[1]} 词元 · 窗口未知`;
   match = /^Metadata saved; PDF unavailable \((no doi|no oa candidate|existing pdf|download failed|file type mismatch|identity unconfirmed|supplementary|file too large)\)$/u.exec(text);
   if (match) {
     const reason: Readonly<Record<string, string>> = { 'no doi': '无 DOI', 'no oa candidate': '无开放获取来源', 'existing pdf': '已有 PDF', 'download failed': '下载失败', 'file type mismatch': '文件类型不符', 'identity unconfirmed': '文献身份未确认', supplementary: '补充材料', 'file too large': '文件过大' };
@@ -166,6 +171,12 @@ function progress(text: string): string {
 
 function actionLabel(text: string): string {
   const fixed = COPY[text]; if (fixed) return fixed;
+  const contextUnknown = 'Current context is unknown: the runtime has not reported usage for this model.';
+  if (text === contextUnknown) return '当前上下文未知：运行时尚未报告此模型的用量。';
+  const contextNoWindow = /^Last runtime usage report: ([\d,]+) input tokens; the model window is unknown\. This is the last report, not remaining context\.$/u.exec(text);
+  if (contextNoWindow) return `上次运行时用量报告：${contextNoWindow[1]} 个输入词元；模型窗口未知。这是上次报告，并非剩余空间。`;
+  const contextReported = /^Last runtime usage report: ([\d,]+) input tokens; model window ([\d,]+) \((runtime reported|bundled catalog estimate)\)\. This is the last report, not remaining context\.$/u.exec(text);
+  if (contextReported) return `上次运行时用量报告：${contextReported[1]} 个输入词元；模型窗口 ${contextReported[2]}（${contextReported[3] === 'runtime reported' ? '运行时报告' : '内置目录估算'}）。这是上次报告，并非剩余空间。`;
   const trySkill = /^Try (.+) in draft$/u.exec(text); if (trySkill) return `在草稿中试用 ${trySkill[1]}`;
   for (const [source, target] of [
     ['Preview workflow ', '预览工作流 '], ['Remove workflow ', '移除工作流 '], ['Preview profile ', '预览配置 '], ['Remove profile ', '移除配置 '],

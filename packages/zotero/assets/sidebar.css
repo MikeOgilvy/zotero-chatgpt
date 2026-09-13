@@ -462,6 +462,9 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-picker:hover { background: var(--fill-quinary, ButtonFace); }
 .zcr-picker:disabled { opacity: .5; cursor: default; }
 .zcr-picker:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zcr-context-usage { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.zcr-context-usage[data-zcr-context-state="runtime-reported"] { color: var(--fill-primary, CanvasText); }
+.zcr-context-usage[data-zcr-context-state="unknown"] { color: var(--fill-secondary, GrayText); font-style: italic; }
 .zcr-send {
   width: var(--zcr-toolbar-button-size, 28px);
   min-width: var(--zcr-toolbar-button-size, 28px);

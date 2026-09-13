@@ -104,6 +104,23 @@ it('localizes model-context, task-scope, workflow-source and profile-delete temp
   expect(prompt.textContent).toBe('Delete Derive?'); locale.dispose();
 });
 
+it('localizes the context usage chip and its accessible report', () => {
+  const { root, add } = setup();
+  const chip = add('span', 'zcr-context-usage', 'Context 12.3k / 128k tokens'); chip.dataset.zcrContextState = 'runtime-reported';
+  chip.setAttribute('aria-label', 'Last runtime usage report: 12,345 input tokens; model window 128,000 (runtime reported). This is the last report, not remaining context.');
+  const unknown = add('span', 'zcr-context-usage', 'Context unknown'); unknown.setAttribute('aria-label', 'Current context is unknown: the runtime has not reported usage for this model.');
+  const noWindow = add('span', 'zcr-context-usage', 'Context 12.3k tokens · window unknown');
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(chip.textContent).toBe('上下文 12.3k / 128k 词元');
+  expect(chip.getAttribute('aria-label')).toBe('上次运行时用量报告：12,345 个输入词元；模型窗口 128,000（运行时报告）。这是上次报告，并非剩余空间。');
+  expect(unknown.textContent).toBe('上下文用量未知');
+  expect(unknown.getAttribute('aria-label')).toBe('当前上下文未知：运行时尚未报告此模型的用量。');
+  expect(noWindow.textContent).toBe('上下文 12.3k 词元 · 窗口未知');
+  locale.update('en');
+  expect(chip.textContent).toBe('Context 12.3k / 128k tokens');
+  expect(unknown.textContent).toBe('Context unknown'); locale.dispose();
+});
+
 it('stays inside its pane and stops observing after disposal', async () => {
   const { document, root, add } = setup(); const outside = add('button', 'zcr-button', 'Send', document.body); const inside = add('button', 'zcr-button', 'Send');
   const locale = mountUILocale(root); locale.update('zh'); expect(inside.textContent).toBe('发送'); expect(outside.textContent).toBe('Send');
