@@ -51,6 +51,71 @@ export interface RequestTiming {
   settledAt: string | null;
 }
 
+/** What a view can honestly say about one request right now. */
+export interface RequestProgress {
+  requestId: UUID;
+  /** True once the core reported a terminal state; `elapsedSeconds` is then frozen at that time. */
+  settled: boolean;
+  /**
+   * Whole seconds since acceptance: to `settledAt` once settled, otherwise to `now`. Never negative;
+   * null when the timestamps cannot be read, so a view shows no counter rather than a fabricated one.
+   */
+  elapsedSeconds: number | null;
+  /** Whole seconds from acceptance to the first delivered assistant text, or null before it arrives. */
+  firstTextSeconds: number | null;
+}
+
+function wholeSeconds(from: string, to: string | number): number | null {
+  const start = Date.parse(from); const end = typeof to === 'number' ? to : Date.parse(to);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, Math.floor((end - start) / 1000));
+}
+
+/**
+ * Derives the honest progress of one request. Callers pass their own clock, so the same function
+ * serves a live "waiting Ns" counter and a settled "answered in Ns" summary: a settled request stops
+ * at `settledAt` instead of growing, and `firstTextSeconds` stays null until the core stamps it.
+ */
+export function requestProgress(timing: RequestTiming, now: number | string = Date.now()): RequestProgress {
+  const { settledAt } = timing;
+  return {
+    requestId: timing.requestId,
+    settled: settledAt !== null,
+    elapsedSeconds: wholeSeconds(timing.acceptedAt, settledAt ?? now),
+    firstTextSeconds: timing.firstTextAt === null ? null : wholeSeconds(timing.acceptedAt, timing.firstTextAt),
+  };
+}
+
+const TERMINAL_EVENTS = new Set<ReaderEvent['type']>(['completed', 'cancelled', 'failed', 'uncertain']);
+
+function eventText(event: ReaderEvent): string | null {
+  switch (event.type) {
+    case 'delta': return event.text;
+    case 'messageCompleted': return event.finalText;
+    case 'completed': return event.finalText;
+    default: return null;
+  }
+}
+
+/**
+ * Applies one core event to a conversation's timing, mirroring the core's own rule: the first
+ * delivered text is stamped once by the event that carried it, and a terminal event stops the clock
+ * even when the view never saw text. Returns a new array; entries are only added for requests the
+ * core already described, because inventing an acceptance time mid-stream would fake the elapsed
+ * value. Re-delivered events keep the earliest stamps.
+ */
+export function advanceRequestTiming(current: readonly RequestTiming[] | undefined, event: ReaderEvent): RequestTiming[] {
+  const entries = [...(current ?? [])];
+  const index = entries.findIndex(entry => entry.requestId === event.requestId);
+  if (index === -1) return entries;
+  const entry = { ...entries[index] } as RequestTiming;
+  const text = eventText(event);
+  if (entry.firstTextAt === null && text !== null && text.length > 0) entry.firstTextAt = event.at;
+  if (TERMINAL_EVENTS.has(event.type) && entry.settledAt === null) entry.settledAt = event.at;
+  entries[index] = entry;
+  return entries;
+}
+
 export interface PaperIdentity {
   title: string;
   authors: string[];
