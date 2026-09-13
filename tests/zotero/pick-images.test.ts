@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import {
   clipboardHasImage, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
@@ -121,6 +123,16 @@ it('captures every pasted image file before the paste data store can be invalida
   expect(images.map(image => image.name)).toEqual(['one.png', 'two.png']);
 });
 
+it('renders the shipped item-pane icon with valid paint values and a visible mark', () => {
+  const svg = readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/icon.svg'), 'utf8');
+  expect(svg).toContain('viewBox="0 0 16 16"');
+  // Gecko ignores a presentation attribute whose value is not a single valid paint, so a
+  // pasted "context-fill currentColor" made the previous icon render as nothing.
+  const paints = [...svg.matchAll(/(?:fill|stroke)="([^"]*)"/gu)].map(match => match[1]!);
+  expect(paints.length).toBeGreaterThan(0);
+  for (const paint of paints) expect(['none', 'context-fill', 'context-stroke', 'currentColor']).toContain(paint);
+  expect(svg).toMatch(/fill="context-fill"/u);
+});
 it('reads an nsIClipboard transferable image when DOM items are empty', async () => {
   const host = fakeGeckoClipboard({ 'image/png': PNG, 'public.png': PNG });
   expect(geckoClipboardHasImage(host)).toBe(true);
