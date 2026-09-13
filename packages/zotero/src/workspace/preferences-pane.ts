@@ -1,4 +1,5 @@
-import type { Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import { defaultAllowedModels, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
 import { mountUILocale } from '../chat/ui-locale.ts';
 
@@ -52,6 +53,8 @@ function isSettings(value: unknown): value is WorkspaceSettings {
   if (typeof value.textScale !== 'number' || !Number.isFinite(value.textScale)) return false;
   if (!Array.isArray(value.profiles) || !Array.isArray(value.skills)) return false;
   if (!value.profiles.every(profile => isRecord(profile) && typeof profile.id === 'string' && typeof profile.name === 'string' && isRecord(profile.preferences))) return false;
+  // Absent means a pre-allowlist record and is rendered as the default set; present but empty is invalid.
+  if (value.allowedModels !== undefined && (!Array.isArray(value.allowedModels) || !value.allowedModels.length || !value.allowedModels.every(model => isRecord(model) && typeof model.id === 'string' && typeof model.name === 'string'))) return false;
   return value.skills.every(skill => isRecord(skill) && typeof skill.id === 'string' && typeof skill.name === 'string' && typeof skill.enabled === 'boolean' && Array.isArray(skill.unsupportedDependencies));
 }
 
@@ -67,6 +70,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   let localizer: ReturnType<typeof mountUILocale> | null = null;
   const listeners: Array<{ element: Element; type: string; handler: (event: Event) => void }> = [];
   const skillRows = new Map<string, { row: HTMLElement; update(skill: ReaderSkill): void; setDisabled(disabled: boolean): void }>();
+  const modelRows = new Map<string, { row: HTMLElement; update(checked: boolean, name: string): void; setDisabled(disabled: boolean): void; isChecked(): boolean }>();
 
   const listen = <T extends Element>(element: T, type: string, handler: (event: Event) => void): T => {
     element.addEventListener(type, handler);
@@ -123,6 +127,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     preferences: Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>;
     savePreferences: HTMLButtonElement;
     exportPreferences: HTMLButtonElement;
+    models: HTMLElement;
     profile: HTMLSelectElement;
     profileName: HTMLInputElement;
     saveProfile: HTMLButtonElement;
@@ -163,6 +168,16 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     automaticPdfNote.className = 'zcr-preferences-muted';
     chat.append(automaticPdfLabel, automaticPdfNote);
 
+    // The allowlist is a checkbox list, not a multi-select: the pane's existing controls are labels
+    // plus checkboxes (skills, automatic PDF text), and a long model list stays keyboard-operable,
+    // themeable and readable with name and exact id on every row.
+    const modelsField = fieldset(doc, container, 'Model and generation settings');
+    const modelsNote = element(doc, 'p', 'Choose which models the composer may offer. This list is the model catalog bundled with the pinned Codex runtime, not a live report of your account\'s entitlements; a model your account can use but that is missing from this list cannot be selected here.');
+    modelsNote.className = 'zcr-preferences-muted';
+    const models = element(doc, 'div');
+    models.dataset.zcrPref = 'models';
+    modelsField.append(modelsNote, models);
+
     const research = fieldset(doc, container, 'Research preferences');
     const preferences = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
     for (const field of PREFERENCE_FIELDS) {
@@ -197,7 +212,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
 
-    return { form: container, uiLanguage, textScale, automaticPdfText, preferences, savePreferences, exportPreferences, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
+    return { form: container, uiLanguage, textScale, automaticPdfText, preferences, savePreferences, exportPreferences, models, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
   }
 
   let controls: Controls | null = null;
@@ -255,6 +270,51 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     return { row, update, setDisabled: disabled => { toggle.disabled = disabled; } };
   }
 
+  /**
+   * Rows are the pinned-catalog candidates plus any stored id the catalog no longer lists, so a
+   * removed or unknown model is shown and preserved rather than dropped or treated as an error.
+   */
+  function syncModels(settings: WorkspaceSettings): void {
+    const allowed = new Set((settings.allowedModels ?? defaultAllowedModels()).map(model => model.id));
+    const wanted = modelChoices(settings.allowedModels);
+    const wantedIds = new Set(wanted.map(candidate => candidate.id));
+    for (const [id, entry] of modelRows) if (!wantedIds.has(id)) { entry.row.remove(); modelRows.delete(id); }
+    const nodes = wanted.map(candidate => {
+      let entry = modelRows.get(candidate.id);
+      if (!entry) { entry = modelRow(candidate); modelRows.set(candidate.id, entry); }
+      entry.update(allowed.has(candidate.id), candidate.name);
+      entry.setDisabled(busy);
+      return entry.row;
+    });
+    const parent = controls?.models;
+    if (!parent) return;
+    for (const node of nodes) parent.append(node);
+  }
+
+  function modelRow(candidate: ModelCandidate): { row: HTMLElement; update(checked: boolean, name: string): void; setDisabled(disabled: boolean): void; isChecked(): boolean } {
+    const doc = (root as Element).ownerDocument;
+    const row = element(doc, 'div');
+    row.className = 'zcr-preferences-model';
+    row.dataset.zcrModel = candidate.id;
+    const label = element(doc, 'label');
+    const toggle = element(doc, 'input');
+    toggle.type = 'checkbox';
+    toggle.dataset.zcrModelAllowed = candidate.id;
+    const name = element(doc, 'span');
+    // The exact id is shown verbatim and is never translated; the label is a local derived name.
+    const id = element(doc, 'span', candidate.id);
+    id.className = 'zcr-preferences-muted';
+    label.append(toggle, name);
+    row.append(label, id);
+    listen(toggle, 'change', () => { void saveAllowedModels(); });
+    return {
+      row,
+      update: (checked, text) => { toggle.checked = checked; name.textContent = text; },
+      setDisabled: disabled => { toggle.disabled = disabled; },
+      isChecked: () => toggle.checked,
+    };
+  }
+
   /** Disabled state only: values stay exactly as the user left them while a write is in flight. */
   function refreshDisabled(): void {
     if (!controls || !current) return;
@@ -263,6 +323,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     controls.updateProfile.disabled = busy || !profile;
     controls.deleteProfile.disabled = busy || !profile;
     for (const [id, entry] of skillRows) entry.setDisabled(busy || (current.skills.find(skill => skill.id === id)?.unsupportedDependencies.length ?? 0) > 0);
+    for (const entry of modelRows.values()) entry.setDisabled(busy);
   }
 
   function sync(): void {
@@ -288,6 +349,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     if (profile) controls.profileName.value = profile.name;
     controls.profile.disabled = busy;
     syncSkills(current);
+    syncModels(current);
     // Language changes and every re-read both land here, so the copy follows the stored setting.
     // Runs after the skill rows exist so one pass covers the whole pane deterministically.
     localizer?.update(current.uiLanguage);
@@ -312,6 +374,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     frame = null;
     controls = null;
     skillRows.clear();
+    modelRows.clear();
     const doc = root?.ownerDocument;
     if (!doc || !root) return;
     const box = element(doc, 'div');
@@ -361,6 +424,30 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   }
 
   /**
+   * Saves the allowlist as one snapshot. Unchecking every model is refused locally and the previous
+   * selection is restored, because an empty allowlist would blank the composer's model picker; the
+   * store independently safe-rejects an empty list as a second line of defence.
+   *
+   * Stored names are kept where the id is unchanged, so a preserved unknown id keeps the label the
+   * user last saw; catalog candidates use this module's derived label.
+   */
+  async function saveAllowedModels(): Promise<void> {
+    if (busy || disposed || !current) return;
+    const selected = [...modelRows.entries()].filter(([, entry]) => entry.isChecked()).map(([id]) => id);
+    if (!selected.length) {
+      fail('At least one model must stay available. The previous selection was kept.');
+      sync();
+      return;
+    }
+    const names = new Map<string, string>([
+      ...(current.allowedModels ?? defaultAllowedModels()).map(model => [model.id, model.name] as const),
+      ...modelChoices(current.allowedModels).map(candidate => [candidate.id, candidate.name] as const),
+    ]);
+    const allowedModels: AllowedModel[] = selected.map(id => ({ id, name: names.get(id) ?? modelLabel(id) }));
+    await commit(settings => ({ ...settings, allowedModels }), 'Allowed models saved.');
+  }
+
+  /**
    * The pref is written synchronously through the host, so this is not a store commit: there is no
    * snapshot to re-read. A refused write reports the host's own message and sync() restores the
    * checkbox to the value the pref actually holds, never to what the user clicked.
@@ -397,6 +484,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       preferences: new Map(PREFERENCE_FIELDS.map(field => [field.key, form.querySelector(`[data-zcr-pref="preference-${field.key}"]`) as HTMLInputElement])),
       savePreferences: form.querySelector('[data-zcr-pref="save-preferences"]') as HTMLButtonElement,
       exportPreferences: form.querySelector('[data-zcr-pref="export-preferences"]') as HTMLButtonElement,
+      models: form.querySelector('[data-zcr-pref="models"]') as HTMLElement,
       profile: form.querySelector('[data-zcr-pref="profile"]') as HTMLSelectElement,
       profileName: form.querySelector('[data-zcr-pref="profile-name"]') as HTMLInputElement,
       saveProfile: form.querySelector('[data-zcr-pref="save-profile"]') as HTMLButtonElement,
@@ -476,6 +564,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       for (const { element: target, type, handler } of listeners) target.removeEventListener(type, handler);
       listeners.length = 0;
       skillRows.clear();
+      modelRows.clear();
       controls = null;
       current = null;
       frame?.remove();

@@ -142,3 +142,23 @@ it('mounts one form when Zotero fires load twice and stops listening after unloa
     bridge.setSkillEnabled = () => undefined;
   }
 });
+
+it('carries the model allowlist across the pane bridge and writes it as JSON', async () => {
+  const element = root();
+  const writes: string[] = [];
+  const writeSettings = bridge.writeSettings;
+  bridge.writeSettings = json => { writes.push(json); };
+  try {
+    pane().mount(element);
+    await vi.waitFor(() => expect(element.querySelector('[data-zcr-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
+    const luna = element.querySelector<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.6-luna"]')!;
+    luna.checked = false;
+    luna.dispatchEvent(new (element.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    const parsed = JSON.parse(writes[0]!) as { allowedModels: Array<{ id: string }> };
+    expect(parsed.allowedModels.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']);
+  } finally {
+    bridge.writeSettings = writeSettings;
+    pane().unmount(element);
+  }
+});

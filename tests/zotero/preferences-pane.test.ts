@@ -5,6 +5,8 @@ import { expect, it, vi } from 'vitest';
 import { ReaderError } from '../../packages/contracts/src/index.ts';
 import type { ReaderSkill, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
+import { defaultAllowedModels } from '../../packages/core/src/workspace/allowed-models.ts';
+import { PINNED_MODEL_CATALOG } from '../../runtime/model-capabilities.ts';
 import { createPreferencesPane, type PreferencesPaneHost } from '../../packages/zotero/src/workspace/preferences-pane.ts';
 
 const copy = <T>(value: T): T => structuredClone(value);
@@ -205,6 +207,66 @@ it('toggles one workflow through setSkillEnabled and reverts the checkbox when t
   expect(toggle.disabled).toBe(false);
 });
 
+it('renders the persisted model allowlist as labelled checkbox rows with exact ids', async () => {
+  const { host } = fixture();
+  const { ready, root, find } = mount(host);
+  await ready;
+  const rows = [...find('[data-zcr-pref="models"]').querySelectorAll<HTMLElement>('.zcr-preferences-model')];
+  expect(rows.map(row => row.dataset.zcrModel)).toEqual(Object.keys(PINNED_MODEL_CATALOG.models));
+  expect(rows).toHaveLength(11);
+  const astra = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-6-astra"]');
+  expect(astra.checked).toBe(true);
+  expect(astra.disabled).toBe(false);
+  expect(astra.closest('label')?.textContent).toBe('GPT-6 Astra');
+  expect(root.querySelector('[data-zcr-model="gpt-6-astra"] .zcr-preferences-muted')?.textContent).toBe('gpt-6-astra');
+  // The default allowlist is exactly GPT-6-Astra plus the GPT-5.6 family; everything else is off.
+  expect([...root.querySelectorAll<HTMLInputElement>('[data-zcr-model-allowed]')].filter(input => input.checked).map(input => input.dataset.zcrModelAllowed))
+    .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+  // The pane states its candidate-list source honestly rather than implying live entitlements.
+  expect(find('[data-zcr-pref="models"]').closest('fieldset')?.querySelector('.zcr-preferences-muted')?.textContent).toMatch(/bundled with the pinned Codex runtime/u);
+});
+
+it('saves a changed allowlist through the workspace snapshot and refuses to empty it', async () => {
+  const { host, save, current } = fixture();
+  const { ready, find, change, settle } = mount(host);
+  await ready;
+  const toggle = (id: string, checked: boolean) => { const input = find<HTMLInputElement>(`[data-zcr-model-allowed="${id}"]`); input.checked = checked; change(input); };
+  toggle('gpt-5.6-luna', false);
+  await vi.waitFor(() => expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']));
+  await settle();
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toMatch(/saved/iu);
+  toggle('gpt-5.6-terra', false); await settle();
+  toggle('gpt-5.6-sol', false); await settle();
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra']);
+
+  // Unchecking the last model is refused locally with an honest message and restores the selection:
+  // no write is attempted, so the picker can never be emptied.
+  const writes = save.mock.calls.length;
+  toggle('gpt-6-astra', false);
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-pref="error"]').hidden).toBe(false));
+  await settle();
+  expect(find<HTMLElement>('[data-zcr-pref="error"]').textContent).toBe('At least one model must stay available. The previous selection was kept.');
+  expect(save.mock.calls.length).toBe(writes);
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra']);
+  expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-6-astra"]').checked).toBe(true);
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').hidden).toBe(true);
+});
+
+it('renders and preserves a stored allowed model the pinned catalog no longer lists', async () => {
+  const settings = { ...defaultSettings(), allowedModels: [...defaultAllowedModels(), { id: 'gpt-retired-x', name: 'GPT Retired X' }] };
+  const { host, current } = fixture(settings);
+  const { ready, root, find, change, settle } = mount(host);
+  await ready;
+  const retired = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-retired-x"]');
+  expect(retired.checked).toBe(true);
+  expect(root.querySelector('[data-zcr-model="gpt-retired-x"] label')?.textContent).toBe('GPT Retired X');
+  expect(root.querySelector('[data-zcr-model="gpt-retired-x"] .zcr-preferences-muted')?.textContent).toBe('gpt-retired-x');
+  const sol = find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.6-sol"]');
+  sol.checked = false; change(sol);
+  await settle();
+  expect(current().allowedModels?.map(model => model.id)).toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-retired-x']);
+});
+
 it('exports through the host and reports a failed export instead of claiming success', async () => {
   const { host, exportPreferences } = fixture();
   const { ready, find, settle } = mount(host);
@@ -258,7 +320,7 @@ it('renders the pane copy in the stored UI language and never translates identif
   const { ready, root, find } = mount(host);
   await ready;
   const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
-  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['对话', '研究偏好', '研究配置', '已安装的工作流']);
+  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['对话', '模型与生成设置', '研究偏好', '研究配置', '已安装的工作流']);
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('聊天字号（0.5–3）');
   expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');
@@ -290,6 +352,9 @@ it('renders the pane copy in the stored UI language and never translates identif
   expect(skillRow('user-study').querySelector('.zcr-preferences-muted')?.textContent).toBe('user · v1.0 · read');
   expect(skillRow('imported-blocked').querySelector('span')?.textContent).toBe('Blocked');
   expect(skillRow('imported-blocked').querySelector('.zcr-preferences-muted')?.textContent).toBe('imported · v1.0 · read · 不可用：mcp');
+  // Model names and ids are data, not copy: the derived label and the exact id stay verbatim.
+  expect(root.querySelector('[data-zcr-model="gpt-5.6-sol"] label')?.textContent).toBe('GPT-5.6 Sol');
+  expect(root.querySelector('[data-zcr-model="gpt-5.6-sol"] .zcr-preferences-muted')?.textContent).toBe('gpt-5.6-sol');
 });
 
 it('follows a language change in both directions and reports the outcome in that language', async () => {

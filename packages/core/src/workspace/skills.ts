@@ -1,7 +1,8 @@
 import { ReaderError } from '../../../contracts/src/index.ts';
-import type { Personalization, ReaderSkill, WorkspaceSettings, WorkflowKind } from '../../../contracts/src/workspace.ts';
+import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings, WorkflowKind } from '../../../contracts/src/workspace.ts';
 import { clone } from '../../../contracts/src/clone.ts';
 import { validatePreferences as preferences } from '../../../contracts/src/workspace-validation.ts';
+import { MODEL_ID, defaultAllowedModels } from './allowed-models.ts';
 export { preferences };
 
 export const SKILL_BYTES = 64 * 1024;
@@ -152,16 +153,32 @@ export async function normalizeSkill(value: unknown): Promise<ReaderSkill> {
   result.revision = await digest(JSON.stringify({ name: result.name, description: result.description, version: result.version, markdown: body, workflow: result.workflow, permissions: result.permissions, unsupportedDependencies: dependencies }));
   return result;
 }
+function modelId(value: unknown): string {
+  const id = text(value, 128, 1); if (!MODEL_ID.test(id)) invalid(); return id;
+}
+/**
+ * An absent field is a pre-allowlist record and loads as the default set. An explicitly empty list is
+ * invalid: it would blank the picker, so the store safe-rejects it instead of silently replacing it.
+ * Unknown ids are preserved verbatim and duplicates collapse in order; a removed or repeated model
+ * must never make an otherwise-readable record fail.
+ */
+function allowedModels(value: unknown): AllowedModel[] {
+  if (value === undefined) return defaultAllowedModels();
+  const list = items(value, 64).map(raw => { const model = object(raw, ['id', 'name']); return { id: modelId(model.id), name: text(model.name, 128, 1) }; });
+  if (!list.length) invalid();
+  const seen = new Set<string>();
+  return list.filter(model => (seen.has(model.id) ? false : (seen.add(model.id), true)));
+}
 export function defaultSettings(): WorkspaceSettings {
-  return { schemaVersion: 1, preferences: clone(DEFAULT_PREFERENCES), profiles: [], skills: builtinSkills(), uiLanguage: 'en', textScale: 1 };
+  return { schemaVersion: 1, preferences: clone(DEFAULT_PREFERENCES), profiles: [], skills: builtinSkills(), uiLanguage: 'en', textScale: 1, allowedModels: defaultAllowedModels() };
 }
 export async function normalizeSettings(value: unknown): Promise<WorkspaceSettings> {
-  const source = object(value, ['schemaVersion', 'preferences', 'profiles', 'skills', 'uiLanguage', 'textScale']);
+  const source = object(value, ['schemaVersion', 'preferences', 'profiles', 'skills', 'uiLanguage', 'textScale', 'allowedModels']);
   if (source.schemaVersion !== 1 || (source.uiLanguage !== 'en' && source.uiLanguage !== 'zh') || typeof source.textScale !== 'number' || !Number.isFinite(source.textScale) || source.textScale < 0.5 || source.textScale > 3) invalid();
   const profiles = items(source.profiles, 32).map(raw => { const p = object(raw, ['id', 'name', 'preferences']); return { id: identifier(p.id), name: text(p.name, 128, 1), preferences: preferences(p.preferences) }; });
   const skills = await Promise.all(items(source.skills, 64).map(normalizeSkill));
   if (new Set(profiles.map(p => p.id)).size !== profiles.length || new Set(skills.map(s => s.id)).size !== skills.length) invalid();
   const byId = new Map(skills.map(skill => [skill.id, skill]));
   const builtin = builtinSkills().map(skill => byId.get(skill.id) ?? skill);
-  return { schemaVersion: 1, preferences: fullPreferences(source.preferences), profiles, skills: [...builtin, ...skills.filter(skill => skill.origin !== 'builtin')], uiLanguage: source.uiLanguage, textScale: source.textScale };
+  return { schemaVersion: 1, preferences: fullPreferences(source.preferences), profiles, skills: [...builtin, ...skills.filter(skill => skill.origin !== 'builtin')], uiLanguage: source.uiLanguage, textScale: source.textScale, allowedModels: allowedModels(source.allowedModels) };
 }

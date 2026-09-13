@@ -10,6 +10,12 @@ export interface Personalization {
   annotationStyle: string;
 }
 export interface ResearchProfile { id: string; name: string; preferences: Partial<Personalization> }
+/**
+ * One model the composer may offer. `id` is the exact runtime model id; `name` is a local display
+ * label derived from that id (the pinned catalog carries no display names), never a live entitlement
+ * report. See `core/workspace/allowed-models.ts` for the default set and the resolver.
+ */
+export interface AllowedModel { id: string; name: string }
 export interface ReaderSkill {
   id: string; name: string; description: string; version: string; revision: string;
   markdown: string; origin: 'builtin' | 'user' | 'imported'; enabled: boolean;
@@ -22,6 +28,13 @@ export interface WorkspaceSettings {
   skills: ReaderSkill[];
   uiLanguage: 'en' | 'zh';
   textScale: number;
+  /**
+   * The models the composer may offer. Absent in records written before this setting existed and then
+   * treated as `defaultAllowedModels()` by the store and the pane; the store refuses to persist or
+   * load an explicitly empty list, so the picker can never be emptied. Additive to schemaVersion 1:
+   * older builds already safe-reject a settings file that carries an unknown key.
+   */
+  allowedModels?: AllowedModel[];
 }
 /** References contain a bounded snapshot, never recursively nested conversations. */
 export interface ReaderReference {

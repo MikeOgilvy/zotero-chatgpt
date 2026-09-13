@@ -16,7 +16,7 @@ const DRAFT_BYTES = 1024 * 1024;
 const ASSET_BYTES = 3 * 1024 * 1024;
 const draftKeys = ['paper', 'settings', 'question', 'citations', 'images', 'references', 'skillId', 'profileId', 'overrides'] as const;
 const savedKeys = ['schemaVersion', 'paper', 'conversationId', 'draft', 'scrollTop', 'pageRange', 'updatedAt'] as const;
-const settingKeys = ['schemaVersion', 'preferences', 'profiles', 'skills', 'uiLanguage', 'textScale'] as const;
+const settingKeys = ['schemaVersion', 'preferences', 'profiles', 'skills', 'uiLanguage', 'textScale', 'allowedModels'] as const;
 const skillKeys = ['id', 'name', 'description', 'version', 'revision', 'markdown', 'origin', 'enabled', 'workflow', 'permissions', 'unsupportedDependencies'] as const;
 function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Saved workspace data could not be read; it was left untouched.'); }
 function failedSave(): never { throw new ReaderError('INTERNAL_ERROR', 'Workspace data could not be saved.'); }
