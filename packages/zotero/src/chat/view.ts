@@ -577,8 +577,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   // lives behind it; the reference/workflow chooser stays reachable by typing '@' or '/'.
   const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
   plus.dataset.zcrPlus = '';
-  plus.setAttribute('aria-haspopup', 'menu'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
-  const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'menu'); plusMenu.setAttribute('aria-label', COPY.attach);
+  plus.setAttribute('aria-haspopup', 'dialog'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
+  // A labelled, non-modal dialog rather than `role="menu"`: the popover holds plain action rows plus
+  // the page-number field, and neither plain buttons nor an `<input>` are valid children of a menu.
+  const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'dialog'); plusMenu.setAttribute('aria-label', COPY.attach);
   const pageNumber = el('input'); pageNumber.type = 'number'; pageNumber.min = '1'; pageNumber.value = '1'; pageNumber.setAttribute('aria-label', COPY.capturePageNumber);
   // Codex-style grouped rows: a small heading, a title and a supporting description. The accessible
   // name stays the title, never the description.

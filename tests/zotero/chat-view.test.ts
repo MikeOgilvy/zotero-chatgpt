@@ -2016,6 +2016,23 @@ it('groups the plus popover into titled sections with title and description rows
   expect(groups[0]!.querySelector('input[type="number"]')).not.toBeNull();
 });
 
+it('labels the plus popover as a dialog that matches the field and rows it contains', async () => {
+  const { root } = await mountReadyChat({ messages: [] });
+  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
+  // `role="menu"` would be a lie: the popover holds plain action buttons and the page-number input.
+  expect(menu.getAttribute('role')).toBe('dialog');
+  expect(menu.getAttribute('aria-label')).toBe('Add images or context');
+  expect(plus.getAttribute('aria-haspopup')).toBe('dialog');
+  expect(plus.getAttribute('aria-controls')).toBe(menu.id);
+  expect(plus.getAttribute('aria-expanded')).toBe('false');
+  // The trigger stays named for assistive technology and reports the popover it controls.
+  expect(plus.getAttribute('aria-label')).toBe('Add images or context');
+  plus.click();
+  expect(plus.getAttribute('aria-expanded')).toBe('true');
+  expect(menu.hidden).toBe(false);
+});
+
 it('opens every attachment route from the plus menu and closes it after a choice', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const view = root.ownerDocument.defaultView!;
