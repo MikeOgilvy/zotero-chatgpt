@@ -84,19 +84,31 @@ it('exempts the reader composer, history search, page field and splitter from Zo
   expect(numberInput?.type).toBe('number');
   expect(resizer).toBeTruthy();
 
-  // None of these matches Zotero's guard on its own; the dock ancestor is the only exemption.
-  for (const target of [composer, historySearch, numberInput, resizer]) {
-    expect(target!.getAttribute('contenteditable')).toBeNull();
-    expect(target!.closest('[contenteditable]')).toBe(dock);
+  // Two different Zotero predicates, two different mechanisms, so the assertions split.
+  // The fields the user types text into also carry their own `contenteditable="true"` because
+  // Zotero's KeyboardManager predicate (reader.js:27222) reads the event TARGET and requires the
+  // literal value `true`; the dock ancestor alone cannot satisfy it. The splitter is not a text
+  // control, so it keeps relying on the dock ancestor and must carry nothing.
+  for (const target of [composer, historySearch, numberInput]) {
+    expect(target!.getAttribute('contenteditable')).toBe('true');
+    expect(target!.closest('[contenteditable]')).toBe(target);
     expect(zoteroFocusManagerExemptsArrowKeys(target!)).toBe(true);
   }
+  expect(resizer!.getAttribute('contenteditable')).toBeNull();
+  expect(resizer!.closest('[contenteditable]')).toBe(dock);
+  expect(zoteroFocusManagerExemptsArrowKeys(resizer!)).toBe(true);
 
-  // The reported symptom, reproduced: without the dock attribute the guard that default-prevents
+  // The reported symptom, reproduced: with no exemption anywhere the guard that default-prevents
   // the arrow key is null for the composer, so Zotero moves focus to another pane instead of the
-  // caret. Restoring it exempts the composer again.
+  // caret. Restoring the dock ancestor alone already exempts the composer again, because this
+  // guard is ancestor-aware — which is why the field's own attribute is only needed for the
+  // KeyboardManager predicate.
+  composer!.removeAttribute('contenteditable');
   dock.removeAttribute('contenteditable');
   expect(zoteroFocusManagerExemptsArrowKeys(composer!)).toBe(false);
   dock.setAttribute('contenteditable', 'false');
+  expect(zoteroFocusManagerExemptsArrowKeys(composer!)).toBe(true);
+  composer!.setAttribute('contenteditable', 'true');
   expect(zoteroFocusManagerExemptsArrowKeys(composer!)).toBe(true);
 
   // An identical control outside our dock is not exempt, proving the attribute on our subtree is

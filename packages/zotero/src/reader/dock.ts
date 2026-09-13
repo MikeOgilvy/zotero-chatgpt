@@ -66,6 +66,91 @@ function exemptFromReaderFocusManager(dock: HTMLElement): void {
   dock.setAttribute('contenteditable', 'false');
 }
 
+/**
+ * Zotero 9.0.6's reader KeyboardManager binds a CAPTURE-phase `keydown` on the same reader window
+ * (resource/reader/reader.js:72687) and gates a family of reader shortcuts on
+ * `isTextBox(event.target)` (resource/reader/reader.js:27222):
+ *
+ *   function isTextBox(node) {
+ *     return ['INPUT'].includes(node.nodeName) && node.type === 'text'
+ *       || node.getAttribute('contenteditable') === 'true';
+ *   }
+ *
+ * Unlike the FocusManager guard above (reader.js:72538), this predicate reads the TARGET itself
+ * (not an ancestor) and requires the literal value `true`, so the dock's
+ * `contenteditable="false"` marker does NOT satisfy it. Our composer is a `<textarea>` (no `type`),
+ * the history field is `<input type="search">`, and the capture page field / reference page ranges
+ * are `<input type="number">`; none has `type === 'text'`, so all three shapes fail the predicate.
+ * Zotero then enters its target-based `!isTextBox(event.target)` blocks: Cmd/Ctrl-ArrowLeft/Right
+ * navigates the PDF instead of moving the caret (reader.js:72770), Cmd/Ctrl-A is hijacked
+ * (reader.js:72898), and `r`/`l` start read-aloud (reader.js:73039) while `h`/`s` switch the reader
+ * tool (reader.js:73033/:73036, both inside reader.js:73001).
+ *
+ * The sibling Delete/Backspace branch (reader.js:72950) is NOT this predicate: it returns early on
+ * `event.target.closest('input, .label-popup')`, so `<input>` targets (search and number) are
+ * already excluded there by tag. Our `<textarea>` composer is not, but a `contenteditable`
+ * exemption does not affect that branch either way — it only re-encodes the `isTextBox` clause.
+ *
+ * The narrowest exemption that satisfies the predicate is the predicate's own second clause:
+ * `contenteditable="true"` on the individual controls the user types text into. `input
+ * [type="text"]` already passes the first clause; `<textarea>`, search fields and number fields do
+ * not. Only our own dock subtree is scanned, and only `<textarea>`/`input[type="search"]`/`input
+ * [type="number"]` are touched — selects, buttons and the dock's own chrome are left alone. The
+ * attribute is only added when the control does not already carry a `contenteditable` value, and
+ * it is never removed or overwritten, so this cannot fight the chat view's own DOM writes.
+ *
+ * Engine note: `contenteditable` is an enumerated attribute on every HTML element, but form
+ * controls have their own editing model, so the intent is for the value to be inert for editing
+ * and to change only how Zotero classifies the event target. That is the expectation, not a
+ * verified fact for Gecko (this host is Gecko 140.12.0 / Zotero 9.0.6); it must be confirmed on a
+ * real reader host for each shape in {@link TYPING_CONTROL_SELECTOR}, including a number field
+ * (the automatable matrix is owned by the host-test workstream, not this module).
+ */
+
+/** Text-typing controls whose event target Zotero's `isTextBox` predicate misses. */
+const TYPING_CONTROL_SELECTOR = 'textarea, input[type="search"], input[type="number"]';
+/** `isTextBox` (reader.js:27222) accepts only this exact value. */
+const TEXTBOX_EXEMPT_VALUE = 'true';
+
+/** Cleanup handles for the scoped observers, keyed by the dock element they watch. */
+const typingControlObservers = new WeakMap<HTMLElement, () => void>();
+
+/** Fill in the exemption only where the view did not already set its own `contenteditable`. */
+function exemptTypingControl(control: Element): void {
+  if (!control.hasAttribute('contenteditable')) control.setAttribute('contenteditable', TEXTBOX_EXEMPT_VALUE);
+}
+
+function exemptTypingControls(root: ParentNode): void {
+  for (const control of root.querySelectorAll(TYPING_CONTROL_SELECTOR)) exemptTypingControl(control);
+}
+
+/**
+ * The composer, its popovers and other fields are mounted after the dock element exists, so an
+ * initial sweep is not enough. A MutationObserver scoped to the dock marks matching controls as
+ * they are added (including ones nested in a newly added subtree). The observer is never given
+ * attribute callbacks, and it only fills in a missing value, so it is immune to the chat view's
+ * updates and cannot overwrite attributes the view sets on its own elements.
+ */
+function observeTypingControls(dock: HTMLElement): void {
+  if (typingControlObservers.has(dock)) return;
+  exemptTypingControls(dock);
+  const view = dock.ownerDocument.defaultView;
+  const Observer = (view as unknown as { MutationObserver?: typeof MutationObserver } | null)?.MutationObserver;
+  if (!Observer) return;
+  const observer = new Observer(records => {
+    for (const record of records) {
+      for (const node of Array.from(record.addedNodes)) {
+        if (node.nodeType !== 1) continue;
+        const element = node as Element;
+        if (element.matches(TYPING_CONTROL_SELECTOR)) exemptTypingControl(element);
+        exemptTypingControls(element);
+      }
+    }
+  });
+  observer.observe(dock, { childList: true, subtree: true });
+  typingControlObservers.set(dock, () => { observer.disconnect(); typingControlObservers.delete(dock); });
+}
+
 export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLElement } | undefined {
   const split = readerContentRoot(doc);
   const toolbar = doc.querySelector('.toolbar');
@@ -73,6 +158,7 @@ export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLE
   const existing = split.querySelector<HTMLElement>(`[${DOCK_ATTR}]`);
   if (existing) {
     exemptFromReaderFocusManager(existing);
+    observeTypingControls(existing);
     markDockOpen(doc, split);
     const current = Number.parseFloat(existing.style.width || existing.style.flexBasis);
     paintDockColumn(existing, Number.isFinite(current) && current > 0 ? current : undefined);
@@ -98,6 +184,7 @@ export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLE
   paintDockColumn(dock);
   split.append(dock);
   markDockOpen(doc, split);
+  observeTypingControls(dock);
   return { dock, body };
 }
 
@@ -222,7 +309,9 @@ export function bindDockResize(resizer: HTMLElement, host: DockResizeHost): () =
 }
 
 export function unmountReaderDock(doc: Document): void {
-  doc.querySelector(`[${DOCK_ATTR}]`)?.remove();
+  const dock = doc.querySelector<HTMLElement>(`[${DOCK_ATTR}]`);
+  if (dock) typingControlObservers.get(dock)?.();
+  dock?.remove();
   doc.getElementById('split-view')?.classList.remove(DOCK_OPEN_CLASS);
   doc.documentElement.classList.remove(DOCK_OPEN_CLASS);
   doc.body.classList.remove(DOCK_OPEN_CLASS);
