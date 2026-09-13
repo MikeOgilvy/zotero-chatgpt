@@ -7,6 +7,7 @@ import { documentA } from '../contracts/document-fixture.ts';
 import { groupHistory, historyGroup, HISTORY_BUCKETS, mountChatView, renderReaderShell } from '../../packages/zotero/src/chat/view.ts';
 import { UNLOCATED_SOURCE_TEXT } from '../../packages/zotero/src/chat/source-links.ts';
 import { messageTimeLabel } from '../../packages/zotero/src/chat/message-time.ts';
+import { workspaceDraft } from '../../packages/zotero/src/chat/draft.ts';
 import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
 import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
@@ -52,6 +53,7 @@ async function mountReadyChat(options: {
   captureTimers?: boolean;
   rename?: (id: string, title: string) => Promise<Conversation>;
   archive?: (id: string, archived: boolean) => Promise<Conversation>;
+  cancel?: (conversationId: string, requestId: string) => Promise<void>;
   clipboardImages?: () => Promise<ImageAttachment[]>;
   workspace?: ReaderWorkspace;
   closeDock?: () => void;
@@ -110,10 +112,14 @@ async function mountReadyChat(options: {
         }],
         lastSeq: conversation.lastSeq + 1,
       };
+      // Keep the listed copy in step: the presenter re-reads a conversation through `get`/`list`, so a
+      // listed entry that lags behind would silently discard the accepted request.
+      const listedIndex = listed.findIndex(entry => entry.id === conversation.id);
+      if (listedIndex >= 0) listed[listedIndex] = conversation; else listed.push(conversation);
       return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false });
     },
     request: () => Promise.resolve({ requestId: 'r1', state: 'completed', replay: false }),
-    cancel: () => Promise.reject(new Error()),
+    cancel: options.cancel ?? (() => Promise.reject(new Error())),
     renameConversation: options.rename ?? ((id, title) => {
       const index = listed.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new Error('missing conversation'));
@@ -875,6 +881,56 @@ it('renders centered timestamp dividers only from recorded request timings', asy
   // A transcript with no recorded request timing renders no divider rather than a fabricated time.
   const none = await mountReadyChat({ messages: [{ id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Untimed', citations: [], status: 'completed' }] });
   expect(none.root.querySelectorAll('[data-zcr-message-time]')).toHaveLength(0);
+});
+
+it('returns the stopped question, citations and images to the composer', async () => {
+  const cancelled: string[] = [];
+  const { root, presenter } = await mountReadyChat({
+    messages: [],
+    cancel: (_conversationId, requestId) => { cancelled.push(requestId); return Promise.resolve(); },
+  });
+  presenter.addCitation(citationA);
+  presenter.addImage(imageA);
+  presenter.setQuestion('What does this mean?');
+  await presenter.send();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.activeRequestId).toBeTruthy());
+  // Sending consumes the draft as before; the transcript owns the question now.
+  expect(presenter.snapshot().draft.question).toBe('');
+  await presenter.cancel();
+  expect(cancelled).toHaveLength(1);
+  // Stop hands the whole question back, including its citations and images, so it can be edited.
+  const restored = presenter.snapshot().draft;
+  expect(restored.question).toBe('What does this mean?');
+  expect(restored.citations.map(citation => citation.id)).toEqual([citationA.id]);
+  expect(restored.images.map(image => image.id)).toEqual([imageA.id]);
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('What does this mean?');
+  // A newer draft typed after sending is never clobbered by a second Stop.
+  presenter.setQuestion('Newer question');
+  await presenter.cancel();
+  expect(presenter.snapshot().draft.question).toBe('Newer question');
+});
+
+it('degrades a legacy per-chat research profile to the global preferences, visibly', async () => {
+  const legacyProfileId = 'legacy-profile-id';
+  const legacyDraft = { ...workspaceDraft({ settings: null, paper: paperA, question: 'Legacy question', citations: [], images: [] }), profileId: legacyProfileId };
+  const base = historyWorkspace([]);
+  const workspace: ReaderWorkspace = {
+    ...base,
+    // A draft persisted by an older build that still had a per-chat profile control.
+    readDraft: () => Promise.resolve({ schemaVersion: 1, paper: paperA, conversationId: null, draft: legacyDraft, scrollTop: 0, pageRange: null, updatedAt: 'now' }),
+  };
+  const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent, workspace });
+  await vi.waitFor(() => expect(presenter.snapshot().draft.profileId).toBe(legacyProfileId));
+  // The profile the draft points at no longer exists and there is no per-chat control left to clear it.
+  expect(presenter.snapshot().workspace?.profiles.some(profile => profile.id === legacyProfileId) ?? false).toBe(false);
+  await presenter.send();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  // The global preferences are authoritative: the dead reference is not applied, and the send happens.
+  expect(sent[0]!.workflow?.profileId).toBeNull();
+  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')!;
+  await vi.waitFor(() => expect(alert.hidden).toBe(false));
+  expect(alert.textContent).toBe('The saved research profile is no longer available; global preferences apply.');
 });
 
 it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {

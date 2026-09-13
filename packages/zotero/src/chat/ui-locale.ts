@@ -39,6 +39,7 @@ const COPY: Readonly<Record<string, string>> = {
   Copied: '已复制',
   'The answer could not be copied.': '无法复制回答。',
   'Elapsed time unavailable': '耗时无法确定',
+  'The saved research profile is no longer available; global preferences apply.': '已保存的研究配置不可用；将应用全局偏好设置。',
   'Context unknown': '上下文用量未知',
   'Add references or workflows': '添加引用或工作流', 'Close preview': '关闭预览', 'Reference preview': '引用预览',
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
@@ -94,7 +95,7 @@ const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-
 const TEXT = [
   BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
   '.zcr-history-heading', '.zcr-history-empty', '.zcr-history-archived-label', '.zcr-status-line', '.zcr-message-meta',
-  '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-context-disclosure > p',
+  '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-context-disclosure > p', '.zcr-error',
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
   '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
   '.zcr-workspace-settings select[name="detail"] option', '.zcr-workspace-settings select[name="mathematics"] option',

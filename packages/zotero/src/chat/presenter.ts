@@ -15,6 +15,8 @@ import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/sr
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { imagesFromGeckoClipboard, pluginClipboardAccess } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
+/** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
+const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available; global preferences apply.';
 export interface DocumentServices {
   prepare(signal: AbortSignal, progress: (p: { done: number; total: number }) => void, range?: readonly [number, number]): Promise<DocumentContext>;
   validate(document: DocumentContext): Promise<void>;
@@ -120,6 +122,12 @@ export class ConversationPresenter {
   private explainFlights = new Map<string, Promise<void>>();
   private continuing = false;
   private drafts = new Map<string, WorkspaceDraft>();
+  /**
+   * The draft each conversation's request was built from, so Stop can hand the question, citations
+   * and images back to the composer instead of losing them. Bounded by the conversations the reader
+   * actually sent from in this session.
+   */
+  private submitted = new Map<string, WorkspaceDraft>();
   private positions = new Map<string, { scrollTop: number; range: [number, number] | null }>();
   private sendFlights = new Map<string, Promise<void>>();
   private queueFlight: Promise<void> | null = null;
@@ -856,8 +864,11 @@ export class ConversationPresenter {
       await this.connect();
       if (!this.signedIn()) { this.update({ message: 'Sign in with ChatGPT first.' }); await this.login(); return; }
       const conversation = target ?? await this.ensureConversation();
-      const input = makeAsk(draft, conversation.id, this.services.uuid(), settings ?? conversation.settings, this.paperIdentity());
-      await this.submit(conversation, input, document, draft, configuration, queued);
+      const resolved = ConversationPresenter.withoutStaleProfile(draft, configuration);
+      const input = makeAsk(resolved.draft, conversation.id, this.services.uuid(), settings ?? conversation.settings, this.paperIdentity());
+      await this.submit(conversation, input, document, resolved.draft, configuration, queued);
+      // Remember what was sent so Stop can return it to the composer.
+      this.submitted.set(conversation.id, clone(resolved.draft));
       const active = this.state.conversation?.id === conversation.id;
       const stored = active ? this.state.draft : this.drafts.get(conversation.id);
       const position = active ? { scrollTop: this.state.scrollTop, range: this.state.document.range } : this.positions.get(conversation.id);
@@ -874,15 +885,29 @@ export class ConversationPresenter {
           }
         }
       }
+      // Report the degradation after the post-send draft clear, which would otherwise null it out.
+      if (resolved.stale) this.update({ message: STALE_PROFILE_MESSAGE });
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   private frozenWorkflow(draft: WorkspaceDraft, settings: WorkspaceSettings | null): WorkflowSnapshot | undefined {
     if (!settings) return undefined;
+    // Global preferences are authoritative. A legacy persisted per-chat profile that no longer
+    // resolves must not abort the send — the per-chat profile control is gone, so there would be no
+    // way out — and it must not override the global preferences either. Treat it as "no profile";
+    // the send path reports the degradation out loud.
     const profile = draft.profileId ? settings.profiles.find(profile => profile.id === draft.profileId) : undefined;
-    if (draft.profileId && !profile) throw new ReaderError('NOT_FOUND', 'The selected research profile is unavailable. Choose another profile.');
     const skill = draft.skillId ? settings.skills.find(skill => skill.id === draft.skillId) : null;
     if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected workflow is unavailable or disabled.');
-    return validateWorkflow({ skill: skill ?? null, profileId: draft.profileId, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
+    return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
+  }
+  /**
+   * Does this draft still point at a research profile that exists? When it does not, the dead
+   * reference is dropped so the global preferences apply, and the caller reports it visibly rather
+   * than failing an unreachable send or silently changing behaviour.
+   */
+  private static withoutStaleProfile(draft: WorkspaceDraft, settings: WorkspaceSettings | null): { draft: WorkspaceDraft; stale: boolean } {
+    if (!draft.profileId || !settings || settings.profiles.some(profile => profile.id === draft.profileId)) return { draft, stale: false };
+    return { draft: { ...draft, profileId: null }, stale: true };
   }
   private estimateBudget(input: SendInput, conversation: Conversation): ContextBudget {
     if (this.services.contextBudget) return this.services.contextBudget(input, conversation);
@@ -975,7 +1000,19 @@ export class ConversationPresenter {
     if (!conversation) return;
     if (!conversation.activeRequestId) { this.submissions.get(conversation.id)?.abort(); return; }
     if (!client) { this.reportError('Reconnect before stopping this saved request.'); return; }
-    try { await client.cancel(conversation.id, conversation.activeRequestId); } catch (error) { this.update({ message: this.errorText(error) }); }
+    try { await client.cancel(conversation.id, conversation.activeRequestId); this.restoreSubmittedDraft(conversation.id); } catch (error) { this.update({ message: this.errorText(error) }); }
+  }
+  /**
+   * Stop returns the question, citations and images to the composer instead of losing them. Only an
+   * empty composer is refilled, so a newer draft the reader typed after sending is never clobbered,
+   * and nothing here touches request timing: the transcript keeps the cancelled request as recorded.
+   */
+  private restoreSubmittedDraft(conversationId: string): void {
+    const submitted = this.submitted.get(conversationId);
+    if (!submitted || this.state.conversation?.id !== conversationId) return;
+    const current = this.state.draft;
+    if (current.question.trim() || current.citations.length || current.images.length || current.references.length) return;
+    this.changeDraft({ ...current, question: submitted.question, citations: clone(submitted.citations), images: clone(submitted.images) });
   }
   async cancelQueuedRequest(requestId: string): Promise<void> {
     const conversation = this.state.conversation; if (!conversation?.queuedRequestIds?.includes(requestId)) throw new ReaderError('NOT_FOUND', 'This request is not queued in the current chat.');
