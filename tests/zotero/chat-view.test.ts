@@ -704,6 +704,16 @@ it('reports a failed rename in the view error slot and keeps the form open', asy
 });
 
 
+it('keeps the composer free of voice input and third-party chat branding', async () => {
+  const { root } = await mountReadyChat();
+  const composer = root.querySelector<HTMLElement>('[data-zcr-composer]')!;
+  const controls = [...composer.querySelectorAll('button')]
+    .map(node => `${node.getAttribute('aria-label') ?? ''} ${node.getAttribute('title') ?? ''} ${node.textContent ?? ''}`).join('\n');
+  expect(controls).not.toMatch(/voice|microphone|dictate|\bmic\b|ChatGPT/iu);
+  expect(composer.querySelector('[data-zcr-input]')?.getAttribute('placeholder')).toBe('Ask a question…');
+});
+
+
 it('shows pending image thumbnails in the composer and can remove them', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [], draftImages: [imageA] });
   const thumb = root.querySelector('[data-zcr-draft-image]');
