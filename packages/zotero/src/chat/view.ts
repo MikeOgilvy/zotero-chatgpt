@@ -1,5 +1,5 @@
 import { requestProgress, type Citation, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
-import { contextUsageLabel, contextUsageTitle, currentContextUsage, mountDocumentContext } from './context-view.ts';
+import { currentContextUsage, mountContextRing, mountDocumentContext } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
 import { mountUILocale } from './ui-locale.ts';
@@ -436,8 +436,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const send = button(COPY.send, 'send', () => { void presenter.send(); }, 'send', 'zcr-icon-button zcr-send');
   const stop = button(COPY.stop, 'stop', () => { void presenter.cancel(); }, 'stop', 'zcr-icon-button zcr-send');
   const queue = button('Queue question', 'queue', () => { void presenter.queueDraft(); }, 'plus'); queue.hidden = true;
-  const contextUsage = el('span', 'zcr-context-usage'); contextUsage.dataset.zcrContextUsage = ''; contextUsage.setAttribute('role', 'status');
-  trailing.append(contextUsage, picker, queue, send, stop);
+  const contextRing = mountContextRing(trailing);
+  trailing.append(picker, queue, send, stop);
   bar.append(leading, trailing);
   const menu = el('div', 'zcr-picker-menu'); menu.dataset.zcrPickerMenu = ''; menu.hidden = true; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', COPY.settings);
   menu.id = `${viewId}-models`;
@@ -1081,11 +1081,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     picker.disabled = !signedIn;
     const usage = currentContextUsage(state.draft.settings?.model ?? state.conversation?.settings.model, state.conversation?.usage);
-    const usageLabel = contextUsageLabel(usage); const usageTitle = contextUsageTitle(usage);
-    if (contextUsage.textContent !== usageLabel) contextUsage.textContent = usageLabel;
-    contextUsage.title = usageTitle;
-    if (contextUsage.getAttribute('aria-label') !== usageTitle) contextUsage.setAttribute('aria-label', usageTitle);
-    contextUsage.dataset.zcrContextState = usage ? usage.provenance : 'unknown';
+    contextRing.update(usage);
     const hasInput = state.draft.question.trim().length > 0;
     const canSend = state.connection === 'ready' && account === 'signedIn' && !state.generating && hasInput;
     send.disabled = !canSend; send.hidden = state.generating; stop.hidden = !state.generating;

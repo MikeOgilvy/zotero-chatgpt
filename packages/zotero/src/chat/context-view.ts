@@ -42,6 +42,50 @@ export function contextUsageTitle(usage: ContextUsage | null): string {
   return `Last runtime usage report: ${used} input tokens; model window ${window} (${origin}). ${tail}`;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+const RING_RADIUS = 8;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/** How much of the ring is filled: used/window when a window is known, otherwise nothing. */
+export function contextRingRatio(usage: ContextUsage | null): number | null {
+  if (!usage || usage.window === null || usage.window <= 0) return null;
+  return Math.min(1, Math.max(0, usage.usedTokens / usage.window));
+}
+
+export interface ContextRing { element: HTMLElement; update(usage: ContextUsage | null): void }
+/**
+ * A small ring instead of a text chip. It fills by used/window when the runtime or the pinned
+ * catalog reports a window, and stays neutral when the window is unknown. The numbers live in the
+ * hover title and the accessible name, so no token figure occupies the composer's control row.
+ */
+export function mountContextRing(parent: HTMLElement): ContextRing {
+  const doc = parent.ownerDocument;
+  const element = doc.createElementNS(HTML_NS, 'span');
+  element.className = 'zcr-context-ring'; element.dataset.zcrContextUsage = ''; element.setAttribute('role', 'status');
+  const svg = doc.createElementNS(SVG_NS, 'svg');
+  for (const [name, value] of [['viewBox', '0 0 20 20'], ['width', '16'], ['height', '16'], ['aria-hidden', 'true'], ['focusable', 'false']] as const) svg.setAttribute(name, value);
+  const circle = (className: string) => {
+    const node = doc.createElementNS(SVG_NS, 'circle');
+    node.setAttribute('class', className); node.setAttribute('cx', '10'); node.setAttribute('cy', '10'); node.setAttribute('r', String(RING_RADIUS)); node.setAttribute('fill', 'none');
+    return node;
+  };
+  const track = circle('zcr-context-ring-track');
+  const fill = circle('zcr-context-ring-fill');
+  fill.setAttribute('transform', 'rotate(-90 10 10)');
+  svg.append(track, fill); element.append(svg); parent.append(element);
+  const update = (usage: ContextUsage | null) => {
+    const ratio = contextRingRatio(usage);
+    element.dataset.zcrContextState = ratio === null ? 'unknown' : usage!.provenance;
+    fill.setAttribute('stroke-dasharray', `${(RING_CIRCUMFERENCE * (ratio ?? 0)).toFixed(2)} ${RING_CIRCUMFERENCE.toFixed(2)}`);
+    const title = contextUsageTitle(usage);
+    if (element.title !== title) element.title = title;
+    if (element.getAttribute('aria-label') !== title) element.setAttribute('aria-label', title);
+  };
+  update(null);
+  return { element, update };
+}
+
 /** Compact coverage plus an on-demand local source preview. Never equates parsing with sending. */
 export function mountDocumentContext(parent: HTMLElement, settings: HTMLElement, presenter: ConversationPresenter, openPage?: (document: DocumentContext, pageIndex: number) => Promise<void>) {
   const doc = parent.ownerDocument;

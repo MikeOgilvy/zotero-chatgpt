@@ -114,7 +114,7 @@ const TEXT = [
   '.zcr-plus-menu', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
-  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-usage', '.zcr-request-timing-text',
+  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
   // Native Preferences pane: pane copy only. Profile names, skill names and ids are never matched.
   '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
   '.zcr-preferences [data-zcr-pref^="preference-"] option', '.zcr-preferences [data-zcr-pref="profile"] option[value=""]',
@@ -124,7 +124,7 @@ const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
   '.zcr-document-context > summary', '.zcr-context-range input', '.zcr-appearance input', '.zcr-appearance select',
   '.zcr-plus-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
-  '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-usage',
+  '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
 ].join(',');
 const STATUS: Readonly<Record<string, string>> = {
   queued: '已排队', reserved: '待开始', running: '运行中', completed: '已完成', paused: '已暂停', uncertain: '未确认', cancelled: '已取消', failed: '失败',

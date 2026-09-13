@@ -104,21 +104,23 @@ it('localizes model-context, task-scope, workflow-source and profile-delete temp
   expect(prompt.textContent).toBe('Delete Derive?'); locale.dispose();
 });
 
-it('localizes the context usage chip and its accessible report', () => {
+it('localizes the context ring accessible report in both directions', () => {
   const { root, add } = setup();
-  const chip = add('span', 'zcr-context-usage', 'Context 12.3k / 128k tokens'); chip.dataset.zcrContextState = 'runtime-reported';
-  chip.setAttribute('aria-label', 'Last runtime usage report: 12,345 input tokens; model window 128,000 (runtime reported). This is the last report, not remaining context.');
-  const unknown = add('span', 'zcr-context-usage', 'Context unknown'); unknown.setAttribute('aria-label', 'Current context is unknown: the runtime has not reported usage for this model.');
-  const noWindow = add('span', 'zcr-context-usage', 'Context 12.3k tokens · window unknown');
+  const ring = add('span', 'zcr-context-ring', ''); ring.dataset.zcrContextState = 'runtime-reported';
+  ring.setAttribute('aria-label', 'Last runtime usage report: 12,345 input tokens; model window 128,000 (runtime reported). This is the last report, not remaining context.');
+  ring.title = 'Last runtime usage report: 12,345 input tokens; model window 128,000 (runtime reported). This is the last report, not remaining context.';
+  const unknown = add('span', 'zcr-context-ring', ''); unknown.setAttribute('aria-label', 'Current context is unknown: the runtime has not reported usage for this model.');
+  const noWindow = add('span', 'zcr-context-ring', ''); noWindow.setAttribute('aria-label', 'Last runtime usage report: 12,300 input tokens; the model window is unknown. This is the last report, not remaining context.');
   const locale = mountUILocale(root); locale.update('zh');
-  expect(chip.textContent).toBe('上下文 12.3k / 128k 词元');
-  expect(chip.getAttribute('aria-label')).toBe('上次运行时用量报告：12,345 个输入词元；模型窗口 128,000（运行时报告）。这是上次报告，并非剩余空间。');
-  expect(unknown.textContent).toBe('上下文用量未知');
+  // The ring never carries text: only its accessible report is localized.
+  expect(ring.textContent).toBe('');
+  expect(ring.getAttribute('aria-label')).toBe('上次运行时用量报告：12,345 个输入词元；模型窗口 128,000（运行时报告）。这是上次报告，并非剩余空间。');
+  expect(ring.title).toBe('上次运行时用量报告：12,345 个输入词元；模型窗口 128,000（运行时报告）。这是上次报告，并非剩余空间。');
   expect(unknown.getAttribute('aria-label')).toBe('当前上下文未知：运行时尚未报告此模型的用量。');
-  expect(noWindow.textContent).toBe('上下文 12.3k 词元 · 窗口未知');
+  expect(noWindow.getAttribute('aria-label')).toBe('上次运行时用量报告：12,300 个输入词元；模型窗口未知。这是上次报告，并非剩余空间。');
   locale.update('en');
-  expect(chip.textContent).toBe('Context 12.3k / 128k tokens');
-  expect(unknown.textContent).toBe('Context unknown'); locale.dispose();
+  expect(ring.getAttribute('aria-label')).toBe('Last runtime usage report: 12,345 input tokens; model window 128,000 (runtime reported). This is the last report, not remaining context.');
+  expect(unknown.getAttribute('aria-label')).toBe('Current context is unknown: the runtime has not reported usage for this model.'); locale.dispose();
 });
 
 it('localizes the honest elapsed-time states while keeping the measured seconds verbatim', () => {

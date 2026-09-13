@@ -424,15 +424,20 @@ it('gives every markdown table its own local scroll container', async () => {
   expect(wrapper?.firstElementChild?.tagName).toBe('TABLE');
 });
 
-it('shows an honest context indicator: an explicit unknown until the runtime reports usage', async () => {
+it('shows an honest context ring: unfilled and neutral until the runtime reports usage', async () => {
   const { root } = await mountReadyChat();
-  const chip = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
-  expect(chip.textContent).toBe('Context unknown');
-  expect(chip.getAttribute('aria-label')).toContain('unknown');
-  expect(chip.getAttribute('role')).toBe('status');
+  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  // The composer holds no token text at all: the ring is the whole indicator.
+  expect(ring.className).toBe('zcr-context-ring');
+  expect(ring.textContent).toBe('');
+  expect(ring.dataset.zcrContextState).toBe('unknown');
+  expect(ring.getAttribute('role')).toBe('status');
+  expect(ring.title).toContain('unknown');
+  expect(ring.getAttribute('aria-label')).toBe(ring.title);
+  expect(ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('0.00 50.27');
 });
 
-it('shows the last runtime context report with its window and never a remaining-space claim', async () => {
+it('fills the ring from the last runtime report and keeps the numbers in the tooltip only', async () => {
   const { root } = await mountReadyChat({
     usage: {
       model: 'catalog-default', contextWindow: 128000,
@@ -440,11 +445,15 @@ it('shows the last runtime context report with its window and never a remaining-
       total: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
     },
   });
-  const chip = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
-  expect(chip.textContent).toBe('Context 12.3k / 128k tokens');
-  expect(chip.getAttribute('aria-label')).toContain('12,345');
-  expect(chip.getAttribute('aria-label')).toContain('128,000');
-  expect(chip.getAttribute('aria-label')).toContain('not remaining context.');
+  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  expect(ring.dataset.zcrContextState).toBe('runtime-reported');
+  expect(ring.textContent).toBe('');
+  expect(ring.getAttribute('aria-label')).toContain('12,345');
+  expect(ring.getAttribute('aria-label')).toContain('128,000');
+  expect(ring.getAttribute('aria-label')).toContain('not remaining context.');
+  const filled = ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')!.split(' ').map(Number);
+  expect(filled[1]).toBeCloseTo(50.27, 2);
+  expect(filled[0]! / filled[1]!).toBeCloseTo(12345 / 128000, 4);
 });
 
 it('counts the wait in whole seconds and refreshes it on each tick', async () => {
