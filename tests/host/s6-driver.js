@@ -170,6 +170,55 @@ async function runHostSmoke(config) {
       } else {
         await skip('records-kept-after-rollback', 'IOUtils.exists was not available');
       }
+      // Downgrade safety probe on a fresh synthetic attachment, so the checks above keep their
+      // original meaning: the older build must refuse a conversation written in the newer schema
+      // with an honest message and must leave the record bytes untouched. A newly opened reader has
+      // no cached conversation to reuse, so it must consult the paper index for this attachment.
+      const profileClientId = Zotero.Prefs.get('extensions.zcr.clientId', true);
+      if (typeof IOUtils?.writeUTF8 === 'function' && typeof profileClientId === 'string' && /^[0-9a-f-]{36}$/u.test(profileClientId)) {
+        const downgradeId = '33333333-0000-4000-8000-000000000003';
+        const probeAttachment = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Synthetic downgrade probe PDF' });
+        await probeAttachment.loadAllData();
+        const probeRecordPath = PathUtils.join(recordsDir, `${downgradeId}.json`);
+        const seededDowngrade = {
+          schemaVersion: 3, logSeq: 0, id: downgradeId,
+          paper: { clientId: profileClientId, libraryId: Zotero.Libraries.userLibraryID, attachmentKey: probeAttachment.key },
+          paperIdentity: { title: 'Synthetic downgrade probe PDF', authors: [] },
+          title: 'Synthetic schema-3 downgrade record',
+          settings: { model: 'catalog-default', serviceTier: null, effort: 'low' },
+          activeRequestId: null, messages: [], lastSeq: 0,
+          createdAt: '2026-09-12T08:00:00.000Z', updatedAt: '2026-09-12T08:00:00.000Z',
+          upstream: { threadId: null, permissionMode: 'read' }, requests: [], documents: {}, documentIds: [],
+        };
+        const seededBytes = `${JSON.stringify(seededDowngrade)}\n`;
+        await IOUtils.writeUTF8(probeRecordPath, seededBytes);
+        const papersDir = PathUtils.join(PathUtils.profileDir, 'zotero-codex-reader', 'v1', 'records', 'papers');
+        await IOUtils.makeDirectory(papersDir, { createAncestors: true, ignoreExisting: true });
+        const probeIndexPath = PathUtils.join(papersDir, `${profileClientId}-${Zotero.Libraries.userLibraryID}-${probeAttachment.key}.json`);
+        let priorIndex = null;
+        try { priorIndex = await IOUtils.readUTF8(probeIndexPath); } catch { priorIndex = null; }
+        await IOUtils.writeUTF8(probeIndexPath, `${JSON.stringify({ schemaVersion: 1, conversations: [downgradeId], current: downgradeId })}\n`);
+        const probeOpened = await Zotero.Reader.open(probeAttachment.id);
+        const probeReader = () => Zotero.Reader.getByTabID(probeOpened.tabID);
+        const probeToggle = () => { try { return probeReader()?._iframeWindow?.document.querySelector('[data-zcr-toggle]') ?? null; } catch { return null; } };
+        const probePanel = () => { try { return probeReader()?._iframeWindow?.document.querySelector('[data-zcr-chat]'); } catch { return null; } };
+        await until(() => probeToggle(), 'downgrade probe toolbar', 30000);
+        if (probeToggle()?.getAttribute('aria-pressed') !== 'true') click(probeToggle());
+        const probeAlert = () => probePanel()?.querySelector('[role="alert"]')?.textContent || '';
+        await until(() => probeAlert(), 'older build refusal message', 60000).catch(() => undefined);
+        const exists = await IOUtils.exists(probeRecordPath);
+        const after = exists ? await IOUtils.readUTF8(probeRecordPath) : null;
+        let schema = null; try { schema = after === null ? null : JSON.parse(after).schemaVersion; } catch { schema = 'unparsable'; }
+        await check('schema3-record-refused-without-rewrite-after-downgrade', exists && after === seededBytes && schema === 3 && /could not be read|left untouched/i.test(probeAlert()), {
+          recordExists: exists, bytesUnchanged: after === seededBytes, schemaVersion: schema,
+          rejectionVisible: /could not be read|left untouched/i.test(probeAlert()), alert: probeAlert().slice(0, 200),
+          probeAttachmentKey: probeAttachment.key,
+        });
+        try { probeReader()?.close(); } catch { /* The instance is about to quit. */ }
+        if (priorIndex !== null) await IOUtils.writeUTF8(probeIndexPath, priorIndex);
+      } else {
+        await skip('schema3-record-refused-without-rewrite-after-downgrade', 'profile clientId or IOUtils.writeUTF8 was not available');
+      }
     } else if (typeof IOUtils?.copy !== 'function' || !config.installedXpi) {
       await skip('same-version-xpi-replaced-while-disabled', 'IOUtils.copy was not available');
       await skip('version-bump-upgrade', 'IOUtils.copy was not available');

@@ -247,4 +247,28 @@ describe('conversation store', () => {
     expect(loaded.messages.find(m => m.id === 'a1')).toMatchObject({ status: 'cancelled', text: '部分回答' });
     expect(new TextDecoder().decode(storage.files.get(logPath))).toContain('{"schemaVersion":1,"n":');
   });
+  it('accepts the schema-3 downgrade fixture the S6 host driver seeds', async () => {
+    // Mirrors the `seededDowngrade` record in tests/host/s6-driver.js. The record is well-formed for
+    // the current schema 3 so that an older build refusing it is a schema decision, not corruption.
+    const { storage } = store();
+    const id = '33333333-0000-4000-8000-000000000003';
+    const paper = paperA;
+    const record = {
+      schemaVersion: 3, logSeq: 0, id,
+      paper,
+      paperIdentity: { title: 'Synthetic paper A', authors: [] },
+      title: 'Synthetic schema-3 downgrade record',
+      settings: { model: 'catalog-default', serviceTier: null, effort: 'low' },
+      activeRequestId: null, messages: [], lastSeq: 0,
+      createdAt: '2026-09-12T08:00:00.000Z', updatedAt: '2026-09-12T08:00:00.000Z',
+      upstream: { threadId: null, permissionMode: 'read' }, requests: [], documents: {}, documentIds: [],
+    };
+    const recordBytes = new TextEncoder().encode(`${JSON.stringify(record)}\n`);
+    storage.files.set(`conversations/${id}.json`, recordBytes);
+    storage.files.set(`papers/${paper.clientId}-${paper.libraryId}-${paper.attachmentKey}.json`, new TextEncoder().encode(`${JSON.stringify({ schemaVersion: 1, conversations: [id], current: id })}\n`));
+    const fresh = store(storage).store;
+    expect(await fresh.current(paper)).toMatchObject({ id, schemaVersion: 3, title: 'Synthetic schema-3 downgrade record' });
+    expect((await fresh.get(id)).messages).toEqual([]);
+    expect(storage.files.get(`conversations/${id}.json`)).toEqual(recordBytes);
+  });
 });
