@@ -4,6 +4,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Sign in with ChatGPT': '使用 ChatGPT 登录', 'Cancel sign-in': '取消登录', Reconnect: '重新连接',
   'New chat': '新建对话', 'Chat history': '对话历史', 'Search chats…': '搜索对话…',
   'Delete chat': '删除对话', 'Rename chat': '重命名对话', 'Save name': '保存名称', 'Chat name': '对话名称',
+  Archived: '已归档', 'Archived chats': '已归档的对话', 'Archive chat': '归档对话', 'Restore chat': '恢复对话',
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
   More: '更多', 'Chat options': '对话选项', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
   'Model and generation settings': '模型与生成设置', Effort: '推理强度', Options: '选项', Fast: '快速', Model: '模型',
@@ -100,7 +101,7 @@ const CONTENT = [
 const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-button,.zcr-workspace-control,.zcr-preferences button';
 const TEXT = [
   BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
-  '.zcr-history-heading', '.zcr-history-empty', '.zcr-message-author', '.zcr-status-line', '.zcr-message-meta',
+  '.zcr-history-heading', '.zcr-history-empty', '.zcr-history-archived-label', '.zcr-message-author', '.zcr-status-line', '.zcr-message-meta',
   '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-document-context > summary', '.zcr-document-context > p',
   '.zcr-context-disclosure > p', '.zcr-context-pages details > summary', '.zcr-sent-context > strong', '.zcr-sent-context > p',
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',

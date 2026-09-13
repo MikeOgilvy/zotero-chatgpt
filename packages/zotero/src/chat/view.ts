@@ -1,4 +1,5 @@
 import { requestProgress, type Citation, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
+import type { HistoryEntry } from '../../../contracts/src/workspace.ts';
 import { currentContextUsage, mountContextRing, mountDocumentContext } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
@@ -42,6 +43,10 @@ const COPY = {
   searchChats: 'Search chats…',
   deleteChat: 'Delete chat',
   deleteConfirm: 'Delete this chat? This only removes the local history for this PDF.',
+  archived: 'Archived',
+  archivedChats: 'Archived chats',
+  archiveChat: 'Archive chat',
+  restoreChat: 'Restore chat',
   newContent: 'New content',
   askPlaceholder: 'Ask a question…',
   question: 'Question',
@@ -97,6 +102,11 @@ const ICONS = {
   check: 'M3.5 8.25 6.5 11.25 12.5 4.75',
   historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
   historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
+  // A right-pointing chevron that CSS rotates to point down while the Archived section is open.
+  chevron: 'M6.25 4.5 9.75 8l-3.5 3.5',
+  // Archive is a closed box with a lid; restore lifts an arrow out of the same box.
+  archive: 'M3 6h10v6.5H3zM2 3.75h12v2.25H2zM6.25 8.75h3.5',
+  restore: 'M3 6h10v6.5H3zM2 3.75h12v2.25H2zM8 11.25V8.75M6.5 10.25 8 8.75l1.5 1.5',
 } as const;
 const STATUS_LINE = {
   idle: 'Open the Codex sidebar to connect.',
@@ -211,7 +221,11 @@ interface HistoryRowSource {
   status: HistoryStatus;
   updatedAt: string;
   current: boolean;
+  /** True only for a row listed under Archived; it flips the row action to Restore. */
+  archived?: boolean;
   open(): void;
+  /** Archive/restore, available on both history paths because the model owns the state. */
+  archive?: () => void;
   /** Present only where the row can be deleted; the workspace history port owns no delete today. */
   remove?: () => void;
 }
@@ -391,7 +405,42 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historySearch.setAttribute('aria-label', COPY.history);
   const historyList = el('div', 'zcr-history-list');
   historyList.setAttribute('role', 'list');
+  // Archived chats leave the grouped list entirely. The section is a hairline row pinned below it,
+  // collapsed by default, and never rendered at zero archived chats (no dead affordance).
+  const archivedSection = el('section', 'zcr-history-archived');
+  archivedSection.dataset.zcrArchived = '';
+  archivedSection.hidden = true;
+  const archivedToggle = el('button', 'zcr-history-archived-toggle');
+  archivedToggle.type = 'button';
+  archivedToggle.dataset.zcrAction = 'toggle-archived';
+  archivedToggle.setAttribute('aria-expanded', 'false');
+  archivedToggle.setAttribute('aria-label', COPY.archivedChats);
+  archivedToggle.setAttribute('aria-controls', `${viewId}-archived`);
+  const archivedChevron = el('span', 'zcr-history-chevron');
+  archivedChevron.setAttribute('aria-hidden', 'true');
+  archivedChevron.append(icon('chevron'));
+  const archivedCount = el('span', 'zcr-history-archived-count');
+  archivedCount.setAttribute('aria-hidden', 'true');
+  const archivedList = el('div', 'zcr-history-archived-list');
+  archivedList.id = `${viewId}-archived`;
+  archivedList.setAttribute('role', 'list');
+  archivedList.hidden = true;
+  archivedToggle.append(archivedChevron, el('span', 'zcr-history-archived-label', COPY.archived), archivedCount);
+  archivedSection.append(archivedToggle, archivedList);
   historyPanel.append(historySearch, historyList);
+  /**
+   * The section follows the search until the user touches it: a non-empty query with archived
+   * matches opens it automatically, and an explicit toggle wins until the query changes.
+   */
+  let archivedChoice: boolean | null = null;
+  const setArchivedExpanded = (expanded: boolean) => {
+    archivedToggle.setAttribute('aria-expanded', String(expanded));
+    archivedList.hidden = !expanded;
+  };
+  archivedToggle.addEventListener('click', () => {
+    archivedChoice = archivedToggle.getAttribute('aria-expanded') !== 'true';
+    setArchivedExpanded(archivedChoice);
+  });
   const status = el('p', 'zcr-status-line'); status.setAttribute('role', 'status');
   // Honest elapsed time. The counter ticks only while a request is unsettled, freezes at the first
   // delivered text, and stops at the settle stamp. Missing timing shows an explicit unknown rather
@@ -733,7 +782,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (isComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
     event.preventDefault(); open(); focusMenu(panel, event.key === 'ArrowUp');
   });
-  historySearch.addEventListener('input', () => { if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value).catch(reportViewError); else applyHistoryFilter(); });
+  historySearch.addEventListener('input', () => {
+    // A new query follows its own matches; an explicit toggle only governs the current query.
+    archivedChoice = null;
+    if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value).catch(reportViewError); else applyHistoryFilter();
+  });
   const onDocumentClick = (event: Event) => {
     const target = event.target as Node | null;
     // A menu row can re-render its own menu, detaching the clicked node before this document
@@ -755,16 +808,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   doc.addEventListener('keydown', onDocumentKey);
   const applyHistoryFilter = () => {
     const query = historySearch.value.trim().toLowerCase();
-    for (const group of historyList.querySelectorAll<HTMLElement>('[data-zcr-history-group]')) {
+    const filterRows = (rows: Iterable<HTMLElement>) => {
       let visible = 0;
-      for (const row of group.querySelectorAll<HTMLElement>('.zcr-history-row')) {
+      for (const row of rows) {
         const hay = row.dataset.zcrHistoryLabel ?? '';
         const show = !query || hay.toLowerCase().includes(query);
         row.hidden = !show;
         if (show) visible++;
       }
-      group.hidden = visible === 0;
+      return visible;
+    };
+    for (const group of historyList.querySelectorAll<HTMLElement>('[data-zcr-history-group]')) {
+      group.hidden = filterRows(group.querySelectorAll<HTMLElement>('.zcr-history-row')) === 0;
     }
+    if (archivedSection.hidden) return;
+    // A query that matches an archived chat opens the section so the match is never lost; an
+    // explicit collapse still wins until the query changes.
+    const archivedVisible = filterRows(archivedList.querySelectorAll<HTMLElement>('.zcr-history-row'));
+    setArchivedExpanded(archivedChoice ?? (archivedVisible > 0 && query.length > 0));
   };
   const citationCard = (citation: Citation, removable: boolean) => {
     const card = el('div', 'zcr-citation'); card.dataset.zcrCitation = citation.id;
@@ -862,6 +923,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     choice.title = description;
     choice.addEventListener('click', () => { source.open(); toggleHistory(false); });
     row.append(choice);
+    if (source.archive) {
+      const archive = button(source.archived ? COPY.restoreChat : COPY.archiveChat, source.archived ? 'restore-conversation' : 'archive-conversation', source.archive, source.archived ? 'restore' : 'archive');
+      archive.dataset.zcrConversationId = source.id;
+      row.append(archive);
+    }
     if (source.remove) {
       const drop = button(COPY.deleteChat, 'delete-conversation', source.remove, 'remove');
       drop.dataset.zcrConversationId = source.id;
@@ -869,31 +935,49 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     return row;
   };
+  const workspaceHistoryRow = (entry: HistoryEntry, state: PresenterState): HistoryRowSource => ({
+    id: entry.id,
+    title: entry.title || COPY.untitled,
+    paperTitle: entry.identity.title,
+    preview: entry.preview,
+    status: historyStatus(entry),
+    updatedAt: entry.updatedAt || entry.createdAt,
+    current: entry.id === state.conversation?.id,
+    archived: !!entry.archivedAt,
+    open: () => { void presenter.openHistoryEntry(entry.id); },
+    archive: () => { void presenter.archiveConversation(entry.id, !entry.archivedAt); },
+  });
+  const conversationHistoryRow = (conversation: Conversation, state: PresenterState): HistoryRowSource => ({
+    id: conversation.id,
+    title: conversationLabel(conversation, state.conversations),
+    paperTitle: conversation.paperIdentity?.title ?? '',
+    preview: conversation.messages.at(-1)?.text ?? '',
+    status: historyStatus(conversation),
+    updatedAt: conversation.updatedAt || conversation.createdAt,
+    current: conversation.id === state.conversation?.id,
+    archived: !!conversation.archivedAt,
+    open: () => { void presenter.openConversation(conversation.id); },
+    // Delete stays a confirmed, separate hard delete on the host-list path only; the workspace
+    // listing has no delete port and must not gain an unconfirmed one.
+    remove: () => { if (confirmDelete()) void presenter.deleteConversation(conversation.id); },
+    archive: () => { void presenter.archiveConversation(conversation.id, !conversation.archivedAt); },
+  });
+  /**
+   * Both history paths render through the same row shape and differ only in their source: the
+   * workspace listing already partitions by scope, while the host-list fallback partitions the
+   * conversations it holds. The Archived section stays out of the DOM at zero archived chats.
+   */
   const renderHistory = (state: PresenterState) => {
-    const rows: HistoryRowSource[] = state.workspace
-      ? newestFirst(state.history).map(entry => ({
-        id: entry.id,
-        title: entry.title || COPY.untitled,
-        paperTitle: entry.identity.title,
-        preview: entry.preview,
-        status: historyStatus(entry),
-        updatedAt: entry.updatedAt || entry.createdAt,
-        current: entry.id === state.conversation?.id,
-        open: () => { void presenter.openHistoryEntry(entry.id); },
-      }))
-      : newestFirst(state.conversations).map(conversation => ({
-        id: conversation.id,
-        title: conversationLabel(conversation, state.conversations),
-        paperTitle: conversation.paperIdentity?.title ?? '',
-        preview: conversation.messages.at(-1)?.text ?? '',
-        status: historyStatus(conversation),
-        updatedAt: conversation.updatedAt || conversation.createdAt,
-        current: conversation.id === state.conversation?.id,
-        open: () => { void presenter.openConversation(conversation.id); },
-        remove: () => { if (confirmDelete()) void presenter.deleteConversation(conversation.id); },
-      }));
+    let rows: HistoryRowSource[]; let archivedRows: HistoryRowSource[];
+    if (state.workspace) {
+      rows = newestFirst(state.history).map(entry => workspaceHistoryRow(entry, state));
+      archivedRows = newestFirst(state.archivedHistory).map(entry => workspaceHistoryRow(entry, state));
+    } else {
+      const all = newestFirst(state.conversations);
+      rows = all.filter(conversation => !conversation.archivedAt).map(conversation => conversationHistoryRow(conversation, state));
+      archivedRows = all.filter(conversation => !!conversation.archivedAt).map(conversation => conversationHistoryRow(conversation, state));
+    }
     const sections = groupHistory(rows, row => row.updatedAt);
-    if (!sections.length) { historyList.replaceChildren(el('p', 'zcr-history-empty', COPY.noSavedChats)); return; }
     const nodes: HTMLElement[] = [];
     for (const { bucket, items } of sections) {
       const group = el('div', 'zcr-history-group');
@@ -902,7 +986,19 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       for (const row of items) group.append(historyRow(row));
       nodes.push(group);
     }
-    historyList.replaceChildren(...nodes);
+    historyList.replaceChildren(...(nodes.length ? nodes : [el('p', 'zcr-history-empty', COPY.noSavedChats)]));
+    if (archivedRows.length === 0) {
+      // Zero archived chats means no section node at all, not a collapsed empty one.
+      archivedSection.remove();
+      archivedChoice = null;
+      setArchivedExpanded(false);
+    } else {
+      if (!archivedSection.isConnected) historyPanel.append(archivedSection);
+      archivedSection.hidden = false;
+      archivedCount.textContent = String(archivedRows.length);
+      archivedList.replaceChildren(...archivedRows.map(row => historyRow(row)));
+      setArchivedExpanded(archivedChoice ?? !!state.historyQuery.trim());
+    }
     // The presenter already filtered a workspace search (it also matches message text), so the
     // local row-label filter only runs for the host-list fallback.
     if (!state.workspace) applyHistoryFilter();
@@ -1065,7 +1161,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     historyBtn.hidden = false;
     alert.textContent = state.message ?? ''; alert.hidden = !state.message;
     updateContext(state);
-    const historyKey = state.workspace ? JSON.stringify(state.history) : state.conversations.map(c => `${c.id}:${c.title}:${c.createdAt}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
+    const historyKey = state.workspace ? JSON.stringify([state.history, state.archivedHistory, state.historyQuery]) : state.conversations.map(c => `${c.id}:${c.title}:${c.createdAt}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}:${c.archivedAt ?? ''}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
     if (historyList.dataset.options !== historyKey) {
       historyList.dataset.options = historyKey;
       renderHistory(state);

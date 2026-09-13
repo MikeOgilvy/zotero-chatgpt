@@ -55,6 +55,13 @@ export interface PresenterState {
   paperTitle: string;
   workspace: WorkspaceSettings | null;
   history: HistoryEntry[];
+  /**
+   * Archived chats for the same query. The view renders these in the collapsed Archived section.
+   * The presenter and the store both guarantee a chat appears in exactly one of `history` and
+   * `archivedHistory`; `historyQuery` lets the view force the section open for a search.
+   */
+  archivedHistory: HistoryEntry[];
+  historyQuery: string;
   scrollTop: number;
   persistence: 'session' | 'loading' | 'saving' | 'saved' | 'error';
   tasks: AgentTaskRecord[];
@@ -137,7 +144,7 @@ export class ConversationPresenter {
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
     this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
-      workspace: null, history: [], scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
+      workspace: null, history: [], archivedHistory: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
   }
   private paperIdentity(): PaperIdentity {
@@ -245,10 +252,52 @@ export class ConversationPresenter {
     if (draft === this.state.draft) return;
     this.draftVersion++; this.update({ draft, message: null }); this.stageDraft();
   }
+  /** A HistoryEntry with no `archivedAt`, i.e. a chat listed in the Archived section. */
+  private archivedEntry(entry: HistoryEntry): boolean { return Boolean(entry.archivedAt); }
+  private entryFromConversation(conversation: Conversation): HistoryEntry {
+    return { id: conversation.id, paper: conversation.paper, title: conversation.title, identity: conversation.paperIdentity ?? { title: conversation.title, authors: [] }, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, preview: conversation.messages.at(-1)?.text ?? '', hasDraft: !!this.drafts.get(conversation.id)?.question.trim(), activeRequestId: conversation.activeRequestId, ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}) };
+  }
+  /**
+   * The fallback host-list path has no archive filter of its own, so the presenter partitions the
+   * list it already holds. Keeping the partition here (not only in the store) is what lets the view
+   * render both scopes identically whether or not a workspace is available.
+   */
+  private fallbackHistory(query: string): HistoryEntry[] {
+    const search = query.toLocaleLowerCase();
+    return this.state.conversations.filter(conversation => `${conversation.title} ${conversation.messages.map(message => message.text).join(' ')}`.toLocaleLowerCase().includes(search)).map(conversation => this.entryFromConversation(conversation));
+  }
+  /**
+   * Search both scopes in one pass so a query can surface an archived chat. The two calls are the
+   * only partition of the listing: every stored chat is unarchived XOR archived, so the view can
+   * force the section open on a search without ever losing a match.
+   */
   async searchHistory(query: string): Promise<HistoryEntry[]> {
     const search = ++this.historySearch;
-    const results = this.services.getWorkspace ? await (await this.getWorkspace()).history(query) : this.state.conversations.filter(conversation => `${conversation.title} ${conversation.messages.map(message => message.text).join(' ')}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(conversation => ({ id: conversation.id, paper: conversation.paper, title: conversation.title, identity: conversation.paperIdentity ?? { title: conversation.title, authors: [] }, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, preview: conversation.messages.at(-1)?.text ?? '', hasDraft: !!this.drafts.get(conversation.id)?.question.trim(), activeRequestId: conversation.activeRequestId }));
-    if (search === this.historySearch && !this.disposed) this.update({ history: results }); return clone(results);
+    let history: HistoryEntry[]; let archived: HistoryEntry[];
+    if (this.services.getWorkspace) {
+      const workspace = await this.getWorkspace();
+      [history, archived] = await Promise.all([workspace.history(query), workspace.history(query, { archived: true })]);
+    } else {
+      const found = this.fallbackHistory(query);
+      history = found.filter(entry => !this.archivedEntry(entry)); archived = found.filter(entry => this.archivedEntry(entry));
+    }
+    if (search === this.historySearch && !this.disposed) this.update({ history, archivedHistory: archived, historyQuery: query });
+    return clone(history);
+  }
+  /**
+   * Archive/unarchive a chat. This is the only mutation the presenter performs for the Archived
+   * section; it delegates to the client, which keeps the record on disk. A failure only surfaces a
+   * message, and the listing is re-read from the source of truth rather than optimistically patched.
+   */
+  async archiveConversation(id: string, archived: boolean): Promise<void> {
+    try {
+      const client = await this.connect();
+      if (!client.archiveConversation) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Archiving chats is unavailable.');
+      const updated = await client.archiveConversation(id, archived);
+      if (this.state.conversation?.id === id) this.update({ conversation: updated });
+      await this.refreshList();
+      await this.searchHistory(this.state.historyQuery);
+    } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   async openHistoryEntry(id: string): Promise<void> {
     const conversation = this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(id) : await (await this.connect()).get(id);
@@ -265,6 +314,8 @@ export class ConversationPresenter {
       results.push(...await waitBounded(Promise.resolve(this.services.library.search(query)), signal, limit, 'The article search did not answer. Try again.'));
     }
     if (kind !== 'article' && this.services.getWorkspace) {
+      // Deliberately the default (unarchived) scope: '@' pulls a chat you are actively working with,
+      // while an archived chat stays reachable from the history popover's search and Archived section.
       const entries = await waitBounded(this.getWorkspace().then(workspace => workspace.history(query)), signal, limit, 'Saved chats could not be searched. Try again.');
       results.push(...entries.map(entry => ({ id: `chat-${entry.id}`, kind: 'chat' as const, label: entry.title, paper: entry.paper, identity: entry.identity, conversationId: entry.id, capturedAt: this.services.now() })));
     }

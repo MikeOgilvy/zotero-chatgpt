@@ -24,7 +24,13 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     importSkill: vi.fn(() => Promise.resolve(userSkill)), deleteSkill: vi.fn(id => { workspaceSettings.skills = workspaceSettings.skills.filter(item => item.id !== id); return Promise.resolve(); }),
     saveDraft: vi.fn<ReaderWorkspace['saveDraft']>(value => { saved.set(value.conversationId ?? 'unbound', copy(value)); return Promise.resolve(); }), readDraft: vi.fn<ReaderWorkspace['readDraft']>((_paper, id) => Promise.resolve(copy(saved.get(id ?? 'unbound') ?? null))), deleteDraft: vi.fn<ReaderWorkspace['deleteDraft']>((_paper, id) => { saved.delete(id ?? 'unbound'); return Promise.resolve(); }),
     currentConversation: vi.fn(() => Promise.resolve(copy(conversation))), readConversation: vi.fn<ReaderWorkspace['readConversation']>(id => { const value = conversations.get(id); return value ? Promise.resolve(copy(value)) : Promise.reject(new ReaderError('NOT_FOUND', 'Unknown chat')); }),
-    history: vi.fn(() => Promise.resolve([...conversations.values()].map(item => ({ id: item.id, paper: item.paper, title: item.title, identity: { title: item.title, authors: [] }, createdAt: item.createdAt, updatedAt: item.updatedAt, preview: item.messages.at(-1)?.text ?? '', messageCount: item.messages.length, hasDraft: saved.has(item.id), activeRequestId: item.activeRequestId })))),
+    history: vi.fn<ReaderWorkspace['history']>((query, scope) => {
+      const search = (query ?? '').toLowerCase();
+      return Promise.resolve([...conversations.values()]
+        .filter(item => (scope?.archived ? !!item.archivedAt : !item.archivedAt))
+        .filter(item => !search || `${item.title} ${item.messages.map(message => message.text).join(' ')}`.toLowerCase().includes(search))
+        .map(item => ({ id: item.id, paper: item.paper, title: item.title, identity: { title: item.title, authors: [] }, createdAt: item.createdAt, updatedAt: item.updatedAt, preview: item.messages.at(-1)?.text ?? '', messageCount: item.messages.length, hasDraft: saved.has(item.id), activeRequestId: item.activeRequestId, ...(item.archivedAt ? { archivedAt: item.archivedAt } : {}) })));
+    }),
     snapshotChat: vi.fn<ReaderWorkspace['snapshotChat']>(id => Promise.resolve({ id: `chat-${id}`, kind: 'chat' as const, label: 'Saved chat', conversationId: id, messageIds: ['m1'], text: 'Bounded chat snapshot', capturedAt: '2026-09-12T00:00:00Z' })),
   };
   const runtime: RuntimeSnapshot = { revision: 1, runtime: 'ready', account: { state: 'signedIn' }, login: null, models: [{ id: settings.model, displayName: 'Model', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [], defaultServiceTier: null, inputModalities: ['text', 'image'] }], error: null };
@@ -41,6 +47,12 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     deleteConversation: () => Promise.resolve(copy(conversation)),
     renameConversation: vi.fn<NonNullable<ReaderClient['renameConversation']>>((id, title) => { const target = conversations.get(id)!; const renamed = { ...target, title, titleCustomized: true }; conversations.set(id, renamed); if (conversation.id === id) conversation = renamed; return Promise.resolve(copy(renamed)); }),
     branchConversation: vi.fn<NonNullable<ReaderClient['branchConversation']>>((_id, messageId) => { saveConversation({ ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', activeRequestId: null, parentConversationId: conversation.id, forkMessageId: messageId, messages: [] }); return Promise.resolve(copy(conversation)); }),
+    archiveConversation: vi.fn<NonNullable<ReaderClient['archiveConversation']>>((id, archived) => {
+      const target = conversations.get(id)!;
+      const next: Conversation = { ...target, ...(archived ? { archivedAt: '2026-09-12T00:00:00Z' } : {}) };
+      if (!archived) delete next.archivedAt;
+      persistConversation(next); return Promise.resolve(copy(next));
+    }),
     diagnostics: () => Promise.resolve({ pluginVersion: 'test', runtimeVersion: 'test', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }), subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, close: () => Promise.resolve(),
   };
   const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickImages: vi.fn(() => Promise.resolve([copy(imageA)])), pickSkill: vi.fn(() => Promise.resolve(userSkill.markdown)), exportText: vi.fn(() => Promise.resolve()), exportImage: vi.fn(() => Promise.resolve()) };
@@ -85,6 +97,33 @@ it('captures @chat through bounded workspace snapshots and persists appearance i
   await f.presenter.saveAppearance({ uiLanguage: 'zh', textScale: 1.5 });
   expect(f.workspaceSettings()).toMatchObject({ uiLanguage: 'zh', textScale: 1.5 });
   expect(f.presenter.snapshot().draft.settings).toEqual(generation); f.presenter.dispose();
+});
+
+it('partitions workspace history by scope, keeps an archived chat findable, and archives through the client', async () => {
+  const f = fixture(); await f.presenter.activate();
+  const open = f.conversation().id;
+  const archivedId = 'dddddddd-0000-4000-8000-000000000005';
+  f.conversations.set(archivedId, { ...f.conversation(), id: archivedId, title: 'Old discussion', archivedAt: '2026-09-12T00:00:00Z' });
+  const history = await f.presenter.searchHistory('');
+  expect(history.map(entry => entry.id)).toEqual([open]);
+  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id)).toEqual([archivedId]);
+  expect(f.presenter.snapshot().historyQuery).toBe('');
+  // The query reaches both scopes, so an archived chat is never lost to a search.
+  expect(await f.presenter.searchHistory('Old discussion')).toEqual([]);
+  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id)).toEqual([archivedId]);
+  // Back to the unfiltered scope before the archive toggle, which refetches the active query.
+  await f.presenter.searchHistory('');
+  await f.presenter.archiveConversation(open, true);
+  expect(f.client.archiveConversation).toHaveBeenCalledWith(open, true);
+  expect(f.presenter.snapshot().conversation?.archivedAt).toBe('2026-09-12T00:00:00Z');
+  expect(f.presenter.snapshot().history).toEqual([]);
+  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id).sort()).toEqual([archivedId, open].sort());
+  // Restoring returns it to the default scope with its archived timestamp removed.
+  await f.presenter.archiveConversation(open, false);
+  expect(f.presenter.snapshot().conversation?.archivedAt).toBeUndefined();
+  expect(f.presenter.snapshot().history.map(entry => entry.id)).toEqual([open]);
+  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id)).toEqual([archivedId]);
+  f.presenter.dispose();
 });
 
 it('renames via the core, branches an old question without sending, and routes cross-paper history externally', async () => {

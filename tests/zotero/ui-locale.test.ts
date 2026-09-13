@@ -136,6 +136,25 @@ it('localizes the honest elapsed-time states while keeping the measured seconds 
   expect(waiting.textContent).toBe('Waiting 7s'); expect(answered.textContent).toBe('Answered in 42s'); locale.dispose();
 });
 
+it('localizes the archived section label and the archive/restore row actions in both directions', () => {
+  const { root, add } = setup();
+  const label = add('span', 'zcr-history-archived-label', 'Archived');
+  const archive = add('button', 'zcr-icon-button'); archive.dataset.zcrAction = 'archive-conversation'; archive.setAttribute('aria-label', 'Archive chat'); archive.title = 'Archive chat';
+  const restore = add('button', 'zcr-icon-button'); restore.dataset.zcrAction = 'restore-conversation'; restore.setAttribute('aria-label', 'Restore chat'); restore.title = 'Restore chat';
+  const toggle = add('button', 'zcr-history-archived-toggle'); toggle.dataset.zcrAction = 'toggle-archived'; toggle.setAttribute('aria-label', 'Archived chats');
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(label.textContent).toBe('已归档');
+  expect(archive.getAttribute('aria-label')).toBe('归档对话');
+  expect(archive.title).toBe('归档对话');
+  expect(restore.getAttribute('aria-label')).toBe('恢复对话');
+  expect(restore.title).toBe('恢复对话');
+  expect(toggle.getAttribute('aria-label')).toBe('已归档的对话');
+  locale.update('en');
+  expect(label.textContent).toBe('Archived');
+  expect(archive.getAttribute('aria-label')).toBe('Archive chat');
+  expect(restore.title).toBe('Restore chat'); locale.dispose();
+});
+
 it('stays inside its pane and stops observing after disposal', async () => {
   const { document, root, add } = setup(); const outside = add('button', 'zcr-button', 'Send', document.body); const inside = add('button', 'zcr-button', 'Send');
   const locale = mountUILocale(root); locale.update('zh'); expect(inside.textContent).toBe('发送'); expect(outside.textContent).toBe('Send');

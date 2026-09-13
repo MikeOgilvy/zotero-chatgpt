@@ -50,6 +50,7 @@ async function mountReadyChat(options: {
   activeRequestId?: string | null;
   captureTimers?: boolean;
   rename?: (id: string, title: string) => Promise<Conversation>;
+  archive?: (id: string, archived: boolean) => Promise<Conversation>;
   clipboardImages?: () => Promise<ImageAttachment[]>;
   workspace?: ReaderWorkspace;
 } = {}) {
@@ -91,7 +92,11 @@ async function mountReadyChat(options: {
       conversation = found;
       return Promise.resolve(structuredClone(found));
     },
-    get: () => Promise.resolve(structuredClone(conversation)),
+    get: id => {
+      const found = id === undefined ? conversation : listed.find(entry => entry.id === id);
+      if (!found) return Promise.reject(new Error('missing conversation'));
+      return Promise.resolve(structuredClone(found));
+    },
     send: input => {
       options.sent?.push(input);
       conversation = {
@@ -127,6 +132,16 @@ async function mountReadyChat(options: {
       }
       return Promise.resolve(structuredClone(conversation));
     },
+    archiveConversation: options.archive ?? ((id, archived) => {
+      const index = listed.findIndex(entry => entry.id === id);
+      if (index < 0) return Promise.reject(new Error('missing conversation'));
+      const target = listed[index]!;
+      const stamped: Conversation = { ...target, ...(archived ? { archivedAt: '2026-09-13T00:00:00.000Z' } : {}) };
+      if (!archived) delete stamped.archivedAt;
+      listed[index] = stamped;
+      if (conversation.id === id) conversation = stamped;
+      return Promise.resolve(structuredClone(stamped));
+    }),
     diagnostics: vi.fn(() => Promise.resolve({
       pluginVersion: '0.3.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {},
       storageLocation: SHAREABLE_STORAGE_LOCATION,
@@ -928,6 +943,20 @@ function agedConversation(id: string, title: string, updatedAt: string, override
   };
 }
 
+function historyEntry(index: number, overrides: Partial<HistoryEntry> = {}): HistoryEntry {
+  const hour = String(index).padStart(2, '0');
+  return {
+    id: `aaaaaaaa-0000-4000-8000-${String(index + 50).padStart(12, '0')}`,
+    paper: paperA,
+    title: `Workspace chat ${index}`,
+    identity: { title: 'Workspace Paper Title', authors: [] },
+    createdAt: `2026-09-10T${hour}:00:00.000Z`,
+    updatedAt: `2026-09-10T${hour}:00:00.000Z`,
+    messageCount: 2, preview: `Workspace preview ${index}`, hasDraft: false, activeRequestId: null,
+    ...overrides,
+  };
+}
+
 function historyWorkspace(entries: HistoryEntry[]): ReaderWorkspace {
   return {
     settings: () => Promise.resolve(defaultSettings()),
@@ -938,7 +967,9 @@ function historyWorkspace(entries: HistoryEntry[]): ReaderWorkspace {
     saveDraft: () => Promise.resolve(),
     readDraft: () => Promise.resolve(null),
     deleteDraft: () => Promise.resolve(),
-    history: query => Promise.resolve(query ? entries.filter(entry => entry.title.includes(query)) : entries),
+    history: (query, scope) => Promise.resolve(entries
+      .filter(entry => (scope?.archived ? !!entry.archivedAt : !entry.archivedAt))
+      .filter(entry => (query ? entry.title.includes(query) : true))),
     readConversation: () => Promise.reject(new ReaderError('NOT_FOUND', 'Not used in this test.')),
     currentConversation: () => Promise.resolve(null),
     snapshotChat: () => Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Not used in this test.')),
@@ -978,9 +1009,12 @@ it('groups workspace history entries single-line and keeps the PDF title and pre
     const done = items.find(item => item.querySelector('[data-zcr-history-status="done"]'))!;
     expect(done.getAttribute('aria-label')).toContain('Workspace Paper Title');
     expect(done.getAttribute('aria-label')).toContain('Workspace preview text');
-    // The workspace port cannot delete or archive, so no dead controls are invented.
+    // The workspace port owns no confirmed delete, so it keeps no delete cross. Archive/restore is
+    // non-destructive and supported by the model, so every row offers it, and zero archived chats
+    // still means no Archived section node at all.
     expect(root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]')).toBeNull();
-    expect(root.querySelector('[data-zcr-history] [data-zcr-action="archived"]')).toBeNull();
+    expect(root.querySelectorAll('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toHaveLength(history.length);
+    expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
   } finally { clock.mockRestore(); }
 });
 
@@ -1025,9 +1059,9 @@ it('renders every conversation exactly once across the four buckets and never in
     expect(new Set(rendered).size).toBe(rendered.length);
     const grouped = [...root.querySelectorAll<HTMLElement>('[data-zcr-history-group]')].map(node => node.dataset.zcrHistoryGroup);
     expect(grouped).toEqual(['Today', 'Yesterday', 'Previous 7 days', 'Older']);
-    // The reference shows a collapsed Archived section; our model has no archive state, so there
-    // must be no empty or dead affordance for it.
-    expect(root.querySelector('[data-zcr-history] [data-zcr-archived], [data-zcr-history] [data-zcr-action="archived"]')).toBeNull();
+    // The reference shows a collapsed Archived section; our model now represents archiving, but with
+    // zero archived chats there must be no section node at all, never an empty or dead affordance.
+    expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
     expect(root.querySelector('[data-zcr-history]')?.textContent).not.toMatch(/Archived|归档/u);
   } finally { clock.mockRestore(); }
 });
@@ -1062,6 +1096,123 @@ it('renders single-line history rows with a per-status glyph and keeps the dropp
     expect(new Set(glyphs).size).toBe(3);
     expect(status(active.id).getAttribute('data-zcr-animated')).toBeNull();
   } finally { clock.mockRestore(); }
+});
+
+it('lists archived workspace chats in a collapsed, keyboard-operable section and keeps them out of the live list', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 8, 10, 12, 0, 0, 0).getTime());
+  try {
+    const active = [historyEntry(1), historyEntry(2)];
+    const archived = [historyEntry(3, { archivedAt: '2026-09-10T09:00:00.000Z' })];
+    const { root } = await mountReadyChat({ workspace: historyWorkspace([...active, ...archived]) });
+    const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
+    const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
+    expect(section).not.toBeNull();
+    const toggle = section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!;
+    const count = section.querySelector<HTMLElement>('.zcr-history-archived-count')!;
+    const archivedList = section.querySelector<HTMLElement>('.zcr-history-archived-list')!;
+    const ids = (scope: HTMLElement) => [...scope.querySelectorAll<HTMLButtonElement>('button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+    // Exactly-one-of-two: the live list holds the unarchived chats, the section holds the rest.
+    expect(ids(panel.querySelector<HTMLElement>('.zcr-history-list')!).sort()).toEqual(active.map(entry => entry.id).sort());
+    expect(ids(archivedList).sort()).toEqual(archived.map(entry => entry.id).sort());
+    expect(ids(panel).filter(id => archived.some(entry => entry.id === id))).toEqual(archived.map(entry => entry.id));
+    // The section is collapsed by default, carries the count and exposes that state.
+    expect(count.textContent).toBe('1');
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(archivedList.hidden).toBe(true);
+    // The section's row keeps the live row shape and the status glyph.
+    expect(archivedList.querySelectorAll('.zcr-history-title')).toHaveLength(1);
+    expect(archivedList.querySelector('.zcr-history-status')?.getAttribute('data-zcr-history-status')).toBe('done');
+    // The toggle lives in the panel's arrow-key order: ArrowDown from the last live row reaches it,
+    // and a click (what Enter/Space activate on a native button) toggles the section.
+    const trigger = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!;
+    trigger.click();
+    const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
+    search.focus();
+    const view = root.ownerDocument.defaultView!;
+    const lastLiveButton = [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button')].at(-1)!;
+    lastLiveButton.focus();
+    lastLiveButton.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    expect(root.ownerDocument.activeElement).toBe(toggle);
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(archivedList.hidden).toBe(false);
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(archivedList.hidden).toBe(true);
+  } finally { clock.mockRestore(); }
+});
+
+it('archives and restores a host-list chat from its row action while delete stays a separate confirmed removal', async () => {
+  const first = agedConversation('aaaaaaaa-0000-4000-8000-000000000031', 'First chat', '2026-09-10T09:00:00.000Z');
+  const second = agedConversation('aaaaaaaa-0000-4000-8000-000000000032', 'Second chat', '2026-09-10T09:01:00.000Z');
+  const confirm = vi.fn(() => true);
+  const { root } = await mountReadyChat({ conversations: [first, second], confirm });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
+  const liveIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
+  // Archive is non-destructive: no confirmation is asked and no data is removed.
+  panel.querySelector<HTMLButtonElement>(`[data-zcr-action="archive-conversation"][data-zcr-conversation-id="${second.id}"]`)!.click();
+  await vi.waitFor(() => expect(liveIds()).not.toContain(second.id));
+  expect(confirm).not.toHaveBeenCalled();
+  const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
+  expect(section.querySelector('.zcr-history-archived-count')?.textContent).toBe('1');
+  section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!.click();
+  expect([...section.querySelectorAll<HTMLButtonElement>('button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId)).toEqual([second.id]);
+  // Restore returns the same chat to the live list and closes the now-empty section.
+  section.querySelector<HTMLButtonElement>('[data-zcr-action="restore-conversation"]')!.click();
+  await vi.waitFor(() => expect(liveIds()).toContain(second.id));
+  await vi.waitFor(() => expect(panel.querySelector('[data-zcr-archived]')).toBeNull());
+  expect(confirm).not.toHaveBeenCalled();
+  // Delete remains a separate, confirmed hard removal on the host-list path.
+  panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${first.id}"]`)!.click();
+  await vi.waitFor(() => expect(confirm).toHaveBeenCalledWith('Delete this chat? This only removes the local history for this PDF.'));
+  await vi.waitFor(() => expect(liveIds()).not.toContain(first.id));
+});
+
+it('searches both scopes so an archived chat stays findable and the section opens for that query', async () => {
+  const active = historyEntry(4, { title: 'Alpha notes' });
+  const archived = historyEntry(5, { title: 'Beta notes', archivedAt: '2026-09-10T09:00:00.000Z' });
+  const { root } = await mountReadyChat({ workspace: historyWorkspace([active, archived]) });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
+  const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
+  const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
+  const toggle = section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  search.value = 'Beta';
+  search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  // The query matched only the archived chat; losing it would be a silent data loss for the reader.
+  await vi.waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('true'));
+  expect([...section.querySelectorAll<HTMLButtonElement>('button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId)).toEqual([archived.id]);
+  expect(panel.querySelectorAll('.zcr-history-list button.zcr-history-item')).toHaveLength(0);
+  search.value = '';
+  search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+  await vi.waitFor(() => expect([...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId)).toEqual([active.id]));
+});
+
+it('forces the archived section open for a local fallback search that only matches an archived chat', async () => {
+  const alpha = agedConversation('aaaaaaaa-0000-4000-8000-000000000041', 'Alpha notes', '2026-09-10T09:00:00.000Z');
+  const beta = agedConversation('aaaaaaaa-0000-4000-8000-000000000042', 'Beta notes', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
+  const { root } = await mountReadyChat({ conversations: [alpha, beta] });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
+  const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
+  const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
+  const toggle = section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(section.querySelector<HTMLElement>('.zcr-history-archived-list')!.hidden).toBe(true);
+  search.value = 'Beta';
+  search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(section.querySelector<HTMLElement>('.zcr-history-archived-list')!.hidden).toBe(false);
+  const archivedRow = section.querySelector<HTMLElement>('.zcr-history-row')!;
+  expect(archivedRow.hidden).toBe(false);
+  search.value = '';
+  search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('keeps history search filtering and keyboard navigation working in the single-line panel', async () => {
