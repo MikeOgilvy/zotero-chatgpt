@@ -176,13 +176,25 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const doc = root.ownerDocument;
   let latestViewState = presenter.snapshot();
   // View actions own a slot separate from `state.message`: a presenter update must not erase a
-  // view failure, and a view failure must never be reported as conversation state. The raw error
-  // is deliberately discarded so host paths or internal text cannot reach the UI.
+  // view failure, and a view failure must never be reported as conversation state.
   const reportViewMessage = (message: string) => {
     const status = root.querySelector<HTMLElement>('[data-zcr-view-error]');
     if (status) { status.textContent = message; status.hidden = false; }
   };
-  const reportViewError = () => reportViewMessage(VIEW_ACTION_FAILED);
+  /**
+   * A failed view action shows the presenter's own sentence when it carries a coded error, because
+   * those messages are written for this UI (for example 'Saved chats could not be searched.').
+   * Anything else stays the constant, so host paths and raw internal text never reach the pane.
+   */
+  const actionFailure = (error: unknown): string => {
+    if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+      && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
+      const message = (error as { message: string }).message.trim();
+      if (message) return message;
+    }
+    return VIEW_ACTION_FAILED;
+  };
+  const reportViewError = (error?: unknown) => reportViewMessage(actionFailure(error));
   const viewId = `zcr-chat-${++viewSerial}`;
   // A cited page re-opens through the same frozen-revision navigation as the PDF context panel.
   // Without an opener, bound citations stay inert (no external launch) and surface a constant status.

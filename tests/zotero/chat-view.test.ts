@@ -1074,6 +1074,29 @@ it('does not send on Enter while IME composition is active', async () => {
   expect(send).not.toHaveBeenCalled();
 });
 
+it('surfaces the presenter’s own sentence for a coded view failure and keeps the constant otherwise', async () => {
+  const { root } = await mountReadyChat({ messages: [] });
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
+  plus.click();
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="capture-region"]')!.click();
+  // Region capture without a native reader is a coded ReaderError, so its own sentence is shown.
+  await vi.waitFor(() => expect(viewError.textContent).toBe('PDF region capture is unavailable.'));
+  expect(viewError.hidden).toBe(false);
+});
+
+it('shows the constant sentence when a failed view action has no coded message', async () => {
+  const { root } = await mountReadyChat({ messages: [], rename: () => Promise.reject(new Error('raw host detail')) });
+  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!.click();
+  const name = root.querySelector<HTMLInputElement>('[data-zcr-settings-menu] input')!;
+  name.value = 'Renamed';
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  await vi.waitFor(() => expect(viewError.hidden).toBe(false));
+  expect(viewError.textContent).toBe('This action could not be completed.');
+});
+
 it('keeps dock type at 1 when the open PDF zooms', async () => {
   const readerZoom = { factor: 1, ins: 0, outs: 0, resets: 0 };
   const { root } = await mountReadyChat({ messages: [], readerZoom });
