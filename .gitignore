@@ -11,3 +11,19 @@ coverage/
 .env.*
 !.env.example
 
+# Nested build output: the root-anchored /build/ and /dist/ above do not cover
+# per-package output produced by a workspace build.
+packages/*/build/
+packages/*/dist/
+
+# Secrets and local credentials — never commit these.
+auth.json
+credentials.json
+*.pem
+*.key
+id_rsa
+
+# Local editor state and TypeScript incremental build info.
+.vscode/
+.idea/
+*.tsbuildinfo
