@@ -99,6 +99,27 @@ it('lists active chats by default, archives away from that scope and restores ba
   await vi.waitFor(() => expect(rows()).toEqual([]));
   scope.value = 'active'; change(scope);
   await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  // Every history control is reachable by name, like the rest of the pane.
+  for (const control of find('[data-zcr-pref="history"]').querySelectorAll('input, select')) {
+    expect(control.closest('label'), control.tagName).not.toBeNull();
+  }
+});
+
+it('locks the delete control for a chat with unfinished work while archiving stays available', async () => {
+  const chat = { ...entry(1, 'Running'), unfinishedWork: true as const };
+  const { host, deleteHistory } = fixture([chat]);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  const remove = find<HTMLButtonElement>(`[data-zcr-history-delete="${chat.id}"]`);
+  expect(remove.disabled).toBe(true);
+  expect(remove.title).toBe('work in progress');
+  remove.click();
+  expect(deleteHistory).not.toHaveBeenCalled();
+  // Archiving is reversible, so an unfinished answer is not a reason to refuse it.
+  expect(find<HTMLButtonElement>(`[data-zcr-history-archive="${chat.id}"]`).disabled).toBe(false);
 });
 
 it('deletes exactly the target chat after an explicit confirmation and keeps the others', async () => {
