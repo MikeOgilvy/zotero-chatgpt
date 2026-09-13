@@ -45,6 +45,20 @@ async function interruptible<T>(work: Promise<T>, signal: AbortSignal): Promise<
     return await Promise.race([work, new Promise<never>((_resolve, reject) => { abort = () => reject(cancelled()); signal.addEventListener('abort', abort, { once: true }); })]);
   } finally { signal.removeEventListener('abort', abort); }
 }
+/**
+ * Bound a local host read. The bound is not a second cancellation path: cancellation stays with
+ * `signal`/`interruptible`, and this only stops waiting on work that has not settled. It exists
+ * because a native `getData()` that never settles must not leave preparation pending forever.
+ */
+async function bounded<T>(work: Promise<T>, signal: AbortSignal | undefined, milliseconds: number, timeoutMessage: string): Promise<T> {
+  void work.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => { timer = globalThis.setTimeout(() => reject(new ReaderError('INVALID_REQUEST', timeoutMessage)), milliseconds); });
+  try {
+    const raced = Promise.race([work, deadline]);
+    return signal ? await interruptible(raced, signal) : await raced;
+  } finally { if (timer !== undefined) globalThis.clearTimeout(timer); }
+}
 
 /** Plugin-owned, bounded local text cache. At most one extraction runs at a time. No network. */
 export class ReaderDocumentCache {
@@ -118,10 +132,23 @@ export class ReaderDocumentCache {
 const READY_POLL_MS = 50;
 const READY_ATTEMPTS = 40;
 /**
- * Narrow native source access. Paths stay in this adapter and are never sent or persisted.
- * `delay` is injectable so the bounded PDF-readiness wait is deterministic under test.
+ * The owner's flow is "open a PDF and ask", so a local whole-document read is expected to be
+ * instantaneous next to any model call: the fixture is milliseconds and a large PDF's file read plus
+ * sha256 is well under a second. 15 s is ~30x the PDF-readiness bound above and the observed stall
+ * never settled at all, so this only ever fires on a read that is not coming back. When it does,
+ * preparation fails honestly and nothing is sent; the question stays in the draft. The in-memory
+ * loaded-hash cache entry is dropped so a later attempt makes a fresh native read instead of
+ * inheriting the hung promise.
  */
-export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReader | undefined, scope: PaperScope, options: { delay?: (milliseconds: number) => Promise<void> } = {}) {
+const LOADED_BYTES_TIMEOUT_MS = 15_000;
+const LOCAL_READ_FAILED = 'The current PDF could not be read locally. Wait for it to load or reopen it; your question is kept.';
+const LOCAL_READ_TIMED_OUT = 'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.';
+/**
+ * Narrow native source access. Paths stay in this adapter and are never sent or persisted.
+ * `delay` is injectable so the bounded PDF-readiness wait is deterministic under test;
+ * `loadedBytesTimeoutMs` is the same seam for the bounded loaded-bytes read.
+ */
+export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReader | undefined, scope: PaperScope, options: { delay?: (milliseconds: number) => Promise<void>; loadedBytesTimeoutMs?: number } = {}) {
   const loadedVersions = new WeakMap<TextPdf, string>();
   const wait = options.delay ?? ((milliseconds: number) => new Promise<void>(resolve => { globalThis.setTimeout(resolve, milliseconds); }));
   const capture = (signal?: AbortSignal): Promise<DocumentSource> => {
@@ -151,8 +178,20 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
       if (!loadedHash) {
         // Native reader promises do not accept privileged callbacks passed directly to .then().
         // Await the native promise first; attach cache cleanup only to our own realm's promise.
-        loadedHash = (async () => digestBytes(new Uint8Array(await pdf.getData!())))().catch(error => { loadedHashes.delete(pdf); throw error; });
+        // The read is bounded: a native `getData()` that never settles fails preparation with its own
+        // cause instead of leaving the pending promise cached for every later attempt.
+        const pending = bounded(
+          (async () => digestBytes(new Uint8Array(await pdf.getData!())))(),
+          signal,
+          options.loadedBytesTimeoutMs ?? LOADED_BYTES_TIMEOUT_MS,
+          LOCAL_READ_TIMED_OUT,
+        );
+        loadedHash = pending.catch(error => { if (loadedHashes.get(pdf) === loadedHash) loadedHashes.delete(pdf); throw error; });
         loadedHashes.set(pdf, loadedHash);
+        // The cache keeps this promise across captures, so a rejection that no consumer is currently
+        // awaiting (a capture aborted before it reads the hash) must not be reported as unhandled;
+        // every real consumer still observes the rejection itself.
+        void loadedHash.catch(() => {});
       }
       const [loadedSha, diskSha] = await Promise.all([loadedHash, io.computeHexDigest(path, 'sha256')]);
       if (loadedSha !== diskSha) throw new ReaderError('INVALID_REQUEST', 'The PDF file changed while this reader was open. Reopen it to load the current version.');
@@ -180,7 +219,7 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
       } };
     } catch (error) {
       if (error instanceof ReaderError) throw error;
-      throw new ReaderError('INVALID_REQUEST', 'The current PDF could not be read locally. Wait for it to load or reopen it; your question is kept.');
+      throw new ReaderError('INVALID_REQUEST', LOCAL_READ_FAILED);
     }
     })();
     return signal ? interruptible(work, signal) : work;

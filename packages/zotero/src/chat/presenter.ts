@@ -625,6 +625,10 @@ export class ConversationPresenter {
     try { await this.connect(); if (this.state.runtime?.models.length) { await this.ensureConversation(); await this.sync(); await this.refreshList(); } }
     catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
     await this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
+    // Adopting the saved chat clears `message`. If local preparation already failed, that would erase
+    // the only signal the owner has — the panel that used to render preparation state is gone — so a
+    // failure that landed before the restore is re-announced here. A later failure sets it itself.
+    if (this.state.document.phase === 'error' && this.state.document.error && !this.state.message) this.update({ message: this.state.document.error });
   }
   setDocumentEnabled(enabled: boolean): void {
     this.services.document?.writeEnabled(enabled);
@@ -668,7 +672,13 @@ export class ConversationPresenter {
       if (this.documentJob === job) this.update({ document: { ...this.state.document, prepared: document, phase: 'ready', error: null } });
       return document;
     }).catch(error => {
-      if (this.documentJob === job) this.update({ document: { ...this.state.document, phase: 'error', error: this.errorText(error) } });
+      if (this.documentJob === job) {
+        // The removed panel was the only surface that rendered preparation state, so a background
+        // failure used to be completely silent: the owner got no reading and no reason. Report it on
+        // the composer's existing coded-error alert, except when the user themselves stopped it by
+        // opting out or changing the range, which is not an error to announce.
+        this.update({ document: { ...this.state.document, phase: 'error', error: this.errorText(error) }, ...(controller.signal.aborted ? {} : { message: this.errorText(error) }) });
+      }
       throw error;
     }).finally(() => { if (this.documentJob === job) this.documentJob = null; });
     return job.promise;

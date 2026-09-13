@@ -65,6 +65,18 @@ it('reports one honest failure when the PDF never loads and stays cancellable wh
   const abort = new AbortController(); abort.abort();
   await expect(source.capture(abort.signal)).rejects.toThrow(/cancel/i);
 });
+it('fails a loaded-bytes read that never settles instead of leaving preparation pending forever', async () => {
+  const f = fixture();
+  const pdf = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!.pdfDocument!;
+  // A native read that never settles is the observed failure mode: `capture()` awaited it forever and
+  // the owner got nothing at all. It must fail within the bound, with its own cause named.
+  pdf.getData = () => new Promise<Uint8Array>(() => {});
+  const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { loadedBytesTimeoutMs: 20 });
+  await expect(source.capture()).rejects.toThrow(/did not finish loading in time/i);
+  // And the hung read must not poison this document: once the host can answer, capture succeeds.
+  pdf.getData = () => Promise.resolve(f.loaded);
+  await expect(source.capture()).resolves.toHaveProperty('revision.sha256');
+});
 it('freezes citation bytes before the action and refuses old coordinates after a file replacement', async () => {
   const f = fixture(); const citation = await freezeCitationVersion(f.zotero, f.reader, citationA);
   expect(citation.documentRevision?.sha256).toHaveLength(64);

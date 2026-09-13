@@ -994,6 +994,21 @@ it('surfaces the honest text-not-ready refusal now that no panel reports coverag
   expect(sent).toHaveLength(0);
 });
 
+it('shows a failed local PDF read in the composer alert, not only in document state', async () => {
+  // The removed panel was the only surface that rendered preparation state. A background read that
+  // fails must still reach the composer's coded-error alert, or the owner sees nothing at all.
+  const { root } = await mountReadyChat({ document: {
+    prepare: () => Promise.reject(new ReaderError('INVALID_REQUEST', 'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.')),
+    validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
+  } });
+  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')!;
+  await vi.waitFor(() => expect(alert.hidden).toBe(false));
+  expect(alert.getAttribute('role')).toBe('alert');
+  expect(alert.textContent).toMatch(/did not finish loading in time/iu);
+  // The three local failures stay distinct: this one is neither a revision change nor empty text.
+  expect(alert.textContent).not.toMatch(/changed|extractable/iu);
+});
+
 it('renders the Codex-like body: no labelled author header, actions in an icon-only strip', async () => {
   const { root } = await mountReadyChat({
     messages: [

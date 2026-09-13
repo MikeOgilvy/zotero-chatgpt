@@ -146,6 +146,28 @@ describe('conversation presenter', () => {
     await presenter.activate(); presenter.setQuestion('Keep this'); await presenter.send();
     expect(f.sent).toHaveLength(0); expect(presenter.snapshot().draft.question).toBe('Keep this'); expect(presenter.snapshot().message).toContain('PDF unavailable');
   });
+  it('surfaces a failed background local read where the composer shows errors', async () => {
+    // No panel renders document preparation any more, so a background failure that only set
+    // `document.phase` was invisible: the owner saw nothing and could not tell why nothing was read.
+    const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+      prepare: () => Promise.reject(new ReaderError('INVALID_REQUEST', 'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.')),
+      validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
+    } });
+    await presenter.activate();
+    await vi.waitFor(() => expect(presenter.snapshot().message).toMatch(/did not finish loading in time/iu));
+    expect(presenter.snapshot().document.phase).toBe('error');
+    expect(presenter.snapshot().message).not.toMatch(/changed/iu);
+  });
+  it('does not announce a background preparation the user cancelled by opting out', async () => {
+    const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+      prepare: signal => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('PDF preparation cancelled. Your question is kept.')), { once: true })),
+      validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
+    } });
+    await presenter.activate(); await settle();
+    presenter.setDocumentEnabled(false); await settle();
+    expect(presenter.snapshot().message).toBeNull();
+    expect(presenter.snapshot().document.enabled).toBe(false);
+  });
   it('honors automatic-context opt-out changed by another view before sending', async () => {
     const f = fixture(); let enabled = true;
     const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {

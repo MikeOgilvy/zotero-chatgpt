@@ -38,6 +38,15 @@ const COPY: Readonly<Record<string, string>> = {
   'Collections could not be loaded.': '无法加载分类列表。',
   Copied: '已复制',
   'The answer could not be copied.': '无法复制回答。',
+  // Local PDF preparation failures. Kept distinct so the owner can tell "this PDF could not be read
+  // here" from "the file changed underneath the reader" from "there was no text to send".
+  'The current PDF could not be read locally. Wait for it to load or reopen it; your question is kept.': '当前 PDF 无法在本地读取。请等待其加载完成或重新打开；你的问题已保留。',
+  'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.': '当前 PDF 未能及时加载完成，无法在本地读取。请等待其加载完成或重新打开；你的问题已保留。',
+  'The PDF file changed while this reader was open. Reopen it to load the current version.': '此阅读器打开期间 PDF 文件已更改。请重新打开以载入当前版本。',
+  'The PDF changed during preparation. Reopen it and send again.': '准备过程中 PDF 已更改。请重新打开后再次发送。',
+  'The host cannot verify this loaded PDF version. Reopen the PDF before asking.': '无法校验已加载的 PDF 版本。请重新打开此 PDF 后再提问。',
+  'No extractable text was found in the pages supplied from this PDF. Attach the relevant page image if you want to ask about them.': '从此 PDF 提供的页面中未找到可提取的文本。如需就此提问，请附加相关页面图像。',
+  'The PDF page text could not be extracted.': '无法提取 PDF 页面文本。',
   'Elapsed time unavailable': '耗时无法确定',
   'The saved research profile is no longer available; global preferences apply.': '已保存的研究配置不可用；将应用全局偏好设置。',
   'Context unknown': '上下文用量未知',
