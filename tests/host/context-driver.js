@@ -245,6 +245,25 @@ async function runHostSmoke(config) {
       if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
     }
     report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
+    // Everything the product-side preparation assertion reports. Written before the trigger so a run
+    // that dies inside the wait still leaves the instrument state on disk.
+    report.backgroundPreparation = {
+      expectedFile,
+      control: optOutControl ? 'automaticPdfText-off' : null,
+      openedMs,
+      legacyWrapMs: legacy.wrapMs,
+      legacyProbeRecorded: legacy.probeRecorded,
+      automaticPdfTextReads: prefReads,
+      productLoggedErrors: logErrors,
+      counts: { ...counts },
+      productVisible: {
+        sidebarOpen: Boolean(panel()),
+        runtime: panel()?.dataset.zcrRuntime ?? null,
+        auth: panel()?.dataset.zcrAuth ?? null,
+        contextState: contextRing()?.dataset.zcrContextState ?? null,
+      },
+      note: 'Assertion source: the product\'s own calls on the reader\'s PDF object (getPageData settlement and text) plus its own revision gate on the host IOUtils. The driver never calls those on this PDF.',
+    };
     // --- The product's own trigger: its toolbar toggle opens the sidebar, whose own copy says that
     // opening it prepares local text (chat/view.ts). a3 clicked here and then waited for the product's
     // page calls; this driver observes the product's host APIs across the same click, so the wait now
