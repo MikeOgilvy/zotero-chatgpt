@@ -1187,15 +1187,48 @@ it('navigates model options with the keyboard, returns focus, and ignores Escape
   picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
   root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="low"]')!.click();
   expect(presenter.snapshot().draft.settings?.effort).toBe('low');
-  expect(menu.hidden).toBe(true);
-  expect(root.ownerDocument.activeElement).toBe(picker);
+  // Choosing a value never closes the picker: effort, speed and model are set in one visit, and the
+  // keyboard stays on the row that was just chosen.
+  expect(menu.hidden).toBe(false);
+  const chosen = root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="low"]')!;
+  expect(chosen.getAttribute('aria-checked')).toBe('true');
+  expect(root.ownerDocument.activeElement).toBe(chosen);
   expect(send).not.toHaveBeenCalled();
-  picker.click(); input.focus();
+  input.focus();
   input.dispatchEvent(new view.Event('compositionstart', { bubbles: true }));
   input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   expect(menu.hidden).toBe(false);
   input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   expect(send).not.toHaveBeenCalled();
+});
+
+it('keeps the picker open while effort, speed and model are configured in one visit', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-picker]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
+  const view = root.ownerDocument.defaultView!;
+  picker.click();
+  expect(menu.hidden).toBe(false);
+  const effort = root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="high"]')!;
+  effort.click();
+  expect(presenter.snapshot().draft.settings?.effort).toBe('high');
+  expect(menu.hidden).toBe(false);
+  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zcr-setting="effort"][data-zcr-value="high"]'));
+  const model = root.querySelector<HTMLButtonElement>('[data-zcr-setting="model"][data-zcr-value="catalog-default"]')!;
+  model.click();
+  expect(presenter.snapshot().draft.settings?.model).toBe('catalog-default');
+  expect(menu.hidden).toBe(false);
+  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zcr-setting="model"][data-zcr-value="catalog-default"]'));
+  // Only the picker button, an outside click or Escape leaves the menu.
+  picker.click();
+  expect(menu.hidden).toBe(true);
+  picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(false);
+  menu.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(true);
+  picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  root.ownerDocument.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true }));
+  expect(menu.hidden).toBe(true);
 });
 
 it('closes the model popover on Escape and click outside', async () => {

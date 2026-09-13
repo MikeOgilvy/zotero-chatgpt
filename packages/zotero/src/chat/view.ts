@@ -655,10 +655,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historySearch.addEventListener('input', () => { if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value).catch(reportViewError); else applyHistoryFilter(); });
   const onDocumentClick = (event: Event) => {
     const target = event.target as Node | null;
-    if (!menu.hidden && target && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
-    if (!historyPanel.hidden && target && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
-    if (!settingsMenu.hidden && target && !settingsMenu.contains(target) && !overflow.contains(target)) toggleSettings(false);
-    if (!plusMenu.hidden && target && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
+    // A menu row can re-render its own menu, detaching the clicked node before this document
+    // listener runs; a detached target was inside the pane, so it is never an outside click.
+    if (!target || !target.isConnected) return;
+    if (!menu.hidden && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
+    if (!historyPanel.hidden && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
+    if (!settingsMenu.hidden && !settingsMenu.contains(target) && !overflow.contains(target)) toggleSettings(false);
+    if (!plusMenu.hidden && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
@@ -810,6 +813,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const controls = composerControls(models, current);
     const selected = current ? models.find(entry => entry.id === current.model) : undefined;
     const fast = resolveFastTier(selected);
+    /**
+     * Codex keeps this menu open so effort, speed and model are configured in one visit; only the
+     * picker button, an outside click or Escape closes it. The re-render replaces the rows, so the
+     * chosen row is focused again to keep keyboard navigation where the owner left it.
+     */
+    const keepPicker = (field: string, value: string) => {
+      const rows = [...menu.querySelectorAll<HTMLButtonElement>(`[data-zcr-setting="${field}"]`)];
+      rows.find(row => row.dataset.zcrValue === value)?.focus();
+    };
     const effortCtl = controls.find(entry => entry.field === 'effort');
     const modelCtl = controls.find(entry => entry.field === 'model');
     const effortValue = current?.effort || selected?.defaultReasoningEffort || '';
@@ -833,7 +845,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'effort', option.value));
-        togglePicker(false); picker.focus();
+        keepPicker('effort', option.value);
       });
       effortSection.append(row);
     }
@@ -883,7 +895,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'model', option.value));
-        togglePicker(false); picker.focus();
+        keepPicker('model', option.value);
       });
       modelSection.append(row);
     }
