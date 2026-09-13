@@ -246,6 +246,11 @@ export function startup(options: PluginContext): void {
     // One pref, one owner: the native pane and the reader opt-out read the same value.
     readAutomaticPdfText: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
     writeAutomaticPdfText: value => { Zotero.Prefs.set(AUTO_PDF_PREF, value, true); },
+    // The bounded, stat-only walk of the plugin's own records store that the History section's
+    // "Calculate size" reports. Nothing runs until the owner asks, and no file content is read.
+    storageReport: () => localServices
+      ? localServices.measureRecords()
+      : Promise.reject(new ReaderError('BUSY', 'Zotero Codex Reader is stopping.')),
     exportText: async (name, text) => {
       const services = localServices;
       if (!services) throw new ReaderError('BUSY', 'Zotero Codex Reader is stopping.');
