@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { basename, resolve, join } from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { execFileSync } from 'node:child_process';
@@ -129,6 +129,9 @@ const config = {
   dataDir,
   profile,
   xpiPath: subjectXpi,
+  // The live-model driver reports the measured XPI by name; without this the report's
+  // `build.xpiName` would stay permanently blank even though the artifact was identified.
+  xpiName: basename(subjectXpi),
   installedXpi: join(profile, 'extensions', `${subjectID}.xpi`),
   reportPath,
   pdfPath,
