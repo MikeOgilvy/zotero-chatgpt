@@ -314,19 +314,37 @@ it('styles the user bubble with theme tokens and rounded corners instead of a ra
 
 it('makes every composer popover an opaque, shadowed surface stacked above the transcript', () => {
   const { doc } = stylesheetDom();
+  const css = shippedCss();
+  // happy-dom drops the `var()`/`Canvas` background declarations, so read the shipped block text.
+  const block = (selector: string) => new RegExp(`${selector.replace(/\./gu, '\\.')}\\s*\\{([^}]*)\\}`, 'u').exec(css)?.[1] ?? '';
   for (const selector of ['.zcr-plus-menu', '.zcr-picker-menu', '.zcr-command-menu']) {
     const rule = shippedRule(doc, selector);
-    // A see-through popover is the reported defect: the surface must be an opaque material token.
-    expect(rule.cssText).toContain('var(--material-menu');
-    expect(rule.cssText.toLowerCase()).not.toContain('background: transparent');
+    // A see-through popover is the reported defect: the surface must carry the material token and
+    // it must not be transparent anywhere.
+    const surface = block(selector);
+    expect(surface, `${selector} keeps the material token`).toContain('var(--material-menu');
+    expect(surface.toLowerCase()).not.toContain('background: transparent');
     expect(rule.cssText).toContain('box-shadow');
     const z = /z-index:\s*(\d+)/u.exec(rule.cssText);
     expect(z, `${selector} declares a z-index`).not.toBeNull();
     expect(Number.parseInt(z![1]!, 10)).toBeGreaterThanOrEqual(20);
+    // The material token is translucent in the host theme, so the material alone is not enough:
+    // an opaque Canvas base underneath is what actually stops the transcript reading through.
+    expect(surface, `${selector} paints over an opaque base`).toMatch(/background-color:\s*Canvas/u);
+    expect(surface, `${selector} layers the material over that base`).toMatch(/background-image:\s*linear-gradient\(var\(--material-menu/u);
   }
   // The composer itself owns a layer above the transcript so nothing bleeds through it.
   const draft = shippedRule(doc, '.zcr-draft');
   expect(Number.parseInt(draft.zIndex, 10)).toBeGreaterThanOrEqual(1);
+});
+
+it('no longer carries bridge rules for the labelled header or the flat plus rows', () => {
+  const css = shippedCss();
+  // The paired DOM patches landed, so these selectors can never match again: `messageNode` emits no
+  // author header and the plus popover emits only `.zcr-plus-row` groups.
+  expect(css).not.toMatch(/\.zcr-message-header\b/u);
+  expect(css).not.toMatch(/\.zcr-message-author\b/u);
+  expect(css).not.toMatch(/\.zcr-plus-menu\s*>\s*\.zcr-button/u);
 });
 
 it('shapes the plus popover as a grouped, hairline-separated list with title and description rows', () => {

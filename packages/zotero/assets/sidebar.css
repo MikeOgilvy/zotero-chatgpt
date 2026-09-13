@@ -276,12 +276,8 @@ body.zcr-dock-open #split-view .primary-view,
 }
 .zcr-messages { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 0 12px; scrollbar-gutter: stable; }
 .zcr-new-content { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 1; background: var(--material-menu, Canvas); border-radius: 14px; white-space: nowrap; }
-/* Bridge rules for the labelled header the current message DOM still emits. They keep the visible
-   author line and the copy chip laid out until the paired `messageNode` patch lands, at which point
-   they simply stop matching; nothing here styles the new body wrapper or the icon-only actions. */
-.zcr-message-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.zcr-message-header .zcr-message-author { margin-inline-end: auto; }
-.zcr-message-author { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
+/* No labelled author header exists any more: role is carried by alignment, so there is nothing to
+   style here beyond the body wrapper and the icon-only action strip below. */
 .zcr-message { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* Timestamp divider: centered, muted and scaled. The time comes from that request's own
    `acceptedAt`, and it is the only place the time appears, so it stays readable to assistive
@@ -325,7 +321,11 @@ body.zcr-dock-open #split-view .primary-view,
   box-sizing: border-box;
   border: 1px solid var(--zcr-border);
   border-radius: 10px;
-  background: var(--material-menu, var(--material-background, Canvas));
+  /* `--material-menu` is a translucent material in the host theme, which is what let the transcript
+     read through this popover. Paint it over an opaque Canvas base so the surface always occludes
+     what is behind it while still keeping the theme's own material color. */
+  background-color: Canvas;
+  background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
   box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
 }
 .zcr-plus-menu[hidden] { display: none; }
@@ -338,16 +338,12 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-plus-row:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
 .zcr-plus-row-title { color: var(--fill-primary, CanvasText); font-size: calc(13px * var(--zcr-chat-text-scale, 1)); }
 .zcr-plus-row-description { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); line-height: 15px; }
-/* Flat-menu bridge: the current DOM still appends plain `.zcr-button` rows; the grouped rows land
-   with the paired popover patch, and this rule stops matching once they do. */
-.zcr-plus-menu > .zcr-button { justify-content: flex-start; }
 .zcr-plus-menu input { width: calc(100% - 24px); min-width: 0; max-width: 100%; margin: 2px 12px 4px; padding: 4px 6px; box-sizing: border-box; color: inherit; background: Field; border: 1px solid var(--zcr-border); border-radius: 5px; }
 .zcr-plus-menu input:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 .zcr-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); min-width: 0; }
 .zcr-acquisition-target select { min-width: 0; width: 100%; max-width: 100%; min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
 .zcr-tasks { min-width: 0; }
 .zcr-message-actions .zcr-icon-button,
-.zcr-message-header .zcr-icon-button,
 .zcr-citation-meta .zcr-icon-button,
 .zcr-chrome-source .zcr-icon-button {
   width: var(--zcr-toolbar-button-size, 28px);
@@ -503,7 +499,9 @@ body.zcr-dock-open #split-view .primary-view,
   overflow: auto;
   padding: 8px;
   box-sizing: border-box;
-  background: var(--material-menu, var(--material-background, Canvas));
+  /* Same opaque-base treatment as the composer popovers: the material token can be translucent. */
+  background-color: Canvas;
+  background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
   border: 1px solid var(--zcr-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--fill-primary, CanvasText) 12%, transparent);
@@ -587,7 +585,8 @@ body.zcr-dock-open #split-view .primary-view,
   overflow: auto;
   padding: 4px 0;
   box-sizing: border-box;
-  background: var(--material-menu, var(--material-background, Canvas));
+  background-color: Canvas;
+  background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
   border: 1px solid var(--zcr-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
@@ -826,14 +825,14 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .zcr-workspace-muted { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
 .zcr-workspace-status { margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
-.zcr-workspace-preview { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 26; max-width: 100%; max-height: 280px; overflow: auto; padding: 12px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; background: var(--material-menu, var(--material-background, Canvas)); color: inherit; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
+.zcr-workspace-preview { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 26; max-width: 100%; max-height: 280px; overflow: auto; padding: 12px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); color: inherit; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
 .zcr-workspace-preview[hidden], .zcr-workspace-status[hidden] { display: none; }
 .zcr-workspace-preview pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; user-select: text; }
 .zcr-workspace-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .zcr-workspace-editor { margin-top: 8px; }
 
 /* One keyboard-owned command menu shared by every composer chooser. */
-.zcr-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background: var(--material-menu, var(--material-background, Canvas)); border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
+.zcr-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
 .zcr-command-menu[hidden] { display: none; }
 .zcr-command-heading { margin: 4px 8px; color: var(--fill-secondary, GrayText); font-size: 11px; }
 .zcr-command-toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
