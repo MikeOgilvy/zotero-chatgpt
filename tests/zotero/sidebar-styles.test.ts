@@ -115,3 +115,39 @@ it('keeps the draft-image remove control inside its thumbnail bounds', () => {
   expect(box.right).toBe('2px');
   expect(Number.parseFloat(box.width)).toBeGreaterThanOrEqual(18);
 });
+
+/** Read one shipped rule so a structural style contract can be asserted without a real host. */
+function shippedRule(doc: Document, selector: string): CSSStyleDeclaration {
+  for (const sheet of [...doc.styleSheets]) {
+    for (const node of [...sheet.cssRules] as Array<{ selectorText?: string; style?: CSSStyleDeclaration }>) {
+      if (node.selectorText === selector && node.style) return node.style;
+    }
+  }
+  throw new Error(`Missing rule ${selector}`);
+}
+/** The shipped stylesheet text: happy-dom drops declarations it cannot parse (for example AccentColor). */
+function shippedCss(): string {
+  return readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/sidebar.css'), 'utf8');
+}
+
+it('keeps composer focus neutral instead of painting an accent-colored selection bar', () => {
+  const { doc, cs } = stylesheetDom();
+  const composer = make(doc)('div', 'zcr-composer');
+  doc.body.append(composer);
+  // The resting card owns the border; focus must not add a colored outline anywhere.
+  expect(cs(composer).outlineStyle === '' || cs(composer).outlineStyle === 'none').toBe(true);
+  const focused = shippedRule(doc, '.zcr-composer:focus-within');
+  expect(focused.cssText).not.toContain('outline');
+  // The focus cue is a neutral border/ring, never the platform accent color.
+  expect(focused.boxShadow).not.toBe('');
+  const css = shippedCss();
+  expect(css).toMatch(/\.zcr-composer:focus-within\s*\{[^}]*border-color:[^}]*\}/u);
+  expect(css).not.toMatch(/\.zcr-composer:focus-within\s*\{[^}]*outline/u);
+});
+
+it('gives the dock resizer a visible keyboard focus ring with a negative offset', () => {
+  const { doc } = stylesheetDom();
+  // happy-dom drops `outline: 2px solid AccentColor`, so the shipped declaration is asserted directly.
+  expect(shippedCss()).toMatch(/\.zcr-dock-resizer:focus-visible\s*\{\s*outline:\s*2px solid AccentColor;\s*outline-offset:\s*-2px;\s*\}/u);
+  expect(shippedRule(doc, '.zcr-dock-resizer:focus-visible').outlineOffset).toBe('-2px');
+});

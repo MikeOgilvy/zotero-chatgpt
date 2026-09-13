@@ -77,6 +77,7 @@ body.zcr-dock-open #split-view .primary-view,
   touch-action: none;
   z-index: 2;
 }
+.zcr-dock-resizer:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
 .zcr-dock-body {
   display: flex;
   flex-direction: column;
@@ -372,9 +373,10 @@ body.zcr-dock-open #split-view .primary-view,
   box-sizing: border-box;
 }
 .zcr-input::placeholder { color: var(--fill-secondary, GrayText); opacity: 1; }
+/* One neutral card. Focus is a quiet border/ring, never a colored bar in the user's accent color. */
 .zcr-composer:focus-within {
-  outline: 2px solid AccentColor;
-  outline-offset: 1px;
+  border-color: color-mix(in srgb, CanvasText 38%, var(--zcr-border));
+  box-shadow: 0 2px 8px color-mix(in srgb, CanvasText 5%, transparent), inset 0 0 0 1px color-mix(in srgb, CanvasText 10%, transparent);
 }
 .zcr-composer-context { max-height: 112px; overflow: auto; }
 .zcr-composer-context:empty { display: none; }
@@ -453,6 +455,10 @@ body.zcr-dock-open #split-view .primary-view,
   gap: 6px;
   min-height: 28px;
 }
+/* Codex-like restraint: one rounded card, a quiet chip for the model name, no accent chrome. */
+.zcr-composer { gap: 2px; }
+.zcr-composer .zcr-picker { border-radius: 999px; }
+.zcr-composer .zcr-picker:hover { background: var(--fill-quinary, ButtonFace); }
 .zcr-composer-leading { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .zcr-composer-trailing {
   display: flex;
