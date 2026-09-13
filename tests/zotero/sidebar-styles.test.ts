@@ -93,6 +93,16 @@ it('keeps the answer copy chip on the control scale', () => {
   expect(cs(copy).display).toBe('inline-flex');
 });
 
+it('keeps the composer a rounded, evenly padded card on the documented scale', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const composer = el('div', 'zcr-composer');
+  doc.body.append(composer);
+  const box = cs(composer);
+  expect(Number.parseFloat(box.paddingTop)).toBeGreaterThanOrEqual(12);
+  expect(Number.parseFloat(box.borderTopLeftRadius)).toBeGreaterThanOrEqual(12);
+});
+
 it('keeps the draft-image remove control inside its thumbnail bounds', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
