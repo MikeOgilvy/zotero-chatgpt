@@ -168,8 +168,14 @@ async function runHostSmoke(config) {
     // labels call), because the archived run's own host observations show the product's capture() gate
     // (stat + sha256 of this file) running and then no page call. Everything recorded below belongs to
     // the product; the probe is a3's own reachability check and its record is cleared the same way.
-    const legacy = { wrapMs: Date.now() - t0, probeRecorded: false, calls: { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }, order: [] };
-    {
+    const legacy = { wrapMs: Date.now() - t0, probeRecorded: false, armed: false, calls: { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }, order: [] };
+    // Replacing a method on this object is not observationally neutral, so it is off unless its marker is
+    // present. Every run that installed the wrapper also reported the product's read failing, and the one
+    // archived run that installed nothing (`host-report-0.4.0a3-DIAG4`) counted the product's own
+    // preparation as working; the default run therefore observes only host APIs the product looks up
+    // itself, and the wrapper is kept for a marked diagnostic run.
+    const wrapPdfInstrument = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-wrap-pdf'));
+    if (wrapPdfInstrument) {
       const pdfObject = pdf().pdfDocument;
       const native = { getData: pdfObject.getData, getPageLabels2: pdfObject.getPageLabels2, getPageData: pdfObject.getPageData };
       const descriptors = {
@@ -188,26 +194,16 @@ async function runHostSmoke(config) {
           let result;
           try { result = native.getData.apply(this, args); } catch (error) { record.error = String((error && error.message) || error); throw error; }
           record.isThenable = Boolean(result && typeof result.then === 'function');
-          // The product receives this promise unchanged; this driver only watches a second consumer of
-          // it, so the read is not rerouted through the driver's realm (the way the a3 wrapper was).
-          void (async () => {
-            try {
-              const value = await result;
-              record.settled = true; record.byteLength = value?.byteLength ?? null; record.tag = Object.prototype.toString.call(value);
-              try {
-                const loaded = new Uint8Array(value);
-                record.loadedSha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', loaded))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-                record.loadedShaMatchesDisk = record.loadedSha === report.revisionPrecondition?.diskSha;
-              } catch (error) { record.hashError = String((error && error.message) || error); }
-            } catch (error) { record.settled = true; record.error = String((error && error.message) || error); }
-          })();
+          void watch(result, value => {
+            record.settled = true; record.byteLength = value?.byteLength ?? null; record.tag = Object.prototype.toString.call(value);
+          });
           return result;
         };
         pdfObject.getPageLabels2 = function (...args) {
           legacy.calls.labels += 1;
           const record = note({ call: 'getPageLabels2' });
           const result = native.getPageLabels2.apply(this, args);
-          void watch(result, value => { record.settled = true; record.labels = Array.isArray(value) ? value.length : null; });
+          void watch(result, value => { record.settled = true; try { record.labels = Array.isArray(value) ? value.length : null; } catch (error) { record.labelsError = String((error && error.message) || error); } });
           return result;
         };
         pdfObject.getPageData = function (...args) {
@@ -234,9 +230,9 @@ async function runHostSmoke(config) {
         pdfObject.getData = native.getData; pdfObject.getPageLabels2 = native.getPageLabels2; pdfObject.getPageData = native.getPageData;
         for (const [name, descriptor] of Object.entries(descriptors)) { try { if (descriptor) Object.defineProperty(pdfObject, name, descriptor); else delete pdfObject[name]; } catch { /* the reader may already be gone */ } }
       };
-      legacy.armedMs = Date.now() - t0;
+      legacy.armed = true; legacy.armedMs = Date.now() - t0;
     }
-    report.nativePreparation = 'probe-deferred-until-after-the-product-turn';
+    report.nativePreparation = wrapPdfInstrument ? 'pdf-object-wrapper-armed-by-marker' : 'host-apis-only';
     // Everything the product-side preparation assertion reports. Written before the trigger so a run
     // that dies inside the wait still leaves the instrument state on disk.
     report.backgroundPreparation = {
@@ -254,7 +250,8 @@ async function runHostSmoke(config) {
         auth: panel()?.dataset.zcrAuth ?? null,
         contextState: contextRing()?.dataset.zcrContextState ?? null,
       },
-      note: 'Assertion source: the product\'s own calls on the reader\'s PDF object (getPageData settlement and text) plus its own revision gate on the host IOUtils. The driver never calls those on this PDF.',
+      wrapPdfInstrument,
+      note: 'Assertion source: the product\'s own revision gate for this file (IOUtils.stat + computeHexDigest, counted only after the driver\'s own disk probe) and the per-page text it measures with TextEncoder. The driver never calls those on this PDF.',
     };
     // --- The product's own trigger: its toolbar toggle opens the sidebar, whose own copy says that
     // opening it prepares local text (chat/view.ts). a3 clicked here and then waited for the product's
@@ -265,39 +262,37 @@ async function runHostSmoke(config) {
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
     await check('title-before-or-with-connection', panel()?.textContent.includes(title));
-    // Wait on the product's own reads of both pages, not on any driver-side proxy for them. The wait
-    // is honest about failure: if the product does not read a page, or reads it with no text, nothing
-    // here can turn that into a pass.
-    const readObserved = await until(() => {
-      const settled = legacy.order.filter(entry => entry.call === 'getPageData' && entry.settled === true && (entry.chars ?? 0) > 0).map(entry => entry.pageIndex);
-      return settled.includes(0) && settled.includes(1) && counts.digestExpected >= 1;
-    }, 'automatic-background-preparation', 60000).catch(() => null);
+    // Wait for the product's own work with nothing of the driver's on the document: its revision gate
+    // for this file, and the per-page text it measures while it reads. The wait can fail honestly.
+    const readObserved = await until(() => counts.statExpected >= 1 && counts.digestExpected >= 1 && observedPageTexts().length >= 2, 'automatic-background-preparation', 60000).catch(() => null);
     // Snapshot the live state again: the pre-trigger copy above cannot contain the product's own errors.
     report.preparation.productLoggedErrors = logErrors;
     report.preparation.prefReads = prefReads;
     report.preparation.counts = { ...counts };
+    const pageTexts = observedPageTexts();
     const productPageCalls = legacy.order.filter(entry => entry.call === 'getPageData').map(entry => ({ pageIndex: entry.pageIndex, settled: entry.settled ?? false, chars: entry.chars ?? null, ms: entry.ms }));
-    const productGetData = legacy.order.filter(entry => entry.call === 'getData').map(entry => ({ ms: entry.ms, settled: entry.settled ?? false, byteLength: entry.byteLength ?? null, error: entry.error ?? null, loadedShaMatchesDisk: entry.loadedShaMatchesDisk ?? null, hashError: entry.hashError ?? null }));
+    const productGetData = legacy.order.filter(entry => entry.call === 'getData').map(entry => ({ ms: entry.ms, settled: entry.settled ?? false, byteLength: entry.byteLength ?? null, error: entry.error ?? null }));
+    const pageTextEvidence = pageTexts.map(entry => ({ ms: entry.ms, characters: entry.characters, head: entry.head }));
     const gateMs = observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile && entry.ok && entry.ms > driverProbeAt)?.ms ?? null;
     const statMs = observations.find(entry => entry.label === 'stat' && entry.file === expectedFile && entry.ok && entry.ms > driverProbeAt)?.ms ?? null;
     const recorded = legacy.calls.pageData;
-    const legacyVerdict = recorded.includes(0) && recorded.includes(1)
-      ? 'the a3 wrapper does see the product page calls; reachability was not the a3 problem'
-      : productPageCalls.length === 0
-        ? 'the product made no page call at all after its trigger: the read never started (see productGetData/productGate)'
-        : recorded.length === 0
-          ? `H2 access path: the product read ${productPageCalls.length} page(s) while the a3 wrapper recorded no page call`
-          : 'the product read fewer pages than this document has';
-    // --- a3's own reachability control, now run after the product's turn ---
-    {
+    const legacyVerdict = !wrapPdfInstrument
+      ? 'wrapper not armed: the product was observed only through the host APIs it looks up itself'
+      : recorded.includes(0) && recorded.includes(1)
+        ? 'the a3 wrapper does see the product page calls; reachability was not the a3 problem'
+        : productPageCalls.length === 0
+          ? 'the product made no page call at all after its trigger: the read never started (see productGetData/productGate)'
+          : 'the product read pages while the a3 wrapper recorded none of them';
+    // --- a3's own reachability control, only meaningful while its wrapper is armed, and now run after the
+    // product's turn so it cannot consume the read the product was about to perform.
+    if (wrapPdfInstrument) {
       try {
-        const pdfObject = pdf().pdfDocument;
-        await pdfObject.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin()));
+        await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin()));
       } catch (error) { report.reachabilityError = String((error && error.message) || error); }
       legacy.probeRecorded = legacy.calls.pageData.includes(0);
       if (legacy.probeRecorded) { legacy.calls = { getData: 0, labels: 0, pageData: [], numPages: 0, fingerprints: 0 }; legacy.order = []; }
+      report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
     }
-    report.nativePreparation = legacy.probeRecorded ? 'observable' : 'not-observable';
     // --- Mechanism probe, run only after the product's own verdict is decided ---
     // Is the loaded-bytes read unavailable to everyone at this moment, or only to the product? The
     // driver asks the same host method twice: once right now, once after a page read has made the
@@ -314,10 +309,12 @@ async function runHostSmoke(config) {
       } catch (error) { probes.push(`${label}=threw:${(error && error.message) || error}`); }
       finally { if (timer) clearTimeout(timer); }
     };
-    await probe('getData-before-page-read');
-    try { await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch (error) { report.mechanismPageError = String((error && error.message) || error); }
-    await probe('getData-after-page-read');
-    report.mechanismProbe = probes;
+    if (wrapPdfInstrument) {
+      await probe('getData-before-page-read');
+      try { await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex: 0 }, viewWin())); } catch (error) { report.mechanismPageError = String((error && error.message) || error); }
+      await probe('getData-after-page-read');
+      report.mechanismProbe = probes;
+    }
     // --- The driver's own native read, for comparison: same calls, but after the product's turn ---
     const extractPage = async pageIndex => {
       const raw = await pdf().pdfDocument.getPageData(Cu.cloneInto({ pageIndex }, viewWin()));
@@ -328,14 +325,13 @@ async function runHostSmoke(config) {
     await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
     report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
     await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
-    // The assertion rests only on what the product itself did: its revision gate for this file, and a
-    // settled, non-empty read of every page. `counts.*Expected` counts only after the driver's own probe.
-    const pageReads = legacy.order.filter(entry => entry.call === 'getPageData' && entry.settled === true && (entry.chars ?? 0) > 0);
-    const pageIndexesRead = [...new Set(pageReads.map(entry => entry.pageIndex))].sort((left, right) => left - right);
-    const preparationObserved = counts.statExpected >= 1 && counts.digestExpected >= 1 && pageIndexesRead.includes(0) && pageIndexesRead.includes(1);
+    // The assertion rests only on what the product itself did: its revision gate for this file and the
+    // per-page text it measured. `counts.*Expected` counts only after the driver's own disk probe, and
+    // the driver has not read any of this document with the wrapper off.
+    const preparationObserved = counts.statExpected >= 1 && counts.digestExpected >= 1 && pageTexts.length >= 2;
     report.backgroundPreparation.preparationObserved = preparationObserved;
-    report.backgroundPreparation.pageReads = pageReads.map(entry => ({ pageIndex: entry.pageIndex, chars: entry.chars, textCharacters: entry.textCharacters }));
-    report.backgroundPreparation.pageIndexesRead = pageIndexesRead;
+    report.backgroundPreparation.pageTextEvidence = pageTextEvidence;
+    report.backgroundPreparation.pageTextEncodings = pageTexts.length;
     report.backgroundPreparation.productGate = { statCalls: counts.statExpected, digestCalls: counts.digestExpected };
     report.backgroundPreparation.productPageCalls = productPageCalls;
     report.backgroundPreparation.productGetData = productGetData;
