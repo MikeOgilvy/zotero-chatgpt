@@ -62,6 +62,8 @@ const COPY = {
   yesterday: 'Yesterday',
   older: 'Older',
   page: (label: string) => `p. ${label}`,
+  copied: 'Copied',
+  copyFailed: 'The answer could not be copied.',
   actionFailed: 'This action could not be completed.',
   sourceOpenFailed: 'The source could not be opened.',
   imageSaveFailed: 'The image could not be saved.',
@@ -204,6 +206,40 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     return node;
   };
   const confirmDelete = () => (hooks.confirm ?? ((message: string) => doc.defaultView?.confirm(message) ?? false))(COPY.deleteConfirm);
+  // Clipboard writes go through the host hook when provided; a copy must always confirm visibly.
+  const copyTimers = new WeakMap<HTMLButtonElement, number>();
+  const confirmCopy = (trigger: HTMLButtonElement) => {
+    const view = doc.defaultView;
+    const previous = copyTimers.get(trigger);
+    if (previous !== undefined) view?.clearTimeout(previous);
+    trigger.dataset.zcrCopied = 'true';
+    trigger.setAttribute('aria-label', COPY.copied); trigger.title = COPY.copied;
+    const label = trigger.querySelector<HTMLElement>('[data-zcr-copy-label]');
+    if (label) label.textContent = COPY.copied;
+    if (!view) return;
+    copyTimers.set(trigger, view.setTimeout(() => {
+      copyTimers.delete(trigger);
+      delete trigger.dataset.zcrCopied;
+      trigger.setAttribute('aria-label', COPY.copy); trigger.title = COPY.copy;
+      if (label) label.textContent = COPY.copy;
+    }, 1600));
+  };
+  const copyText = (source: string, trigger: HTMLButtonElement) => {
+    if (hooks.copyText) hooks.copyText(source);
+    else void doc.defaultView?.navigator.clipboard?.writeText(source).catch(() => reportViewMessage(COPY.copyFailed));
+    confirmCopy(trigger);
+  };
+  // Each fenced block gets its own wrapper so the copy affordance never scrolls away with the code.
+  const enhanceCodeBlocks = (host: HTMLElement) => {
+    for (const pre of [...host.querySelectorAll('pre')]) {
+      const wrapper = el('div', 'zcr-code-block');
+      pre.replaceWith(wrapper); wrapper.append(pre);
+      const source = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
+      const copy = button(COPY.copy, 'copy-code', () => copyText(source, copy));
+      copy.classList.add('zcr-code-copy');
+      wrapper.prepend(copy);
+    }
+  };
   root.querySelector('[data-zcr-chat]')?.remove();
   const chat = el('section', 'zcr-chat'); chat.dataset.zcrChat = '';
   const chrome = el('div', 'zcr-chrome');
@@ -278,7 +314,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const viewError = el('p', 'zcr-error zcr-view-error'); viewError.dataset.zcrViewError = ''; viewError.setAttribute('role', 'alert'); viewError.hidden = true;
   const transcript = el('div', 'zcr-transcript');
   transcript.dataset.zcrTranscript = '';
-  const messages = el('div', 'zcr-messages'); messages.setAttribute('aria-live', 'polite'); messages.dataset.zcrMessages = '';
+  const messages = el('div', 'zcr-messages'); messages.dataset.zcrMessages = '';
   const taskPanel = el('div', 'zcr-tasks'); taskPanel.dataset.zcrTasks = '';
   const taskView = mountTaskView(taskPanel, {
     approveSelected: (id, selected, choices) => presenter.approveTask(id, selected, choices),
@@ -583,12 +619,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const header = el('div', 'zcr-message-header');
     header.append(el('div', 'zcr-message-author', message.role === 'user' ? COPY.you : COPY.assistant));
     if (message.role === 'assistant') {
-      header.append(button(COPY.copy, 'copy-answer', () => {
+      const copyAnswer = button(COPY.copy, 'copy-answer', () => {
         const latest = presenter.snapshot().conversation?.messages.find(entry => entry.id === message.id);
-        const source = copyableAnswerText(latest?.text ?? message.text);
-        if (hooks.copyText) hooks.copyText(source);
-        else void doc.defaultView?.navigator.clipboard?.writeText(source);
-      }, 'copy'));
+        copyText(copyableAnswerText(latest?.text ?? message.text), copyAnswer);
+      });
+      copyAnswer.classList.add('zcr-copy-answer');
+      const copyLabel = el('span', 'zcr-copy-label', COPY.copy);
+      copyLabel.dataset.zcrCopyLabel = '';
+      copyAnswer.replaceChildren(icon('copy'), copyLabel);
+      header.append(copyAnswer);
     }
     const branch = button(message.role === 'assistant' ? 'Regenerate in new chat' : 'Edit in new chat', 'branch-message', () => {
       const previous = presenter.snapshot().conversation?.id;
@@ -893,6 +932,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
           // rather than left as external `zcr.invalid` URLs for the generic link handler to launch.
           linkAnswerSources(fragment, state.conversation ? answerSources(state.conversation, message) : [], openAnswerSource);
           text.replaceChildren(fragment);
+          enhanceCodeBlocks(text);
         } else if (hiddenExplainText(message)) {
           text.classList.remove('zcr-rendered');
           text.textContent = '';

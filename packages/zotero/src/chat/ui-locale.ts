@@ -42,6 +42,8 @@ const COPY: Readonly<Record<string, string>> = {
   'The clipboard image could not be attached.': '无法附加剪贴板图片。',
   'The dropped image could not be attached.': '无法附加拖放的图片。',
   'Collections could not be loaded.': '无法加载分类列表。',
+  Copied: '已复制',
+  'The answer could not be copied.': '无法复制回答。',
   'Add references or workflows': '添加引用或工作流', 'Close preview': '关闭预览', 'Reference preview': '引用预览',
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
   'Reference first PDF page': '引用 PDF 起始页', 'Reference last PDF page': '引用 PDF 结束页',
