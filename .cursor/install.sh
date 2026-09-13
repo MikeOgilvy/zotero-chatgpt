@@ -21,6 +21,22 @@ nvm use "$NODE_VERSION"
 
 echo "Using Node $(node --version) / npm $(npm --version)"
 
+# Interactive/login shells and tmux terminals pick up Node 24 via the nvm default
+# alias above. The non-interactive per-command executor, however, prepends
+# /exec-daemon (which bundles its own Node 22) to PATH, shadowing nvm's Node for
+# bare `node` lookups; that breaks tests/tools that spawn child `node` processes.
+# /usr/local/cargo/bin sits ahead of /exec-daemon on that PATH and is on the real
+# disk, so linking the pinned Node/npm/npx there makes every execution context
+# resolve Node 24. Best-effort and idempotent: skip silently if the dir is absent.
+NODE_BIN_DIR="$(dirname "$(nvm which "$NODE_VERSION")")"
+PREFERRED_BIN_DIR="/usr/local/cargo/bin"
+if [ -d "$PREFERRED_BIN_DIR" ] && [ -w "$PREFERRED_BIN_DIR" ]; then
+  for tool in node npm npx; do
+    ln -sfn "$NODE_BIN_DIR/$tool" "$PREFERRED_BIN_DIR/$tool"
+  done
+  echo "Linked Node $NODE_VERSION into $PREFERRED_BIN_DIR for the command executor."
+fi
+
 # Deterministic dependency install from package-lock.json.
 npm ci
 
