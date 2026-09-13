@@ -228,6 +228,19 @@ build/ dist/ .zcr-dev/（忽略的生成/测试内容）
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话；未发送草稿目前仅在插件寿命内保留，重启不会恢复。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
 
+### 2026-09-13 原生偏好面板简化：单个 Codex 指令框、只保留 annotate、历史全选删除、去掉 storage/archive 与说明文字（代码 + 单元证据）
+
+owner 逐段拍照反馈后的面板简化，均为代码 + 单元证据；未跑宿主测试、未调用真实模型、未改 `manifest.json`（版本仍 `0.4.0a3`）。
+
+- **Item 1 指令**：`Research preferences` 的六个控件（`language`/`detail`/`mathematics`/`background`/`citationStyle`/`annotationStyle`）收敛为 Codex 形状的一段：标题 `Codex instructions`、一行说明、一个多行文本框 + `Save`。文本框复用**已存在**的 `background` 字段（不新增 shape）；其余五项仍是记录的一部分，保存时按存储原样回写，并继续随冻结的 `workflow.preferences` 发送。`Research profiles` 区块整块移除 UI，**数据保留**：磁盘上的 profile 不删、不裁剪、不迁移，面板只是不再渲染。`Export preferences` 保留（仍如实导出存储的 `preferences` + `profiles`，是查看隐藏字段的唯一出口），并移到面板级操作行，不再暗示只导出指令。请求链路本就把整个 `Personalization` 合进 `SendInput.workflow.preferences`（`presenter.frozenWorkflow`），因此指令此前已在发送；新增行为测试断言改动文本框后普通提问的 `sent[0].workflow.preferences.background` 随之改变。
+- **Item 2 workflow 列表**：`Installed workflows` 只列出 `builtin-annotate`（`OFFERED_BUILTIN_SKILLS`，可逆：把 id 加回集合即恢复），owner 自己的 user/imported workflow 仍列出。**只撤列表项、不动定义与默认路径**：六个 builtin 定义仍在记录里、仍 `enabled`；普通提问的 draft `skillId: null`，根本不带 workflow。`WorkflowKind` 联合类型未改（持久化记录与导入 skill 仍按 `read | annotate | acquire | diagram` 校验）。代价：面板不再提供 `read`/`derive`/`compare`/`acquire`/`diagram` 的启用开关；侧边栏 `/` 菜单是另一个界面，本轮未改。
+- **Item 3 历史**：`Chat history` 一段重写——每行一个对话、标题只出现一次、`Search chats…` 只作为输入框自身名称（`aria-label` + placeholder）、`Paper` 与搜索并排但不再被拉伸、批量操作只在有选中时才出现、新增全选（只覆盖实际渲染的最多 200 行，被截断时明说 200/总数、计数为“实际选中数”）。删除是唯一的移除路径：确认语点名数量并声明永久，`unfinishedWork` 的对话被拒绝并说明，不静默跳过。
+- **Item 3 storage 全链路删除**：`HistoryStorageStop`/`HistoryStorageChat`/`HistoryStorageReport` 契约、`validateHistoryStorageReport`、core `isHistoryStorageReport`、`workspace/history-storage.ts`、`measureRecords`/`readStorageReport` 端口与 service/entry/index/面板接线、`Calculate size` 动作与全部 storage 文案及 locale key、对应测试（`preferences-history-storage.test.ts`、`preferences-storage-wiring.test.ts` 改为 `preferences-live-models-wiring.test.ts`）全部删除。**测量被移除，历史数据本身一字未动**。
+- **Item 3 archive 概念**：面板侧 archive（归档/恢复、范围筛选、`archivedAt` 徽标）移除；`isHistoryListing` 仍按 `activeCount`/`archivedCount` 整表校验，`archivedAt` 记录仍随 `listing()` 两个 scope 合并后**作为普通对话列出、可像普通对话一样删除**，字段从未被改写。**侧边栏的 Archived 段本轮未移除**：它由 `chat/presenter.ts`（不在本 worker 可写白名单）负责把 `history` 与 `archivedHistory` 分区，若只改 `view.ts` 会让 `archivedAt` 对话从侧边栏消失，违反“必须仍可见”的硬约束；因此改为交付 `chat/presenter.ts` + `chat/view.ts` 的补丁文本，等 owner/协调者一并应用。core 的 `HistoryManager.setArchived`/`HistorySource.setConversationArchived` 因侧边栏仍在使用而保留，待侧边栏补丁一并清理。
+- **Item 4 说明文字**：删掉 `PDF text` 的“Changes affect future requests…”整句、历史段长引言（已随 archive 移除）、storage 说明、以及模型段原来的长免责声明；模型来源说明**压缩为一行**保留（“这是随包目录，并非你账户的实时权限；GPT-5.3-Spark 来自运行时，报告后才出现；实际发送的是确切 id”）。删除确认与 `unfinishedWork` 拒绝属操作后果，保留。
+- **门禁**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **966 passed / 76 files**（较上轮 977 少 11 条，全部是被删除的 storage/archive/五字段相关用例；净新增覆盖：面板单指令框与 profile 保留、only-annotate 与“普通提问不带 workflow”、历史全选/截断/未完成拒绝/archivedAt 当普通对话、指令进入请求 payload、live 模型接线改名）。失败先行的观察：把面板/locale/历史段临时换回改动前版本后，新用例分别以 `expected [ 'builtin-read', … ] to equal [ 'builtin-annotate', … ]`、`expected <input data-zcr-pref="preference-language"> to be null`、`Missing [data-zcr-history-id]` 失败，恢复后全绿。
+- **未验证**：上述均为代码 + 单元证据。真实宿主与真实模型未跑；面板中文/CJK 视觉、`Codex instructions` 在真实 Gecko 下的行高与换行、侧边栏 archive 移除后的真实历史popover 行为都仍需宿主目视。
+
 ## 已迁移的旧版证据（不是本次通过）
 
 来源为被合并的 Git 已追踪 QA；原始历史可从 HEAD `1fdd3dc` 查看。本表只保存仍影响当前判断的证据，不延续逐日流水账。环境均旧 macOS arm64 / Zotero 9.0.6 专用 profile / 合成材料。
