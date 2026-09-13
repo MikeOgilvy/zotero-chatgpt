@@ -44,6 +44,27 @@ it('does not confuse Zotero basic-page enrichment partial with incomplete extrac
   const result = await cache.read(paperA, source, new AbortController().signal, () => {});
   expect(result.pages).toEqual([{ pageIndex: 0, pageLabel: '1', status: 'text', text: 'Complete page text' }]);
 });
+it('waits for the reader PDF that loads after the panel opens instead of failing local preparation once', async () => {
+  const f = fixture();
+  const application = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!;
+  const pdf = application.pdfDocument!;
+  delete application.pdfDocument;
+  let waits = 0;
+  const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { delay: () => { waits += 1; if (waits === 3) application.pdfDocument = pdf; return Promise.resolve(); } });
+  await expect(source.capture()).resolves.toHaveProperty('revision.sha256');
+  expect(waits).toBe(3);
+});
+it('reports one honest failure when the PDF never loads and stays cancellable while waiting', async () => {
+  const f = fixture();
+  const application = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!;
+  delete application.pdfDocument;
+  let waits = 0;
+  const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { delay: () => { waits += 1; return Promise.resolve(); } });
+  await expect(source.capture()).rejects.toThrow(/could not be read locally/i);
+  expect(waits).toBe(40);
+  const abort = new AbortController(); abort.abort();
+  await expect(source.capture(abort.signal)).rejects.toThrow(/cancel/i);
+});
 it('freezes citation bytes before the action and refuses old coordinates after a file replacement', async () => {
   const f = fixture(); const citation = await freezeCitationVersion(f.zotero, f.reader, citationA);
   expect(citation.documentRevision?.sha256).toHaveLength(64);

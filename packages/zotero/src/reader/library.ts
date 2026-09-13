@@ -28,11 +28,11 @@ export interface LibraryReader extends Pick<HostReader, 'itemID' | 'tabID' | '_i
 }
 export interface NativeLibraryHost {
   Items: { get(id: number): LibraryItem | false | undefined; getAsync(id: number): Promise<LibraryItem | false | undefined>; getByLibraryAndKey(libraryID: number, key: string): LibraryItem | false | undefined };
-  Search: new () => { addCondition(condition: string, operator: string, value?: string): void; search(): Promise<number[]> };
+  Search: new () => { libraryID?: number; addCondition(condition: string, operator: string, value?: string): void; search(): Promise<number[]> };
   Reader: { _readers: LibraryReader[]; open: (itemID: number, location?: unknown, options?: { tabID?: string; openInBackground?: boolean; allowDuplicate?: boolean }) => Promise<LibraryReader | false | undefined> };
   getMainWindow?(): Window & LibraryWindow;
   Notifier?: { registerObserver(observer: { notify(event: string, type: string, ids: Array<string | number>): void }, types: string[], id: string): string | number; unregisterObserver(id: string | number): void };
-  Libraries?: { getAll: () => Array<{ libraryID: number; name: string; editable: boolean; waitForDataLoad?(type: 'collection'): Promise<void> }> };
+  Libraries?: { getAll: () => Array<{ libraryID: number; name: string; editable: boolean; libraryType?: string; waitForDataLoad?(type: 'collection'): Promise<void> }> };
   Collections?: { getByLibrary: (libraryID: number, recursive: boolean, includeTrashed: boolean) => Array<{ key: string; libraryID: number; name: string; parentKey?: string | null | false; deleted?: boolean; isEditable(): boolean }> };
 }
 export interface LibraryFilePicker {
@@ -191,6 +191,22 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     return { title, authors, ...(year ? { year } : {}), ...(doi ? { doi } : {}) };
   };
   const io = () => options.io ?? globals().IOUtils ?? fail('Native file access is unavailable.', 'UNSUPPORTED_INTERACTION');
+  /** Every library an @-reference may point at. A feed has no PDF items; the fallback keeps the default search path. */
+  const libraries = (): Array<{ libraryID?: number }> => {
+    const readable = (z.Libraries?.getAll() ?? []).filter(library => library.libraryType !== 'feed' && Number.isSafeInteger(library.libraryID) && library.libraryID >= 1);
+    return readable.length ? readable : [{}];
+  };
+  /** Same-title items are routinely different papers; author and year keep their candidates distinguishable. */
+  const disambiguate = (results: ReaderReference[]): ReaderReference[] => {
+    const counts = new Map<string, number>();
+    for (const reference of results) counts.set(reference.label, (counts.get(reference.label) ?? 0) + 1);
+    for (const reference of results) {
+      if ((counts.get(reference.label) ?? 0) < 2) continue;
+      const detail = [reference.identity?.authors[0], reference.identity?.year].filter(Boolean).join(' · ');
+      if (detail) reference.label = `${reference.label} · ${detail}`;
+    }
+    return results;
+  };
   const filePicker = (title: string, kind: 'images' | 'skill' | 'save', name = '') => {
     const picker = options.createFilePicker?.() ?? (() => {
       const FilePicker = globals().ChromeUtils?.importESModule('chrome://zotero/content/modules/filePicker.mjs').FilePicker;
@@ -262,25 +278,40 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     search: query => boundary(async () => {
       const text = query.trim(); if (!text) return [];
       if (text.length > 512 || text.includes('\0')) fail('Use a shorter article search.');
-      const search = new z.Search(); search.addCondition('quicksearch-titleCreatorYear', 'contains', text);
-      const ids = await search.search(); const results: ReaderReference[] = []; const seen = new Set<string>();
-      for (const id of ids.slice(0, MAX_RESULTS)) {
-        const item = await z.Items.getAsync(id); if (!item || item.deleted) continue;
-        await metadata(item, item.isRegularItem());
-        const candidates = item.isPDFAttachment() ? [item.id] : item.isRegularItem() ? item.getAttachments() : [];
-        for (const attachmentID of candidates) {
-          const pdf = await z.Items.getAsync(attachmentID); if (!pdf || pdf.deleted || !pdf.isPDFAttachment()) continue;
-          await metadata(pdf);
-          const parentID = pdf.parentID ?? pdf.parentItemID; const parent = parentID ? await z.Items.getAsync(parentID) : undefined;
-          if (parent && !parent.deleted) await metadata(parent);
-          const source = parent && !parent.deleted ? parent : pdf; const paper = { clientId: options.clientId, libraryId: pdf.libraryID, attachmentKey: pdf.key };
-          scopeOf(paper); const key = paperId(paper); if (seen.has(key)) continue; seen.add(key);
-          const info = identity(source, pdf); const attachmentTitle = pdf.getField('title');
-          results.push({ id: `article-${options.clientId}-${pdf.libraryID}-${pdf.key}`, kind: 'article', label: attachmentTitle && attachmentTitle !== info.title ? `${info.title} · ${attachmentTitle}` : info.title, paper, identity: info, capturedAt: now() });
-          if (results.length >= MAX_RESULTS) return results;
+      const results: ReaderReference[] = []; const seen = new Set<string>();
+      let searched = false; let failure: Error | undefined;
+      // A bare `Zotero.Search` defaults to the user library, so group libraries would never surface
+      // an @-reference. Search every readable library explicitly; a referencable PDF is read-only.
+      for (const library of libraries()) {
+        if (results.length >= MAX_RESULTS) break;
+        let ids: number[];
+        try {
+          const search = new z.Search();
+          if (library.libraryID !== undefined) search.libraryID = library.libraryID;
+          search.addCondition('quicksearch-titleCreatorYear', 'contains', text);
+          ids = await search.search(); searched = true;
+        } catch (error) { failure ??= error instanceof Error ? error : new Error('Article metadata could not be searched.'); continue; }
+        for (const id of ids.slice(0, MAX_RESULTS)) {
+          const item = await z.Items.getAsync(id); if (!item || item.deleted) continue;
+          await metadata(item, item.isRegularItem());
+          const candidates = item.isPDFAttachment() ? [item.id] : item.isRegularItem() ? item.getAttachments() : [];
+          for (const attachmentID of candidates) {
+            const pdf = await z.Items.getAsync(attachmentID); if (!pdf || pdf.deleted || !pdf.isPDFAttachment()) continue;
+            await metadata(pdf);
+            const parentID = pdf.parentID ?? pdf.parentItemID; const parent = parentID ? await z.Items.getAsync(parentID) : undefined;
+            if (parent && !parent.deleted) await metadata(parent);
+            const source = parent && !parent.deleted ? parent : pdf; const paper = { clientId: options.clientId, libraryId: pdf.libraryID, attachmentKey: pdf.key };
+            scopeOf(paper); const key = paperId(paper); if (seen.has(key)) continue; seen.add(key);
+            const info = identity(source, pdf); const attachmentTitle = pdf.getField('title');
+            results.push({ id: `article-${options.clientId}-${pdf.libraryID}-${pdf.key}`, kind: 'article', label: attachmentTitle && attachmentTitle !== info.title ? `${info.title} · ${attachmentTitle}` : info.title, paper, identity: info, capturedAt: now() });
+            if (results.length >= MAX_RESULTS) break;
+          }
+          if (results.length >= MAX_RESULTS) break;
         }
       }
-      return results;
+      // Every library failing is a real search failure; a single unreachable library must not hide the rest.
+      if (!searched && failure) throw failure;
+      return disambiguate(results);
     }, 'Article metadata could not be searched.'),
     read: (reference, signal) => {
       const frozen = clone(reference);

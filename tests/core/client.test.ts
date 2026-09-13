@@ -495,4 +495,34 @@ describe('attachment conversations', () => {
     expect(report.states.failed).toBe(1);
     expect(JSON.stringify(report)).not.toContain('completed without an answer');
   });
+  it('exposes honest accept, first-text and settle times without claiming completion early', async () => {
+    const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.144.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    await c.refreshAccount();
+    const conversation = await c.current(paperA, 'Scheduled timing');
+    const input: SendInput = { requestId: requestId(801), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings };
+    await c.send(input); await flush();
+    const running = (await c.get(conversation.id)).requestTiming?.find(timing => timing.requestId === input.requestId);
+    expect(running).toEqual({ requestId: input.requestId, acceptedAt: '2026-09-09T08:00:00.000Z', firstTextAt: null, settledAt: null });
+    current = '2026-09-09T08:00:04.000Z';
+    stream(s.p, 'thread-1', 'turn-1', 'item-1', 'Partial answer'); await tick(10);
+    const streaming = (await c.get(conversation.id)).requestTiming?.find(timing => timing.requestId === input.requestId);
+    expect(streaming?.firstTextAt).toBe('2026-09-09T08:00:04.000Z');
+    expect(streaming?.settledAt).toBeNull();
+    current = '2026-09-09T08:00:09.000Z';
+    complete(s.p, 'thread-1', 'turn-1', 'item-1', 'Final answer'); await flush();
+    const settled = (await c.get(conversation.id)).requestTiming?.find(timing => timing.requestId === input.requestId);
+    expect(settled?.settledAt).toBe('2026-09-09T08:00:09.000Z');
+    const saved = JSON.parse(new TextDecoder().decode(storage.files.get(`conversations/${conversation.id}.json`))) as { requests: Array<{ firstTokenAt?: string }> };
+    expect(saved.requests[0]?.firstTokenAt).toBe('2026-09-09T08:00:04.000Z');
+    // A single completed item with no streamed deltas is still first visible text, not a missing value.
+    current = '2026-09-09T08:01:00.000Z';
+    const oneShotInput: SendInput = { requestId: requestId(802), conversationId: conversation.id, action: 'ask', question: 'Follow-up?', citations: [citationA], settings };
+    await c.send(oneShotInput); await flush();
+    current = '2026-09-09T08:01:03.000Z';
+    complete(s.p, 'thread-1', 'turn-2', 'item-2', 'One-shot answer'); await flush();
+    const oneShot = (await c.get(conversation.id)).requestTiming?.find(timing => timing.requestId === oneShotInput.requestId);
+    expect(oneShot?.firstTextAt).toBe('2026-09-09T08:01:03.000Z');
+    expect(oneShot?.settledAt).toBe('2026-09-09T08:01:03.000Z');
+  });
 });

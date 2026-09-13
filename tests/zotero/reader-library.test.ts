@@ -51,6 +51,53 @@ it('performs metadata-only explicit article search and disambiguates PDF attachm
   for (const item of f.items) expect(item.getFilePathAsync).not.toHaveBeenCalled();
 });
 
+it('searches every readable library and disambiguates same-title articles by author and year', async () => {
+  const searches: Array<{ libraryID?: number; conditions: Array<[string, string, string | undefined]> }> = [];
+  const item = (id: number, key: string, libraryID: number, title: string, pdf: boolean, author: string, year: string, parentID?: number): LibraryItem => ({ id, key, libraryID, ...(parentID ? { parentID } : {}), getField: field => field === 'title' ? title : field === 'date' ? `${year}-01-01` : '', getCreators: () => pdf ? [] : [{ firstName: author.split(' ')[0]!, lastName: author.split(' ').slice(1).join(' ') }], isRegularItem: () => !pdf, isPDFAttachment: () => pdf, getAttachments: () => pdf ? [] : [id + 1], loadDataType: () => Promise.resolve() });
+  const items = [
+    item(10, 'USERITEM', 1, 'Shared Methods', false, 'Ada Lovelace', '2020'), item(11, 'USERPDF1', 1, 'Shared Methods', true, '', '', 10),
+    item(20, 'GROUPITE', 2, 'Shared Methods', false, 'Alan Turing', '2024'), item(21, 'GRPPDF01', 2, 'Shared Methods', true, '', '', 20),
+    item(30, 'LOCKEDIT', 3, 'Shared Methods', false, 'Grace Hopper', '1952'), item(31, 'LOCKPDF1', 3, 'Shared Methods', true, '', '', 30),
+  ];
+  const host: NativeLibraryHost = {
+    Items: { get: id => items.find(entry => entry.id === id), getAsync: id => Promise.resolve(items.find(entry => entry.id === id)), getByLibraryAndKey: (library, key) => items.find(entry => entry.libraryID === library && entry.key === key) },
+    Search: class {
+      libraryID = 1; conditions: Array<[string, string, string | undefined]> = [];
+      addCondition(condition: string, operator: string, value?: string) { this.conditions.push([condition, operator, value]); }
+      search() {
+        searches.push({ libraryID: this.libraryID, conditions: this.conditions });
+        return Promise.resolve(this.libraryID === 1 ? [10] : this.libraryID === 2 ? [20] : [30]);
+      }
+    },
+    Libraries: { getAll: () => [
+      { libraryID: 1, name: 'Personal', editable: true, libraryType: 'user' },
+      { libraryID: 2, name: 'Lab Group', editable: false, libraryType: 'group' },
+      { libraryID: 3, name: 'Locked Group', editable: false, libraryType: 'group' },
+      { libraryID: 9, name: 'Feeds', editable: false, libraryType: 'feed' },
+    ] },
+    Reader: { _readers: [], open: vi.fn() },
+  };
+  const port = createLibraryReferencePort(host, { clientId: paperA.clientId, documentCache: new ReaderDocumentCache({ yield: async () => {} }), uuid: () => uuid, now: () => '2026-09-12T00:00:00Z' });
+  const results = await port.search('Shared Methods');
+  expect(searches.map(entry => entry.libraryID)).toEqual([1, 2, 3]);
+  expect(searches.every(entry => entry.conditions.some(([name]) => name === 'quicksearch-titleCreatorYear'))).toBe(true);
+  expect(results.map(reference => reference.paper?.libraryId)).toEqual([1, 2, 3]);
+  expect(results.map(reference => reference.label)).toEqual([
+    'Shared Methods · Ada Lovelace · 2020',
+    'Shared Methods · Alan Turing · 2024',
+    'Shared Methods · Grace Hopper · 1952',
+  ]);
+  expect(results.map(reference => reference.identity?.authors[0])).toEqual(['Ada Lovelace', 'Alan Turing', 'Grace Hopper']);
+  // A single unreachable library is skipped; the reachable libraries still answer.
+  const flaky = { ...host, Search: class { libraryID = 1; addCondition() { /* noop */ } search() { if (this.libraryID === 3) return Promise.reject(new Error('This library is unavailable.')); return Promise.resolve(this.libraryID === 1 ? [10] : [20]); } } } as NativeLibraryHost;
+  const tolerant = createLibraryReferencePort(flaky, { clientId: paperA.clientId, documentCache: new ReaderDocumentCache({ yield: async () => {} }), uuid: () => uuid, now: () => '2026-09-12T00:00:00Z' });
+  expect((await tolerant.search('Shared Methods')).map(reference => reference.paper?.libraryId)).toEqual([1, 2]);
+  // Every library failing is still a real failure, never a silent empty list.
+  const broken = { ...host, Search: class { libraryID = 1; addCondition() { /* noop */ } search() { return Promise.reject(new Error('offline')); } } } as NativeLibraryHost;
+  const failing = createLibraryReferencePort(broken, { clientId: paperA.clientId, documentCache: new ReaderDocumentCache({ yield: async () => {} }), uuid: () => uuid, now: () => '2026-09-12T00:00:00Z' });
+  await expect(failing.search('Shared Methods')).rejects.toMatchObject({ code: 'INVALID_REQUEST', message: 'Article metadata could not be searched.' });
+});
+
 it('uses an isolated background tab even when an unloaded tab already exists, then closes only its own', async () => {
   const f = setup(); f.tabs.set('unloaded-user-tab', { id: 'unloaded-user-tab', data: { itemID: 2 } });
   const result = await f.port.read(reference, new AbortController().signal);

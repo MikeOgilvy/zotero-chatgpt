@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import {
   clipboardHasImage, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
   imagesFromClipboardItems, imagesFromGeckoClipboard, resolveGeckoClipboardAccess,
+  type ClipboardImageItem,
 } from '../../packages/zotero/src/chat/pick-images.ts';
 import { TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 
@@ -99,6 +102,42 @@ it('treats a macOS public.png flavor as a screenshot even when items are empty',
   expect(images).toEqual([PNG_ATTACHMENT]);
 });
 
+it('refuses an input image above the documented 2 MiB bound instead of downscaling it', () => {
+  const oversize = new Uint8Array(2 * 1024 * 1024 + 1); oversize.set([0x89, 0x50, 0x4e, 0x47]);
+  expect(imageFromBytes({ id: PNG_ID, name: 'huge.png', bytes: oversize })).toBeUndefined();
+  const empty = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+  expect(imageFromBytes({ id: PNG_ID, name: 'header-only.png', bytes: empty })).toMatchObject({ mime: 'image/png', name: 'header-only.png' });
+});
+
+it('captures every pasted image file before the paste data store can be invalidated', async () => {
+  const first = new File([PNG], 'one.png', { type: 'image/png' });
+  const second = new File([PNG], 'two.png', { type: 'image/png' });
+  let live = true;
+  const item = (file: File): ClipboardImageItem => ({ kind: 'file', type: 'image/png', getAsFile: () => (live ? file : null) });
+  let index = 0;
+  // Gecko drops access to a paste event's data store once the handler returns, so a second
+  // getAsFile() after an await returns null and that image silently disappears.
+  const pending = imagesFromClipboardItems([item(first), item(second)], () => index++ === 0 ? PNG_ID : '6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b21');
+  live = false;
+  const images = await pending;
+  expect(images.map(image => image.name)).toEqual(['one.png', 'two.png']);
+});
+
+it('renders the shipped item-pane icon with valid paint values and a visible mark', () => {
+  const svg = readFileSync(resolve(import.meta.dirname, '../../packages/zotero/assets/icon.svg'), 'utf8');
+  expect(svg).toContain('viewBox="0 0 16 16"');
+  // Gecko ignores a presentation attribute whose value is not a single valid paint, so a
+  // pasted "context-fill currentColor" made the previous icon render as nothing.
+  const paints = [...svg.matchAll(/(?:fill|stroke)="([^"]*)"/gu)].map(match => match[1]!);
+  expect(paints.length).toBeGreaterThan(0);
+  for (const paint of paints) expect(['none', 'context-fill', 'context-stroke', 'currentColor']).toContain(paint);
+  expect(svg).toMatch(/fill="context-fill"/u);
+  // The mark is a hollow page outline with a text rule and a spark, so the frame needs the
+  // even-odd rule to punch its interior out; a single solid subpath would be a plain block.
+  expect(svg).toContain('fill-rule="evenodd"');
+  const subpaths = [...svg.matchAll(/[MZ]/gu)].length;
+  expect(subpaths).toBeGreaterThanOrEqual(8);
+});
 it('reads an nsIClipboard transferable image when DOM items are empty', async () => {
   const host = fakeGeckoClipboard({ 'image/png': PNG, 'public.png': PNG });
   expect(geckoClipboardHasImage(host)).toBe(true);
