@@ -18,12 +18,33 @@ function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error
     ...overrides,
   } as ReaderWorkspace;
   const exportText = vi.fn(() => exportFailure === undefined ? Promise.resolve() : Promise.reject(exportFailure));
-  return { service: createPreferencesService({ workspace: () => Promise.resolve(workspace), uuid: () => 'aaaaaaaa-0000-4000-8000-00000000000a', exportText }), workspace, exportText, current: () => copy(settings) };
+  let automaticPdfText = true;
+  const service = createPreferencesService({
+    workspace: () => Promise.resolve(workspace),
+    uuid: () => 'aaaaaaaa-0000-4000-8000-00000000000a',
+    exportText,
+    readAutomaticPdfText: () => automaticPdfText,
+    writeAutomaticPdfText: enabled => { automaticPdfText = enabled; },
+  });
+  return { service, workspace, exportText, current: () => copy(settings), automaticPdfText: () => automaticPdfText };
 }
 
 it('mints a valid profile id in the plugin sandbox', () => {
   const { service } = fixture();
   expect(service.newProfileId()).toBe('profile-aaaaaaaa-0000-4000-8000-00000000000a');
+});
+
+it('carries the automatic-PDF-text pref without touching the workspace store', () => {
+  const { service, workspace, automaticPdfText } = fixture();
+  expect(service.readAutomaticPdfText()).toBe(true);
+  service.writeAutomaticPdfText(false);
+  expect(automaticPdfText()).toBe(false);
+  expect(service.readAutomaticPdfText()).toBe(false);
+  service.writeAutomaticPdfText(true);
+  expect(service.readAutomaticPdfText()).toBe(true);
+  expect(workspace.saveSettings).not.toHaveBeenCalled();
+  expect(() => service.writeAutomaticPdfText('yes' as unknown as boolean)).toThrow(ReaderError);
+  expect(automaticPdfText()).toBe(true);
 });
 
 it('reads the real stored settings as JSON without inventing fields', async () => {

@@ -14,6 +14,8 @@ interface PreferencesBridge {
   writeSettings(json: string): Promise<void> | void;
   setSkillEnabled(id: string, enabled: boolean): Promise<void> | void;
   newProfileId(): string;
+  readAutomaticPdfText(): boolean;
+  writeAutomaticPdfText(enabled: boolean): void;
 }
 interface PreferencesPaneGlobal {
   mount(root: Element): void;
@@ -34,6 +36,8 @@ const bridge: PreferencesBridge = {
   writeSettings: () => undefined,
   setSkillEnabled: () => undefined,
   newProfileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a',
+  readAutomaticPdfText: () => true,
+  writeAutomaticPdfText: () => undefined,
 };
 shared.Zotero = { ZoteroCodexReaderPreferencesHost: bridge, logError: error => failures.push(error) };
 // Import once: Zotero evaluates this script once per Preferences window and then reuses the pane.
@@ -91,6 +95,27 @@ it('reports the store\'s own failure and no half-rendered form when the settings
     expect(failures).toEqual([]);
   } finally {
     bridge.readSettings = readSettings;
+    pane().unmount(element);
+  }
+});
+
+it('writes the automatic-PDF pref through the published bridge and never through the store', async () => {
+  const element = root();
+  const writes: boolean[] = [];
+  const writeSettings = vi.fn(bridge.writeSettings);
+  bridge.writeAutomaticPdfText = enabled => { writes.push(enabled); };
+  bridge.writeSettings = writeSettings;
+  try {
+    pane().mount(element);
+    await vi.waitFor(() => expect(element.querySelector<HTMLInputElement>('[data-zcr-pref="automatic-pdf-text"]')?.checked).toBe(true));
+    const toggle = element.querySelector<HTMLInputElement>('[data-zcr-pref="automatic-pdf-text"]')!;
+    toggle.checked = false;
+    toggle.dispatchEvent(new (element.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
+    expect(writes).toEqual([false]);
+    expect(writeSettings).not.toHaveBeenCalled();
+  } finally {
+    bridge.writeAutomaticPdfText = () => undefined;
+    bridge.writeSettings = () => undefined;
     pane().unmount(element);
   }
 });

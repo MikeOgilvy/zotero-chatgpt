@@ -13,6 +13,9 @@ export interface PreferencesServiceHost {
   uuid(): string;
   /** Native save dialog; the host owns the file picker and the exact bytes written. */
   exportText(name: string, text: string): Promise<void>;
+  /** The plugin preference `extensions.zcr.automaticPdfText`; not part of the workspace store. */
+  readAutomaticPdfText(): boolean;
+  writeAutomaticPdfText(enabled: boolean): void;
 }
 export interface PreferencesService {
   readSettings(): Promise<string>;
@@ -21,6 +24,8 @@ export interface PreferencesService {
   exportPreferences(): Promise<void>;
   /** Profile ids are minted in the plugin sandbox so the pane needs no host globals. */
   newProfileId(): string;
+  readAutomaticPdfText(): boolean;
+  writeAutomaticPdfText(enabled: boolean): void;
 }
 
 function parseSettings(json: string): WorkspaceSettings {
@@ -58,6 +63,13 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
     },
     newProfileId(): string {
       return `profile-${host.uuid()}`;
+    },
+    readAutomaticPdfText(): boolean {
+      return host.readAutomaticPdfText() !== false;
+    },
+    writeAutomaticPdfText(enabled: boolean): void {
+      if (typeof enabled !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'Automatic PDF text is either on or off.');
+      host.writeAutomaticPdfText(enabled);
     },
   };
 }

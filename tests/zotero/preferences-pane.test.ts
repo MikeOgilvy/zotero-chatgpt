@@ -13,13 +13,18 @@ const blockedSkill: ReaderSkill = { ...userSkill, id: 'imported-blocked', name: 
 
 function fixture(initial?: WorkspaceSettings, overrides: Partial<PreferencesPaneHost> = {}) {
   let state: WorkspaceSettings = initial ?? { ...defaultSettings(), skills: [...defaultSettings().skills, copy(userSkill), copy(blockedSkill)], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }], uiLanguage: 'en', textScale: 1 };
+  // The automatic-PDF pref is plugin state, not a workspace field: the fixture keeps it beside the
+  // store so a test can prove the checkbox writes the same value the reader reads.
+  const pref = { automaticPdfText: true };
   const read = vi.fn(() => Promise.resolve(copy(state)));
   const save = vi.fn<PreferencesPaneHost['save']>(value => { state = copy(value); return Promise.resolve(); });
   const setSkillEnabled = vi.fn<PreferencesPaneHost['setSkillEnabled']>((id, enabled) => { state = { ...state, skills: state.skills.map(skill => (skill.id === id ? { ...skill, enabled } : skill)) }; return Promise.resolve(); });
   const exportPreferences = vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve());
-  const base: PreferencesPaneHost = { read, save, setSkillEnabled, exportPreferences, profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a' };
+  const readAutomaticPdfText = vi.fn<PreferencesPaneHost['readAutomaticPdfText']>(() => pref.automaticPdfText);
+  const writeAutomaticPdfText = vi.fn<PreferencesPaneHost['writeAutomaticPdfText']>(enabled => { pref.automaticPdfText = enabled; });
+  const base: PreferencesPaneHost = { read, save, setSkillEnabled, exportPreferences, profileId: () => 'profile-aaaaaaaa-0000-4000-8000-00000000000a', readAutomaticPdfText, writeAutomaticPdfText };
   const host: PreferencesPaneHost = { ...base, ...overrides };
-  return { host, read, save, setSkillEnabled, exportPreferences, current: () => copy(state) };
+  return { host, read, save, setSkillEnabled, exportPreferences, readAutomaticPdfText, writeAutomaticPdfText, pref, current: () => copy(state) };
 }
 
 /** The same fixture settings in a chosen UI language; profile and skill names stay data. */
@@ -129,6 +134,43 @@ it('saves the six research preferences and profiles as one validated snapshot', 
   expect(find<HTMLSelectElement>('[data-zcr-pref="profile"]').options).toHaveLength(3);
 });
 
+it('owns the automatic-PDF-text opt-out in the native pane without writing the workspace store', async () => {
+  const { host, save, readAutomaticPdfText, writeAutomaticPdfText, pref, current } = fixture();
+  const { ready, find, change } = mount(host);
+  await ready;
+  const toggle = find<HTMLInputElement>('[data-zcr-pref="automatic-pdf-text"]');
+  expect(toggle.checked).toBe(true);
+  expect(toggle.closest('label')?.textContent).toMatch(/Use current PDF text automatically/u);
+  // The checkbox writes the same pref the reader re-checks at every request boundary.
+  toggle.checked = false; change(toggle);
+  expect(writeAutomaticPdfText).toHaveBeenCalledWith(false);
+  expect(readAutomaticPdfText()).toBe(false);
+  expect(pref.automaticPdfText).toBe(false);
+  // It is a pref, not workspace state: no snapshot is written and no store field changes.
+  expect(save).not.toHaveBeenCalled();
+  expect(current()).toMatchObject({ uiLanguage: 'en', textScale: 1 });
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toMatch(/off/iu);
+
+  toggle.checked = true; change(toggle);
+  expect(readAutomaticPdfText()).toBe(true);
+  expect(save).not.toHaveBeenCalled();
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toMatch(/on/iu);
+});
+
+it('keeps the automatic-PDF checkbox and the pref in agreement when the write is refused', async () => {
+  const failure = new ReaderError('READER_POLICY_UNAVAILABLE', 'The preference could not be written.');
+  const { host, pref } = fixture(undefined, { writeAutomaticPdfText: vi.fn<PreferencesPaneHost['writeAutomaticPdfText']>(() => { throw failure; }) });
+  const { ready, find, change } = mount(host);
+  await ready;
+  const toggle = find<HTMLInputElement>('[data-zcr-pref="automatic-pdf-text"]');
+  toggle.checked = false; change(toggle);
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-pref="error"]').textContent).toBe(failure.message));
+  // The checkbox shows what the pref actually holds, never what the user clicked.
+  expect(toggle.checked).toBe(true);
+  expect(pref.automaticPdfText).toBe(true);
+  expect(find<HTMLElement>('[data-zcr-pref="status"]').hidden).toBe(true);
+});
+
 it('shows a clean error message from the store and reloads the real state after a conflict', async () => {
   const conflict = new ReaderError('REQUEST_CONFLICT', 'This workflow has changed since it was opened. Load the newer revision before editing it.');
   const { host, read } = fixture(undefined, { save: vi.fn<PreferencesPaneHost['save']>().mockRejectedValue(conflict) });
@@ -219,6 +261,7 @@ it('renders the pane copy in the stored UI language and never translates identif
   expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['对话', '研究偏好', '研究配置', '已安装的工作流']);
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('聊天字号（0.5–3）');
+  expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');
   expect(label('preference-language')).toBe('回答语言');
   expect(label('preference-detail')).toBe('回答详细程度');
   expect(label('preference-mathematics')).toBe('数学解释方式');

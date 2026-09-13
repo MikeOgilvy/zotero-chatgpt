@@ -15,6 +15,8 @@ interface PreferencesBridge {
   setSkillEnabled(id: string, enabled: boolean): Promise<void> | void;
   exportPreferences(): Promise<void> | void;
   newProfileId(): string;
+  readAutomaticPdfText(): boolean;
+  writeAutomaticPdfText(enabled: boolean): void;
 }
 interface ZoteroGlobal {
   ZoteroCodexReaderPreferencesHost?: PreferencesBridge;
@@ -48,6 +50,8 @@ function mount(root: Element): void {
     setSkillEnabled: (id, enabled) => Promise.resolve(bridge.setSkillEnabled(id, enabled)),
     exportPreferences: () => Promise.resolve(bridge.exportPreferences()),
     profileId: () => bridge.newProfileId(),
+    readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
+    writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
   });
   panes.set(root, pane);
   void pane.mount(root).catch((error: unknown) => {

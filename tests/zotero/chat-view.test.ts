@@ -669,23 +669,23 @@ it('centers a Codex mark in an empty transcript without instructional copy', asy
   expect(filled.querySelector('[data-zcr-empty]')).toBeNull();
 });
 
-it('changes the actual full-PDF default from Settings without submitting a question', async () => {
-  const writeEnabled = vi.fn(); const sent: SendInput[] = [];
-  const { root } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled } });
-  const chrome = root.querySelector('.zcr-chrome-actions');
+it('leaves the automatic-PDF preference to Zotero Preferences instead of the sidebar', async () => {
+  const sent: SendInput[] = [];
+  const { root } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
   const settings = root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]');
   const menu = root.querySelector<HTMLElement>('[data-zcr-settings-menu]');
-  expect(chrome?.contains(settings)).toBe(true);
   expect(settings?.getAttribute('aria-label')).toBe('More');
   expect(settings?.textContent?.trim()).toBe('');
-  expect(menu?.hasAttribute('hidden')).toBe(true);
   settings?.click();
   expect(menu?.hasAttribute('hidden')).toBe(false);
-  const checkbox = menu?.querySelector<HTMLInputElement>('input[type="checkbox"]');
-  root.ownerDocument.body.append(root);
-  expect(checkbox?.checked).toBe(true); checkbox?.click();
-  expect(writeEnabled).toHaveBeenCalledWith(false); expect(sent).toHaveLength(0);
-  expect(root.querySelector('[data-zcr-document-context]')?.textContent).toMatch(/off/iu);
+  // The sidebar owns no preference or appearance control: the pane writes the same pref.
+  expect(root.querySelector('[data-zcr-automatic-pdf]')).toBeNull();
+  expect(menu?.querySelectorAll('[data-zcr-pref^="automatic-pdf"]')).toHaveLength(0);
+  expect(menu?.querySelectorAll('input[type="checkbox"], select')).toHaveLength(0);
+  expect(menu?.querySelector('[data-zcr-account-usage]')).not.toBeNull();
+  expect(sent).toHaveLength(0);
+  // The reader still applies the stored opt-out to background preparation without a sidebar control.
+  expect(root.querySelector('[data-zcr-document-context]')?.textContent).toMatch(/Current PDF/u);
 });
 
 it('shows local PDF coverage and extraction gaps without claiming transmission or image understanding', async () => {
@@ -696,6 +696,32 @@ it('shows local PDF coverage and extraction gaps without claiming transmission o
   expect(context?.textContent).toContain('1/2'); expect(context?.textContent).toMatch(/no text|empty/iu);
   expect(context?.textContent).toMatch(/not sent/iu); expect(context?.textContent).toMatch(/unknown/iu);
   expect(root.querySelector('[data-zcr-context-disclosure]')?.textContent).toMatch(/PDF text/iu);
+});
+
+it('keeps the Current PDF panel collapsed while local preparation runs in the background', async () => {
+  const prepare = vi.fn(() => Promise.resolve(documentA)); const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+  const details = root.querySelector<HTMLDetailsElement>('[data-zcr-document-context]')!;
+  const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
+  // Opening the sidebar prepares the PDF locally with no click and no model request.
+  await vi.waitFor(() => expect(prepare).toHaveBeenCalled());
+  await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
+  expect(sent).toHaveLength(0);
+  // The reader sees one compact summary line, never an expanded block or a pinned consent banner.
+  expect(details.open).toBe(false);
+  expect(disclosure.hasAttribute('hidden')).toBe(true);
+  expect(details.querySelector('summary')?.textContent).toMatch(/Current PDF/u);
+});
+
+it('shows the send disclosure only when a request actually needs consent', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [], document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {}, needsDisclosure: () => true } });
+  const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
+  expect(disclosure.hasAttribute('hidden')).toBe(true);
+  expect(disclosure.textContent).toMatch(/go to Codex/u);
+  // An explain with automatic PDF text on needs consent: the prompt appears with its button.
+  await presenter.explain(citationA);
+  expect(disclosure.hasAttribute('hidden')).toBe(false);
+  expect(disclosure.querySelector<HTMLButtonElement>('button')?.hidden).toBe(false);
 });
 
 it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {

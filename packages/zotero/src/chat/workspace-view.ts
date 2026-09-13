@@ -1,8 +1,7 @@
-import type { ReaderReference, ReaderSkill, ReferenceInput, WorkflowKind, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { ReaderReference, ReferenceInput, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { mountCommandMenu } from './command-menu.ts';
 
 export type ReferenceFilter = 'all' | 'article' | 'chat';
-export interface SkillEdit { id: string | null; name: string; description: string; version: string; workflow: WorkflowKind; markdown: string; enabled: boolean; revision?: string }
 export interface WorkspaceViewState { settings: WorkspaceSettings; draft: Pick<WorkspaceDraft, 'references' | 'skillId' | 'profileId'> }
 export interface WorkspaceViewActions {
   searchReferences: (query: string, kind: ReferenceFilter, signal: AbortSignal) => Promise<ReaderReference[]>;
@@ -11,28 +10,20 @@ export interface WorkspaceViewActions {
   removeReference: (id: string) => Promise<void>;
   selectSkill: (id: string | null) => Promise<void>;
   selectProfile: (id: string | null) => Promise<void>;
-  saveSkill: (edit: SkillEdit) => Promise<ReaderSkill>;
-  duplicateSkill: (id: string) => Promise<ReaderSkill>;
-  deleteSkill: (id: string) => Promise<void>;
-  importSkill: () => Promise<ReaderSkill | null>;
-  exportSkill: (id: string) => Promise<void>;
   setReferenceRange?: (id: string, range: [number, number] | null) => Promise<void>;
 }
 export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement; settings: HTMLElement }
 
 function failure(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
-/** Reconcile keyed children in place so open rows and scroll survive unrelated updates. */
-function placeChildren(parent: HTMLElement, nodes: HTMLElement[]): void {
-  const wanted = new Set(nodes);
-  for (const child of [...parent.children]) if (!wanted.has(child as HTMLElement)) child.remove();
-  let cursor = parent.firstElementChild;
-  for (const node of nodes) { if (node !== cursor) parent.insertBefore(node, cursor); cursor = node.nextElementSibling; }
-}
 function referenceDetail(reference: ReaderReference): string {
   return [reference.identity?.authors.join(', '), reference.identity?.year, reference.kind === 'chat' ? 'Chat snapshot' : reference.kind, reference.paper?.attachmentKey].filter(Boolean).join(' · ');
 }
 
-/** Scoped controls only. Persistence, library reads and workflow execution stay in explicit ports. */
+/**
+ * Scoped, per-chat controls only. Persistence, library reads and workflow execution stay in explicit
+ * ports, and installed-workflow authoring lives in Zotero's own Preferences window: here the reader
+ * only chooses a workflow for this chat through the `/` chooser.
+ */
 export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { openCommands(): void; update(state: WorkspaceViewState): void; dispose(): void } {
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
@@ -182,8 +173,13 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     chips.replaceChildren(...nodes);
   };
 
-  const profileLabel = create('label', 'Research profile for this chat');
-  const profile = create('select'); profile.dataset.zcrProfile = ''; profileLabel.append(profile); advanced.append(profileLabel);
+  // The per-chat research profile is chat context, not a setting: it stays a compact labelled select
+  // in the composer's context row, so the More menu owns no preference or management UI.
+  const scopeBar = create('div', '', 'zcr-chat-scope'); scopeBar.dataset.zcrChatScope = '';
+  const profileChip = create('label', '', 'zcr-chat-profile'); profileChip.dataset.zcrChatProfile = '';
+  const profileLabel = create('span', 'Profile', 'zcr-chat-profile-label');
+  const profile = create('select'); profile.dataset.zcrProfile = ''; profile.setAttribute('aria-label', 'Research profile for this chat');
+  profileChip.append(profileLabel, profile); mounts.context.append(scopeBar);
   profile.addEventListener('change', () => {
     const selected = profile.value || null;
     void run(async () => {
@@ -191,93 +187,14 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
       catch (error) { profile.value = state?.draft.profileId ?? ''; throw error; }
     }, profile);
   });
+  /** The status slot only exists for the scoped controls above; it must stay beside them, not in More. */
+  scopeBar.append(profileChip, status);
   // Global answer preferences, research profiles and workflow availability live in Zotero's own
   // Preferences window; this pane only chooses what applies to the current chat.
   const globalHint = create('p', "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.", 'zcr-workspace-muted');
   globalHint.dataset.zcrGlobalHint = '';
   advanced.append(globalHint);
-  const labeled = (parent: HTMLElement, name: string, title: string, kind: 'input' | 'textarea' | 'select', choices?: Array<[string, string]>) => {
-    const label = create('label', title); const control = create(kind); control.name = name;
-    if (control.tagName === 'SELECT') for (const [value, title] of choices ?? []) { const option = create('option', title); option.value = value; control.append(option); }
-    label.append(control); parent.append(label); return control;
-  };
-
-  const skillsDetails = create('details'); skillsDetails.append(create('summary', 'Installed workflows'));
-  const skillActions = create('div', '', 'zcr-workspace-actions'); const skillList = create('div'); const editor = create('div');
-  skillsDetails.append(skillActions, editor, skillList); advanced.append(skillsDetails, status);
-  const openEditor = (skill: ReaderSkill | null) => {
-    editor.replaceChildren(); editor.className = 'zcr-workspace-editor'; editor.dataset.zcrSkillEditor = ''; skillsDetails.open = true;
-    editor.append(create('strong', skill ? `Edit ${skill.name}` : 'Create workflow'));
-    const name = labeled(editor, 'name', 'Name', 'input'); name.value = skill?.name ?? '';
-    const description = labeled(editor, 'description', 'Description', 'input'); description.value = skill?.description ?? '';
-    const version = labeled(editor, 'version', 'Version', 'input'); version.value = skill?.version ?? '1.0.0';
-    const workflow = labeled(editor, 'workflow', 'Workflow', 'select', [['read', 'Read and explain'], ['annotate', 'Review annotations'], ['acquire', 'Acquire literature'], ['diagram', 'Create diagram']]); workflow.value = skill?.workflow ?? 'read';
-    const markdown = labeled(editor, 'markdown', 'SKILL.md content', 'textarea'); markdown.value = skill?.markdown ?? '';
-    const enabledLabel = create('label', 'Enabled', 'zcr-workspace-check'); const enabled = create('input'); enabled.type = 'checkbox'; enabled.checked = skill?.enabled ?? true; enabledLabel.prepend(enabled); editor.append(enabledLabel);
-    if (skill) editor.append(create('p', [`Source: ${skill.origin}`, `Permissions: ${skill.permissions.join(', ') || 'none'}`, `Unsupported dependencies: ${skill.unsupportedDependencies.join(', ') || 'none'}`].join('\n'), 'zcr-workspace-muted'));
-    const save = button('Save workflow', () => {
-      const missing = [name, version, markdown].find(field => !field.value.trim());
-      if (missing) { status.textContent = 'Name, version and SKILL.md content are required.'; status.hidden = false; missing.focus(); return; }
-      const kind = workflow.value; if (kind !== 'read' && kind !== 'annotate' && kind !== 'acquire' && kind !== 'diagram') return;
-      const edit: SkillEdit = { id: skill?.id ?? null, name: name.value.trim(), description: description.value, version: version.value.trim(), workflow: kind, markdown: markdown.value, enabled: enabled.checked, ...(skill ? { revision: skill.revision } : {}) };
-      void run(async () => {
-        const fields = [name, description, version, workflow, markdown, enabled];
-        for (const field of fields) field.disabled = true;
-        try { await actions.saveSkill(edit); editor.replaceChildren(); editor.removeAttribute('data-zcr-skill-editor'); status.textContent = 'Workflow saved.'; status.hidden = false; }
-        finally { for (const field of fields) field.disabled = false; }
-      }, save);
-    });
-    editor.append(save, button('Cancel editing', () => { editor.replaceChildren(); editor.removeAttribute('data-zcr-skill-editor'); })); name.focus();
-  };
-  const createSkill = button('Create workflow', () => openEditor(null));
-  const importSkill = button('Import workflow', () => { void run(async () => { const imported = await actions.importSkill(); if (imported && !disposed) openEditor(imported); }, importSkill); });
-  skillActions.append(createSkill, importSkill);
-  let skillsKey = ''; let chipsKey = ''; let profilesKey = '';
-  const skillRows = new Map<string, { node: HTMLDetailsElement; update(skill: ReaderSkill): void }>();
-  const skillRow = (initial: ReaderSkill) => {
-    let skill = initial;
-    const row = create('details'); row.dataset.zcrSkillId = skill.id;
-    const summary = create('summary'); const description = create('p', '', 'zcr-workspace-muted');
-    const unsupported = create('p', '', 'zcr-workspace-muted');
-    const controls = create('div', '', 'zcr-workspace-actions');
-    const duplicate = button('Duplicate', () => { void run(async () => { const copy = await actions.duplicateSkill(skill.id); if (!disposed) openEditor(copy); }, duplicate); }, 'Duplicate');
-    const exportSkill = button('Export', () => { void run(() => actions.exportSkill(skill.id), exportSkill); }, 'Export');
-    const trySkill = button('Try in draft', () => { void run(async () => { await actions.selectSkill(skill.id); input.focus(); }, trySkill); }, 'Try in draft');
-    const confirm = create('div', '', 'zcr-workspace-actions'); confirm.hidden = true;
-    const remove = button('Delete', () => { void run(async () => { await actions.deleteSkill(skill.id); confirm.hidden = true; }, remove); }, 'Delete');
-    const prompt = create('span'); const edit = button('Edit', () => openEditor(skill), 'Edit'); const askDelete = button('Delete', () => { confirm.hidden = false; }, 'Delete'); const cancel = button('Cancel', () => { confirm.hidden = true; }, 'Cancel');
-    confirm.append(prompt, remove, cancel);
-    controls.append(trySkill, duplicate, exportSkill);
-    row.append(summary, description, unsupported, controls, confirm);
-    const update = (next: ReaderSkill) => {
-      skill = next;
-      summary.textContent = next.name;
-      description.textContent = `${next.description}\n${next.origin} · v${next.version} · ${next.workflow}`;
-      unsupported.textContent = next.unsupportedDependencies.length ? `Unavailable: ${next.unsupportedDependencies.join(', ')}` : '';
-      unsupported.hidden = !next.unsupportedDependencies.length;
-      trySkill.disabled = !next.enabled || !!next.unsupportedDependencies.length;
-      duplicate.setAttribute('aria-label', `Duplicate ${next.name}`); exportSkill.setAttribute('aria-label', `Export ${next.name}`);
-      trySkill.setAttribute('aria-label', `Try ${next.name} in draft`); prompt.textContent = `Delete ${next.name}?`;
-      remove.setAttribute('aria-label', `Confirm delete ${next.name}`); edit.setAttribute('aria-label', `Edit ${next.name}`);
-      askDelete.setAttribute('aria-label', `Delete ${next.name}`); cancel.setAttribute('aria-label', `Cancel delete ${next.name}`);
-      if (next.origin !== 'builtin') controls.append(edit, askDelete);
-      else { edit.remove(); askDelete.remove(); }
-    };
-    update(initial);
-    return { node: row, update };
-  };
-  const renderSkills = () => {
-    if (!state) return;
-    const wanted = new Set(state.settings.skills.map(skill => skill.id));
-    for (const [id, entry] of skillRows) if (!wanted.has(id)) { entry.node.remove(); skillRows.delete(id); }
-    const nodes = state.settings.skills.map(skill => {
-      let entry = skillRows.get(skill.id);
-      if (!entry) { entry = skillRow(skill); skillRows.set(skill.id, entry); } else entry.update(skill);
-      return entry.node;
-    });
-    placeChildren(skillList, nodes);
-    if (!nodes.length) skillList.append(create('p', 'No workflows installed.', 'zcr-workspace-muted'));
-  };
+  let chipsKey = ''; let profilesKey = '';
   return { openCommands, update: next => {
     if (disposed) return; state = next;
     const nextChips = JSON.stringify([next.draft, next.settings.skills.map(skill => [skill.id, skill.name, skill.revision]), next.settings.profiles]);
@@ -288,8 +205,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
       profile.replaceChildren(none, ...next.settings.profiles.map(item => { const option = create('option', item.name); option.value = item.id; return option; }));
     }
     profile.value = next.draft.profileId ?? '';
-    const nextSkills = JSON.stringify(next.settings.skills);
-    if (nextSkills !== skillsKey) { skillsKey = nextSkills; renderSkills(); if (menu.isOpen() && mode === 'skills') search(); }
   }, dispose: () => {
     if (disposed) return; disposed = true; searchController?.abort(); previewController?.abort(); querySerial++;
     input.removeEventListener('input', onInput); input.removeEventListener('click', onInput); input.removeEventListener('keyup', onCaretKey); input.removeEventListener('compositionstart', onStart); input.removeEventListener('compositionend', onEnd);

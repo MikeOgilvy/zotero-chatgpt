@@ -239,6 +239,9 @@ export function startup(options: PluginContext): void {
   preferencesBridge().ZoteroCodexReaderPreferencesHost = createPreferencesService({
     workspace,
     uuid: () => crypto.randomUUID(),
+    // One pref, one owner: the native pane and the reader opt-out read the same value.
+    readAutomaticPdfText: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
+    writeAutomaticPdfText: value => { Zotero.Prefs.set(AUTO_PDF_PREF, value, true); },
     exportText: async (name, text) => {
       const services = localServices;
       if (!services) throw new ReaderError('BUSY', 'Zotero Codex Reader is stopping.');

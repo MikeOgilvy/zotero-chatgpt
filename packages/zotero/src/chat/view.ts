@@ -302,7 +302,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const accountUsage = el('p', 'zcr-account-usage'); accountUsage.dataset.zcrAccountUsage = ''; settingsContent.append(accountUsage);
   const documentPanel = el('div', 'zcr-document-panel');
   documentPanel.dataset.zcrContextSummary = '';
-  const documentView = mountDocumentContext(documentPanel, settingsContent, presenter, hooks.openDocumentPage ? async (document, pageIndex) => { await hooks.openDocumentPage!(document, pageIndex); } : undefined);
+  const documentView = mountDocumentContext(documentPanel, presenter, hooks.openDocumentPage ? async (document, pageIndex) => { await hooks.openDocumentPage!(document, pageIndex); } : undefined);
   documentPanel.append(contextSource);
   const historyPanel = el('div', 'zcr-history-panel');
   historyPanel.id = `${viewId}-history`;
@@ -449,15 +449,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let lastLanguage: 'en' | 'zh' | null = null;
   let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
   let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
-  const appearance = el('details', 'zcr-appearance'); appearance.hidden = true; appearance.append(el('summary', '', 'Appearance'));
-  const scaleLabel = el('label', '', 'Chat text size'); const scaleInput = el('input'); scaleInput.type = 'range'; scaleInput.min = '50'; scaleInput.max = '300'; scaleInput.step = '5'; scaleInput.setAttribute('aria-label', 'Chat text size');
-  const scaleValue = el('output', '', '100%'); scaleLabel.append(scaleInput, scaleValue);
-  scaleInput.addEventListener('input', () => { const scale = applyChatTextScale(root, Number(scaleInput.value) / 100); scaleValue.textContent = `${Math.round(scale * 100)}%`; });
-  scaleInput.addEventListener('change', () => { hooks.writeTextScale?.(Number(scaleInput.value) / 100); void presenter.saveAppearance({ textScale: Number(scaleInput.value) / 100 }).catch(reportViewError); });
-  const languageLabel = el('label', '', 'Interface language'); const language = el('select'); language.setAttribute('aria-label', 'Interface language');
-  for (const [value, label] of [['en', 'English'], ['zh', '简体中文']] as const) { const option = el('option', '', label); option.value = value; language.append(option); }
-  languageLabel.append(language); language.addEventListener('change', () => { void presenter.saveAppearance({ uiLanguage: language.value === 'zh' ? 'zh' : 'en' }).catch(reportViewError); });
-  appearance.append(scaleLabel, languageLabel); settingsContent.append(appearance);
   // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
   // lives behind it; the reference/workflow chooser stays reachable by typing '@' or '/'.
   const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
@@ -912,8 +903,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         searchReferences: (query, kind, signal) => presenter.searchReferences(query, kind, signal), previewReference: (reference, signal) => presenter.previewReference(reference, signal),
         addReference: async reference => { await presenter.addReference(reference); }, removeReference: async id => { await presenter.removeReference(id); },
         selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id),
-        saveSkill: edit => presenter.saveSkill(edit), duplicateSkill: id => presenter.duplicateSkill(id),
-        deleteSkill: id => presenter.deleteSkill(id), importSkill: () => presenter.importSkill(), exportSkill: id => presenter.exportSkill(id),
         setReferenceRange: (id, range) => presenter.setReferenceRange(id, range),
       });
       const nextDraftKey = `${state.draft.references.map(reference => `${reference.id}:${reference.range?.join('-') ?? ''}:${reference.capturedAt}`).join(',')}:${state.draft.skillId}:${state.draft.profileId}`;
@@ -921,9 +910,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         lastWorkspace = state.workspace; workspaceDraftKey = nextDraftKey;
         workspaceView.update({ settings: state.workspace, draft: { references: state.draft.references, skillId: state.draft.skillId, profileId: state.draft.profileId } });
       }
-      appearance.hidden = false;
-      if (doc.activeElement !== scaleInput) { scaleInput.value = String(Math.round(state.workspace.textScale * 100)); scaleValue.textContent = `${scaleInput.value}%`; applyChatTextScale(root, state.workspace.textScale); }
-      language.value = state.workspace.uiLanguage;
+      applyChatTextScale(root, state.workspace.textScale);
       const acquire = state.workspace.skills.find(skill => skill.id === state.draft.skillId)?.workflow === 'acquire'; acquisition.hidden = !acquire;
       if (acquire && !requestedCollections) { requestedCollections = true; void presenter.collections().catch(() => { requestedCollections = false; reportViewMessage(COPY.collectionsFailed); }); }
       const collectionKey = JSON.stringify(state.collectionOptions);

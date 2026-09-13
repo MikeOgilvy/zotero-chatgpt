@@ -16,7 +16,6 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const actions: WorkspaceViewActions = {
     searchReferences: vi.fn().mockResolvedValue([reference]), previewReference: vi.fn().mockResolvedValue(reference),
     addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined), selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined),
-    saveSkill: vi.fn().mockResolvedValue(skill), duplicateSkill: vi.fn().mockResolvedValue({ ...skill, id: 'copy', name: 'Derive copy' }), deleteSkill: vi.fn().mockResolvedValue(undefined), importSkill: vi.fn().mockResolvedValue(skill), exportSkill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
   const view = mountWorkspaceView({ input, context, leading, settings: advanced }, actions);
@@ -66,9 +65,12 @@ it('previews reference and skill chips as inert text and removes them through ca
   await vi.waitFor(() => { expect(actions.removeReference).toHaveBeenCalledWith('paper-one'); expect(actions.selectSkill).toHaveBeenCalledWith(null); });
 });
 
-it('keeps only the per-chat profile choice here and points at the native Preferences window', async () => {
-  const { advanced, actions, pane, document } = setup();
-  const profile = advanced.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
+it('keeps the per-chat profile chip in the composer context and points at the native Preferences window', async () => {
+  const { advanced, context, actions, pane, document } = setup();
+  // The profile is chat context, not a setting: it sits with the draft chips in the composer row.
+  const profile = context.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
+  expect(profile.closest('[data-zcr-chat-scope]')).not.toBeNull();
+  expect(profile.closest('[data-zcr-workspace-settings]')).toBeNull();
   profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
   await vi.waitFor(() => expect(actions.selectProfile).toHaveBeenCalledWith('math'));
   // The global controls moved to Zotero's own Preferences window, not the sidebar.
@@ -83,16 +85,15 @@ it('no longer offers any per-chat override controls in the sidebar', () => {
   expect(pane.textContent).not.toMatch(/Chat overrides|Answer language for this chat|Clear chat overrides/u);
 });
 
-it('keeps an expanded workflow card open across unrelated updates', () => {
-  const { pane, view, state } = setup();
-  const first = pane.querySelector<HTMLDetailsElement>('[data-zcr-skill-id="derive"]')!;
-  first.open = true;
-  const second: ReaderSkill = { ...skill, id: 'second', name: 'Second workflow' };
-  view.update({ ...state, settings: { ...state.settings, skills: [...state.settings.skills, second] } });
-  const after = pane.querySelector<HTMLDetailsElement>('[data-zcr-skill-id="derive"]')!;
-  expect(after).toBe(first);
-  expect(after.open).toBe(true);
-  expect(pane.querySelector('[data-zcr-skill-id="second"]')).not.toBeNull();
+it('offers no workflow authoring, import or export in the sidebar', () => {
+  const { pane, advanced } = setup();
+  for (const label of ['Create workflow', 'Import workflow', 'Save workflow', 'Cancel editing', 'Duplicate', 'Export', 'Try in draft', 'Edit', 'Delete']) {
+    expect(pane.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`), label).toBeNull();
+  }
+  expect(pane.querySelector('[data-zcr-skill-id]')).toBeNull();
+  expect(pane.querySelector('[data-zcr-skill-editor]')).toBeNull();
+  expect(pane.textContent).not.toMatch(/Installed workflows|SKILL\.md content|No workflows installed/u);
+  expect(advanced.querySelector('[name="workflow"]')).toBeNull();
 });
 
 it('offers no global preference, research-profile or workflow-availability control in the sidebar', () => {
@@ -100,43 +101,29 @@ it('offers no global preference, research-profile or workflow-availability contr
   for (const label of ['Save preferences', 'Export preferences', 'Save as new profile', 'Update selected profile', 'Delete selected profile']) expect(button(label), label).toBeUndefined();
   expect(advanced.querySelector('[name="language"]')).toBeNull();
   expect(pane.querySelector('[data-zcr-skill-enabled="derive"]')).toBeNull();
-  // Workflow authoring stays here: the sidebar owns the library of installed workflows.
-  expect(pane.querySelector('[data-zcr-skill-id="derive"]')).not.toBeNull();
+  // Workflow availability is a native Preferences checkbox; the sidebar only selects one for the chat.
+  expect(pane.querySelector('[data-zcr-skill-id="derive"]')).toBeNull();
+  expect(pane.querySelector<HTMLInputElement>('input[type="checkbox"]')).toBeNull();
 });
 
-it('creates, edits, duplicates, imports, exports, and tries skills through real handlers', async () => {
-  const { pane, actions, button } = setup();
-  button('Create workflow').click();
-  const name = pane.querySelector<HTMLInputElement>('[data-zcr-skill-editor] [name="name"]')!;
-  const markdown = pane.querySelector<HTMLTextAreaElement>('[data-zcr-skill-editor] [name="markdown"]')!;
-  name.value = 'New derive'; markdown.value = '# New derive';
-  button('Save workflow').click();
-  await vi.waitFor(() => expect(actions.saveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: null, name: 'New derive', markdown: '# New derive' })));
-  button('Edit Derive').click();
-  expect(pane.querySelector<HTMLTextAreaElement>('[data-zcr-skill-editor] [name="markdown"]')!.value).toBe(skill.markdown);
-  button('Cancel editing').click(); button('Duplicate Derive').click();
-  await vi.waitFor(() => expect(actions.duplicateSkill).toHaveBeenCalledWith('derive'));
-  button('Cancel editing').click();
-  button('Export Derive').click(); button('Import workflow').click(); button('Try Derive in draft').click();
-  await vi.waitFor(() => { expect(actions.exportSkill).toHaveBeenCalledWith('derive'); expect(actions.importSkill).toHaveBeenCalled(); expect(actions.selectSkill).toHaveBeenCalledWith('derive'); });
+it('reports a refused removal beside the composer controls instead of inside More', async () => {
+  const { context, advanced, pane, view, state, button } = setup({ removeReference: vi.fn().mockRejectedValue(new Error('Reference unavailable')) });
+  view.update({ ...state, draft: { ...state.draft, references: [reference] } });
+  button('Remove Shared title').click();
+  await vi.waitFor(() => expect(pane.textContent).toContain('Reference unavailable'));
+  const status = pane.querySelector<HTMLElement>('.zcr-workspace-status')!;
+  expect(context.contains(status)).toBe(true);
+  expect(advanced.contains(status)).toBe(false);
 });
 
-it('requires an inline delete confirmation and leaves failed saves editable', async () => {
-  const { pane, actions, button } = setup({ saveSkill: vi.fn().mockRejectedValue(new Error('Revision changed')) });
-  button('Delete Derive').click(); expect(actions.deleteSkill).not.toHaveBeenCalled();
-  button('Confirm delete Derive').click();
-  await vi.waitFor(() => expect(actions.deleteSkill).toHaveBeenCalledWith('derive'));
-  button('Edit Derive').click(); button('Save workflow').click();
-  await vi.waitFor(() => expect(pane.textContent).toContain('Revision changed'));
-  expect(pane.querySelector('[data-zcr-skill-editor]')).not.toBeNull();
-});
 
-it('restores the chat profile control when selecting a profile is refused', async () => {
-  const { advanced, pane, document } = setup({ selectProfile: vi.fn().mockRejectedValue(new Error('Profile unavailable')) });
-  const profile = advanced.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
+it('restores the chat profile chip when selecting a profile is refused', async () => {
+  const { context, pane, document } = setup({ selectProfile: vi.fn().mockRejectedValue(new Error('Profile unavailable')) });
+  const profile = context.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
   profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
   await vi.waitFor(() => expect(pane.textContent).toContain('Profile unavailable'));
   expect(profile.value).toBe('');
+  expect(context.querySelector<HTMLElement>('.zcr-workspace-status')?.hidden).toBe(false);
 });
 
 it('leaves a newer query and its open menu intact when an earlier selection finishes', async () => {

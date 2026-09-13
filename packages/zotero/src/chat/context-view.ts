@@ -86,19 +86,20 @@ export function mountContextRing(parent: HTMLElement): ContextRing {
   return { element, update };
 }
 
-/** Compact coverage plus an on-demand local source preview. Never equates parsing with sending. */
-export function mountDocumentContext(parent: HTMLElement, settings: HTMLElement, presenter: ConversationPresenter, openPage?: (document: DocumentContext, pageIndex: number) => Promise<void>) {
+/**
+ * Compact coverage plus an on-demand local source preview. Never equates parsing with sending.
+ *
+ * The panel is collapsed on purpose: local preparation runs in the background, so the reader gets a
+ * one-line status instead of an expanded block. Nothing here ever sets `open`; only the reader can.
+ */
+export function mountDocumentContext(parent: HTMLElement, presenter: ConversationPresenter, openPage?: (document: DocumentContext, pageIndex: number) => Promise<void>) {
   const doc = parent.ownerDocument;
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '') => {
     const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; return node;
   };
   const button = (text: string, click: () => void) => { const node = el('button', text); node.type = 'button'; node.className = 'zcr-button'; node.addEventListener('click', click); return node; };
-  const checkLabel = el('label', 'Use current PDF text automatically');
-  const enabled = el('input'); enabled.type = 'checkbox'; enabled.dataset.zcrAutomaticPdf = '';
-  enabled.addEventListener('change', () => presenter.setDocumentEnabled(enabled.checked));
-  checkLabel.prepend(enabled);
-  settings.append(checkLabel, el('p', 'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.'));
   const details = el('details'); details.className = 'zcr-document-context'; details.dataset.zcrDocumentContext = '';
+  details.open = false;
   const summary = el('summary', 'Current PDF'); summary.setAttribute('aria-label', 'Current PDF context');
   const status = el('p'); status.setAttribute('role', 'status');
   const coverage = el('p');
@@ -116,8 +117,9 @@ export function mountDocumentContext(parent: HTMLElement, settings: HTMLElement,
   disclosure.append(disclosureCopy, acknowledge); parent.append(disclosure, details);
   let key = '';
   return { update(state: PresenterState): void {
-    enabled.checked = state.document.enabled;
-    disclosure.hidden = !state.document.disclosure || !state.document.enabled;
+    // The consent prompt is not a permanent banner: it appears only when a request actually needs
+    // it, so the collapsed status line stays the only thing above the transcript by default.
+    disclosure.hidden = !state.pendingExplain;
     acknowledge.hidden = !state.pendingExplain;
     const current = state.document; const prepared = current.prepared;
     const request = state.conversation?.messages.filter(m => m.role === 'user').at(-1);

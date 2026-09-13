@@ -20,6 +20,9 @@ export interface PreferencesPaneHost {
   exportPreferences(): Promise<void>;
   /** A fresh, valid profile id; minted in the plugin sandbox, never in the pane. */
   profileId(): string;
+  /** The shared automatic-PDF-text opt-out (`extensions.zcr.automaticPdfText`), never a store copy. */
+  readAutomaticPdfText(): boolean;
+  writeAutomaticPdfText(enabled: boolean): void;
 }
 export interface PreferencesPane {
   mount(root: Element): Promise<void>;
@@ -116,6 +119,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     form: HTMLElement;
     uiLanguage: HTMLSelectElement;
     textScale: HTMLInputElement;
+    automaticPdfText: HTMLInputElement;
     preferences: Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>;
     savePreferences: HTMLButtonElement;
     exportPreferences: HTMLButtonElement;
@@ -147,6 +151,17 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     const scaleLabel = labelled(doc, chat, `Chat text scale (${CHAT_TEXT_SCALE_MIN}–${CHAT_TEXT_SCALE_MAX})`, 'textScale', 'input');
     const textScale = scaleLabel.querySelector('input') as HTMLInputElement;
     textScale.type = 'number'; textScale.min = String(CHAT_TEXT_SCALE_MIN); textScale.max = String(CHAT_TEXT_SCALE_MAX); textScale.step = '0.05';
+
+    // The automatic-PDF-text opt-out is a plugin preference, not a workspace field: the pane reads
+    // and writes `extensions.zcr.automaticPdfText` directly so it is the single source of truth for
+    // every reader, including an already-open sidebar.
+    const automaticPdfLabel = element(doc, 'label', 'Use current PDF text automatically');
+    const automaticPdfText = element(doc, 'input');
+    automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zcrPref = 'automatic-pdf-text';
+    automaticPdfLabel.append(automaticPdfText);
+    const automaticPdfNote = element(doc, 'p', 'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.');
+    automaticPdfNote.className = 'zcr-preferences-muted';
+    chat.append(automaticPdfLabel, automaticPdfNote);
 
     const research = fieldset(doc, container, 'Research preferences');
     const preferences = new Map<keyof Personalization, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
@@ -182,7 +197,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
 
-    return { form: container, uiLanguage, textScale, preferences, savePreferences, exportPreferences, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
+    return { form: container, uiLanguage, textScale, automaticPdfText, preferences, savePreferences, exportPreferences, profile, profileName, saveProfile, updateProfile, deleteProfile, skills };
   }
 
   let controls: Controls | null = null;
@@ -244,7 +259,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   function refreshDisabled(): void {
     if (!controls || !current) return;
     const profile = selectedProfile(current);
-    for (const control of [controls.uiLanguage, controls.textScale, controls.savePreferences, controls.exportPreferences, controls.saveProfile, controls.profileName, controls.profile, ...controls.preferences.values()]) control.disabled = busy;
+    for (const control of [controls.uiLanguage, controls.textScale, controls.automaticPdfText, controls.savePreferences, controls.exportPreferences, controls.saveProfile, controls.profileName, controls.profile, ...controls.preferences.values()]) control.disabled = busy;
     controls.updateProfile.disabled = busy || !profile;
     controls.deleteProfile.disabled = busy || !profile;
     for (const [id, entry] of skillRows) entry.setDisabled(busy || (current.skills.find(skill => skill.id === id)?.unsupportedDependencies.length ?? 0) > 0);
@@ -254,6 +269,8 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     if (!controls || !current) return;
     controls.uiLanguage.value = current.uiLanguage;
     controls.textScale.value = String(current.textScale);
+    // Always re-read the pref: another reader may have changed what this checkbox shows.
+    controls.automaticPdfText.checked = host.readAutomaticPdfText();
     const profile = selectedProfile(current);
     const shown = profile ? { ...current.preferences, ...profile.preferences } : current.preferences;
     for (const field of PREFERENCE_FIELDS) {
@@ -343,6 +360,24 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     }
   }
 
+  /**
+   * The pref is written synchronously through the host, so this is not a store commit: there is no
+   * snapshot to re-read. A refused write reports the host's own message and sync() restores the
+   * checkbox to the value the pref actually holds, never to what the user clicked.
+   */
+  function saveAutomaticPdfText(enabled: boolean): void {
+    if (disposed) return;
+    clear(error);
+    try {
+      host.writeAutomaticPdfText(enabled);
+      show(status, enabled ? 'Automatic PDF text preparation is on.' : 'Automatic PDF text preparation is off.');
+    } catch (caught) {
+      fail(message(caught));
+    } finally {
+      if (!disposed) sync();
+    }
+  }
+
   async function mount(next: Element): Promise<void> {
     root = next;
     root.setAttribute('data-zcr-pref-pane', '');
@@ -358,6 +393,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       form,
       uiLanguage: form.querySelector('[data-zcr-pref="uiLanguage"]') as HTMLSelectElement,
       textScale: form.querySelector('[data-zcr-pref="textScale"]') as HTMLInputElement,
+      automaticPdfText: form.querySelector('[data-zcr-pref="automatic-pdf-text"]') as HTMLInputElement,
       preferences: new Map(PREFERENCE_FIELDS.map(field => [field.key, form.querySelector(`[data-zcr-pref="preference-${field.key}"]`) as HTMLInputElement])),
       savePreferences: form.querySelector('[data-zcr-pref="save-preferences"]') as HTMLButtonElement,
       exportPreferences: form.querySelector('[data-zcr-pref="export-preferences"]') as HTMLButtonElement,
@@ -383,6 +419,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       }
       void commit(settings => ({ ...settings, textScale: clampChatTextScale(requested) }), 'Chat text scale saved.');
     });
+    listen(controls.automaticPdfText, 'change', () => { saveAutomaticPdfText(controls!.automaticPdfText.checked); });
     listen(controls.savePreferences, 'click', () => {
       if (!current) return;
       const preferences = formPreferences(current);
