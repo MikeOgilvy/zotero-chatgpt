@@ -11,6 +11,8 @@ import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
+import { createPreferencesService } from './workspace/preferences-service.ts';
+import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './workspace/preferences-registration.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
@@ -25,6 +27,13 @@ let notifierID: string | undefined;
 let runtime: ReturnType<typeof createRuntimeSupervisor> | undefined;
 let documentCache: ReaderDocumentCache | undefined;
 let localServices: ReturnType<typeof createLocalServices> | undefined;
+let preferencePanes: PreferencePaneRegistrar | undefined;
+/** Small, JSON-only surface the Preferences window script may call; see preferences-entry.ts. */
+interface PreferencesBridgeHost {
+  ZoteroCodexReaderPreferencesHost?: unknown;
+  ZoteroCodexReaderPreferencesPane?: unknown;
+}
+function preferencesBridge(): PreferencesBridgeHost { return Zotero as ZoteroHost & PreferencesBridgeHost; }
 const AUTO_PDF_PREF = 'extensions.zcr.automaticPdfText';
 const PDF_DISCLOSURE_PREF = 'extensions.zcr.pdfTextDisclosureSeen';
 const readers = new Map<HostReader, ReaderEntry>();
@@ -224,6 +233,15 @@ export function startup(options: PluginContext): void {
       }
     },
   });
+  const workspace = () => localServices
+    ? localServices.getWorkspace()
+    : Promise.reject(new ReaderError('BUSY', 'Zotero Codex Reader is stopping.'));
+  preferencesBridge().ZoteroCodexReaderPreferencesHost = createPreferencesService({ workspace, uuid: () => crypto.randomUUID() });
+  preferencePanes = createPreferencePaneRegistrar({
+    panes: Zotero.PreferencePanes, pluginID: options.pluginID, rootURI: options.rootURI,
+    logError: error => Zotero.logError(error),
+  });
+  void preferencePanes.ensure();
   // Zotero 9.0.6's unregisterEventListener has an inverted filter. PluginObserver
   // removes pluginID listeners on actual disable/uninstall; active guards late events.
   Zotero.Reader.registerEventListener('renderToolbar', attach, options.pluginID);
@@ -280,6 +298,10 @@ export async function shutdown(): Promise<void> {
   for (const win of windows.keys()) onMainWindowUnload(win);
   for (const current of readers.values()) { for (const button of current.buttons) button.remove(); current.pane.dispose(); current.bar.dispose(); }
   readers.clear();
+  preferencePanes?.remove(); preferencePanes = undefined;
+  const bridge = preferencesBridge();
+  try { delete bridge.ZoteroCodexReaderPreferencesHost; delete bridge.ZoteroCodexReaderPreferencesPane; }
+  catch (error) { Zotero.logError(error); }
   if (notifierID) Zotero.Notifier.unregisterObserver(notifierID);
   notifierID = undefined;
   if (paneID) Zotero.ItemPaneManager.unregisterSection(paneID);

@@ -69,6 +69,17 @@ describe('shareable artifact verification', () => {
     await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /\/Users\//.test(failureMessage(error)));
   });
 
+  it('rejects a package missing the native preferences pane fragment or its script', async () => {
+    const copy = path.join(await makeTemporaryDirectory(), 'pkg');
+    await cp(builtExtension, copy, { recursive: true });
+    await rm(path.join(copy, 'content/preferences/preferences.xhtml'));
+    await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /preferences\.xhtml/i.test(failureMessage(error)));
+
+    await cp(path.join(builtExtension, 'content/preferences/preferences.xhtml'), path.join(copy, 'content/preferences/preferences.xhtml'));
+    await rm(path.join(copy, 'content/preferences/pane.js'));
+    await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /pane\.js/i.test(failureMessage(error)));
+  });
+
   it('rejects a package missing the Codex NOTICE', async () => {
     const copy = path.join(await makeTemporaryDirectory(), 'pkg');
     await cp(builtExtension, copy, { recursive: true });

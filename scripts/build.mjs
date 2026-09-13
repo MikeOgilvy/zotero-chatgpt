@@ -52,6 +52,11 @@ export async function copyStaticFiles(outputDirectory) {
       path.join(zoteroPackage, "assets"),
       path.join(outputDirectory, "content/assets"),
     ),
+    // Native Preferences pane fragment; the matching script is bundled below.
+    copyIfPresent(
+      path.join(zoteroPackage, "preferences"),
+      path.join(outputDirectory, "content/preferences"),
+    ),
     copyIfPresent(path.join(zoteroPackage, "locale"), path.join(outputDirectory, "locale")),
     copyIfPresent(path.join(zoteroPackage, "locales"), path.join(outputDirectory, "locales")),
   ]);
@@ -96,14 +101,29 @@ export function bundleOptions(outputDirectory) {
   };
 }
 
+export function preferencesBundleOptions(outputDirectory) {
+  return {
+    bundle: true,
+    entryPoints: [path.join(zoteroPackage, "src/preferences-entry.ts")],
+    format: "iife",
+    outfile: path.join(outputDirectory, "content/preferences/pane.js"),
+    platform: "browser",
+    target: ["firefox128"],
+  };
+}
+
 export async function buildDevelopmentExtension(outputDirectory = defaultOutputDirectory, options = {}) {
   requireNode24();
   await rm(outputDirectory, { force: true, recursive: true });
   await mkdir(path.join(outputDirectory, "content"), { recursive: true });
+  // Static files first: the pane fragment and its bundle land in the same directory.
   await Promise.all([
     copyStaticFiles(outputDirectory),
     copyBundledRuntime(outputDirectory, options.runtime),
+  ]);
+  await Promise.all([
     build(bundleOptions(outputDirectory)),
+    build(preferencesBundleOptions(outputDirectory)),
   ]);
 }
 

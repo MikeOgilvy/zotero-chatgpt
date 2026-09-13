@@ -67,4 +67,9 @@ export interface ZoteroHost {
     unregisterSection(id: string): void;
   };
   Notifier: { registerObserver(observer: { notify(): void }, types: string[], id: string): string; unregisterObserver(id: string): void };
+  /** Zotero 7+ plugin preference panes; absent only on an incompatible host. */
+  PreferencePanes?: {
+    register(options: { pluginID: string; id?: string; label?: string; image?: string; src: string; scripts?: string[]; stylesheets?: string[]; helpURL?: string }): Promise<string>;
+    unregister(id: string): void;
+  };
 }

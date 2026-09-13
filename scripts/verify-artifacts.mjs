@@ -12,7 +12,8 @@ const requiredLicenses = [
   'content/assets/licenses/markdown-it.LICENSE',
   'content/assets/licenses/dompurify.LICENSE',
 ];
-const requiredFiles = ['bootstrap.js', 'content/zcr.js', 'manifest.json', 'LICENSE', ...requiredLicenses];
+const requiredPanes = ['content/preferences/preferences.xhtml', 'content/preferences/pane.js'];
+const requiredFiles = ['bootstrap.js', 'content/zcr.js', 'manifest.json', 'LICENSE', ...requiredLicenses, ...requiredPanes];
 const forbiddenNames = ['auth.json', 'auth.json.enc', 'credentials.json', '.zcr-dev'];
 const textSuffixes = ['.js', '.json', '.css', '.html', '.ftl', '.md', '.txt', '.toml'];
 
