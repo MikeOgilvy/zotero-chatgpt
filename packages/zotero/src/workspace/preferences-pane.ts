@@ -1,5 +1,6 @@
 import type { Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
+import { mountUILocale } from '../chat/ui-locale.ts';
 
 /**
  * Native Zotero Preferences pane for the global workspace settings.
@@ -8,6 +9,9 @@ import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '..
  * full validated snapshot (or a single supported skill), the store keeps its atomic writes and
  * revision conflicts, and the pane re-reads after every write so it never shows a state the store
  * refused. Per-chat overrides stay in the sidebar and are never written from here.
+ *
+ * Copy follows the stored UI language through the same localizer the sidebar uses. Profile names,
+ * skill names, ids, versions and file paths are never translated.
  */
 export interface PreferencesPaneHost {
   read(): Promise<WorkspaceSettings>;
@@ -57,6 +61,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   let frame: HTMLElement | null = null;
   let status: HTMLElement | null = null;
   let error: HTMLElement | null = null;
+  let localizer: ReturnType<typeof mountUILocale> | null = null;
   const listeners: Array<{ element: Element; type: string; handler: (event: Event) => void }> = [];
   const skillRows = new Map<string, { row: HTMLElement; update(skill: ReaderSkill): void; setDisabled(disabled: boolean): void }>();
 
@@ -65,7 +70,13 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     listeners.push({ element, type, handler });
     return element;
   };
-  const show = (element: HTMLElement | null, text: string): void => { if (!element) return; element.textContent = text; element.hidden = false; };
+  const show = (element: HTMLElement | null, text: string): void => {
+    if (!element) return;
+    element.textContent = text;
+    element.hidden = false;
+    // Messages are authored in English; render them through the stored UI language immediately.
+    if (current) localizer?.update(current.uiLanguage);
+  };
   const clear = (element: HTMLElement | null): void => { if (!element) return; element.textContent = ''; element.hidden = true; };
   /** A failure replaces any earlier success message: the pane never shows two contradictory outcomes. */
   const fail = (text: string): void => { clear(status); show(error, text); };
@@ -260,6 +271,9 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     if (profile) controls.profileName.value = profile.name;
     controls.profile.disabled = busy;
     syncSkills(current);
+    // Language changes and every re-read both land here, so the copy follows the stored setting.
+    // Runs after the skill rows exist so one pass covers the whole pane deterministically.
+    localizer?.update(current.uiLanguage);
     refreshDisabled();
   }
 
@@ -354,6 +368,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       deleteProfile: form.querySelector('[data-zcr-pref="delete-profile"]') as HTMLButtonElement,
       skills: form.querySelector('[data-zcr-pref="skills"]') as HTMLElement,
     };
+    localizer = mountUILocale(root);
 
     listen(controls.uiLanguage, 'change', () => {
       const uiLanguage = controls!.uiLanguage.value === 'zh' ? 'zh' : 'en';
@@ -419,6 +434,8 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     mount,
     dispose(): void {
       disposed = true;
+      localizer?.dispose();
+      localizer = null;
       for (const { element: target, type, handler } of listeners) target.removeEventListener(type, handler);
       listeners.length = 0;
       skillRows.clear();

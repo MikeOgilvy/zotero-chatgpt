@@ -82,6 +82,14 @@ const COPY: Readonly<Record<string, string>> = {
   'Reconcile unconfirmed writes before undoing. They will not be resent automatically.': '撤销前请先核对未确认的写入，它们不会被自动重发。',
   'Changed outputs and human changes are preserved. Undo checks the recorded version again.': '已修改的结果和人工更改会被保留。撤销时会再次核对记录的版本。',
   'PDF download is unavailable for this target; approval saves metadata only.': '此目标无法下载 PDF；批准后仅保存元数据。',
+  // Native Zotero Preferences pane (workspace/preferences-pane.ts). Messages the store raises
+  // through the same text reach the sidebar too, so the key is deliberately shared.
+  Chat: '对话', 'Research preferences': '研究偏好', 'Research profiles': '研究配置',
+  'Profile being edited': '正在编辑的研究配置', 'No profile selected': '未选择研究配置',
+  'Interface language saved.': '界面语言已保存。', 'Chat text scale saved.': '聊天字号已保存。',
+  'Preferences exported.': '偏好已导出。', 'Research profile updated.': '研究配置已更新。', 'Research profile deleted.': '研究配置已删除。',
+  'Workflow updated.': '工作流已更新。', 'Name this research profile.': '请为此研究配置命名。',
+  'The stored preferences could not be read.': '无法读取已保存的偏好。',
 };
 
 // Content areas are never localized, including controls embedded in rendered Markdown.
@@ -91,7 +99,7 @@ const CONTENT = [
   '.zcr-task-question', '.zcr-task-quote', '.zcr-task-scope', '.zcr-workspace-preview pre', '.zcr-workspace-preview-title strong',
   'script', 'style', 'svg', 'math', '[data-zcr-ui="false"]',
 ].join(',');
-const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-button,.zcr-workspace-control';
+const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-button,.zcr-workspace-control,.zcr-preferences button';
 const TEXT = [
   BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
   '.zcr-history-heading', '.zcr-history-empty', '.zcr-message-author', '.zcr-status-line', '.zcr-message-meta',
@@ -107,6 +115,10 @@ const TEXT = [
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-usage', '.zcr-request-timing-text',
+  // Native Preferences pane: pane copy only. Profile names, skill names and ids are never matched.
+  '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
+  '.zcr-preferences [data-zcr-pref^="preference-"] option', '.zcr-preferences [data-zcr-pref="profile"] option[value=""]',
+  '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
@@ -172,6 +184,13 @@ function progress(text: string): string {
     const reason: Readonly<Record<string, string>> = { 'no doi': '无 DOI', 'no oa candidate': '无开放获取来源', 'existing pdf': '已有 PDF', 'download failed': '下载失败', 'file type mismatch': '文件类型不符', 'identity unconfirmed': '文献身份未确认', supplementary: '补充材料', 'file too large': '文件过大' };
     return `元数据已保存；PDF 不可用（${reason[match[1]!]!}）`;
   }
+  // Native Preferences pane. Values, ids and workflow names stay verbatim.
+  match = /^Chat text scale \(([\d.]+)–([\d.]+)\)$/u.exec(text);
+  if (match) return `聊天字号（${match[1]}–${match[2]}）`;
+  match = /^Choose a chat text scale from ([\d.]+) to ([\d.]+)\.$/u.exec(text);
+  if (match) return `请选择 ${match[1]} 到 ${match[2]} 之间的聊天字号。`;
+  match = /^(.*) · Unavailable: (.+)$/u.exec(text);
+  if (match) return `${match[1]} · 不可用：${match[2]}`;
   return text;
 }
 
@@ -194,7 +213,7 @@ function actionLabel(text: string): string {
 
 interface Original { source: string; rendered: string }
 /** Translate only known UI surfaces. Source text and user-defined names stay in their original language. */
-export function mountUILocale(root: HTMLElement): { update(language: UILanguage): void; dispose(): void } {
+export function mountUILocale(root: Element): { update(language: UILanguage): void; dispose(): void } {
   let language: UILanguage = 'en'; let disposed = false;
   const texts = new WeakMap<Text, Original>(); const attributes = new WeakMap<Element, Map<string, Original>>();
   const protectedContent = (node: Element) => !!node.closest(CONTENT);
