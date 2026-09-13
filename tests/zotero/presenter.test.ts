@@ -165,6 +165,29 @@ describe('conversation presenter', () => {
     expect(f.last().draft.question).toBe('Original draft');
     expect(f.last().draft.citations).toEqual([citationA]);
   });
+  it('closes the current chat without deleting it and starts a fresh chat on the next send', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const original = f.last().conversation!.id;
+    f.presenter.setQuestion('Kept draft'); f.presenter.addCitation(citationA);
+    f.presenter.closeConversation();
+    // Nothing is removed or confirmed: the chat stays in the list and on the client.
+    expect(f.last().conversation).toBeNull();
+    expect(f.client.deleteConversation).not.toHaveBeenCalled();
+    expect(f.last().conversations.map(c => c.id)).toContain(original);
+    // The pane is at the unbound empty draft, and the next request starts a fresh chat instead of
+    // silently re-adopting the one that was closed.
+    expect(f.last().draft.question).toBe('');
+    expect(f.last().draft.citations).toEqual([]);
+    f.presenter.setQuestion('Fresh question'); await f.presenter.send();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    expect(f.last().conversation?.id).not.toBe(original);
+    expect(f.sent[0]?.conversationId).toBe(f.last().conversation!.id);
+    // The closed chat reappears with its own draft when picked again.
+    await f.presenter.openConversation(original);
+    expect(f.last().conversation?.id).toBe(original);
+    expect(f.last().draft.question).toBe('Kept draft');
+    expect(f.last().draft.citations).toEqual([citationA]);
+  });
   it('activates the attachment conversation and renders history without sending anything', async () => {
     const f = fixture(); f.setConversation({ ...f.conversation(), messages: [{ id: 'm1', requestId: 'r0', role: 'assistant', phase: 'final', settings, text: '旧回答', citations: [], status: 'completed' }], lastSeq: 4 });
     await f.presenter.activate();

@@ -155,6 +155,19 @@ it('localizes the archived section label and the archive/restore row actions in 
   expect(restore.title).toBe('Restore chat'); locale.dispose();
 });
 
+it('localizes the close-chat control without touching the destructive delete label', () => {
+  const { root, add } = setup();
+  const close = add('button', 'zcr-current-close'); close.dataset.zcrAction = 'close-conversation'; close.setAttribute('aria-label', 'Close chat'); close.title = 'Close chat';
+  const del = add('button', 'zcr-icon-button'); del.dataset.zcrAction = 'delete-conversation'; del.setAttribute('aria-label', 'Delete chat');
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(close.getAttribute('aria-label')).toBe('关闭对话');
+  expect(close.title).toBe('关闭对话');
+  expect(del.getAttribute('aria-label')).toBe('删除对话');
+  locale.update('en');
+  expect(close.getAttribute('aria-label')).toBe('Close chat');
+  expect(close.title).toBe('Close chat'); locale.dispose();
+});
+
 it('stays inside its pane and stops observing after disposal', async () => {
   const { document, root, add } = setup(); const outside = add('button', 'zcr-button', 'Send', document.body); const inside = add('button', 'zcr-button', 'Send');
   const locale = mountUILocale(root); locale.update('zh'); expect(inside.textContent).toBe('发送'); expect(outside.textContent).toBe('Send');

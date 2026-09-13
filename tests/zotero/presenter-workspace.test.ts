@@ -126,6 +126,27 @@ it('partitions workspace history by scope, keeps an archived chat findable, and 
   f.presenter.dispose();
 });
 
+it('closes the active workspace chat without deleting it and restores it from history with its draft', async () => {
+  const f = fixture(); await f.presenter.activate();
+  const id = f.conversation().id;
+  f.presenter.setQuestion('Unsaved thought');
+  f.presenter.closeConversation();
+  expect(f.presenter.snapshot().conversation).toBeNull();
+  expect(f.workspace.deleteDraft).not.toHaveBeenCalled();
+  // The workspace listing still holds the closed chat; the next request starts a new one.
+  expect(f.presenter.snapshot().history.map(entry => entry.id)).toContain(id);
+  expect(f.conversations.has(id)).toBe(true);
+  f.presenter.setQuestion('Fresh question'); await f.presenter.send();
+  expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+  expect(f.presenter.snapshot().conversation?.id).not.toBe(id);
+  // Re-opening the closed chat from history restores it together with its draft.
+  await f.presenter.openHistoryEntry(id);
+  expect(f.presenter.snapshot().conversation?.id).toBe(id);
+  expect(f.presenter.snapshot().draft.question).toBe('Unsaved thought');
+  expect(f.workspace.deleteDraft).not.toHaveBeenCalled();
+  f.presenter.dispose();
+});
+
 it('renames via the core, branches an old question without sending, and routes cross-paper history externally', async () => {
   const f = fixture(); f.saveConversation({ ...f.conversation(), messages: [{ id: 'old-question', requestId: 'old-request', role: 'user', phase: null, text: 'Original question', settings, citations: [citationA], status: 'completed' }] });
   await f.presenter.activate(); const original = f.conversation().id;

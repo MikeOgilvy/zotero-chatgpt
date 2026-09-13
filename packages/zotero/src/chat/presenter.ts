@@ -141,6 +141,12 @@ export class ConversationPresenter {
   private readingDescriptions = new Map<string, { question: string; scopeLabel: string }>();
   private planningAnnotations = new Set<string>();
   private disposed = false;
+  /**
+   * Set by an explicit close. The persisted paper index still points at the closed chat, so the
+   * adoption paths must not treat it as the active conversation: the next request starts a fresh
+   * chat. Cleared as soon as a conversation becomes active again.
+   */
+  private selectionCleared = false;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
     this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
@@ -204,7 +210,9 @@ export class ConversationPresenter {
       const [settings, current] = await Promise.all([workspace.settings(), workspace.currentConversation(this.paper)]);
       if (this.disposed) return;
       this.update({ workspace: settings });
-      if (!this.state.conversation && current && paperId(current.paper) === paperId(this.paper)) this.update({ conversation: current, conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
+      // A cleared selection is new-chat state: the persisted pointer to the just-closed chat must
+      // not silently restore it while the reader is composing the next question.
+      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) this.update({ conversation: current, conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
       const id = this.state.conversation?.id ?? null;
       const saved = await workspace.readDraft(this.paper, id) ?? (id ? await workspace.readDraft(this.paper, null) : null);
       if (this.disposed) return;
@@ -680,7 +688,14 @@ export class ConversationPresenter {
   private async ensureConversation(): Promise<Conversation> {
     const client = await this.connect();
     if (this.state.conversation) return this.state.conversation;
-    const conversation = await client.current(this.paper, this.title, this.currentSettings() ?? undefined);
+    const settings = this.currentSettings() ?? undefined;
+    // After an explicit close the reader is in the new-chat state; creating a fresh chat is the
+    // honest equivalent of starting over, instead of letting the stored pointer re-adopt the chat
+    // the reader just closed.
+    const conversation = this.selectionCleared
+      ? await client.newConversation(this.paper, this.title, settings)
+      : await client.current(this.paper, this.title, settings);
+    this.selectionCleared = false;
     this.update({ conversation, draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
     await this.sync();
     await this.refreshList();
@@ -975,6 +990,8 @@ export class ConversationPresenter {
   async newConversation(): Promise<void> {
     try {
       await this.loadLocal(); const navigation = ++this.navigation;
+      // Deliberately starting a chat clears any pending Close state.
+      this.selectionCleared = false;
       const client = await this.connect();
       this.stageDraft();
       // Never stack duplicate empty chats: adopt the open one, or the most recent idle empty one.
@@ -995,6 +1012,29 @@ export class ConversationPresenter {
       this.update({ conversation, draft: this.emptyDraft(conversation.settings), scrollTop: 0, message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [], acquisitionTarget: null, messageFocus: null, document: { ...this.state.document, range: null, prepared: null, phase: 'idle' } });
       this.stageDraft(); await this.sync(); await this.refreshList(); await this.refreshTaskState();
     } catch (error) { this.update({ message: this.errorText(error) }); }
+  }
+  /**
+   * Leave the current conversation without deleting or rewriting anything. The chat stays on disk
+   * and in history; the pane returns to its new-conversation state with the unbound draft. The
+   * stored "current" pointer is left alone, so an explicit close must stop the adoption paths from
+   * silently restoring the closed chat: the next request starts a fresh one instead.
+   */
+  closeConversation(): void {
+    if (this.disposed || !this.state.conversation) return;
+    this.stageDraft();
+    const position = this.positions.get('unbound');
+    const unbound = this.drafts.get('unbound');
+    this.selectionCleared = true;
+    this.draftVersion++;
+    this.update({
+      conversation: null,
+      draft: unbound ? workspaceDraft(unbound) : this.emptyDraft(),
+      scrollTop: position?.scrollTop ?? 0,
+      message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [],
+      acquisitionTarget: null, messageFocus: null,
+      document: { ...this.state.document, range: clone(position?.range ?? null), prepared: null, phase: 'idle', error: null },
+    });
+    this.stageDraft();
   }
   async deleteConversation(id: string): Promise<void> {
     try {
@@ -1028,6 +1068,8 @@ export class ConversationPresenter {
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft): Promise<void> {
+    // A chat is active again, so a previous Close no longer governs adoption.
+    this.selectionCleared = false;
     let draft = override ?? this.drafts.get(conversation.id); let position = this.positions.get(conversation.id);
     if (!draft && this.services.getWorkspace) {
       const saved = await (await this.getWorkspace()).readDraft(this.paper, conversation.id);

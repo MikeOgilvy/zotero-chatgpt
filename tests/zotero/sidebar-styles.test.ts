@@ -206,6 +206,33 @@ it('gives history rows a neutral keyboard focus ring instead of the accent outli
   expect(shippedCss()).not.toMatch(/\.zcr-history-item:focus-visible\s*\{[^}]*AccentColor/u);
 });
 
+it('shapes the current chat title as a rounded neutral chip with a small close cross', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const chrome = el('div', 'zcr-chrome');
+  const chip = el('div', 'zcr-chrome-main');
+  chip.setAttribute('data-zcr-chat-pill', '');
+  const title = el('span', 'zcr-current-title', 'A very long conversation name that must truncate');
+  const close = el('button', 'zcr-current-close');
+  close.setAttribute('aria-label', 'Close chat');
+  chip.append(title, close); chrome.append(chip); doc.body.append(chrome);
+  // The chip is fully rounded and its fill comes from the shared palette, not a hardcoded color.
+  expect(Number.parseFloat(cs(chip).borderTopLeftRadius)).toBeGreaterThanOrEqual(999);
+  expect(shippedCss()).toMatch(/\.zcr-chrome-main\[data-zcr-chat-pill\]\s*\{[^}]*var\(--fill-quinary/u);
+  // The title truncates inside the chip instead of pushing the cross out of the row.
+  expect(cs(title).whiteSpace).toBe('nowrap');
+  expect(cs(title).textOverflow).toBe('ellipsis');
+  // The cross is a compact control, not a full toolbar button.
+  expect(cs(close).width).toBe('18px');
+  expect(cs(close).borderTopLeftRadius).toBe('999px');
+  // A neutral keyboard ring, never the accent outline the owner rejected.
+  const focused = shippedRule(doc, '.zcr-current-close:focus-visible');
+  expect(focused.outlineWidth).toBe('2px');
+  expect(focused.outlineStyle).toBe('solid');
+  expect(focused.outlineColor).not.toContain('AccentColor');
+  expect(shippedCss()).not.toMatch(/\.zcr-current-close:focus-visible\s*\{[^}]*AccentColor/u);
+});
+
 it('keeps history copy and rows on the chat text scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);

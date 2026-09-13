@@ -41,6 +41,7 @@ const COPY = {
   untitled: 'Untitled',
   history: 'Chat history',
   searchChats: 'Search chats…',
+  closeChat: 'Close chat',
   deleteChat: 'Delete chat',
   deleteConfirm: 'Delete this chat? This only removes the local history for this PDF.',
   archived: 'Archived',
@@ -349,9 +350,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   context.dataset.zcrContext = '';
   const currentTitle = el('span', 'zcr-current-title');
   currentTitle.dataset.zcrCurrentTitle = '';
+  // The current chat title carries the reference's rounded neutral chip: the title truncates and a
+  // small cross sits at its right edge. Closing leaves the chat on disk and in history and asks no
+  // confirmation; the destructive remove lives only on the fallback host-list row.
+  const closeCurrent = button(COPY.closeChat, 'close-conversation', () => { presenter.closeConversation(); }, 'remove', 'zcr-current-close');
+  context.append(currentTitle, closeCurrent);
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
-  context.append(currentTitle);
   const actions = el('div', 'zcr-chrome-actions');
   const fresh = button(COPY.newChat, 'new-conversation', () => { void presenter.newConversation(); }, 'plus');
   const historyBtn = button(COPY.history, 'history', () => { toggleHistory(); }, 'clock');
@@ -362,14 +367,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   overflow.setAttribute('aria-haspopup', 'dialog');
   overflow.setAttribute('aria-expanded', 'false');
   overflow.setAttribute('aria-controls', `${viewId}-options`);
-  // Deletion lives on the chrome itself as a plain cross (the Cursor behavior); More owns no
-  // destructive action and the confirmation still states exactly what is removed.
-  const deleteCurrent = button(COPY.deleteChat, 'delete-current-conversation', () => {
-    const id = presenter.snapshot().conversation?.id;
-    if (!id || !confirmDelete()) return;
-    void presenter.deleteConversation(id);
-  }, 'remove');
-  actions.append(fresh, historyBtn, overflow, deleteCurrent);
+  actions.append(fresh, historyBtn, overflow);
   chrome.append(context, actions);
   const settingsMenu = el('div', 'zcr-settings-menu');
   settingsMenu.id = `${viewId}-options`;
@@ -886,7 +884,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (currentTitle.textContent !== title) currentTitle.textContent = title;
     currentTitle.title = state.conversation?.title || state.paperTitle || COPY.untitled;
     conversationActions.hidden = !state.conversation;
-    deleteCurrent.hidden = !state.conversation;
+    // The chip and its close cross exist only while a chat is open; the empty state keeps the
+    // paper title plain, with no close affordance and no destructive control.
+    if (state.conversation) context.setAttribute('data-zcr-chat-pill', '');
+    else context.removeAttribute('data-zcr-chat-pill');
+    closeCurrent.hidden = !state.conversation;
     const citation = latestCitation(state);
     const sourceKey = citation ? `${citation.id}:${pageLabel(citation)}` : '';
     if (contextSource.dataset.rendered !== sourceKey) {
