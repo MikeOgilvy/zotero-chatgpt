@@ -592,6 +592,27 @@ it('hides the elapsed-time indicator when no request timing exists at all', asyn
   expect(root.querySelector<HTMLElement>('[data-zcr-request-timing]')!.hidden).toBe(true);
 });
 
+it('keeps a request that is reasoning without text visibly alive instead of dead', async () => {
+  const base = Date.parse('2026-09-13T00:00:00.000Z');
+  vi.spyOn(Date, 'now').mockReturnValue(base);
+  const requestId = '66666666-6666-4666-8666-666666666666';
+  try {
+    const { root } = await mountReadyChat({
+      messages: [{ id: 'm1', requestId, role: 'user', phase: null, settings, text: 'What does this claim?', citations: [], status: 'completed' }],
+      activeRequestId: requestId,
+      requestTiming: [{ requestId, acceptedAt: new Date(base - 45000).toISOString(), firstTextAt: null, settledAt: null }],
+    });    // A long reasoning phase delivers no text at all, so the transcript itself stays empty: the live
+    // wait and a usable stop control are the only honest signs that work is happening.
+    expect(root.querySelector<HTMLElement>('[data-zcr-request-timing]')!.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!.textContent).toBe('Waiting 45s');
+    expect(root.textContent).toContain('Responding…');
+    const stop = root.querySelector<HTMLButtonElement>('[data-zcr-action="stop"]')!;
+    expect(stop.hidden).toBe(false);
+    expect(stop.getAttribute('aria-label')).toBe('Stop');
+    expect(root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')!.hidden).toBe(true);
+  } finally { vi.restoreAllMocks(); }
+});
+
 it('keeps the offline composer editable while preventing model submission', async () => {
   const f = await mountReadyChat(); f.updateRuntime({ runtime: 'error', error: 'Connection ended' });
   expect(f.root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.disabled).toBe(false);
