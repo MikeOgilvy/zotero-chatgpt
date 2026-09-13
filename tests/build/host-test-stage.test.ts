@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -36,6 +37,45 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--live'])).rejects.toThrow();
     await expect(select(['--context', '--acceptance', '--live'])).rejects.toThrow();
     await expect(select(['--context', '--live'])).resolves.toMatchObject({ stage: 'context', installDriver: true });
+  });
+
+  it('registers the human-gated live model-catalog stage on its own isolated tree', async () => {
+    await expect(select(['--live-model'])).resolves.toMatchObject({ stage: 'live-model', driver: 'tests/host/live-model-driver.js', installDriver: true });
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--input-type=module',
+      '-e',
+      `import { selectHostTree } from ${JSON.stringify(stageModule)};
+       console.log(JSON.stringify(selectHostTree(['--live-model'], ${JSON.stringify(repositoryRoot)})));`,
+    ], { cwd: repositoryRoot });
+    const tree = JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; reportPath: string };
+    expect(tree.stage).toBe('live-model');
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zcr-dev/live/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zcr-dev/live/data'));
+    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zcr-dev/live/host-report.json'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zcr-dev/profile'));
+  });
+
+  it('refuses the live model-catalog stage in acceptance, native and model-request modes', async () => {
+    await expect(select(['--live-model', '--acceptance'])).rejects.toThrow();
+    await expect(select(['--live-model', '--native'])).rejects.toThrow();
+    await expect(select(['--live-model', '--live'])).rejects.toThrow();
+    await expect(select(['--context', '--live-model'])).rejects.toThrow();
+  });
+
+  it('keeps every host driver file reachable from a stage registration', async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--input-type=module',
+      '-e',
+      `import { HOST_DRIVERS } from ${JSON.stringify(stageModule)}; console.log(JSON.stringify(HOST_DRIVERS));`,
+    ], { cwd: repositoryRoot });
+    const registered = new Set<string>(Object.values(JSON.parse(stdout) as Record<string, string>));
+    // Selected by --native rather than by HOST_DRIVERS.
+    registered.add('tests/host/native-agent-driver.ts');
+    const files = readdirSync(path.join(repositoryRoot, 'tests/host'))
+      .filter(name => /-driver\.(js|ts)$/u.test(name))
+      .map(name => `tests/host/${name}`);
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter(file => !registered.has(file))).toEqual([]);
   });
   it('isolates native task checks and forbids combining their automatic driver with live or manual mode', async () => {
     await expect(select(['--context', '--native'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/native-agent-driver.ts' });

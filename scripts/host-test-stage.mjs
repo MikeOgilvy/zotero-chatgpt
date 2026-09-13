@@ -9,9 +9,11 @@ export const HOST_DRIVERS = {
   s5: 'tests/host/s5-driver.js',
   s6: 'tests/host/s6-driver.js',
   context: 'tests/host/context-driver.js',
+  // Human-gated: the operator completes exactly one official login and the driver sends no model request.
+  'live-model': 'tests/host/live-model-driver.js',
 };
 
-const EXCLUSIVE = ['s2', 's3', 's4', 's5', 's6', 'context'];
+const EXCLUSIVE = ['s2', 's3', 's4', 's5', 's6', 'context', 'live-model'];
 
 /**
  * @param {string[]} argv
@@ -41,6 +43,8 @@ export function selectHostTree(argv, repositoryRoot) {
   const { stage } = selectHostStage(argv);
   const dev = join(repositoryRoot, '.zcr-dev');
   if (stage === 'context') return { stage, profile: join(dev, 'context/profile'), dataDir: join(dev, 'context/data'), reportPath: join(dev, 'context/host-report.json'), pdfPath: join(dev, 'context/fixtures/reading.pdf') };
+  // Human-gated model-catalog measurement, isolated in its own `.zcr-dev/live` tree.
+  if (stage === 'live-model') return { stage, profile: join(dev, 'live/profile'), dataDir: join(dev, 'live/data'), reportPath: join(dev, 'live/host-report.json'), pdfPath: join(dev, 'live/fixtures/reading.pdf') };
   if (stage === 's6') {
     const twoVersion = argv.includes('--upgrade-xpi') && argv.includes('--rollback-xpi');
     const root = join(dev, twoVersion ? 's6-upgrade' : 's6-virgin');
