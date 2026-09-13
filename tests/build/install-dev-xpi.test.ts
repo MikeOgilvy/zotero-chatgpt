@@ -154,8 +154,8 @@ describe('pref and lever planning', () => {
 
 describe('process and open-file parsing', () => {
   const header = 'COMMAND     PID USER   FD   TYPE DEVICE SIZE/OFF     NODE NAME';
-  const row = `zotero    50356 kuhn  txt    REG   1,17 92661563  87654321 /Users/kuhn/Library/Application Support/Zotero/Profiles/mi2zhr2s.default/extensions/${SUBJECT_ID}.xpi`;
-  const installedPath = `/Users/kuhn/Library/Application Support/Zotero/Profiles/mi2zhr2s.default/extensions/${SUBJECT_ID}.xpi`;
+  const row = `zotero    50356 exampleuser  txt    REG   1,17 92661563  87654321 /Users/exampleuser/Library/Application Support/Zotero/Profiles/aaaa1111.default/extensions/${SUBJECT_ID}.xpi`;
+  const installedPath = `/Users/exampleuser/Library/Application Support/Zotero/Profiles/aaaa1111.default/extensions/${SUBJECT_ID}.xpi`;
 
   it('parses lsof rows, keeping NAME with spaces, and dedupes pids', () => {
     const rows = parseLsofRows(`${header}\n${row}\n`);
@@ -272,7 +272,7 @@ describe('local plan and install against a temporary profile', () => {
     const artifactXpi = await packageFixture(path.join(root, 'artifact.xpi'), '0.4.0a4');
     const profile = await makeProfile(root, 'profile', '');
     const busy = makeDeps({
-      lsof: () => `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 kuhn txt REG 1,17 0 42 ${path.join(profile, '.parentlock')}\n`,
+      lsof: () => `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 exampleuser txt REG 1,17 0 42 ${path.join(profile, '.parentlock')}\n`,
     });
     await expect(run(['install', '--profile', profile, '--xpi', artifactXpi], busy)).rejects.toThrow(/in use/u);
 
@@ -318,11 +318,11 @@ describe('measurement and rollback on a temporary profile', () => {
       path.join(profile, 'extensions.json'),
       `${JSON.stringify({ addons: [{ id: SUBJECT_ID, version: '0.4.0a4' }] }, null, 2)}\n`,
     );
-    const lsofRow = `zotero 50356 kuhn txt REG 1,17 ${info.size} ${info.ino} ${installedPath}`;
+    const lsofRow = `zotero 50356 exampleuser txt REG 1,17 ${info.size} ${info.ino} ${installedPath}`;
     const deps = makeDeps({
       lsof: (target) =>
         target.endsWith('.parentlock')
-          ? `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 kuhn txt REG 1,17 0 42 ${target}\n`
+          ? `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 exampleuser txt REG 1,17 0 42 ${target}\n`
           : `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n${lsofRow}\n`,
     });
 
@@ -360,8 +360,8 @@ describe('measurement and rollback on a temporary profile', () => {
     const deps = makeDeps({
       lsof: (target) =>
         target.endsWith('.parentlock')
-          ? `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 kuhn txt REG 1,17 0 42 ${target}\n`
-          : `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 kuhn txt REG 1,17 ${info.size} ${info.ino} ${installedPath}\n`,
+          ? `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 exampleuser txt REG 1,17 0 42 ${target}\n`
+          : `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nzotero 50356 exampleuser txt REG 1,17 ${info.size} ${info.ino} ${installedPath}\n`,
     });
     const checked = ok(await run(['check', '--profile', profile], deps));
     expect(checked.status).toBe('verified');

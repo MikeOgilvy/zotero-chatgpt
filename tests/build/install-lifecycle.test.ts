@@ -61,7 +61,7 @@ afterEach(async () => {
 
 describe('clean-environment install layout', () => {
   it('refuses the user regular Zotero profile directory', async () => {
-    const regular = path.join(tmpdir(), 'Library/Application Support/Zotero/Profiles/mi2zhr2s.default');
+    const regular = path.join(tmpdir(), 'Library/Application Support/Zotero/Profiles/aaaa1111.default');
     await mkdir(regular, { recursive: true });
     temporaryDirectories.push(regular);
     await expect(run(['prepare', '--root', regular, '--xpi', path.join(fixtureSource, 'missing.xpi')])).rejects.toSatisfy((error: unknown) => /regular Zotero profile/i.test(failureMessage(error)));
@@ -90,7 +90,7 @@ describe('clean-environment install layout', () => {
       '--input-type=module',
       '-e',
       `import { assertNotRegularProfile } from ${JSON.stringify(lifecycle)};
-       assertNotRegularProfile(${JSON.stringify(path.join(tmpdir(), 'Library/Application Support/Zotero/Profiles/mi2zhr2s.default'))});`,
+       assertNotRegularProfile(${JSON.stringify(path.join(tmpdir(), 'Library/Application Support/Zotero/Profiles/aaaa1111.default'))});`,
     ], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /regular Zotero profile/i.test(failureMessage(error)));
   });
 
