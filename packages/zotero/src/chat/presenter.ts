@@ -56,13 +56,13 @@ export interface PresenterState {
   focusToken: number;
   paperTitle: string;
   workspace: WorkspaceSettings | null;
-  history: HistoryEntry[];
   /**
-   * Archived chats for the same query. The view renders these in the collapsed Archived section.
-   * The presenter and the store both guarantee a chat appears in exactly one of `history` and
-   * `archivedHistory`; `historyQuery` lets the view force the section open for a search.
+   * The one chat listing. It holds every stored chat for the query, including records that carry a
+   * legacy `archivedAt`: there is no archive surface in the sidebar any more, so those render and
+   * behave exactly like ordinary chats and nothing is ever hidden or rewritten. `historyQuery` lets
+   * the view re-filter a host-list listing locally.
    */
-  archivedHistory: HistoryEntry[];
+  history: HistoryEntry[];
   historyQuery: string;
   scrollTop: number;
   persistence: 'session' | 'loading' | 'saving' | 'saved' | 'error';
@@ -93,6 +93,10 @@ function gapDisclosure(document: DocumentContext): string {
   return ` Recorded source gaps: ${shown.join(', ')}${gaps.length > 12 ? `, and ${gaps.length - 12} more` : ''}.`;
 }
 function unfinishedReading(job: ReadingJob): boolean { return !['completed', 'cancelled', 'failed'].includes(job.status); }
+/** Newest first with a stable tiebreak, so the merged single listing keeps one deterministic order. */
+function newestFirst<T extends { id: string; updatedAt: string; createdAt: string }>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt) || a.id.localeCompare(b.id));
+}
 function activeReading(job: ReadingJob): boolean { return ['reserved', 'submitting', 'running', 'cancelling'].includes(job.status); }
 function aborted(signal: AbortSignal): void { if (signal.aborted) throw new ReaderError('INVALID_REQUEST', 'Request preparation cancelled. Your draft is kept.'); }
 async function waitPreparation<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -172,7 +176,7 @@ export class ConversationPresenter {
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
     this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
-      workspace: null, history: [], archivedHistory: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
+      workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
   }
   private paperIdentity(): PaperIdentity {
@@ -289,52 +293,35 @@ export class ConversationPresenter {
     if (draft === this.state.draft) return;
     this.draftVersion++; this.update({ draft, message: null }); this.stageDraft();
   }
-  /** A HistoryEntry with no `archivedAt`, i.e. a chat listed in the Archived section. */
-  private archivedEntry(entry: HistoryEntry): boolean { return Boolean(entry.archivedAt); }
   private entryFromConversation(conversation: Conversation): HistoryEntry {
     return { id: conversation.id, paper: conversation.paper, title: conversation.title, identity: conversation.paperIdentity ?? { title: conversation.title, authors: [] }, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messageCount: conversation.messages.length, preview: conversation.messages.at(-1)?.text ?? '', hasDraft: !!this.drafts.get(conversation.id)?.question.trim(), activeRequestId: conversation.activeRequestId, ...(conversation.archivedAt ? { archivedAt: conversation.archivedAt } : {}) };
   }
   /**
-   * The fallback host-list path has no archive filter of its own, so the presenter partitions the
-   * list it already holds. Keeping the partition here (not only in the store) is what lets the view
-   * render both scopes identically whether or not a workspace is available.
+   * The fallback host-list path has no archive filter of its own, so the presenter filters the list
+   * it already holds. There is no archive scene to partition here: every chat is an ordinary chat.
    */
   private fallbackHistory(query: string): HistoryEntry[] {
     const search = query.toLocaleLowerCase();
     return this.state.conversations.filter(conversation => `${conversation.title} ${conversation.messages.map(message => message.text).join(' ')}`.toLocaleLowerCase().includes(search)).map(conversation => this.entryFromConversation(conversation));
   }
   /**
-   * Search both scopes in one pass so a query can surface an archived chat. The two calls are the
-   * only partition of the listing: every stored chat is unarchived XOR archived, so the view can
-   * force the section open on a search without ever losing a match.
+   * One listing for every stored chat, newest first. A stored `archivedAt` is not a scope: records
+   * that carry it are merged in as ordinary chats so they stay readable and are never hidden. The
+   * two `HistoryScope` reads are only how the store exposes the field; the scope contract and the
+   * store's `archived` parameter are left intact and unused by the sidebar UI.
    */
   async searchHistory(query: string): Promise<HistoryEntry[]> {
     const search = ++this.historySearch;
-    let history: HistoryEntry[]; let archived: HistoryEntry[];
+    let history: HistoryEntry[];
     if (this.services.getWorkspace) {
       const workspace = await this.getWorkspace();
-      [history, archived] = await Promise.all([workspace.history(query), workspace.history(query, { archived: true })]);
+      const [current, legacy] = await Promise.all([workspace.history(query), workspace.history(query, { archived: true })]);
+      history = newestFirst([...current, ...legacy]);
     } else {
-      const found = this.fallbackHistory(query);
-      history = found.filter(entry => !this.archivedEntry(entry)); archived = found.filter(entry => this.archivedEntry(entry));
+      history = newestFirst(this.fallbackHistory(query));
     }
-    if (search === this.historySearch && !this.disposed) this.update({ history, archivedHistory: archived, historyQuery: query });
+    if (search === this.historySearch && !this.disposed) this.update({ history, historyQuery: query });
     return clone(history);
-  }
-  /**
-   * Archive/unarchive a chat. This is the only mutation the presenter performs for the Archived
-   * section; it delegates to the client, which keeps the record on disk. A failure only surfaces a
-   * message, and the listing is re-read from the source of truth rather than optimistically patched.
-   */
-  async archiveConversation(id: string, archived: boolean): Promise<void> {
-    try {
-      const client = await this.connect();
-      if (!client.archiveConversation) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Archiving chats is unavailable.');
-      const updated = await client.archiveConversation(id, archived);
-      if (this.state.conversation?.id === id) this.update({ conversation: updated });
-      await this.refreshList();
-      await this.searchHistory(this.state.historyQuery);
-    } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   async openHistoryEntry(id: string): Promise<void> {
     const conversation = this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(id) : await (await this.connect()).get(id);
@@ -1094,17 +1081,17 @@ export class ConversationPresenter {
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   /**
-   * Does the sidebar still have an unarchived chat to list for this attachment once `closingId` is
-   * gone? `state.conversations` is `client.list(this.paper)` — the attachment-scoped listing the
+   * Does the sidebar still have a chat to list for this attachment once `closingId` is gone?
+   * `state.conversations` is `client.list(this.paper)` — the attachment-scoped listing the
    * sidebar's host-list path renders. `state.history` is the workspace listing it renders otherwise;
    * that listing is profile-wide, so it is scoped here by the same paper identity this presenter
-   * uses everywhere else. Archived chats do not count: they live in the collapsed Archived section
-   * and the default history scope is unarchived. This reads those two existing listings instead of
-   * inventing a separate count.
+   * uses everywhere else. Every chat counts, including a record that carries a legacy `archivedAt`:
+   * there is no Archived section any more, so such a record is an ordinary chat the owner can open
+   * and therefore a reason to keep the dock open.
    */
-  private hasUnarchivedChatForPaper(closingId: string | null): boolean {
+  private hasChatForPaper(closingId: string | null): boolean {
     const paper = paperId(this.paper);
-    if (this.state.conversations.some(conversation => conversation.id !== closingId && !conversation.archivedAt && paperId(conversation.paper) === paper)) return true;
+    if (this.state.conversations.some(conversation => conversation.id !== closingId && paperId(conversation.paper) === paper)) return true;
     return this.state.history.some(entry => entry.id !== closingId && paperId(entry.paper) === paper);
   }
   /**
@@ -1113,8 +1100,8 @@ export class ConversationPresenter {
    * stored "current" pointer is left alone, so an explicit close must stop the adoption paths from
    * silently restoring the closed chat: the next request starts a fresh one instead.
    *
-   * Returns true when nothing unarchived is left to list for this attachment, i.e. the caller
-   * should collapse the reader dock through its own close path rather than leave an empty panel.
+   * Returns true when nothing is left to list for this attachment, i.e. the caller should collapse
+   * the reader dock through its own close path rather than leave an empty panel.
    */
   closeConversation(): boolean {
     if (this.disposed || !this.state.conversation) return false;
@@ -1133,7 +1120,7 @@ export class ConversationPresenter {
       document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null },
     });
     this.stageDraft();
-    return !this.hasUnarchivedChatForPaper(closingId);
+    return !this.hasChatForPaper(closingId);
   }
   async deleteConversation(id: string): Promise<void> {
     try {

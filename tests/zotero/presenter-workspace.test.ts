@@ -139,30 +139,27 @@ it('captures @chat through bounded workspace snapshots and persists appearance i
   expect(f.presenter.snapshot().draft.settings).toEqual(generation); f.presenter.dispose();
 });
 
-it('partitions workspace history by scope, keeps an archived chat findable, and archives through the client', async () => {
+it('lists a record carrying archivedAt as an ordinary chat in the one listing and never rewrites it', async () => {
   const f = fixture(); await f.presenter.activate();
   const open = f.conversation().id;
   const archivedId = 'dddddddd-0000-4000-8000-000000000005';
   f.conversations.set(archivedId, { ...f.conversation(), id: archivedId, title: 'Old discussion', archivedAt: '2026-09-12T00:00:00Z' });
+  // There is one listing: the legacy record sits beside the active chat as a plain history entry.
   const history = await f.presenter.searchHistory('');
-  expect(history.map(entry => entry.id)).toEqual([open]);
-  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id)).toEqual([archivedId]);
+  expect(history.map(entry => entry.id).sort()).toEqual([open, archivedId].sort());
+  expect(history.find(entry => entry.id === archivedId)?.archivedAt).toBe('2026-09-12T00:00:00Z');
+  expect(f.presenter.snapshot().history.map(entry => entry.id).sort()).toEqual([open, archivedId].sort());
   expect(f.presenter.snapshot().historyQuery).toBe('');
-  // The query reaches both scopes, so an archived chat is never lost to a search.
-  expect(await f.presenter.searchHistory('Old discussion')).toEqual([]);
-  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id)).toEqual([archivedId]);
-  // Back to the unfiltered scope before the archive toggle, which refetches the active query.
-  await f.presenter.searchHistory('');
-  await f.presenter.archiveConversation(open, true);
-  expect(f.client.archiveConversation).toHaveBeenCalledWith(open, true);
+  // The query still reaches both store scopes, so a chat only the archived scope holds is not lost.
+  expect((await f.presenter.searchHistory('Old discussion')).map(entry => entry.id)).toEqual([archivedId]);
+  expect(f.presenter.snapshot().history.map(entry => entry.id)).toEqual([archivedId]);
+  // Opening it reads the stored record unchanged; nothing rewrites or drops the field.
+  await f.presenter.openHistoryEntry(archivedId);
+  expect(f.presenter.snapshot().conversation?.id).toBe(archivedId);
   expect(f.presenter.snapshot().conversation?.archivedAt).toBe('2026-09-12T00:00:00Z');
-  expect(f.presenter.snapshot().history).toEqual([]);
-  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id).sort()).toEqual([archivedId, open].sort());
-  // Restoring returns it to the default scope with its archived timestamp removed.
-  await f.presenter.archiveConversation(open, false);
-  expect(f.presenter.snapshot().conversation?.archivedAt).toBeUndefined();
-  expect(f.presenter.snapshot().history.map(entry => entry.id)).toEqual([open]);
-  expect(f.presenter.snapshot().archivedHistory.map(entry => entry.id)).toEqual([archivedId]);
+  expect(f.conversations.get(archivedId)?.archivedAt).toBe('2026-09-12T00:00:00Z');
+  // The sidebar owns no archive mutation: the client primitive stays available but is never called.
+  expect(f.client.archiveConversation).not.toHaveBeenCalled();
   f.presenter.dispose();
 });
 

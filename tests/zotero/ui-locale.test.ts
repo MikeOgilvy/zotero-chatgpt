@@ -163,23 +163,22 @@ it('localizes the honest elapsed-time states while keeping the measured seconds 
   expect(waiting.textContent).toBe('Waiting 7s'); expect(answered.textContent).toBe('Answered in 42s'); locale.dispose();
 });
 
-it('localizes the archived section label and the archive/restore row actions in both directions', () => {
+it('localizes the local PDF read failures the composer alert can now show', () => {
   const { root, add } = setup();
-  const label = add('span', 'zcr-history-archived-label', 'Archived');
-  const archive = add('button', 'zcr-icon-button'); archive.dataset.zcrAction = 'archive-conversation'; archive.setAttribute('aria-label', 'Archive chat'); archive.title = 'Archive chat';
-  const restore = add('button', 'zcr-icon-button'); restore.dataset.zcrAction = 'restore-conversation'; restore.setAttribute('aria-label', 'Restore chat'); restore.title = 'Restore chat';
-  const toggle = add('button', 'zcr-history-archived-toggle'); toggle.dataset.zcrAction = 'toggle-archived'; toggle.setAttribute('aria-label', 'Archived chats');
+  const timedOut = add('p', 'zcr-error', 'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.');
+  const unreadable = add('p', 'zcr-error', 'The current PDF could not be read locally. Wait for it to load or reopen it; your question is kept.');
+  const changed = add('p', 'zcr-error', 'The PDF file changed while this reader was open. Reopen it to load the current version.');
+  const empty = add('p', 'zcr-error', 'No extractable text was found in the pages supplied from this PDF. Attach the relevant page image if you want to ask about them.');
   const locale = mountUILocale(root); locale.update('zh');
-  expect(label.textContent).toBe('已归档');
-  expect(archive.getAttribute('aria-label')).toBe('归档对话');
-  expect(archive.title).toBe('归档对话');
-  expect(restore.getAttribute('aria-label')).toBe('恢复对话');
-  expect(restore.title).toBe('恢复对话');
-  expect(toggle.getAttribute('aria-label')).toBe('已归档的对话');
+  // The three local causes stay distinct in Chinese: timeout, unreadable, and a changed revision.
+  expect(timedOut.textContent).toBe('当前 PDF 未能及时加载完成，无法在本地读取。请等待其加载完成或重新打开；你的问题已保留。');
+  expect(unreadable.textContent).toBe('当前 PDF 无法在本地读取。请等待其加载完成或重新打开；你的问题已保留。');
+  expect(changed.textContent).toBe('此阅读器打开期间 PDF 文件已更改。请重新打开以载入当前版本。');
+  expect(empty.textContent).toBe('从此 PDF 提供的页面中未找到可提取的文本。如需就此提问，请附加相关页面图像。');
   locale.update('en');
-  expect(label.textContent).toBe('Archived');
-  expect(archive.getAttribute('aria-label')).toBe('Archive chat');
-  expect(restore.title).toBe('Restore chat'); locale.dispose();
+  expect(timedOut.textContent).toBe('The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.');
+  expect(unreadable.textContent).toBe('The current PDF could not be read locally. Wait for it to load or reopen it; your question is kept.');
+  locale.dispose();
 });
 
 it('localizes the close-chat control without touching the destructive delete label', () => {

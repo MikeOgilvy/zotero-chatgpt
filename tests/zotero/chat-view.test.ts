@@ -1248,8 +1248,8 @@ it('keeps the closed chat’s draft and starts a fresh chat from the empty state
 /**
  * Two regressions the owner reported together. Closing the current chat used to hide the `+` as
  * well, so the empty state had no way to start again. And the owner chose that closing the last
- * unarchived chat for the PDF should collapse the whole dock through the reader's own close path,
- * but must not collapse it while other chats for that attachment remain.
+ * chat for the PDF should collapse the whole dock through the reader's own close path, but must not
+ * collapse it while any other chat for that attachment remains.
  */
 it('keeps the New chat control available in the empty state after closing the current chat', async () => {
   const confirm = vi.fn(() => true);
@@ -1271,21 +1271,20 @@ it('keeps the New chat control available in the empty state after closing the cu
   expect(confirm).not.toHaveBeenCalled();
 });
 
-it('collapses the dock when closing the last unarchived chat for the attachment', async () => {
+it('collapses the dock when closing the last chat for the attachment', async () => {
   const closeDock = vi.fn();
   const { root, presenter } = await mountReadyChat({ messages: [], closeDock });
   const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
   root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
-  // Nothing unarchived is left to list for this attachment, so the reader's own close path runs
-  // exactly once.
+  // Nothing is left to list for this attachment, so the reader's own close path runs exactly once.
   expect(closeDock).toHaveBeenCalledTimes(1);
   expect(presenter.closeConversation()).toBe(false);
   expect(closeDock).toHaveBeenCalledTimes(1);
   expect(fresh.hidden).toBe(false);
 });
 
-it('does not collapse the dock while other unarchived chats for the attachment remain', async () => {
+it('does not collapse the dock while other chats for the attachment remain', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
     activeRequestId: null, messages: [], lastSeq: 0,
@@ -1306,8 +1305,8 @@ it('does not collapse the dock while other unarchived chats for the attachment r
   expect(presenter.snapshot().conversation).toBeNull();
   expect(closeDock).not.toHaveBeenCalled();
   expect(fresh.hidden).toBe(false);
-  // Closing the first chat is not the "last" one either: the chat closed above is still an
-  // unarchived history entry for this attachment, so the dock must stay open.
+  // Closing the first chat is not the "last" one either: the chat closed above is still a history
+  // entry for this attachment, so the dock must stay open.
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${first.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first.id));
@@ -1317,7 +1316,7 @@ it('does not collapse the dock while other unarchived chats for the attachment r
   expect(fresh.hidden).toBe(false);
 });
 
-it('does not count an archived chat as a reason to keep the dock open', async () => {
+it('keeps the dock open for a legacy archived record now that it is an ordinary chat', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
     activeRequestId: null, messages: [], lastSeq: 0,
@@ -1331,8 +1330,9 @@ it('does not count an archived chat as a reason to keep the dock open', async ()
   const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, archived], closeDock });
   root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
-  // The only other chat for this PDF is archived, and archived chats do not keep the dock open.
-  expect(closeDock).toHaveBeenCalledTimes(1);
+  // The record carries archivedAt but the sidebar has no archive surface: it is an ordinary chat the
+  // owner can still open, so it is a reason to keep the dock open.
+  expect(closeDock).not.toHaveBeenCalled();
 });
 
 it('hides the More details prompt in the transcript while keeping the citation', async () => {
@@ -1474,11 +1474,12 @@ it('groups workspace history entries single-line and keeps the PDF title and pre
     const done = items.find(item => item.querySelector('[data-zcr-history-status="done"]'))!;
     expect(done.getAttribute('aria-label')).toContain('Workspace Paper Title');
     expect(done.getAttribute('aria-label')).toContain('Workspace preview text');
-    // The workspace port owns no confirmed delete, so it keeps no delete cross. Archive/restore is
-    // non-destructive and supported by the model, so every row offers it, and zero archived chats
-    // still means no Archived section node at all.
+    // The workspace port owns no confirmed delete, so it keeps no delete cross. It also owns no
+    // archive mutation any more, so no row carries an archive/restore action and no Archived
+    // section node is ever invented.
     expect(root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]')).toBeNull();
-    expect(root.querySelectorAll('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toHaveLength(history.length);
+    expect(root.querySelector('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toBeNull();
+    expect(root.querySelector('[data-zcr-history] [data-zcr-action="restore-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
   } finally { clock.mockRestore(); }
 });
@@ -1524,9 +1525,10 @@ it('renders every conversation exactly once across the four buckets and never in
     expect(new Set(rendered).size).toBe(rendered.length);
     const grouped = [...root.querySelectorAll<HTMLElement>('[data-zcr-history-group]')].map(node => node.dataset.zcrHistoryGroup);
     expect(grouped).toEqual(['Today', 'Yesterday', 'Previous 7 days', 'Older']);
-    // The reference shows a collapsed Archived section; our model now represents archiving, but with
-    // zero archived chats there must be no section node at all, never an empty or dead affordance.
+    // There is no archive concept in the sidebar any more: no section node is invented, no archive
+    // action exists, and the word never appears.
     expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
+    expect(root.querySelector('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zcr-history]')?.textContent).not.toMatch(/Archived|归档/u);
   } finally { clock.mockRestore(); }
 });
@@ -1563,121 +1565,90 @@ it('renders single-line history rows with a per-status glyph and keeps the dropp
   } finally { clock.mockRestore(); }
 });
 
-it('lists archived workspace chats in a collapsed, keyboard-operable section and keeps them out of the live list', async () => {
+it('lists a workspace record carrying archivedAt as an ordinary chat in the one listing', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 8, 10, 12, 0, 0, 0).getTime());
   try {
     const active = [historyEntry(1), historyEntry(2)];
-    const archived = [historyEntry(3, { archivedAt: '2026-09-10T09:00:00.000Z' })];
-    const { root } = await mountReadyChat({ workspace: historyWorkspace([...active, ...archived]) });
+    const archived = historyEntry(3, { archivedAt: '2026-09-10T09:00:00.000Z' });
+    const { root } = await mountReadyChat({ workspace: historyWorkspace([...active, archived]) });
     const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-    const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
-    expect(section).not.toBeNull();
-    const toggle = section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!;
-    const count = section.querySelector<HTMLElement>('.zcr-history-archived-count')!;
-    const archivedList = section.querySelector<HTMLElement>('.zcr-history-archived-list')!;
-    const ids = (scope: HTMLElement) => [...scope.querySelectorAll<HTMLButtonElement>('button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
-    // Exactly-one-of-two: the live list holds the unarchived chats, the section holds the rest.
-    expect(ids(panel.querySelector<HTMLElement>('.zcr-history-list')!).sort()).toEqual(active.map(entry => entry.id).sort());
-    expect(ids(archivedList).sort()).toEqual(archived.map(entry => entry.id).sort());
-    expect(ids(panel).filter(id => archived.some(entry => entry.id === id))).toEqual(archived.map(entry => entry.id));
-    // The section is collapsed by default, carries the count and exposes that state.
-    expect(count.textContent).toBe('1');
-    expect(toggle.tagName).toBe('BUTTON');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(archivedList.hidden).toBe(true);
-    // The section's row keeps the live row shape and the status glyph.
-    expect(archivedList.querySelectorAll('.zcr-history-title')).toHaveLength(1);
-    expect(archivedList.querySelector('.zcr-history-status')?.getAttribute('data-zcr-history-status')).toBe('done');
-    // The toggle lives in the panel's arrow-key order: ArrowDown from the last live row reaches it,
-    // and a click (what Enter/Space activate on a native button) toggles the section.
-    const trigger = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!;
-    trigger.click();
-    const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
-    search.focus();
-    const view = root.ownerDocument.defaultView!;
-    const lastLiveButton = [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button')].at(-1)!;
-    lastLiveButton.focus();
-    lastLiveButton.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
-    expect(root.ownerDocument.activeElement).toBe(toggle);
-    toggle.click();
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(archivedList.hidden).toBe(false);
-    toggle.click();
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(archivedList.hidden).toBe(true);
+    const ids = [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+    // One ordinary listing: the record with archivedAt appears exactly once, beside the others.
+    expect(ids.sort()).toEqual([...active, archived].map(entry => entry.id).sort());
+    expect(ids.filter(id => id === archived.id)).toHaveLength(1);
+    // It keeps the live row shape and the status glyph.
+    const item = panel.querySelector<HTMLElement>(`.zcr-history-list button.zcr-history-item[data-zcr-conversation-id="${archived.id}"]`)!;
+    const row = item.closest<HTMLElement>('.zcr-history-row')!;
+    expect(row.querySelectorAll('.zcr-history-title')).toHaveLength(1);
+    expect(row.querySelector('.zcr-history-status')?.getAttribute('data-zcr-history-status')).toBe('done');
+    // No archive surface survives: no section, no toggle, no per-row action, not even the word.
+    expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
+    expect(panel.querySelector('[data-zcr-action="toggle-archived"]')).toBeNull();
+    expect(panel.querySelector('[data-zcr-action="archive-conversation"]')).toBeNull();
+    expect(panel.querySelector('[data-zcr-action="restore-conversation"]')).toBeNull();
+    expect(panel.textContent).not.toMatch(/Archived|归档/u);
   } finally { clock.mockRestore(); }
 });
 
-it('archives and restores a host-list chat from its row action while delete stays a separate confirmed removal', async () => {
+it('shows a host-list record carrying archivedAt as an ordinary row while delete stays a separate confirmed removal', async () => {
   const first = agedConversation('aaaaaaaa-0000-4000-8000-000000000031', 'First chat', '2026-09-10T09:00:00.000Z');
-  const second = agedConversation('aaaaaaaa-0000-4000-8000-000000000032', 'Second chat', '2026-09-10T09:01:00.000Z');
+  const second = agedConversation('aaaaaaaa-0000-4000-8000-000000000032', 'Second chat', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
   const confirm = vi.fn(() => true);
   const { root } = await mountReadyChat({ conversations: [first, second], confirm });
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-  const liveIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  const rowIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  // Both chats render in one list; the archivedAt record is not hidden, restyled or relocated.
+  expect(rowIds()).toContain(first.id);
+  expect(rowIds().filter(id => id === second.id)).toHaveLength(1);
   expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
-  // Archive is non-destructive: no confirmation is asked and no data is removed.
-  panel.querySelector<HTMLButtonElement>(`[data-zcr-action="archive-conversation"][data-zcr-conversation-id="${second.id}"]`)!.click();
-  await vi.waitFor(() => expect(liveIds()).not.toContain(second.id));
+  expect(panel.querySelector('[data-zcr-action="archive-conversation"]')).toBeNull();
+  expect(panel.querySelector('[data-zcr-action="restore-conversation"]')).toBeNull();
   expect(confirm).not.toHaveBeenCalled();
-  const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
-  expect(section.querySelector('.zcr-history-archived-count')?.textContent).toBe('1');
-  section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!.click();
-  expect([...section.querySelectorAll<HTMLButtonElement>('button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId)).toEqual([second.id]);
-  // Restore returns the same chat to the live list and closes the now-empty section.
-  section.querySelector<HTMLButtonElement>('[data-zcr-action="restore-conversation"]')!.click();
-  await vi.waitFor(() => expect(liveIds()).toContain(second.id));
-  await vi.waitFor(() => expect(panel.querySelector('[data-zcr-archived]')).toBeNull());
-  expect(confirm).not.toHaveBeenCalled();
-  // Delete remains a separate, confirmed hard removal on the host-list path.
-  panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${first.id}"]`)!.click();
+  // Delete is the only removal path, and it stays behind the explicit confirmation.
+  panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(confirm).toHaveBeenCalledWith('Delete this chat? This only removes the local history for this PDF.'));
-  await vi.waitFor(() => expect(liveIds()).not.toContain(first.id));
+  await vi.waitFor(() => expect(rowIds()).not.toContain(second.id));
+  expect(rowIds()).toContain(first.id);
 });
 
-it('searches both scopes so an archived chat stays findable and the section opens for that query', async () => {
+it('finds a chat that only the archived store scope holds, in the one listing', async () => {
   const active = historyEntry(4, { title: 'Alpha notes' });
   const archived = historyEntry(5, { title: 'Beta notes', archivedAt: '2026-09-10T09:00:00.000Z' });
   const { root } = await mountReadyChat({ workspace: historyWorkspace([active, archived]) });
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
   const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
-  const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
-  const toggle = section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!;
-  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  expect(listIds().sort()).toEqual([active.id, archived.id].sort());
   search.value = 'Beta';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
-  // The query matched only the archived chat; losing it would be a silent data loss for the reader.
-  await vi.waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('true'));
-  expect([...section.querySelectorAll<HTMLButtonElement>('button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId)).toEqual([archived.id]);
-  expect(panel.querySelectorAll('.zcr-history-list button.zcr-history-item')).toHaveLength(0);
+  // The only match lives in the archived store scope; losing it would be silent data loss.
+  await vi.waitFor(() => expect(listIds()).toEqual([archived.id]));
+  expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
   search.value = '';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
-  await vi.waitFor(() => expect([...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId)).toEqual([active.id]));
+  await vi.waitFor(() => expect(listIds().sort()).toEqual([active.id, archived.id].sort()));
 });
 
-it('forces the archived section open for a local fallback search that only matches an archived chat', async () => {
+it('filters a fallback record carrying archivedAt in the same single listing', async () => {
   const alpha = agedConversation('aaaaaaaa-0000-4000-8000-000000000041', 'Alpha notes', '2026-09-10T09:00:00.000Z');
   const beta = agedConversation('aaaaaaaa-0000-4000-8000-000000000042', 'Beta notes', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
   const { root } = await mountReadyChat({ conversations: [alpha, beta] });
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
   const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
-  const section = panel.querySelector<HTMLElement>('[data-zcr-archived]')!;
-  const toggle = section.querySelector<HTMLButtonElement>('[data-zcr-action="toggle-archived"]')!;
-  expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  expect(section.querySelector<HTMLElement>('.zcr-history-archived-list')!.hidden).toBe(true);
+  const visible = () => [...panel.querySelectorAll<HTMLElement>('.zcr-history-list .zcr-history-row')].filter(row => !row.hidden).map(row => row.querySelector<HTMLElement>('button.zcr-history-item')!.dataset.zcrConversationId);
+  expect(visible()).toContain(alpha.id);
+  expect(visible()).toContain(beta.id);
   search.value = 'Beta';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
-  expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  expect(section.querySelector<HTMLElement>('.zcr-history-archived-list')!.hidden).toBe(false);
-  const archivedRow = section.querySelector<HTMLElement>('.zcr-history-row')!;
-  expect(archivedRow.hidden).toBe(false);
+  expect(visible()).toEqual([beta.id]);
+  expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
   search.value = '';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
-  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(visible()).toContain(alpha.id);
+  expect(visible()).toContain(beta.id);
 });
 
 it('keeps history search filtering and keyboard navigation working in the single-line panel', async () => {
