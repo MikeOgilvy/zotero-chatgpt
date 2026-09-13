@@ -24,6 +24,8 @@ interface PreferencesBridge {
   readHistory?(query: string): Promise<string> | string;
   setHistoryArchived?(ids: string, archived: boolean): Promise<string> | string;
   deleteHistory?(ids: string): Promise<string> | string;
+  /** Bounded storage measurement, optional like the rest: absent means the pane says size is unknown. */
+  readStorageReport?(): Promise<string> | string;
 }
 interface ZoteroGlobal {
   ZoteroCodexReaderPreferencesHost?: PreferencesBridge;
@@ -58,6 +60,10 @@ function mount(root: Element): void {
         readHistory: async (query: string): Promise<unknown> => JSON.parse(await bridge.readHistory!(query)) as unknown,
         setHistoryArchived: async (ids: string[], archived: boolean): Promise<unknown> => JSON.parse(await bridge.setHistoryArchived!(JSON.stringify(ids), archived)) as unknown,
         deleteHistory: async (ids: string[]): Promise<unknown> => JSON.parse(await bridge.deleteHistory!(JSON.stringify(ids))) as unknown,
+        // The storage measurement is separately optional: without it the section still lists chats.
+        ...(bridge.readStorageReport ? {
+          readStorageReport: async (): Promise<unknown> => JSON.parse(await bridge.readStorageReport!()) as unknown,
+        } : {}),
       }
     : {};
   const pane = createPreferencesPane({

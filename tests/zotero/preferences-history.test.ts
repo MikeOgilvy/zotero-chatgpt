@@ -1,7 +1,7 @@
 import { Window } from 'happy-dom';
 import { expect, it, vi } from 'vitest';
 import type { PaperScope } from '../../packages/contracts/src/index.ts';
-import type { HistoryEntry, HistoryListing, HistoryMutationReport, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
+import type { HistoryEntry, HistoryListing, HistoryMutationReport, HistoryStorageReport, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import { createPreferencesPane, type PreferencesPaneHost } from '../../packages/zotero/src/workspace/preferences-pane.ts';
 import { paperA, paperB } from '../contracts/factories.ts';
@@ -26,6 +26,16 @@ function listingOf(entries: HistoryEntry[], query = ''): HistoryListing {
 
 function report(action: HistoryMutationReport['action'], changed: string[], failed: HistoryMutationReport['failed'] = []): HistoryMutationReport {
   return { action, requested: changed.length + failed.length, changed, failed, warnings: [], partial: failed.length > 0 };
+}
+
+function storageReport(overrides: Partial<HistoryStorageReport> = {}): HistoryStorageReport {
+  return {
+    location: '/tmp/zcr-profile/zotero-codex-reader/v1/records', scope: 'zotero-codex-reader/v1/records',
+    bytes: 3072, chatBytes: 2048, draftBytes: 512, otherBytes: 512, files: 7,
+    chats: [{ id: id(1), bytes: 2048 }], chatsComplete: true,
+    complete: true, stoppedBy: null, limits: { entries: 20_000, bytes: 1 << 30, depth: 4 }, measuredAt: NOW,
+    ...overrides,
+  };
 }
 
 /** A pane host whose history methods mutate an in-memory listing, mirroring the store's two scopes. */
@@ -287,4 +297,82 @@ it('skips an unfinished chat in bulk removal and says so instead of arming a del
   find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
   await vi.waitFor(() => expect(deleteHistory).toHaveBeenCalledWith([idle.id]));
   await vi.waitFor(() => expect(rows()).toEqual([running.id]));
+});
+
+it('measures storage only when the owner asks, then shows the location and the per-chat size', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const readStorageReport = vi.fn<NonNullable<PreferencesPaneHost['readStorageReport']>>(() => Promise.resolve(storageReport()));
+  const { host, readHistory } = fixture([chat], { readStorageReport });
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  // Opening the section lists chats and walks nothing: the size is an owner-triggered action.
+  expect(readHistory).toHaveBeenCalled();
+  expect(readStorageReport).not.toHaveBeenCalled();
+  const size = find<HTMLElement>('[data-zcr-history="storage-size"]');
+  expect(size.textContent).toMatch(/not measured yet/iu);
+  expect(find<HTMLElement>('[data-zcr-history="storage-path"]').hidden).toBe(true);
+  expect(find('[data-zcr-history="storage-scope"]').textContent).toBe('Location: zotero-codex-reader/v1/records');
+
+  find<HTMLButtonElement>('[data-zcr-history="measure"]').click();
+  await vi.waitFor(() => expect(readStorageReport).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(size.textContent).toContain('2.0 KiB'));
+  expect(size.textContent).toContain('7 files');
+  expect(find('[data-zcr-history="storage-path"]').textContent).toBe('Absolute path: /tmp/zcr-profile/zotero-codex-reader/v1/records');
+  expect(find('[data-zcr-history="storage-note"]').textContent).toMatch(/^Measured /u);
+  expect(find<HTMLElement>('[data-zcr-history="storage-chats"]').hidden).toBe(true);
+  // The measured per-chat bytes appear on the row that they belong to.
+  expect(find(`[data-zcr-history-id="${chat.id}"]`).textContent).toContain('2.0 KiB');
+});
+
+it('states the bound instead of a precise total when the measurement stopped early', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const readStorageReport = vi.fn(() => Promise.resolve(storageReport({ complete: false, stoppedBy: 'entries', limits: { entries: 3, bytes: 1 << 30, depth: 4 } })));
+  const { host } = fixture([chat], { readStorageReport });
+  const { ready, find } = mount(host);
+  await ready;
+  find<HTMLButtonElement>('[data-zcr-history="measure"]').click();
+  await vi.waitFor(() => expect(find('[data-zcr-history="storage-note"]').textContent).toContain('3'));
+  expect(find('[data-zcr-history="storage-note"]').textContent).toMatch(/at least/iu);
+  expect(find('[data-zcr-history="storage-size"]').textContent).toContain('2.0 KiB');
+});
+
+it('reports a malformed storage report honestly instead of showing a number', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const readStorageReport = vi.fn(() => Promise.resolve({ bytes: 'nope' }));
+  const { host } = fixture([chat], { readStorageReport });
+  const { ready, find } = mount(host);
+  await ready;
+  find<HTMLButtonElement>('[data-zcr-history="measure"]').click();
+  await vi.waitFor(() => expect(find('[data-zcr-history="storage-size"]').textContent).toMatch(/could not be measured/iu));
+  expect(find('[data-zcr-history="storage-size"]').textContent).toMatch(/nothing was changed/iu);
+  expect(find<HTMLElement>('[data-zcr-history="storage-note"]').hidden).toBe(true);
+});
+
+it('shows an honest unavailable storage state when the host offers no measurement', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const { host } = fixture([chat]);
+  const { ready, find } = mount(host);
+  await ready;
+  expect(find<HTMLButtonElement>('[data-zcr-history="measure"]').hidden).toBe(true);
+  expect(find('[data-zcr-history="storage-size"]').textContent).toMatch(/cannot report/iu);
+  // The documented location is stated even when nothing can be measured; no number is invented.
+  expect(find('[data-zcr-history="storage-scope"]').textContent).toContain('zotero-codex-reader/v1/records');
+  expect(find<HTMLElement>('[data-zcr-history="storage-path"]').hidden).toBe(true);
+});
+
+it('drops a measured figure after a change instead of presenting it as current', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const readStorageReport = vi.fn(() => Promise.resolve(storageReport()));
+  const { host } = fixture([chat], { readStorageReport });
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+  find<HTMLButtonElement>('[data-zcr-history="measure"]').click();
+  await vi.waitFor(() => expect(find('[data-zcr-history="storage-size"]').textContent).toContain('2.0 KiB'));
+
+  find<HTMLButtonElement>(`[data-zcr-history-archive="${chat.id}"]`).click();
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+  expect(find('[data-zcr-history="storage-size"]').textContent).toMatch(/not measured yet/iu);
 });

@@ -1,5 +1,6 @@
-import type { HistoryAction, HistoryEntry, HistoryFilterScope, HistoryListing, HistoryMutationReport } from '../../../contracts/src/workspace.ts';
-import { filterHistory, historyCounts, historyPapers, isHistoryListing, isHistoryReport } from '../../../core/src/workspace/history.ts';
+import type { HistoryAction, HistoryEntry, HistoryFilterScope, HistoryListing, HistoryMutationReport, HistoryStorageReport } from '../../../contracts/src/workspace.ts';
+import { filterHistory, historyCounts, historyPapers, isHistoryListing, isHistoryReport, isHistoryStorageReport } from '../../../core/src/workspace/history.ts';
+import { HISTORY_STORAGE_SCOPE } from './history-storage.ts';
 
 /**
  * The History section of the native Zotero Preferences pane.
@@ -9,6 +10,9 @@ import { filterHistory, historyCounts, historyPapers, isHistoryListing, isHistor
  * toggle it already is. Only deleting is destructive, and every delete goes through an explicit
  * confirmation that names what is removed. Nothing is ever pruned on open.
  *
+ * The storage report is measured only when the owner presses "Calculate size": it stats files in the
+ * plugin's own records store, reads no contents, and states its bounds when it stops early.
+ *
  * Copy is authored in both languages here because `chat/ui-locale.ts` is owned by the sidebar chat
  * work; the strings mirror that dictionary's wording so moving them into it later is mechanical.
  */
@@ -16,6 +20,8 @@ export interface HistorySectionHost {
   readHistory(query: string): Promise<unknown>;
   setHistoryArchived(ids: string[], archived: boolean): Promise<unknown>;
   deleteHistory(ids: string[]): Promise<unknown>;
+  /** Optional: without it the section still lists chats and says the size is unavailable. */
+  readStorageReport?(): Promise<unknown>;
 }
 export interface HistorySection {
   readonly element: HTMLElement;
@@ -64,6 +70,23 @@ interface Copy {
   morePapers(count: number): string;
   /** Why a chat with a running answer cannot be deleted, shown instead of arming a confirmation. */
   refusedUnfinished: string;
+  storage: string;
+  storageIntro: string;
+  location(scope: string): string;
+  absolutePath(path: string): string;
+  measure: string;
+  measuring: string;
+  notMeasured: string;
+  storageUnavailable: string;
+  storageFailed: string;
+  sizes(chat: string, draft: string, other: string, files: number): string;
+  measuredAt(stamp: string): string;
+  stoppedEntries(limit: number): string;
+  stoppedBytes(limit: string): string;
+  stoppedDepth(limit: number): string;
+  stoppedEntryType: string;
+  stoppedListing: string;
+  chatsPartial(shown: number): string;
   stored(total: number, archived: number): string;
   matching(total: number, archived: number): string;
   messages(count: number): string;
@@ -98,6 +121,23 @@ const COPY: Record<'en' | 'zh', Copy> = {
     showing: (shown, total) => `Showing the ${shown} most recent of ${total} matching chats. Narrow the search or the paper filter to see the rest.`,
     morePapers: count => `…and ${count} more papers — search to narrow`,
     refusedUnfinished: 'A chat with an unfinished answer or native task was skipped: finish or cancel it before deleting.',
+    storage: 'Storage',
+    storageIntro: 'Chats, drafts, workflows and task records live in one plugin-owned folder inside your Zotero profile. Measuring reads file sizes only — never chat text, drafts or credential files — and it never changes anything.',
+    location: scope => `Location: ${scope}`,
+    absolutePath: path => `Absolute path: ${path}`,
+    measure: 'Calculate size',
+    measuring: 'Measuring…',
+    notMeasured: 'Size not measured yet.',
+    storageUnavailable: 'This build cannot report how much space stored chats take.',
+    storageFailed: 'The stored size could not be measured. Nothing was changed.',
+    sizes: (chat, draft, other, files) => `Chats ${chat} · Drafts ${draft} · Other records ${other} · ${files} files`,
+    measuredAt: stamp => `Measured ${stamp}.`,
+    stoppedEntries: limit => `At least these figures: the measurement stopped at its ${limit}-entry bound.`,
+    stoppedBytes: limit => `At least these figures: the measurement stopped at its ${limit} bound.`,
+    stoppedDepth: limit => `At least these figures: a directory deeper than ${limit} levels was not measured.`,
+    stoppedEntryType: 'At least these figures: an unexpected entry in the records store was not measured.',
+    stoppedListing: 'The records store could not be listed, so its size is unknown. Nothing was changed.',
+    chatsPartial: shown => `Per-chat sizes are shown for the largest ${shown} chats.`,
     stored: (total, archived) => `${total} stored ${total === 1 ? 'chat' : 'chats'} · ${archived} archived`,
     matching: (total, archived) => `${total} matching ${total === 1 ? 'chat' : 'chats'} · ${archived} archived`,
     messages: count => `${count} ${count === 1 ? 'message' : 'messages'}`,
@@ -134,6 +174,23 @@ const COPY: Record<'en' | 'zh', Copy> = {
     showing: (shown, total) => `仅显示最近匹配的 ${total} 个对话中的 ${shown} 个。请缩小搜索范围或更改文献筛选以查看其余内容。`,
     morePapers: count => `……还有 ${count} 篇文献，请用搜索缩小范围`,
     refusedUnfinished: '已跳过包含未完成回答或原生任务的对话：请先完成或取消，再删除。',
+    storage: '存储',
+    storageIntro: '对话、草稿、工作流和任务记录都保存在 Zotero 配置文件内一个由本插件拥有的文件夹中。测量只读取文件大小，绝不读取对话正文、草稿或认证文件，也不会更改任何内容。',
+    location: scope => `位置：${scope}`,
+    absolutePath: path => `绝对路径：${path}`,
+    measure: '计算占用空间',
+    measuring: '正在测量…',
+    notMeasured: '尚未测量占用空间。',
+    storageUnavailable: '此版本无法报告已保存对话占用的空间。',
+    storageFailed: '无法测量已占用的空间，未做任何更改。',
+    sizes: (chat, draft, other, files) => `对话 ${chat} · 草稿 ${draft} · 其他记录 ${other} · ${files} 个文件`,
+    measuredAt: stamp => `测量时间 ${stamp}。`,
+    stoppedEntries: limit => `至少为以下数值：测量在 ${limit} 条条目上限处停止。`,
+    stoppedBytes: limit => `至少为以下数值：测量在 ${limit} 上限处停止。`,
+    stoppedDepth: limit => `至少为以下数值：未测量深度超过 ${limit} 层的目录。`,
+    stoppedEntryType: '至少为以下数值：未测量记录存储中一个意外的条目。',
+    stoppedListing: '无法列出记录存储，因此占用空间未知。未做任何更改。',
+    chatsPartial: shown => `按对话显示的大小仅覆盖最大的 ${shown} 个对话。`,
     stored: (total, archived) => `已保存 ${total} 个对话 · ${archived} 个已归档`,
     matching: (total, archived) => `匹配 ${total} 个对话 · ${archived} 个已归档`,
     messages: count => `${count} 条消息`,
@@ -154,6 +211,17 @@ function el<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, text =
 function reason(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
 /** UTC, minute precision, sortable and identical on every machine; identical to the stored value. */
 function stamp(iso: string): string { return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`; }
+/**
+ * Binary units, one decimal below 100: a size is either exact or the report says it is a lower
+ * bound. Never a rounded-up figure presented as exact.
+ */
+function bytesText(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024; let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]!}`;
+}
 
 export function createHistorySection(doc: Document, host: HistorySectionHost, initial: 'en' | 'zh'): HistorySection {
   let language = initial;
@@ -168,6 +236,12 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   let disposed = false;
   let seq = 0;
   let timer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  /** Last measurement the owner asked for; cleared whenever a mutation makes it stale. */
+  let measured: HistoryStorageReport | null = null;
+  let measuring = false;
+  /** True when the last measurement could not be trusted; the size line then says exactly that. */
+  let storageFailure = false;
+  const measuredChats = new Map<string, number>();
   const listeners: Array<{ element: Element; type: string; handler: (event: Event) => void }> = [];
   const listen = <T extends Element>(element: T, type: string, handler: (event: Event) => void): T => {
     element.addEventListener(type, handler);
@@ -254,7 +328,35 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   confirmButtons.append(confirmDelete, cancel);
   confirm.append(confirmText, confirmButtons);
 
-  box.append(legend, intro, counts, filters, list, truncated, empty, failure, status, actions, confirm);
+  const storage = el(doc, 'div');
+  storage.dataset.zcrHistory = 'storage';
+  const storageHeading = el(doc, 'strong');
+  const storageIntro = el(doc, 'p');
+  storageIntro.className = 'zcr-preferences-muted';
+  const storageScope = el(doc, 'p');
+  storageScope.className = 'zcr-preferences-muted';
+  storageScope.dataset.zcrHistory = 'storage-scope';
+  const storagePath = el(doc, 'p');
+  storagePath.className = 'zcr-preferences-muted';
+  storagePath.dataset.zcrHistory = 'storage-path';
+  storagePath.hidden = true;
+  const storageSize = el(doc, 'p');
+  storageSize.className = 'zcr-preferences-muted';
+  storageSize.dataset.zcrHistory = 'storage-size';
+  const storageNote = el(doc, 'p');
+  storageNote.className = 'zcr-preferences-muted';
+  storageNote.dataset.zcrHistory = 'storage-note';
+  storageNote.hidden = true;
+  const storageChats = el(doc, 'p');
+  storageChats.className = 'zcr-preferences-muted';
+  storageChats.dataset.zcrHistory = 'storage-chats';
+  storageChats.hidden = true;
+  const measure = el(doc, 'button');
+  measure.type = 'button';
+  measure.dataset.zcrHistory = 'measure';
+  storage.append(storageHeading, storageIntro, storageScope, storagePath, storageSize, storageNote, storageChats, measure);
+
+  box.append(legend, intro, counts, filters, list, truncated, empty, failure, status, actions, confirm, storage);
 
   /** Drop listeners whose element is no longer part of the section, so refreshes cannot leak them. */
   function pruneListeners(): void {
@@ -289,6 +391,8 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     if (entry.taskCount) parts.push(copy.tasks(entry.taskCount));
     if (entry.unfinishedWork) parts.push(copy.unfinished);
     if (entry.archivedAt) parts.push(copy.archivedBadge);
+    const bytes = measuredChats.get(entry.id);
+    if (bytes !== undefined) parts.push(bytesText(bytes));
     return parts;
   }
 
@@ -395,6 +499,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     confirmDelete.textContent = copy.confirmDelete;
     empty.textContent = copy.empty;
     renderFilters();
+    renderStorage();
     renderRows();
     renderActions();
     renderConfirm();
@@ -405,6 +510,74 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     const totals = historyCounts(current.entries);
     counts.textContent = query ? copy.matching(totals.total, totals.archived) : copy.stored(totals.total, totals.archived);
     counts.hidden = false;
+  }
+
+  function storageNoteText(report: HistoryStorageReport): string {
+    if (report.complete) return copy.measuredAt(stamp(report.measuredAt));
+    switch (report.stoppedBy) {
+      case 'entries': return copy.stoppedEntries(report.limits.entries);
+      case 'bytes': return copy.stoppedBytes(bytesText(report.limits.bytes));
+      case 'depth': return copy.stoppedDepth(report.limits.depth);
+      case 'entry-type': return copy.stoppedEntryType;
+      default: return copy.stoppedListing;
+    }
+  }
+
+  /**
+   * The report is shown exactly as measured: the location is stated even before measuring, the size
+   * is either an exact measured figure, a stated lower bound, or honestly unavailable — never a
+   * blank and never a guess.
+   */
+  function renderStorage(): void {
+    storageHeading.textContent = copy.storage;
+    storageIntro.textContent = copy.storageIntro;
+    storageScope.textContent = copy.location(measured ? measured.scope : HISTORY_STORAGE_SCOPE);
+    measuredChats.clear();
+    if (measured) for (const chat of measured.chats) measuredChats.set(chat.id, chat.bytes);
+    measure.hidden = !host.readStorageReport;
+    if (!host.readStorageReport) {
+      storageSize.textContent = copy.storageUnavailable;
+      storagePath.hidden = true; storageNote.hidden = true; storageChats.hidden = true;
+      return;
+    }
+    measure.textContent = measuring ? copy.measuring : copy.measure;
+    lock(measure, measuring);
+    if (storageFailure) {
+      // The block itself reports an untrustworthy measurement; no fake number, no extra banner noise.
+      storageSize.textContent = copy.storageFailed;
+      storagePath.hidden = true; storageNote.hidden = true; storageChats.hidden = true;
+      return;
+    }
+    if (!measured) {
+      storageSize.textContent = copy.notMeasured;
+      storagePath.hidden = true; storageNote.hidden = true; storageChats.hidden = true;
+      return;
+    }
+    storageSize.textContent = copy.sizes(bytesText(measured.chatBytes), bytesText(measured.draftBytes), bytesText(measured.otherBytes), measured.files);
+    storagePath.textContent = copy.absolutePath(measured.location);
+    storagePath.hidden = false;
+    storageNote.textContent = storageNoteText(measured);
+    storageNote.hidden = false;
+    storageChats.textContent = measured.chatsComplete ? '' : copy.chatsPartial(measured.chats.length);
+    storageChats.hidden = measured.chatsComplete;
+  }
+
+  /** Only the owner's explicit action measures anything; the walk is bounded inside the host port. */
+  async function measureStorage(): Promise<void> {
+    if (busy || disposed || measuring || !host.readStorageReport) return;
+    measuring = true;
+    renderStorage();
+    try {
+      const raw = await host.readStorageReport();
+      if (!disposed) { measured = isHistoryStorageReport(raw) ? raw : null; storageFailure = measured === null; }
+    } catch {
+      if (!disposed) { measured = null; storageFailure = true; }
+    } finally {
+      measuring = false;
+    }
+    if (disposed) return;
+    renderStorage();
+    renderRows();
   }
 
   function renderConfirm(): void {
@@ -441,6 +614,8 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       } else {
         const report: HistoryMutationReport = raw;
         for (const id of report.changed) selected.delete(id);
+        // The store changed, so a figure measured before it is no longer current. Say so.
+        if (report.changed.length) measured = null;
         outcome = { text: copy.outcome(report.action, report.changed.length, report.requested, report.failed.length), failure: report.partial || report.failed.length > 0 || report.warnings.length > 0 };
       }
     } catch (caught) {
@@ -476,6 +651,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       clearMessages();
       renderCounts();
       renderFilters();
+      renderStorage();
       renderRows();
       renderActions();
       renderConfirm();
@@ -503,6 +679,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     void apply(chosen.every(entry => !!entry.archivedAt) ? 'restore' : 'archive', chosen.map(entry => entry.id));
   });
   listen(deleteSelected, 'click', () => requestDelete([...selected]));
+  listen(measure, 'click', () => { void measureStorage(); });
   listen(confirmDelete, 'click', () => { const ids = pending; pending = null; renderConfirm(); if (ids) void apply('delete', ids); });
   listen(cancel, 'click', () => { pending = null; renderConfirm(); });
 

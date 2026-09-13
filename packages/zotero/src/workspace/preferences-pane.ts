@@ -32,6 +32,11 @@ export interface PreferencesPaneHost {
   readHistory?(query: string): Promise<unknown>;
   setHistoryArchived?(ids: string[], archived: boolean): Promise<unknown>;
   deleteHistory?(ids: string[]): Promise<unknown>;
+  /**
+   * Bounded storage measurement, separately optional: a host without it still gets the full History
+   * list and states that the size is unavailable instead of showing a blank or a guess.
+   */
+  readStorageReport?(): Promise<unknown>;
 }
 export interface PreferencesPane {
   mount(root: Element): Promise<void>;
@@ -226,6 +231,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
         readHistory: query => host.readHistory!(query),
         setHistoryArchived: (ids, archived) => host.setHistoryArchived!(ids, archived),
         deleteHistory: ids => host.deleteHistory!(ids),
+        ...(host.readStorageReport ? { readStorageReport: () => host.readStorageReport!() } : {}),
       }, current?.uiLanguage ?? 'en');
       container.append(historySection.element);
     }

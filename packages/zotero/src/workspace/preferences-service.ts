@@ -1,5 +1,6 @@
 import { ReaderError } from '../../../contracts/src/index.ts';
 import type { ReaderWorkspace, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import { validateHistoryStorageReport } from '../../../contracts/src/workspace-validation.ts';
 import { HistoryManager } from '../../../core/src/workspace/history.ts';
 import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/src/workspace/export.ts';
 
@@ -17,6 +18,11 @@ export interface PreferencesServiceHost {
   /** The plugin preference `extensions.zcr.automaticPdfText`; not part of the workspace store. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
+  /**
+   * Bounded measurement of the plugin's own records store, for the History section's size report.
+   * Optional: a host that omits it renders an honest unavailable state instead of a made-up number.
+   */
+  storageReport?(): Promise<unknown>;
 }
 export interface PreferencesService {
   readSettings(): Promise<string>;
@@ -31,6 +37,11 @@ export interface PreferencesService {
   readHistory(query: string): Promise<string>;
   setHistoryArchived(idsJson: string, archived: boolean): Promise<string>;
   deleteHistory(idsJson: string): Promise<string>;
+  /**
+   * The storage measurement as JSON text. Absent when the host cannot measure; the pane then shows
+   * that size is unavailable rather than a blank or an estimate.
+   */
+  readStorageReport?(): Promise<string>;
 }
 
 /** Ids only: the pane never sends back titles, previews or paper scopes it could have forged. */
@@ -55,7 +66,12 @@ function parseSettings(json: string): WorkspaceSettings {
 }
 
 export function createPreferencesService(host: PreferencesServiceHost): PreferencesService {
+  // Presence, not a flag: a host without a reader simply has no `readStorageReport` to call.
+  const measure = host.storageReport?.bind(host);
   return {
+    ...(measure ? {
+      async readStorageReport(): Promise<string> { return JSON.stringify(validateHistoryStorageReport(await measure())); },
+    } : {}),
     async readSettings(): Promise<string> {
       return JSON.stringify(await (await host.workspace()).settings());
     },
