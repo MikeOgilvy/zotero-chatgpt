@@ -1,6 +1,6 @@
 # 开发、测试与发行
 
-当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a1**。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
+当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a2**。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
 
 四份权威文档分别负责[产品行为](zotero-codex-user-flow.md)、[架构与数据契约](module-design.md)、本文的开发操作、[进度与验收结果](progress.md)。不要再复制旧阶段计划或把单元、宿主、模型、发行证据混写成一个 PASS。
 
@@ -28,11 +28,11 @@ npm run verify:artifacts
 | `npm run verify:install -- <command>` | 本地安装生命周期工具；需要明确子命令，没有通用 `--help` 入口 |
 | `npm run release:dry-run` | 检查本地发行计划，githubRelease=null；不发布或上传 |
 
-当前目标文件名为 `dist/zotero-codex-reader-0.4.0a1-dev.xpi`。不要在文档多处手写 digest；以 `dist/SHA256SUMS`、实际包身份和 progress 为准。
+当前目标文件名为 `dist/zotero-codex-reader-0.4.0a2-dev.xpi`。不要在文档多处手写 digest；以 `dist/SHA256SUMS`、实际包身份和 progress 为准。
 
 ```sh
 npm run verify:install -- build-info \
-  --xpi dist/zotero-codex-reader-0.4.0a1-dev.xpi \
+  --xpi dist/zotero-codex-reader-0.4.0a2-dev.xpi \
   --out .zcr-dev/build-info.json --json
 ```
 
@@ -99,7 +99,7 @@ node scripts/prepare-host-test.mjs --s6
 
 ## 发行边界
 
-0.4.0a1 是开发预览，`update_url` 仍为 zcr-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
+0.4.0a2 是开发预览，`update_url` 仍为 zcr-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
 
 发行前还需以实际最终包完成干净 checkout 重建、无 Node 环境、下载隔离属性、长期性能和多窗口等验收；隔离官方登录、真实输出与图像生成仍未完成。0.3→0.4→0.3 的升级保留记录与回退安全拒绝已在 s6 隔离树验证（见 progress），但这不等于签名公开发行的升级验收。**目前不能从工作树 native 驱动通过推断最终 0.4 XPI 的原生 UI 接线、真实图像生成或公开发行已通过。** 所有结果与未完成门槛只在 progress 更新。
 
