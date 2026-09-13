@@ -505,7 +505,8 @@ async function runHostSmoke(config) {
       const blankSend = panel().querySelector('[data-zcr-action="send"]');
       if (panel().dataset.zcrAuth === 'signedIn' && !blankSend.disabled) {
         click(blankSend);
-        const refused = await until(() => refusalAlert() && !refusalAlert().hidden, 'not-ready-refusal-alert', 30000);
+        // The predicate must return the element, not a boolean, or the check reads attributes off `true`.
+        const refused = await until(() => { const alert = refusalAlert(); return alert && !alert.hidden ? alert : null; }, 'not-ready-refusal-alert', 30000);
         await check('not-ready-send-refuses-with-error-alert',
           refused.getAttribute('role') === 'alert' && /No extractable text/iu.test(refused.textContent || '') && panel().dataset.zcrGenerating !== 'true',
           { message: refused.textContent });
