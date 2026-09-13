@@ -16,7 +16,7 @@ npm run package:dev
 npm run verify:artifacts
 ```
 
-`runtime-prepare.mjs` 仅在固定运行资产需要准备时执行：从 manifest 指定的官方归档获取并校验 Codex 0.144.1 到忽略的 `.zcr-dev/runtime-cache/`。它不替换系统 CLI，也不操作认证。缺少真实运行资产时构建失败，不用测试 fixture 冒充发行包。
+`runtime-prepare.mjs` 仅在固定运行资产需要准备时执行：从 manifest 指定的官方归档获取并校验 Codex 0.154.0 到忽略的 `.zcr-dev/runtime-cache/`。它不替换系统 CLI，也不操作认证。缺少真实运行资产时构建失败，不用测试 fixture 冒充发行包。
 
 | 命令 | 作用与证据边界 |
 | --- | --- |

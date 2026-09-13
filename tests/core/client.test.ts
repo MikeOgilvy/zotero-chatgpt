@@ -14,7 +14,7 @@ const uuid = () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`;
 const requestId = (n: number) => `11111111-0000-4000-8000-${String(n).padStart(12, '0')}`;
 async function setup(configure?: (s: ReturnType<typeof server>) => void, storage = new MemoryStorage(), options: Pick<ReaderOptions, 'generatedImage'> = {}) {
   const s = server(); configure?.(s);
-  const c = await createReaderClient(s.p, storage, { codexVersion: '0.144.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...options }); clients.push(c);
+  const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', ...options }); clients.push(c);
   const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
   return { ...s, storage, c, events };
 }
@@ -235,21 +235,21 @@ describe('runtime handshake and policy', () => {
     const snapshot = c.snapshot(); snapshot.models.length = 0; expect(c.snapshot().models).toHaveLength(2);
     let notified = false; c.observe(() => { notified = true; })(); expect(notified).toBe(true);
   });
-  it.each(['external-mcp', 'wrong-feature', 'managed-layer', 'foreign-user-layer', 'unknown-origin', 'missing-layers', 'thread-endpoint', 'home-mismatch'])('fails closed on effective policy violation: %s', async violation => {
+  it.each(['external-mcp', 'wrong-feature', 'managed-layer', 'foreign-user-layer', 'unknown-origin', 'missing-layers', 'chatgpt-base-url', 'home-mismatch'])('fails closed on effective policy violation: %s', async violation => {
     const s = server(); const fixture = configResponse();
     if (violation === 'external-mcp') fixture.config.mcp_servers = { remote: { url: 'https://example.test' } };
     if (violation === 'wrong-feature') fixture.config.features.shell_tool = true;
     if (violation === 'managed-layer') fixture.layers.push({ name: { type: 'system', file: '/etc/codex/extra.toml' }, config: { approval_policy: 'never' }, version: 'sha256:managed' });
     if (violation === 'foreign-user-layer') fixture.layers[1]!.name.file = '/outside/config.toml';
     if (violation === 'unknown-origin') fixture.origins.approval_policy!.name.type = 'enterpriseManaged';
-    s.handlers.set('config/read', () => violation === 'missing-layers' ? { ...fixture, layers: null } : violation === 'thread-endpoint' ? { ...fixture, config: { ...fixture.config, experimental_thread_config_endpoint: 'https://example.test' } } : fixture);
-    const options = { codexVersion: '0.144.1', cwd: '/isolated', uuid, ...(violation === 'home-mismatch' ? { codexHome: '/isolated/other-account' } : {}) };
+    s.handlers.set('config/read', () => violation === 'missing-layers' ? { ...fixture, layers: null } : violation === 'chatgpt-base-url' ? { ...fixture, config: { ...fixture.config, chatgpt_base_url: 'https://example.test/' } } : fixture);
+    const options = { codexVersion: '0.154.0', cwd: '/isolated', uuid, ...(violation === 'home-mismatch' ? { codexHome: '/isolated/other-account' } : {}) };
     await expect(createReaderClient(s.p, new MemoryStorage(), options)).rejects.toThrow('policy');
     expect(s.p.terminated).toBe(true); expect(methods(s.p)).not.toContain('account/read');
   });
   it('does not accept the expected version only inside a client-supplied user-agent suffix', async () => {
-    const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zcr; 0.144.1)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
-    await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.144.1', cwd: '/isolated', uuid })).rejects.toThrow('version');
+    const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zcr; 0.154.0)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
+    await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid })).rejects.toThrow('version');
     expect(s.p.terminated).toBe(true);
   });
   it('latches overflow once and stops the transport', async () => {
@@ -474,7 +474,7 @@ describe('attachment conversations', () => {
     const report = await c.diagnostics(explain(1).conversationId);
     expect(report).toMatchObject({
       pluginVersion: '0.4.0-alpha.1',
-      runtimeVersion: '0.144.1',
+      runtimeVersion: '0.154.0',
       errorCode: null,
       requestCount: 1,
       storageLocation: 'Zotero profile/zotero-codex-reader/v1/records',
@@ -497,7 +497,7 @@ describe('attachment conversations', () => {
   });
   it('exposes honest accept, first-text and settle times without claiming completion early', async () => {
     const s = server(); const storage = new MemoryStorage(); let current = '2026-09-09T08:00:00.000Z';
-    const c = await createReaderClient(s.p, storage, { codexVersion: '0.144.1', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
+    const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Scheduled timing');
     const input: SendInput = { requestId: requestId(801), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings };

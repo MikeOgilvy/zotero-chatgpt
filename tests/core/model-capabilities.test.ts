@@ -1,9 +1,43 @@
 import { expect, it, vi } from 'vitest';
 import { buildContextBudget, getPinnedModelCapabilities, parseThreadUsage } from '../../packages/core/src/codex/model-capabilities.ts';
+import { PINNED_MODEL_CATALOG } from '../../runtime/model-capabilities.ts';
+import { PINNED_RUNTIME } from '../../runtime/manifest.ts';
 
 it('uses the exact pinned model default window rather than its optional maximum', () => {
-  expect(getPinnedModelCapabilities('gpt-5.4')).toMatchObject({ contextWindow: 272000, maxContextWindow: 1000000, inputModalities: ['text', 'image'], provenance: 'pinned-catalog', runtimeVersion: '0.144.1' });
-  expect(getPinnedModelCapabilities('gpt-5.6-sol')).toMatchObject({ contextWindow: 372000, maxContextWindow: 372000 });
+  expect(getPinnedModelCapabilities('gpt-5.4')).toMatchObject({ contextWindow: 272000, maxContextWindow: 1000000, inputModalities: ['text', 'image'], provenance: 'pinned-catalog', runtimeVersion: '0.154.0' });
+  expect(getPinnedModelCapabilities('gpt-5.6-sol')).toMatchObject({ contextWindow: 272000, maxContextWindow: 872000 });
+});
+
+it('keeps the pinned catalog identity welded to the manifest binary identity', () => {
+  // If either literal drifts from the manifest the identities disagree and every lookup silently returns null.
+  expect(PINNED_MODEL_CATALOG.runtimeVersion).toBe(PINNED_RUNTIME.codexVersion);
+  expect(PINNED_MODEL_CATALOG.runtimeSha256).toBe(PINNED_RUNTIME.sha256);
+});
+
+it('resolves every embedded catalog id so a manifest bump cannot silently empty the model picker', () => {
+  const expected: Record<string, [contextWindow: number, maxContextWindow: number]> = {
+    'gpt-6-astra': [272000, 872000],
+    'gpt-5.6-sol': [272000, 872000],
+    'gpt-5.6-terra': [272000, 872000],
+    'gpt-5.6-luna': [272000, 872000],
+    'gpt-daybreak-blue-latest': [272000, 872000],
+    'gpt-daybreak-red-latest': [372000, 372000],
+    'gpt-5.5': [272000, 272000],
+    'gpt-5.4': [272000, 1000000],
+    'gpt-5.4-mini': [272000, 272000],
+    'gpt-5.2': [272000, 272000],
+    'codex-auto-review': [272000, 872000],
+  };
+  expect(Object.keys(PINNED_MODEL_CATALOG.models)).toEqual(Object.keys(expected));
+  for (const [id, [contextWindow, maxContextWindow]] of Object.entries(expected)) {
+    expect(getPinnedModelCapabilities(id), `${id} must resolve from the pinned catalog`).toMatchObject({ contextWindow, maxContextWindow, inputModalities: ['text', 'image'], provenance: 'pinned-catalog', runtimeVersion: PINNED_RUNTIME.codexVersion });
+  }
+});
+
+it('lists gpt-6-astra first, matching the newest-first runtime order that feeds the composer default', () => {
+  // model/list pages newest-first and the composer default is the first visible entry, so the
+  // embedded catalog order is the offline mirror of the account's default model.
+  expect(Object.keys(PINNED_MODEL_CATALOG.models)[0]).toBe('gpt-6-astra');
 });
 
 it.each(['gpt-5.6-sol-future', 'GPT-5.6-Sol', ' gpt-5.6-sol', 'unlisted-model', '__proto__'])('leaves unmatched model %s unknown', model => {
@@ -12,7 +46,7 @@ it.each(['gpt-5.6-sol-future', 'GPT-5.6-Sol', ' gpt-5.6-sol', 'unlisted-model', 
 
 it('does not reuse a catalog after the declared binary identity changes', async () => {
   vi.resetModules();
-  vi.doMock('../../runtime/manifest.ts', () => ({ PINNED_RUNTIME: { codexVersion: '0.144.1', sha256: 'different-binary' } }));
+  vi.doMock('../../runtime/manifest.ts', () => ({ PINNED_RUNTIME: { codexVersion: PINNED_RUNTIME.codexVersion, sha256: 'different-binary' } }));
   try {
     const changed = await import('../../packages/core/src/codex/model-capabilities.ts');
     expect(changed.getPinnedModelCapabilities('gpt-5.6-sol')).toBeNull();

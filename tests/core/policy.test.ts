@@ -5,7 +5,7 @@ import { parseModel } from '../../packages/core/src/codex/models.ts';
 import { citationA, imageA, paperA } from '../contracts/factories.ts';
 import type { DocumentContext } from '../../packages/contracts/src/index.ts';
 it('accepts the pinned server echo for the default service tier and names the field that differs', () => {
-  // Live 0.144.1 probe: a null (catalog default) tier is echoed as "default"; an explicit tier is echoed verbatim.
+  // Live 0.144.1/0.154.0 probes: a null (catalog default) tier is echoed as "default"; an explicit tier is echoed verbatim.
   const paper = { ephemeral: false, emptyHistory: true };
   const defaultTier = resolveSettings({ model: 'catalog-default', serviceTier: null, effort: null }, parseModel(model)!);
   expect(defaultTier.effort).toBe('medium');
@@ -71,7 +71,7 @@ it('injects bibliographic paper identity on ask even without a citation', () => 
   expect(parsed.citations).toEqual([]);
   expect(text).not.toMatch(/full paper|整篇 PDF|upload/iu);
 });
-it('sends rust-v0.144.1 image input items after the reading text, never a remote URL or the PDF', () => {
+it('sends rust-v0.154.0 image input items after the reading text, never a remote URL or the PDF', () => {
   const settings = resolveSettings({ model: 'catalog-default', serviceTier: null, effort: null }, parseModel(model)!);
   const text = readingInput({
     requestId: 'r', conversationId: 'c', action: 'ask', question: '图里的符号是什么？', citations: [],
@@ -108,7 +108,7 @@ it('pins global read-only defaults, rejects unrecognized configuration and keeps
   expect(args).toContain('--strict-config');
   for (const flag of ['approval_policy="never"', 'sandbox_mode="read-only"', 'default_permissions=":read-only"', 'approvals_reviewer="user"', 'history.persistence="none"', 'features.memories=false', 'features.remote_control=false']) expect(args).toContain(flag);
 });
-it('accepts the observed 0.144.1 effective policy and rejects each weakened variant', () => {
+it('accepts the observed 0.154.0 effective policy and rejects each weakened variant', () => {
   expect(() => validatePolicy(configResponse(), '/isolated/auth')).not.toThrow();
   const weakened: Array<[string, (fixture: ReturnType<typeof configResponse>) => void]> = [
     ['history persisted by Codex', f => { f.config.history.persistence = 'save-all'; }],
@@ -123,6 +123,18 @@ it('accepts the observed 0.144.1 effective policy and rejects each weakened vari
     const fixture = configResponse(); weaken(fixture);
     expect(() => validatePolicy(fixture, '/isolated/auth'), label).toThrow('policy');
   }
+});
+it('pins the two 0.154.0 policy changes: a non-null ChatGPT base URL and no thread-config endpoint', () => {
+  // The pinned 0.154.0 binary now defaults chatgpt_base_url and dropped the endpoint key from its
+  // schema. A wrong base URL must still fail closed; a stale endpoint key is simply unrecognized.
+  const fixture = configResponse();
+  const config = fixture.config as Record<string, unknown>;
+  expect(config.chatgpt_base_url).toBe('https://chatgpt.com/backend-api/');
+  expect('experimental_thread_config_endpoint' in config).toBe(false);
+  expect(() => validatePolicy(fixture, '/isolated/auth')).not.toThrow();
+  const weakened = configResponse();
+  (weakened.config as Record<string, unknown>).chatgpt_base_url = null;
+  expect(() => validatePolicy(weakened, '/isolated/auth')).toThrow('policy');
 });
 it('tolerates additional benign keys and empty managed layers reported by the pinned binary', () => {
   const fixture = configResponse();

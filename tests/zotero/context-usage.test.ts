@@ -21,7 +21,7 @@ it('reports the last runtime input usage, never remaining context', () => {
 });
 
 it('uses the pinned catalog window only as a fallback and admits an unknown window otherwise', () => {
-  expect(currentContextUsage('gpt-5.6-sol', usage({ contextWindow: null }))).toEqual({ usedTokens: 12345, window: 372000, provenance: 'pinned-catalog' });
+  expect(currentContextUsage('gpt-5.6-sol', usage({ contextWindow: null }))).toEqual({ usedTokens: 12345, window: 272000, provenance: 'pinned-catalog' });
   expect(currentContextUsage('unknown-model', usage({ model: 'unknown-model', contextWindow: null }))).toEqual({ usedTokens: 12345, window: null, provenance: 'unknown' });
 });
 
@@ -79,7 +79,7 @@ it('releases the ring into a used/window arc once a window is known', () => {
   ring.update(currentContextUsage('gpt-5.6-sol', usage({ contextWindow: null })));
   expect(ring.element.dataset.zcrContextState).toBe('pinned-catalog');
   expect(ring.element.title).toContain('bundled catalog estimate');
-  expect(fillStroke(ring)!.split(' ').map(Number)[0]! / 50.27).toBeCloseTo(12345 / 372000, 4);
+  expect(fillStroke(ring)!.split(' ').map(Number)[0]! / 50.27).toBeCloseTo(12345 / 272000, 4);
 
   // A full window caps the arc at one full circumference rather than overdrawing the ring.
   ring.update({ usedTokens: 999_999, window: 372000, provenance: 'runtime-reported' });

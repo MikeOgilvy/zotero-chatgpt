@@ -2,8 +2,8 @@ import { RuntimeFailure, type ModelOption } from '../../../contracts/src/runtime
 import type { GenerationSettings, ImageAttachment, Message, PaperIdentity, SendInput } from '../../../contracts/src/index.ts';
 import { record } from './transport.ts';
 import { string } from './models.ts';
-// Audited against rust-v0.144.1 and a live isolated config/read probe of the pinned
-// binary (2026-09-09). The native adapter removes the execution environment
+// Audited against rust-v0.154.0 and a live isolated config/read probe of the pinned
+// binary (2026-09-13). The native adapter removes the execution environment
 // (environments.toml include_local=false, CODEX_EXEC_SERVER_URL=none); these flags
 // remove the remaining optional capabilities, and validatePolicy checks the
 // effective result before the runtime is usable.
@@ -36,8 +36,8 @@ const expectedPolicy: Record<string, unknown> = {
   approval_policy: 'never', approvals_reviewer: 'user', sandbox_mode: 'read-only', default_permissions: ':read-only',
   cli_auth_credentials_store: 'file', web_search: 'disabled', project_doc_max_bytes: 0, allow_login_shell: false,
   check_for_update_on_startup: false, include_apps_instructions: false, include_collaboration_mode_instructions: false, include_environment_context: false,
-  model_provider: null, openai_base_url: null, chatgpt_base_url: null, notify: null, hooks: null,
-  experimental_thread_config_endpoint: null, experimental_thread_store_endpoint: null,
+  model_provider: null, openai_base_url: null, chatgpt_base_url: 'https://chatgpt.com/backend-api/', notify: null, hooks: null,
+  experimental_thread_store_endpoint: null,
   mcp_servers: {}, plugins: {}, marketplaces: {}, model_providers: {},
   analytics: { enabled: false }, feedback: { enabled: false },
   skills: { include_instructions: false, bundled: { enabled: false } },
@@ -145,7 +145,7 @@ export function readingInput(input: SendInput, reuseDocument = false, history: r
 /** Checks a thread/start or thread/resume response against the frozen request; names the first field that differs. */
 export function validateThread(value: unknown, cwd: string, settings: ResolvedSettings, expectation: { ephemeral: boolean; emptyHistory: boolean }): string {
   const response = record(value); const thread = record(response.thread); const sandbox = record(response.sandbox);
-  // Live 0.144.1 probe: a null (catalog default) tier is echoed as "default"; explicit tiers verbatim.
+  // Live 0.144.1/0.154.0 probes: a null (catalog default) tier is echoed as "default"; explicit tiers verbatim.
   const tier = settings.serviceTier ?? 'default';
   const roots = response.runtimeWorkspaceRoots;
   const checks: Array<[string, boolean]> = [

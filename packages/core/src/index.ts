@@ -13,10 +13,10 @@ export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => 
 export async function createReaderClient(process: ManagedProcess, storage: StoragePort, options: ReaderOptions): Promise<ReaderClient> {
   let rpc: RpcTransport | null = null;
   try {
-    if (options.codexVersion !== '0.144.1' || !options.cwd) throw new RuntimeFailure('Unsupported runtime version or directory');
+    if (options.codexVersion !== '0.154.0' || !options.cwd) throw new RuntimeFailure('Unsupported runtime version or directory');
     rpc = new RpcTransport(process);
     const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero Codex Reader', version: options.pluginVersion ?? 'unknown' }, capabilities: { experimentalApi: false } }));
-    if (typeof response.userAgent !== 'string' || !/^[^/]+\/0\.144\.1(?:\s|$)/u.test(response.userAgent)) throw new RuntimeFailure('Unsupported runtime version');
+    if (typeof response.userAgent !== 'string' || !/^[^/]+\/0\.154\.0(?:\s|$)/u.test(response.userAgent)) throw new RuntimeFailure('Unsupported runtime version');
     const codexHome = typeof response.codexHome === 'string' ? response.codexHome : '';
     if (!codexHome.startsWith('/') || (options.codexHome !== undefined && options.codexHome !== codexHome)) throw new RuntimeFailure('Reader policy unavailable: the runtime is not using the dedicated account directory');
     await rpc.notify('initialized');
@@ -248,6 +248,7 @@ class RuntimeSession implements ReaderClient {
   get(conversationId: string): Promise<Conversation> { return this.service.get(conversationId); }
   select(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.select(paper, conversationId); }
   renameConversation(conversationId: string, title: string): Promise<Conversation> { return this.service.renameConversation(conversationId, title); }
+  archiveConversation(conversationId: string, archived: boolean): Promise<Conversation> { return this.service.archiveConversation(conversationId, archived); }
   branchConversation(conversationId: string, messageId: string): Promise<Conversation> { return this.service.branchConversation(conversationId, messageId); }
   deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.deleteConversation(paper, conversationId); }
   send(input: SendInput): Promise<SendReceipt> { return this.service.send(input); }

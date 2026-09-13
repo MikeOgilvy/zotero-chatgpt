@@ -1,7 +1,7 @@
 import { FakeProcess } from './doubles.ts';
 export const model = { id: 'catalog-entry', model: 'catalog-default', upgrade: null, upgradeInfo: null, availabilityNux: null, displayName: 'Catalog Default', description: 'Test fixture', hidden: false, supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }], defaultReasoningEffort: 'medium', inputModalities: ['text'], supportsPersonality: false, additionalSpeedTiers: [], serviceTiers: [{ id: 'priority', name: 'Priority', description: 'Priority service' }], defaultServiceTier: 'priority', isDefault: true };
 // Paper threads are kept by the plugin-private Codex home (ephemeral: false) so they can be resumed.
-export const thread = { id: 'thread-1', sessionId: 'session-1', forkedFromId: null, parentThreadId: null, preview: '', ephemeral: false, modelProvider: 'openai', createdAt: 1, updatedAt: 1, recencyAt: null, status: { type: 'idle' }, path: null, cwd: '/isolated', cliVersion: '0.144.1', source: 'appServer', threadSource: null, agentNickname: null, agentRole: null, gitInfo: null, name: null, turns: [] };
+export const thread = { id: 'thread-1', sessionId: 'session-1', forkedFromId: null, parentThreadId: null, preview: '', ephemeral: false, modelProvider: 'openai', createdAt: 1, updatedAt: 1, recencyAt: null, status: { type: 'idle' }, path: null, cwd: '/isolated', cliVersion: '0.154.0', source: 'appServer', threadSource: null, agentNickname: null, agentRole: null, gitInfo: null, name: null, turns: [] };
 export const threadResponse = { thread, model: model.model, modelProvider: 'openai', serviceTier: 'priority', cwd: '/isolated', instructionSources: [], approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false }, reasoningEffort: 'medium' };
 export const turn = { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1, completedAt: null, durationMs: null };
 export function server() {
@@ -9,7 +9,7 @@ export function server() {
   const handlers = new Map<string, (params: Record<string, unknown>, id: unknown) => unknown>();
   let threads = 0; let turns = 0;
   const imagePermissions = new Map<string, boolean>();
-  handlers.set('initialize', () => ({ userAgent: 'codex/0.144.1', codexHome: '/isolated/auth', platformFamily: 'unix', platformOs: 'macos' }));
+  handlers.set('initialize', () => ({ userAgent: 'codex/0.154.0', codexHome: '/isolated/auth', platformFamily: 'unix', platformOs: 'macos' }));
   handlers.set('config/read', () => configResponse());
   handlers.set('account/read', () => ({ account: { type: 'chatgpt', email: 'private@example.test', planType: 'plus' }, requiresOpenaiAuth: true }));
   handlers.set('model/list', () => ({ data: [model], nextCursor: null }));
@@ -43,8 +43,8 @@ export function server() {
   return { p, handlers };
 }
 export function methods(p: FakeProcess) { return p.writes.map(line => (JSON.parse(line) as { method: string }).method); }
-// Sanitized 0.144.1 config/read shape, mirroring a live isolated probe of the pinned
-// binary launched with the plugin policy (2026-09-09). Configuration is explicitly
+// Sanitized 0.154.0 config/read shape, mirroring a live isolated probe of the pinned
+// binary launched with the plugin policy (2026-09-13). Configuration is explicitly
 // authored at this external boundary; it is not derived from production launch arguments.
 export const policyConfig = {
   model: null, review_model: null, model_context_window: null, model_auto_compact_token_limit: null, model_auto_compact_token_limit_scope: null, model_provider: null,
@@ -54,11 +54,11 @@ export const policyConfig = {
   analytics: { enabled: false }, apps: null, plugins: {}, openai_base_url: null, marketplaces: {}, check_for_update_on_startup: false, permissions: null,
   hooks: null, experimental_thread_store_endpoint: null, notice: null, project_doc_max_bytes: 0, notify: null, mcp_oauth_callback_url: null,
   allow_login_shell: false, experimental_thread_store: null, cli_auth_credentials_store: 'file', feedback: { enabled: false },
-  default_permissions: ':read-only', experimental_thread_config_endpoint: null, hide_agent_reasoning: false,
+  default_permissions: ':read-only', hide_agent_reasoning: false,
   skills: { bundled: { enabled: false }, include_instructions: false },
   features: { network_proxy: null, apps: false, auth_elicitation: false, browser_use: false, browser_use_external: false, browser_use_full_cdp_access: false, code_mode_host: false, computer_use: false, goals: false, hooks: false, image_generation: false, in_app_browser: false, mentions_v2: false, multi_agent: false, plugin_sharing: false, plugins: false, remote_plugin: false, shell_snapshot: false, shell_tool: false, skill_mcp_dependency_install: false, tool_call_mcp_elicitation: false, tool_suggest: false, unified_exec: false, workspace_dependencies: false, memories: false, remote_control: false },
   orchestrator: { skills: { enabled: false }, mcp: { enabled: false } }, model_providers: {}, project_root_markers: null, project_doc_fallback_filenames: [],
-  include_collaboration_mode_instructions: false, chatgpt_base_url: null, include_environment_context: false,
+  include_collaboration_mode_instructions: false, chatgpt_base_url: 'https://chatgpt.com/backend-api/', include_environment_context: false,
   shell_environment_policy: { inherit: null, ignore_default_excludes: null, exclude: null, set: null, include_only: null, experimental_use_profile: null },
   profile: null, sqlite_home: null, profiles: {}, include_apps_instructions: false, memories: null, mcp_servers: {}, projects: null,
   history: { persistence: 'none', max_bytes: null },

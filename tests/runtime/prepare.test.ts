@@ -3,13 +3,14 @@ import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { prepareRuntime, type RuntimeHost } from '../../packages/zotero/src/runtime/prepare.ts';
+import { PINNED_RUNTIME } from '../../runtime/manifest.ts';
 import { nodeFiles } from './files-fixture.ts';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 it('prepares only private profile state and resets executable environments before every spawn', async () => {
   const profile = await mkdtemp(path.join(tmpdir(), 'zcr-私有 profile-')); roots.push(profile);
   const host: RuntimeHost = { ...nodeFiles(), os: 'Darwin', abi: 'aarch64-gcc3', profileDir: profile, load: () => Promise.resolve(new TextEncoder().encode('abc')) };
-  const manifest = { codexVersion: '0.144.1', platform: 'darwin', architecture: 'arm64', entry: 'content/runtime/codex-aarch64-apple-darwin', size: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' };
+  const manifest = { codexVersion: PINNED_RUNTIME.codexVersion, platform: 'darwin', architecture: 'arm64', entry: 'content/runtime/codex-aarch64-apple-darwin', size: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' };
   const prepared = await prepareRuntime(host, 'jar:file:///extension.xpi!/', manifest);
   const { env, cwd, executable } = prepared.spec; const privateRoot = path.join(profile, 'zotero-codex-reader/v1');
   expect(cwd).toBe(path.join(privateRoot, 'scratch')); expect(executable.startsWith(privateRoot + '/runtime/')).toBe(true);
