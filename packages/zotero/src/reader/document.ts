@@ -26,6 +26,8 @@ export function cancelled(): ReaderError { return new ReaderError('INVALID_REQUE
 function checkSignal(signal: AbortSignal): void { if (signal.aborted) throw cancelled(); }
 /** Stop waiting for a worker without destroying the PDF document owned by Zotero. */
 async function interruptible<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  // The loser of the race must not surface as an unhandled rejection when the caller cancels.
+  void work.catch(() => {});
   checkSignal(signal);
   let abort: () => void = () => {};
   try {
@@ -83,18 +85,33 @@ export class ReaderDocumentCache {
   clear(): void { this.entries.clear(); }
 }
 
-/** Narrow native source access. Paths stay in this adapter and are never sent or persisted. */
-export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReader | undefined, scope: PaperScope) {
+const READY_POLL_MS = 50;
+const READY_ATTEMPTS = 40;
+/**
+ * Narrow native source access. Paths stay in this adapter and are never sent or persisted.
+ * `delay` is injectable so the bounded PDF-readiness wait is deterministic under test.
+ */
+export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReader | undefined, scope: PaperScope, options: { delay?(milliseconds: number): Promise<void> } = {}) {
   const loadedVersions = new WeakMap<TextPdf, string>();
+  const wait = options.delay ?? ((milliseconds: number) => new Promise<void>(resolve => { globalThis.setTimeout(resolve, milliseconds); }));
   const capture = (signal?: AbortSignal): Promise<DocumentSource> => {
     const work = (async () => {
     try {
       const hostReader = reader();
       const item = hostReader && zotero.Items.get(hostReader.itemID);
       if (!hostReader || !item || item.key !== scope.attachmentKey || item.libraryID !== scope.libraryId) throw new Error();
-      const view = hostReader._internalReader?._primaryView ?? hostReader._internalReader?._lastView;
-      await view?.initializedPromise;
-      const pdf = view?._iframeWindow?.PDFViewerApplication?.pdfDocument;
+      const viewOf = () => hostReader._internalReader?._primaryView ?? hostReader._internalReader?._lastView;
+      await viewOf()?.initializedPromise;
+      // A panel opened before the reader finishes loading would otherwise fail once and leave the
+      // context card at "text not ready" until the user reopens or clicks again. Wait, bounded and
+      // cancellable, for the native document instead of turning a slow load into a permanent error.
+      let pdfDocument = viewOf()?._iframeWindow?.PDFViewerApplication?.pdfDocument;
+      for (let attempt = 0; !pdfDocument && attempt < READY_ATTEMPTS; attempt++) {
+        if (signal?.aborted) throw cancelled();
+        await wait(READY_POLL_MS);
+        pdfDocument = viewOf()?._iframeWindow?.PDFViewerApplication?.pdfDocument;
+      }
+      const pdf = pdfDocument;
       const path = await item.getFilePathAsync?.();
       if (!pdf || !path) throw new Error();
       const io = (globalThis as unknown as { IOUtils: { stat(path: string): Promise<{ size: number; lastModified: number }>; computeHexDigest(path: string, algorithm: 'sha256'): Promise<string> } }).IOUtils;
@@ -114,7 +131,7 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
       const loaded = loadedVersions.get(pdf);
       if (loaded && loaded !== key) throw new ReaderError('INVALID_REQUEST', 'The PDF file changed. Reopen this PDF before asking again.');
       loadedVersions.set(pdf, key);
-      const nativeWindow = view._iframeWindow;
+      const nativeWindow = viewOf()?._iframeWindow;
       if (!nativeWindow) throw new Error();
       const cu = (globalThis as unknown as { Cu: { cloneInto(value: object, target: object): { pageIndex: number } } }).Cu;
       return { revision, pdf: {

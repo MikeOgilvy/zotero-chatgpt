@@ -97,6 +97,16 @@ describe('conversation presenter', () => {
     expect(f.sent).toHaveLength(0); expect(presenter.snapshot().draft.question).toBe('Keep this');
     expect(presenter.snapshot().message).toMatch(/cancelled/iu);
   });
+  it('prepares the current PDF locally on activation without creating a model request', async () => {
+    const f = fixture();
+    const prepare = vi.fn(() => Promise.resolve(documentA)); const validate = vi.fn(async () => {});
+    const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} } });
+    await presenter.activate();
+    await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
+    expect(prepare).toHaveBeenCalledTimes(1); expect(validate).toHaveBeenCalledTimes(1);
+    expect(presenter.snapshot().document.prepared).toEqual(documentA);
+    expect(f.sent).toHaveLength(0);
+  });
   it('keeps PDF failures visible and never sends a bibliographic-only substitute', async () => {
     const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
       prepare: () => Promise.reject(new Error('PDF unavailable.')), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
