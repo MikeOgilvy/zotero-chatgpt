@@ -77,6 +77,33 @@ it('translates workflow and reference action labels without translating dynamic 
   locale.update('en'); expect(button.title).toBe('Try Send in draft'); locale.dispose();
 });
 
+it('localizes model-context, task-scope, workflow-source and profile-delete templates while keeping identifiers verbatim', () => {
+  const { root, add } = setup();
+  const context = add('div', 'zcr-document-context');
+  const unknown = add('p', '', 'Model context window: unknown. Figures and complex formulas may need page images. Text is not silently truncated.', context);
+  const known = add('p', '', 'Model context window: 12,000 tokens · runtime reported. Last source budget: 8,000 tokens after 4,000 reserved; text sizing is an estimate. Figures and complex formulas may need page images. Text is not silently truncated.', context);
+  const card = add('details', 'zcr-task-card'); const body = add('div', 'zcr-task-body', '', card);
+  const pdfScope = add('p', 'zcr-task-muted', 'PDF PDFONE01 · candidate pages 1, 3', body);
+  const emptyScope = add('p', 'zcr-task-muted', 'PDF PDFONE01 · candidate pages none', body);
+  const collectionScope = add('p', 'zcr-task-muted', 'Target collection: My Papers', body);
+  const editor = add('div', 'zcr-workspace-editor');
+  const source = add('p', 'zcr-workspace-muted', 'Source: user\nPermissions: read, write\nUnsupported dependencies: none', editor);
+  const settings = add('div', 'zcr-workspace-settings'); const skill = add('details', '', '', settings); const actions = add('div', 'zcr-workspace-actions', '', skill); const prompt = add('span', '', 'Delete Derive?', actions);
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(unknown.textContent).toBe('模型上下文窗口：未知。图表和复杂公式可能需要页面图像。不会静默截断文本。');
+  expect(known.textContent).toContain('12,000 词元');
+  expect(known.textContent).toContain('上次来源预算：预留 4,000 后为 8,000 词元');
+  expect(pdfScope.textContent).toBe('PDF PDFONE01 · 候选页 1, 3');
+  expect(emptyScope.textContent).toBe('PDF PDFONE01 · 候选页 无');
+  expect(collectionScope.textContent).toBe('目标分类：My Papers');
+  expect(source.textContent).toBe('来源：user\n权限：read, write\n不支持的依赖：无');
+  expect(prompt.textContent).toBe('删除 Derive？');
+  locale.update('en');
+  expect(unknown.textContent).toBe('Model context window: unknown. Figures and complex formulas may need page images. Text is not silently truncated.');
+  expect(pdfScope.textContent).toBe('PDF PDFONE01 · candidate pages 1, 3');
+  expect(prompt.textContent).toBe('Delete Derive?'); locale.dispose();
+});
+
 it('stays inside its pane and stops observing after disposal', async () => {
   const { document, root, add } = setup(); const outside = add('button', 'zcr-button', 'Send', document.body); const inside = add('button', 'zcr-button', 'Send');
   const locale = mountUILocale(root); locale.update('zh'); expect(inside.textContent).toBe('发送'); expect(outside.textContent).toBe('Send');

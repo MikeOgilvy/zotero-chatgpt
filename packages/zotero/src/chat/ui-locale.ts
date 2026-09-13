@@ -95,7 +95,7 @@ const TEXT = [
   '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-document-context > summary', '.zcr-document-context > p',
   '.zcr-context-disclosure > p', '.zcr-context-pages details > summary', '.zcr-sent-context > strong', '.zcr-sent-context > p',
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
-  '.zcr-workspace-settings > details > div > p.zcr-workspace-muted',
+  '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
   '.zcr-workspace-settings select[name="detail"] option', '.zcr-workspace-settings select[name="mathematics"] option',
   '.zcr-workspace-settings select[name="workflow"] option', '.zcr-workspace-settings select[name="override-detail"] option',
   '.zcr-workspace-settings select[name="override-mathematics"] option', '[data-zcr-profile] option[value=""]',
@@ -140,6 +140,22 @@ function progress(text: string): string {
   if (match) return `本地文本：${match[1]} 页。${match[2]} 页无文本；${match[3]} 页提取失败；${match[4]} 页部分提取。所选范围之外有 ${match[5]} 页。`;
   match = /^Review (\d+) annotation suggestions$/u.exec(text);
   if (match) return `审核 ${match[1]} 条标注建议`;
+  match = /^Model context window: unknown\. Figures and complex formulas may need page images\. Text is not silently truncated\.$/u.exec(text);
+  if (match) return '模型上下文窗口：未知。图表和复杂公式可能需要页面图像。不会静默截断文本。';
+  match = /^Model context window: ([\d,]+) tokens · (runtime reported|bundled catalog estimate)\.(?: Last source budget: ([\d,]+) tokens after ([\d,]+|\?) reserved; text sizing is an estimate\.)? Figures and complex formulas may need page images\. Text is not silently truncated\.$/u.exec(text);
+  if (match) {
+    const origin = match[2] === 'runtime reported' ? '运行时报告' : '内置目录估算';
+    const budget = match[3] ? `上次来源预算：预留 ${match[4]} 后为 ${match[3]} 词元；文本规模为估算值。` : '';
+    return `模型上下文窗口：${match[1]} 词元 · ${origin}。${budget}图表和复杂公式可能需要页面图像。不会静默截断文本。`;
+  }
+  match = /^PDF (\S+) · candidate pages (.+)$/u.exec(text);
+  if (match) return `PDF ${match[1]} · 候选页 ${match[2] === 'none' ? '无' : match[2]}`;
+  match = /^Target collection: (.*)$/u.exec(text);
+  if (match) return `目标分类：${match[1]}`;
+  match = /^Source: (\S+)\nPermissions: (.*)\nUnsupported dependencies: (.*)$/u.exec(text);
+  if (match) return `来源：${match[1]}\n权限：${match[2] === 'none' ? '无' : match[2]}\n不支持的依赖：${match[3] === 'none' ? '无' : match[3]}`;
+  match = /^Delete (.+)\?$/u.exec(text);
+  if (match) return `删除 ${match[1]}？`;
   match = /^Metadata saved; PDF unavailable \((no doi|no oa candidate|existing pdf|download failed|file type mismatch|identity unconfirmed|supplementary|file too large)\)$/u.exec(text);
   if (match) {
     const reason: Readonly<Record<string, string>> = { 'no doi': '无 DOI', 'no oa candidate': '无开放获取来源', 'existing pdf': '已有 PDF', 'download failed': '下载失败', 'file type mismatch': '文件类型不符', 'identity unconfirmed': '文献身份未确认', supplementary: '补充材料', 'file too large': '文件过大' };

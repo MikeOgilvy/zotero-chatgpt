@@ -52,7 +52,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
     let task = initial; let previousState = initial.state; let userToggled = false; let removed = false;
     const node = create('details', '', 'zcr-task-card'); node.dataset.zcrTaskId = task.id; node.open = !['completed', 'undone'].includes(task.state);
     const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
-    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-scope');
+    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-muted'); scope.dataset.zcrTaskScope = '';
     const counts = create('p', '', 'zcr-task-muted zcr-task-counts'); counts.setAttribute('role', 'status');
     const rows = create('div'); const guidance = create('p', '', 'zcr-task-muted'); const error = create('p', '', 'zcr-task-error'); error.setAttribute('role', 'alert'); error.hidden = true;
     const controls = create('div', '', 'zcr-task-actions'); body.append(question, scope, counts, rows, guidance, error, controls); node.append(summary, body);

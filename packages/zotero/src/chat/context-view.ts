@@ -18,7 +18,7 @@ export function mountDocumentContext(parent: HTMLElement, settings: HTMLElement,
   const summary = el('summary', 'Current PDF'); summary.setAttribute('aria-label', 'Current PDF context');
   const status = el('p'); status.setAttribute('role', 'status');
   const coverage = el('p');
-  const limits = el('p', 'Model context window: unknown. Text is not silently truncated. Figures and complex formulas may need page images.');
+  const limits = el('p', 'Model context window: unknown. Figures and complex formulas may need page images. Text is not silently truncated.');
   const sent = el('div'); sent.className = 'zcr-sent-context'; sent.dataset.zcrSentContext = '';
   const controls = el('div'); controls.className = 'zcr-context-range';
   const first = el('input'); const last = el('input');
