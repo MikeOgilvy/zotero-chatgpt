@@ -60,7 +60,7 @@ async function runHostSmoke(config) {
     const openPage = rows[1].querySelector('button'); openPage.click();
     await until(() => pdf().pdfViewer.currentPageNumber === 2, 'source-navigation');
     toggle().click(); await until(() => !panel(), 'close-sidebar');
-    await check('close-preserves-current-page', pdf().pdfViewer.currentPageNumber === 2);
+    await check('close-preserves-current-page', pdf().pdfViewer.currentPageNumber === 2, { page: pdf().pdfViewer.currentPageNumber });
     toggle().click(); await until(() => panel()?.dataset.zcrConversation === conversationA, 'same-conversation-restored');
     await check('draft-preserved', input().value === 'Unsent synthetic question about the current PDF');
     const readRange = context().querySelectorAll('input'); readRange[0].value = '2'; readRange[1].value = '2';
@@ -137,6 +137,81 @@ async function runHostSmoke(config) {
       const data = typeof doc.getData === 'function' ? await doc.getData() : null;
       report.loadedDocumentBytes = { supported: !!data?.byteLength, bytes: data?.byteLength ?? 0 };
     } catch { report.loadedDocumentBytes = { supported: false }; }
+
+    // --- Native Preferences pane preflight (bounded addition; does not touch the checks above) ---
+    // Observed on the installed subject XPI only. The visual pane, native theming and keyboard
+    // focus are explicitly not verifiable here and stay in notRun.
+    report.notRun.push('pref-pane-visual-theme-and-keyboard');
+    report.notRun.push('pref-pane-registrar-isolated-from-host-auto-unregister');
+    step = 'preferences-pane-preflight';
+    const PANE_ID = 'zcr-prefpane-settings';
+    const panePanes = () => (Array.isArray(Zotero.PreferencePanes?.pluginPanes) ? Zotero.PreferencePanes.pluginPanes.filter(pane => pane && pane.id === PANE_ID) : null);
+    const waive = value => { try { return Cu.waiveXrays(value); } catch { return value; } };
+    const firstPane = () => { const entries = panePanes(); return entries && entries[0] ? waive(entries[0]) : null; };
+    const paneDetails = () => {
+      const pane = firstPane();
+      return {
+        paneCount: panePanes()?.length ?? null,
+        id: pane ? String(pane.id) : null,
+        pluginID: pane ? String(pane.pluginID) : null,
+        pluginIDMatches: Boolean(pane && String(pane.pluginID) === config.subjectID),
+        src: pane ? String(pane.src) : null,
+        label: pane ? String(pane.rawLabel) : null,
+        scripts: pane && Array.isArray(pane.scripts) ? pane.scripts.map(String) : [],
+      };
+    };
+    const identity = paneDetails();
+    await check('pref-pane-registered-once-after-startup',
+      identity.paneCount === 1 && identity.pluginIDMatches &&
+      typeof identity.src === 'string' && identity.src.endsWith('content/preferences/preferences.xhtml') &&
+      identity.label === 'Zotero Codex Reader' &&
+      identity.scripts.length === 1 && identity.scripts[0].endsWith('content/preferences/pane.js'),
+      identity);
+    // Open the real Preferences window and select our pane; Zotero loads the fragment and its script.
+    const prefWin = Zotero.Utilities.Internal.openPreferences(PANE_ID);
+    await until(() => prefWin && waive(prefWin).document && waive(prefWin).document.getElementById(PANE_ID), 'preferences-pane-window');
+    const prefDoc = waive(prefWin).document;
+    const paneRoot = prefDoc.getElementById(PANE_ID);
+    await until(() => paneRoot.querySelector('[data-zcr-pref="form"]') || paneRoot.querySelector('[data-zcr-pref="error"]') || paneRoot.querySelector('[role="alert"]'), 'preferences-pane-mounted', 30000);
+    const form = paneRoot.querySelector('[data-zcr-pref="form"]');
+    const paneText = String(paneRoot.textContent || '').slice(0, 200);
+    const bridge = Boolean(waive(prefWin).Zotero && waive(prefWin).Zotero.ZoteroCodexReaderPreferencesPane);
+    const unavailable = !form || /unavailable|could not be displayed/i.test(paneText);
+    report.preferencesPane = {
+      windowOpened: true,
+      sandboxPaneBridgeVisible: bridge,
+      mountedForm: Boolean(form),
+      controlCount: paneRoot.querySelectorAll('input, select, textarea, button').length,
+      settingsFields: paneRoot.querySelectorAll('[data-zcr-pref^="preference-"]').length,
+      unavailable,
+      textSample: paneText,
+    };
+    await check('pref-pane-window-mounts-real-form',
+      Boolean(form) && report.preferencesPane.controlCount > 0 && !unavailable && bridge,
+      report.preferencesPane);
+    let prefWinClosed = false;
+    try { prefWin.close(); prefWinClosed = true; } catch { prefWinClosed = false; }
+    report.preferencesPane.windowClosed = prefWinClosed;
+    await save();
+    // A disable/enable cycle must not stack panes: absent while disabled, exactly one after re-enable,
+    // with no preference-pane error logged by the plugin. Zotero's own plugin-shutdown observer also
+    // clears panes, so this proves the end state, not that only our registrar did the removal.
+    const { AddonManager: PrefAddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
+    const subjectAddon = await PrefAddonManager.getAddonByID(config.subjectID);
+    const loggedErrors = [];
+    const originalLogError = Zotero.logError;
+    Zotero.logError = error => { loggedErrors.push(String((error && error.message) || error)); };
+    try {
+      await subjectAddon.disable();
+      await until(() => (panePanes()?.length ?? -1) === 0, 'pref-pane-absent-while-disabled');
+      await subjectAddon.enable();
+      await until(() => panePanes()?.length === 1, 'pref-pane-single-after-reenable', 30000);
+    } finally { Zotero.logError = originalLogError; }
+    const paneErrors = loggedErrors.filter(text => /preferences pane|prefpane|zcr-prefpane/i.test(text));
+    await check('pref-pane-no-duplicates-across-disable-enable',
+      panePanes()?.length === 1 && paneErrors.length === 0,
+      { panesAfterReenable: panePanes()?.length ?? null, paneCountAfterStartup: identity.paneCount, preferencePaneErrors: paneErrors, loggedErrorCount: loggedErrors.length });
+
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
   } catch (error) { report.status = 'failed'; report.failedStep = step; report.finishedAt = new Date().toISOString(); await save(); Zotero.logError(error); }
 }
