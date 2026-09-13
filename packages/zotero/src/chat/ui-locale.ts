@@ -26,17 +26,6 @@ const COPY: Readonly<Record<string, string>> = {
   'Move image earlier': '将图片前移', 'Move image later': '将图片后移',
   'Use current PDF text automatically': '自动使用当前 PDF 文本',
   'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.': '更改将影响之后的请求。已有文本仍保留在当前对话中；新建对话即可排除它。',
-  'Current PDF': '当前 PDF', 'Current PDF context': '当前 PDF 上下文',
-  'Current PDF · automatic text off': '当前 PDF · 自动文本已关闭', 'Current PDF · text not ready': '当前 PDF · 文本尚未就绪',
-  'Source included in a recorded request. Its exact page coverage is listed below.': '原文已包含在记录的请求中，具体页码范围见下方。',
-  'Local preparation only — not sent to Codex.': '仅在本地准备，尚未发送至 Codex。',
-  'Only this PDF is in scope. Other tabs and your library are not included.': '范围仅限此 PDF，不包含其他标签页或文献库。',
-  'First PDF page': 'PDF 起始页', 'Last PDF page': 'PDF 结束页', 'Use pages': '使用这些页面', 'Whole PDF': '完整 PDF',
-  'Continue with current PDF': '继续使用当前 PDF', 'Open page': '打开页面', 'Show more pages': '显示更多页面',
-  'Last recorded request': '上次记录的请求',
-  'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.': '发送时，此 PDF 的提取文本、选中文本和附加图片将通过你的 ChatGPT 账户发送至 Codex。打开侧栏仅会在本地准备文本。你可以在 Zotero 的偏好设置窗口中关闭自动使用 PDF 文本。',
-  'Included material describes what was supplied. The answer’s citations identify the evidence the model claims to use.': '所含材料说明实际提供的内容。回答中的引用标识模型声称使用的证据。',
-  'The source could not be located. Reopen the PDF and check its version.': '无法定位原文。请重新打开 PDF 并检查其版本。',
   'This action could not be completed.': '此操作未能完成。',
   'The source could not be opened.': '无法打开原文。',
   'The image could not be saved.': '无法保存图片。',
@@ -155,14 +144,6 @@ function progress(text: string): string {
   if (match) return `本地文本：${match[1]} 页。${match[2]} 页无文本；${match[3]} 页提取失败；${match[4]} 页部分提取。所选范围之外有 ${match[5]} 页。`;
   match = /^Review (\d+) annotation suggestions$/u.exec(text);
   if (match) return `审核 ${match[1]} 条标注建议`;
-  match = /^Model context window: unknown\. Figures and complex formulas may need page images\. Text is not silently truncated\.$/u.exec(text);
-  if (match) return '模型上下文窗口：未知。图表和复杂公式可能需要页面图像。不会静默截断文本。';
-  match = /^Model context window: ([\d,]+) tokens · (runtime reported|bundled catalog estimate)\.(?: Last source budget: ([\d,]+) tokens after ([\d,]+|\?) reserved; text sizing is an estimate\.)? Figures and complex formulas may need page images\. Text is not silently truncated\.$/u.exec(text);
-  if (match) {
-    const origin = match[2] === 'runtime reported' ? '运行时报告' : '内置目录估算';
-    const budget = match[3] ? `上次来源预算：预留 ${match[4]} 后为 ${match[3]} 词元；文本规模为估算值。` : '';
-    return `模型上下文窗口：${match[1]} 词元 · ${origin}。${budget}图表和复杂公式可能需要页面图像。不会静默截断文本。`;
-  }
   match = /^PDF (\S+) · candidate pages (.+)$/u.exec(text);
   if (match) return `PDF ${match[1]} · 候选页 ${match[2] === 'none' ? '无' : match[2]}`;
   match = /^Target collection: (.*)$/u.exec(text);
