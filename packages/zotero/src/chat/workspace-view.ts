@@ -27,6 +27,13 @@ export interface WorkspaceViewActions {
 export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement; settings: HTMLElement }
 
 function failure(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
+/** Reconcile keyed children in place so open rows and scroll survive unrelated updates. */
+function placeChildren(parent: HTMLElement, nodes: HTMLElement[]): void {
+  const wanted = new Set(nodes);
+  for (const child of [...parent.children]) if (!wanted.has(child as HTMLElement)) child.remove();
+  let cursor = parent.firstElementChild;
+  for (const node of nodes) { if (node !== cursor) parent.insertBefore(node, cursor); cursor = node.nextElementSibling; }
+}
 function referenceDetail(reference: ReaderReference): string {
   return [reference.identity?.authors.join(', '), reference.identity?.year, reference.kind === 'chat' ? 'Chat snapshot' : reference.kind, reference.paper?.attachmentKey].filter(Boolean).join(' · ');
 }
@@ -184,6 +191,9 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   const profile = create('select'); profile.dataset.zcrProfile = ''; profileLabel.append(profile); advanced.append(profileLabel);
   profile.addEventListener('change', () => {
     const selected = profile.value || null;
+    // Switching profile adopts that profile: pending edits belong to the previous one and must not
+    // be refreshed back into the controls (or saved into the new profile).
+    preferencesDirty = false;
     void run(async () => {
       try { await actions.selectProfile(selected); }
       catch (error) { profile.value = state?.draft.profileId ?? ''; throw error; }
@@ -282,35 +292,61 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   const importSkill = button('Import workflow', () => { void run(async () => { const imported = await actions.importSkill(); if (imported && !disposed) openEditor(imported); }, importSkill); });
   skillActions.append(createSkill, importSkill);
   let skillsKey = ''; let chipsKey = ''; let profilesKey = '';
+  const skillRows = new Map<string, { node: HTMLDetailsElement; update(skill: ReaderSkill): void }>();
+  const skillRow = (initial: ReaderSkill) => {
+    let skill = initial;
+    const row = create('details'); row.dataset.zcrSkillId = skill.id;
+    const summary = create('summary'); const description = create('p', '', 'zcr-workspace-muted');
+    const unsupported = create('p', '', 'zcr-workspace-muted');
+    const enabledLabel = create('label', 'Enabled', 'zcr-workspace-check'); const enabled = create('input'); enabled.type = 'checkbox'; enabled.dataset.zcrSkillEnabled = skill.id; enabledLabel.prepend(enabled);
+    const controls = create('div', '', 'zcr-workspace-actions');
+    const duplicate = button('Duplicate', () => { void run(async () => { const copy = await actions.duplicateSkill(skill.id); if (!disposed) openEditor(copy); }, duplicate); }, 'Duplicate');
+    const exportSkill = button('Export', () => { void run(() => actions.exportSkill(skill.id), exportSkill); }, 'Export');
+    const trySkill = button('Try in draft', () => { void run(async () => { await actions.selectSkill(skill.id); input.focus(); }, trySkill); }, 'Try in draft');
+    const confirm = create('div', '', 'zcr-workspace-actions'); confirm.hidden = true;
+    const remove = button('Delete', () => { void run(async () => { await actions.deleteSkill(skill.id); confirm.hidden = true; }, remove); }, 'Delete');
+    const prompt = create('span'); const edit = button('Edit', () => openEditor(skill), 'Edit'); const askDelete = button('Delete', () => { confirm.hidden = false; }, 'Delete'); const cancel = button('Cancel', () => { confirm.hidden = true; }, 'Cancel');
+    confirm.append(prompt, remove, cancel);
+    controls.append(trySkill, duplicate, exportSkill);
+    row.append(summary, description, unsupported, enabledLabel, controls, confirm);
+    enabled.addEventListener('change', () => {
+      const next = enabled.checked;
+      void run(async () => {
+        try {
+          await actions.setSkillEnabled(skill.id, next);
+          [...skillList.querySelectorAll<HTMLInputElement>('[data-zcr-skill-enabled]')].find(control => control.dataset.zcrSkillEnabled === skill.id)?.focus();
+        } catch (error) { enabled.checked = state?.settings.skills.find(item => item.id === skill.id)?.enabled ?? skill.enabled; throw error; }
+      }, enabled);
+    });
+    const update = (next: ReaderSkill) => {
+      skill = next;
+      summary.textContent = next.name;
+      description.textContent = `${next.description}\n${next.origin} · v${next.version} · ${next.workflow}`;
+      unsupported.textContent = next.unsupportedDependencies.length ? `Unavailable: ${next.unsupportedDependencies.join(', ')}` : '';
+      unsupported.hidden = !next.unsupportedDependencies.length;
+      enabled.checked = next.enabled;
+      trySkill.disabled = !next.enabled || !!next.unsupportedDependencies.length;
+      duplicate.setAttribute('aria-label', `Duplicate ${next.name}`); exportSkill.setAttribute('aria-label', `Export ${next.name}`);
+      trySkill.setAttribute('aria-label', `Try ${next.name} in draft`); prompt.textContent = `Delete ${next.name}?`;
+      remove.setAttribute('aria-label', `Confirm delete ${next.name}`); edit.setAttribute('aria-label', `Edit ${next.name}`);
+      askDelete.setAttribute('aria-label', `Delete ${next.name}`); cancel.setAttribute('aria-label', `Cancel delete ${next.name}`);
+      if (next.origin !== 'builtin') controls.append(edit, askDelete);
+      else { edit.remove(); askDelete.remove(); }
+    };
+    update(initial);
+    return { node: row, update };
+  };
   const renderSkills = () => {
     if (!state) return;
-    skillList.replaceChildren(...state.settings.skills.map(skill => {
-      const row = create('details'); row.append(create('summary', skill.name));
-      row.append(create('p', `${skill.description}\n${skill.origin} · v${skill.version} · ${skill.workflow}`, 'zcr-workspace-muted'));
-      if (skill.unsupportedDependencies.length) row.append(create('p', `Unavailable: ${skill.unsupportedDependencies.join(', ')}`, 'zcr-workspace-muted'));
-      const enabledLabel = create('label', 'Enabled', 'zcr-workspace-check'); const enabled = create('input'); enabled.type = 'checkbox'; enabled.checked = skill.enabled; enabled.dataset.zcrSkillEnabled = skill.id; enabledLabel.prepend(enabled); row.append(enabledLabel);
-      enabled.addEventListener('change', () => {
-        const next = enabled.checked;
-        void run(async () => {
-          try {
-            await actions.setSkillEnabled(skill.id, next);
-            [...skillList.querySelectorAll<HTMLInputElement>('[data-zcr-skill-enabled]')].find(control => control.dataset.zcrSkillEnabled === skill.id)?.focus();
-          } catch (error) { enabled.checked = state?.settings.skills.find(item => item.id === skill.id)?.enabled ?? skill.enabled; throw error; }
-        }, enabled);
-      });
-      const controls = create('div', '', 'zcr-workspace-actions');
-      const duplicate = button(`Duplicate ${skill.name}`, () => { void run(async () => { const copy = await actions.duplicateSkill(skill.id); if (!disposed) openEditor(copy); }, duplicate); }, 'Duplicate');
-      const exportSkill = button(`Export ${skill.name}`, () => { void run(() => actions.exportSkill(skill.id), exportSkill); }, 'Export');
-      const trySkill = button(`Try ${skill.name} in draft`, () => { void run(async () => { await actions.selectSkill(skill.id); input.focus(); }, trySkill); }, 'Try in draft');
-      trySkill.disabled = !skill.enabled || !!skill.unsupportedDependencies.length;
-      const confirm = create('div', '', 'zcr-workspace-actions'); confirm.hidden = true;
-      const remove = button(`Confirm delete ${skill.name}`, () => { void run(async () => { await actions.deleteSkill(skill.id); confirm.hidden = true; }, remove); }, 'Delete');
-      confirm.append(create('span', `Delete ${skill.name}?`), remove, button(`Cancel delete ${skill.name}`, () => { confirm.hidden = true; }, 'Cancel'));
-      controls.append(trySkill, duplicate, exportSkill);
-      if (skill.origin !== 'builtin') controls.append(button(`Edit ${skill.name}`, () => openEditor(skill), 'Edit'), button(`Delete ${skill.name}`, () => { confirm.hidden = false; }, 'Delete'));
-      row.append(controls, confirm); return row;
-    }));
-    if (!state.settings.skills.length) skillList.append(create('p', 'No workflows installed.', 'zcr-workspace-muted'));
+    const wanted = new Set(state.settings.skills.map(skill => skill.id));
+    for (const [id, entry] of skillRows) if (!wanted.has(id)) { entry.node.remove(); skillRows.delete(id); }
+    const nodes = state.settings.skills.map(skill => {
+      let entry = skillRows.get(skill.id);
+      if (!entry) { entry = skillRow(skill); skillRows.set(skill.id, entry); } else entry.update(skill);
+      return entry.node;
+    });
+    placeChildren(skillList, nodes);
+    if (!nodes.length) skillList.append(create('p', 'No workflows installed.', 'zcr-workspace-muted'));
   };
   return { update: next => {
     if (disposed) return; state = next;

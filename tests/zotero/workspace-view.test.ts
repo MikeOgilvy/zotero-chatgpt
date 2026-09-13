@@ -78,6 +78,32 @@ it('persists explicit profile and preference edits while preserving unsaved fiel
   button('Save preferences').click();
   await vi.waitFor(() => expect(actions.savePreferences).toHaveBeenCalledWith({ ...preferences, background: 'I know linear algebra' }));
 });
+it('adopts the newly selected profile instead of keeping stale preference edits', async () => {
+  const saveProfile = vi.fn().mockResolvedValue({ id: 'math', name: 'Mathematics', preferences });
+  const { advanced, actions, view, state, document } = setup({ saveProfile });
+  const background = advanced.querySelector<HTMLTextAreaElement>('[name="background"]')!;
+  background.value = 'unsaved draft text';
+  background.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true }));
+  const profile = advanced.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
+  profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
+  await vi.waitFor(() => expect(actions.selectProfile).toHaveBeenCalledWith('math'));
+  view.update({ ...state, draft: { ...state.draft, profileId: 'math' } });
+  expect(advanced.querySelector<HTMLTextAreaElement>('[name="background"]')!.value).toBe('');
+  expect(advanced.querySelector<HTMLSelectElement>('[name="mathematics"]')!.value).toBe('formal');
+});
+
+it('keeps an expanded workflow card open across unrelated updates', () => {
+  const { pane, view, state } = setup();
+  const first = pane.querySelector<HTMLDetailsElement>('[data-zcr-skill-id="derive"]')!;
+  first.open = true;
+  const second: ReaderSkill = { ...skill, id: 'second', name: 'Second workflow' };
+  view.update({ ...state, settings: { ...state.settings, skills: [...state.settings.skills, second] } });
+  const after = pane.querySelector<HTMLDetailsElement>('[data-zcr-skill-id="derive"]')!;
+  expect(after).toBe(first);
+  expect(after.open).toBe(true);
+  expect(pane.querySelector('[data-zcr-skill-id="second"]')).not.toBeNull();
+});
+
 it('creates research profiles and sets explicit chat overrides without changing global preferences', async () => {
   const saveProfile = vi.fn().mockResolvedValue({ id: 'new-profile', name: 'Control theory', preferences });
   const setOverrides = vi.fn();
