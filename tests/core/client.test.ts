@@ -577,6 +577,9 @@ describe('attachment conversations', () => {
     expect((await timing())?.lastActivityAt).toBe('2026-09-09T08:00:01.000Z');
     expect(pings()).toHaveLength(1);
     expect(pings()[0]).toMatchObject({ type: 'progress', requestId: input.requestId, at: '2026-09-09T08:00:01.000Z' });
+    // The view applies events only when `event.seq` is newer than its snapshot; a ping that reused or
+    // preceded the accepted seq would be silently dropped and the liveness plumbing would do nothing.
+    expect(pings()[0]!.seq).toBeGreaterThan(events.find(event => event.type === 'accepted')!.seq);
     expect((await c.get(conversation.id)).messages.every(message => message.role === 'user')).toBe(true);
 
     // Reasoning deltas arrive far faster than one per second; the mark advances, the ping does not.
