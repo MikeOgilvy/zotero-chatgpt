@@ -82,6 +82,23 @@ const COPY: Readonly<Record<string, string>> = {
   'Preferences exported.': '偏好已导出。', 'Research profile updated.': '研究配置已更新。', 'Research profile deleted.': '研究配置已删除。',
   'Workflow updated.': '工作流已更新。', 'Name this research profile.': '请为此研究配置命名。',
   'The stored preferences could not be read.': '无法读取已保存的偏好。',
+  // History management section (workspace/history-section.ts). Counts, sizes, paper titles and paths
+  // are data and stay verbatim; only the phrases below are translated.
+  Active: '活动', Show: '显示', Paper: '文献', 'All papers': '全部文献',
+  'Archive selected': '归档所选项', 'Restore selected': '恢复所选项', 'Delete selected': '删除所选项',
+  'Delete permanently': '永久删除', 'work in progress': '有未完成的工作',
+  'Chats stored on this computer. Archiving is reversible; deleting is not. Nothing is removed until you confirm it.': '保存在此电脑上的对话。归档可以恢复，删除无法恢复；在你确认之前不会移除任何内容。',
+  'The saved chat list could not be read. Nothing was changed.': '无法读取已保存的对话列表，未做任何更改。',
+  'The change could not be confirmed. Reopen this section to see what is actually stored.': '无法确认更改结果。请重新打开此部分以查看实际保存的内容。',
+  'A chat with an unfinished answer or native task was skipped: finish or cancel it before deleting.': '已跳过包含未完成回答或原生任务的对话：请先完成或取消，再删除。',
+  // Storage report. The location, the file count and every byte figure are measurements, never copy.
+  Storage: '存储',
+  'Chats, drafts, workflows and task records live in one plugin-owned folder inside your Zotero profile. Measuring reads file sizes only — never chat text, drafts or credential files — and it never changes anything.': '对话、草稿、工作流和任务记录都保存在 Zotero 配置文件内一个由本插件拥有的文件夹中。测量只读取文件大小，绝不读取对话正文、草稿或认证文件，也不会更改任何内容。',
+  'Calculate size': '计算占用空间', 'Measuring…': '正在测量…', 'Size not measured yet.': '尚未测量占用空间。',
+  'This build cannot report how much space stored chats take.': '此版本无法报告已保存对话占用的空间。',
+  'The stored size could not be measured. Nothing was changed.': '无法测量已占用的空间，未做任何更改。',
+  'At least these figures: an unexpected entry in the records store was not measured.': '至少为以下数值：未测量记录存储中一个意外的条目。',
+  'The records store could not be listed, so its size is unknown. Nothing was changed.': '无法列出记录存储，因此占用空间未知。未做任何更改。',
 };
 
 // Content areas are never localized, including controls embedded in rendered Markdown.
@@ -108,11 +125,17 @@ const TEXT = [
   '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
   '.zcr-preferences [data-zcr-pref^="preference-"] option', '.zcr-preferences [data-zcr-pref="profile"] option[value=""]',
   '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',
+  // History management section: its own status, confirmation and storage lines, plus filter options.
+  '.zcr-preferences [data-zcr-history="error"]', '.zcr-preferences [data-zcr-history="status"]',
+  '.zcr-preferences [data-zcr-history="confirm-text"]', '.zcr-preferences [data-zcr-history="storage"] > strong',
+  '.zcr-preferences [data-zcr-history="scope"] option', '.zcr-preferences [data-zcr-history="paper"] option',
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
   '.zcr-plus-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
+  // The History search box carries copy in its placeholder and aria-label only when it is empty.
+  '.zcr-preferences [data-zcr-history="search"]',
 ].join(',');
 const STATUS: Readonly<Record<string, string>> = {
   queued: '已排队', reserved: '待开始', running: '运行中', completed: '已完成', paused: '已暂停', uncertain: '未确认', cancelled: '已取消', failed: '失败',
@@ -145,6 +168,45 @@ function progress(text: string): string {
   if (match) return `目标分类：${match[1]}`;
   match = /^Source: (\S+)\nPermissions: (.*)\nUnsupported dependencies: (.*)$/u.exec(text);
   if (match) return `来源：${match[1]}\n权限：${match[2] === 'none' ? '无' : match[2]}\n不支持的依赖：${match[3] === 'none' ? '无' : match[3]}`;
+  // History management section. Every number, title, size and path in these lines is data and is
+  // carried through verbatim; only the surrounding sentence is translated. They precede the generic
+  // `Delete …?` rule below, which would otherwise only translate the verb.
+  match = /^(\d+) stored chats? · (\d+) archived$/u.exec(text);
+  if (match) return `已保存 ${match[1]} 个对话 · ${match[2]} 个已归档`;
+  match = /^(\d+) matching chats? · (\d+) archived$/u.exec(text);
+  if (match) return `匹配 ${match[1]} 个对话 · ${match[2]} 个已归档`;
+  match = /^(\d+) messages?$/u.exec(text);
+  if (match) return `${match[1]} 条消息`;
+  match = /^(\d+) tasks?$/u.exec(text);
+  if (match) return `${match[1]} 个任务`;
+  match = /^Showing the (\d+) most recent of (\d+) matching chats\. Narrow the search or the paper filter to see the rest\.$/u.exec(text);
+  if (match) return `仅显示最近匹配的 ${match[2]} 个对话中的 ${match[1]} 个。请缩小搜索范围或更改文献筛选以查看其余内容。`;
+  match = /^…and (\d+) more papers — search to narrow$/u.exec(text);
+  if (match) return `……还有 ${match[1]} 篇文献，请用搜索缩小范围`;
+  match = /^(Archived|Restored|Deleted) (\d+) of (\d+) chats?\.(?: (\d+) could not be changed\.)?$/u.exec(text);
+  if (match) {
+    const verb = match[1] === 'Deleted' ? '删除' : match[1] === 'Archived' ? '归档' : '恢复';
+    const head = `已${verb} ${match[3]} 个对话中的 ${match[2]} 个。`;
+    return match[4] ? `${head}有 ${match[4]} 个未能更改。` : head;
+  }
+  match = /^Delete “(.+)”\? This permanently removes the chat, its messages and its unsent draft from this computer\. Native task outputs and exported files are not undone\. This cannot be undone\.$/u.exec(text);
+  if (match) return `删除“${match[1]}”？将从此电脑永久移除该对话、其中的消息及其未发送的草稿。原生任务的输出和已导出的文件不会被撤销。此操作无法撤销。`;
+  match = /^Delete (\d+) chats\? This permanently removes those chats, their messages and their unsent drafts from this computer\. Native task outputs and exported files are not undone\. This cannot be undone\.$/u.exec(text);
+  if (match) return `删除 ${match[1]} 个对话？将从此电脑永久移除这些对话、其中的消息及其未发送的草稿。原生任务的输出和已导出的文件不会被撤销。此操作无法撤销。`;
+  match = /^Location: (.+)$/u.exec(text);
+  if (match) return `位置：${match[1]}`;
+  match = /^Absolute path: (.+)$/u.exec(text);
+  if (match) return `绝对路径：${match[1]}`;
+  match = /^Chats (.+) · Drafts (.+) · Other records (.+) · (\d+) files$/u.exec(text);
+  if (match) return `对话 ${match[1]} · 草稿 ${match[2]} · 其他记录 ${match[3]} · ${match[4]} 个文件`;
+  match = /^Measured (.+)\.$/u.exec(text);
+  if (match) return `测量时间 ${match[1]}。`;
+  match = /^At least these figures: the measurement stopped at its (.+) bound\.$/u.exec(text);
+  if (match) return `至少为以下数值：测量在 ${match[1]} 上限处停止。`;
+  match = /^At least these figures: a directory deeper than (\d+) levels was not measured\.$/u.exec(text);
+  if (match) return `至少为以下数值：未测量深度超过 ${match[1]} 层的目录。`;
+  match = /^Per-chat sizes are shown for the largest (\d+) chats\.$/u.exec(text);
+  if (match) return `按对话显示的大小仅覆盖最大的 ${match[1]} 个对话。`;
   match = /^Delete (.+)\?$/u.exec(text);
   if (match) return `删除 ${match[1]}？`;
   match = /^Context ([\d.]+k?) \/ ([\d.]+k?) tokens$/u.exec(text);

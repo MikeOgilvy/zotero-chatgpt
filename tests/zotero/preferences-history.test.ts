@@ -244,6 +244,40 @@ it('renders the history copy in the stored UI language', async () => {
   expect(find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').textContent).toBe('删除所选项');
 });
 
+it('renders the measured storage copy and the delete confirmation in the stored UI language', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const settings: WorkspaceSettings = { ...defaultSettings(), uiLanguage: 'zh', textScale: 1 };
+  const readStorageReport = vi.fn<NonNullable<PreferencesPaneHost['readStorageReport']>>(() => Promise.resolve(storageReport()));
+  const { host } = fixture([chat], { read: () => Promise.resolve(settings), readStorageReport });
+  const { ready, find, change, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  // The whole storage block is translated by the shared locale, not by copy embedded in the section.
+  expect(find('[data-zcr-history="storage"] > strong').textContent).toBe('存储');
+  expect(find('[data-zcr-history="storage-scope"]').textContent).toBe('位置：zotero-codex-reader/v1/records');
+  expect(find('[data-zcr-history="storage-size"]').textContent).toBe('尚未测量占用空间。');
+  const measure = find<HTMLButtonElement>('[data-zcr-history="measure"]');
+  expect(measure.textContent).toBe('计算占用空间');
+
+  measure.click();
+  await vi.waitFor(() => expect(find('[data-zcr-history="storage-path"]').textContent).toContain('绝对路径：'));
+  // The measurement is the point: the numbers, the path and the timestamp are data and stay verbatim.
+  expect(find('[data-zcr-history="storage-size"]').textContent).toContain('对话 2.0 KiB');
+  expect(find('[data-zcr-history="storage-size"]').textContent).toContain('7 个文件');
+  expect(find('[data-zcr-history="storage-note"]').textContent).toMatch(/^测量时间 /u);
+
+  // Deleting still names exactly what is permanently removed, in the stored language.
+  const toggle = find<HTMLInputElement>(`[data-zcr-history-select="${chat.id}"]`);
+  toggle.checked = true; change(toggle);
+  find<HTMLButtonElement>('[data-zcr-history="delete-selected"]').click();
+  await vi.waitFor(() => expect(find('[data-zcr-history="confirm-text"]').textContent).toContain('无法撤销'));
+  expect(find('[data-zcr-history="confirm-text"]').textContent).toContain('Bayesian notes');
+  expect(find<HTMLButtonElement>('[data-zcr-history="confirm"]').textContent).toBe('永久删除');
+  expect(find<HTMLButtonElement>('[data-zcr-history="cancel"]').textContent).toBe('取消');
+  find<HTMLButtonElement>('[data-zcr-history="cancel"]').click();
+});
+
 it('renders only the newest slice of a long listing and says how much it is not showing', async () => {
   const many = Array.from({ length: 205 }, (_, index) => entry(index + 1, `Chat ${index + 1}`));
   const { host } = fixture(many);
