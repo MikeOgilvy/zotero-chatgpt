@@ -284,3 +284,105 @@ it('keeps a visible keyboard ring on the composer context controls that remain',
   expect(shippedCss()).toMatch(/\.zcr-workspace-control:focus-visible\s*\{[^}]*outline:\s*2px solid\b/u);
 });
 
+it('paints the send control from the primary theme token, never the accent color', () => {
+  const { doc } = stylesheetDom();
+  const send = shippedRule(doc, '.zcr-send');
+  expect(send.cssText).toContain('var(--fill-primary');
+  expect(send.cssText).not.toContain('AccentColor');
+  // The disabled control keeps the same fill and dims through opacity, not transparency.
+  const css = shippedCss();
+  expect(css).toMatch(/\.zcr-send:disabled\s*\{[^}]*var\(--fill-primary[^}]*opacity:\s*\.?35\b/u);
+  expect(css).not.toMatch(/\.zcr-send:disabled\s*\{[^}]*transparent/u);
+  // Hover only shifts opacity; it never swaps the fill back to the accent color.
+  expect(shippedRule(doc, '.zcr-send:hover').cssText).not.toContain('AccentColor');
+  expect(css).not.toMatch(/\.zcr-send[^{},]*\{[^}]*AccentColor/u);
+});
+
+it('styles the user bubble with theme tokens and rounded corners instead of a raw black', () => {
+  const { doc } = stylesheetDom();
+  const css = shippedCss();
+  const bubble = shippedRule(doc, '.zcr-message[data-role="user"] .zcr-message-text');
+  expect(bubble.cssText).toContain('var(--fill-primary');
+  expect(bubble.cssText).toContain('var(--material-background');
+  expect(Number.parseFloat(bubble.borderRadius)).toBeGreaterThanOrEqual(16);
+  // The bubble hugs the message side at a bounded width instead of stretching the column.
+  expect(css).toMatch(/\.zcr-message\[data-role="user"\]\s+\.zcr-message-body\s*\{[^}]*align-self:\s*flex-end/u);
+  expect(css).toMatch(/\.zcr-message\[data-role="user"\]\s+\.zcr-message-body\s*\{[^}]*max-width:\s*min\(92%/u);
+  // No raw hex in the bubble rules: a hardcoded black would break the dark theme.
+  expect(css).not.toMatch(/\.zcr-message\[data-role="user"\][^{]*\{[^}]*#[0-9a-fA-F]{3,8}/u);
+});
+
+it('makes every composer popover an opaque, shadowed surface stacked above the transcript', () => {
+  const { doc } = stylesheetDom();
+  for (const selector of ['.zcr-plus-menu', '.zcr-picker-menu', '.zcr-command-menu']) {
+    const rule = shippedRule(doc, selector);
+    // A see-through popover is the reported defect: the surface must be an opaque material token.
+    expect(rule.cssText).toContain('var(--material-menu');
+    expect(rule.cssText.toLowerCase()).not.toContain('background: transparent');
+    expect(rule.cssText).toContain('box-shadow');
+    const z = /z-index:\s*(\d+)/u.exec(rule.cssText);
+    expect(z, `${selector} declares a z-index`).not.toBeNull();
+    expect(Number.parseInt(z![1]!, 10)).toBeGreaterThanOrEqual(20);
+  }
+  // The composer itself owns a layer above the transcript so nothing bleeds through it.
+  const draft = shippedRule(doc, '.zcr-draft');
+  expect(Number.parseInt(draft.zIndex, 10)).toBeGreaterThanOrEqual(1);
+});
+
+it('shapes the plus popover as a grouped, hairline-separated list with title and description rows', () => {
+  const { doc } = stylesheetDom();
+  const css = shippedCss();
+  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*min-width:\s*240px/u);
+  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*max-width:\s*min\(320px/u);
+  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*padding:\s*4px/u);
+  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*border-radius:\s*10px/u);
+  // Groups are separated by a hairline; the first group must not draw a rule above itself.
+  expect(css).toMatch(/\.zcr-plus-group\s*\+\s*\.zcr-plus-group\s*\{[^}]*border-top:\s*1px solid/u);
+  const row = shippedRule(doc, '.zcr-plus-row');
+  expect(row.cssText).toContain('padding: 7px 12px');
+  expect(row.cssText).toContain('border-radius: 6px');
+  expect(row.cssText).toContain('text-align: left');
+  expect(css).toMatch(/\.zcr-plus-row:hover,\s*\.zcr-plus-row:focus-visible\s*\{[^}]*var\(--fill-quinary/u);
+  expect(shippedRule(doc, '.zcr-plus-heading').cssText).toContain('var(--fill-secondary');
+  expect(shippedRule(doc, '.zcr-plus-row-description').cssText).toContain('var(--fill-secondary');
+});
+
+it('reveals message actions with opacity alone so they stay keyboard reachable', () => {
+  const { doc } = stylesheetDom();
+  const css = shippedCss();
+  const actions = shippedRule(doc, '.zcr-message-actions');
+  expect(actions.cssText).toContain('opacity: 0');
+  expect(actions.cssText).toContain('display: flex');
+  expect(css).toMatch(/\.zcr-message:hover\s+\.zcr-message-actions,\s*\.zcr-message:focus-within\s+\.zcr-message-actions\s*\{[^}]*opacity:\s*1/u);
+  // display/visibility would drop the buttons from the tab order, so they must never be used here.
+  expect(css).not.toMatch(/\.zcr-message-actions[^{},]*\{[^}]*(display:\s*none|visibility:\s*hidden)/u);
+});
+
+it('uses neutral secondary-token rings on the transcript and popover controls', () => {
+  const { doc } = stylesheetDom();
+  const css = shippedCss();
+  for (const selector of ['.zcr-icon-button:focus-visible', '.zcr-plus-row:focus-visible', '.zcr-send:focus-visible', '.zcr-picker-option:focus-visible']) {
+    expect(shippedRule(doc, selector).cssText).toContain('var(--fill-secondary');
+  }
+  expect(css).not.toMatch(/\.zcr-send:focus-visible\s*\{[^}]*AccentColor/u);
+  expect(css).not.toMatch(/\.zcr-plus-menu\s+:focus-visible\s*\{[^}]*AccentColor/u);
+});
+
+it('centers a scaled muted timestamp divider and keeps transcript type on the chat scale', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const sidebar = el('div', 'zcr-sidebar');
+  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
+  const time = el('div', 'zcr-message-time', '2:05 PM');
+  const reference = el('span', 'zcr-message-reference', '@article');
+  const card = el('figure', 'zcr-image-card');
+  const caption = el('figcaption', '', 'Screenshot');
+  card.append(caption);
+  sidebar.append(time, reference, card); doc.body.append(sidebar);
+  expect(cs(time).alignSelf).toBe('center');
+  expect(cs(time).fontSize).toBe('calc(11px * 1.5)');
+  expect(cs(reference).fontSize).toBe('calc(11px * 1.5)');
+  expect(cs(caption).fontSize).toBe('calc(11px * 1.5)');
+  expect(shippedRule(doc, '.zcr-message-time').cssText).toContain('var(--fill-secondary');
+});
+

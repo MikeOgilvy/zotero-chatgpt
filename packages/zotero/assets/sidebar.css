@@ -202,7 +202,8 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-icon-button:hover { background: var(--fill-quinary, ButtonFace); }
 .zcr-icon-button:active { background: var(--fill-quaternary, ButtonFace); }
 .zcr-icon-button:disabled { opacity: .45; cursor: default; }
-.zcr-icon-button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+/* Neutral rings on the transcript/composer controls the owner rejected the accent outline on. */
+.zcr-icon-button:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 
 /* The current chat title carries the reference's rounded neutral chip. The chip hugs the title, the
    title truncates instead of pushing the cross out of the row, and the cross is a small, calm
@@ -275,15 +276,29 @@ body.zcr-dock-open #split-view .primary-view,
 }
 .zcr-messages { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 0 12px; scrollbar-gutter: stable; }
 .zcr-new-content { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 1; background: var(--material-menu, Canvas); border-radius: 14px; white-space: nowrap; }
-.zcr-message { display: flex; flex-direction: column; gap: 4px; }
+/* Bridge rules for the labelled header the current message DOM still emits. They keep the visible
+   author line and the copy chip laid out until the paired `messageNode` patch lands, at which point
+   they simply stop matching; nothing here styles the new body wrapper or the icon-only actions. */
 .zcr-message-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .zcr-message-header .zcr-message-author { margin-inline-end: auto; }
-.zcr-message-action { font-size: calc(11px * var(--zcr-chat-text-scale, 1)); padding: 2px 8px; opacity: 0; min-height: 28px; }
+.zcr-message-author { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
+.zcr-message { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* Timestamp divider: centered, muted and scaled. It is presentational: the request timing it
+   renders is already announced through the meta line, so a screen reader should not repeat it. */
+.zcr-message-time { align-self: center; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); padding: 2px 0; }
+/* Body holds the text bubble, the attachments and the hover actions, and anchors the actions. */
+.zcr-message-body { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* Actions reveal by opacity alone: they stay in layout and remain keyboard-reachable in both roles. */
+.zcr-message-actions { position: absolute; inset-block-end: 0; inset-inline-end: 0; display: flex; gap: 4px; opacity: 0; }
+.zcr-message:hover .zcr-message-actions, .zcr-message:focus-within .zcr-message-actions { opacity: 1; }
+.zcr-message-action { font-size: calc(11px * var(--zcr-chat-text-scale, 1)); opacity: 0; min-height: 28px; }
 .zcr-message:hover .zcr-message-action, .zcr-message:focus-within .zcr-message-action { opacity: 1; }
-.zcr-copy-answer { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 2px 8px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); border-color: transparent; }
+.zcr-copy-answer { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); }
 .zcr-copy-answer svg { display: block; width: 14px; height: 14px; }
 .zcr-copy-answer:hover { color: var(--fill-primary, CanvasText); background: var(--fill-quinary, ButtonFace); }
-.zcr-copy-answer[data-zcr-copied="true"] { color: AccentColor; }
+.zcr-copy-answer[data-zcr-copied="true"] { color: var(--fill-primary, CanvasText); }
+/* Copy is icon-only; the labelled feedback node stays in the DOM but is visually hidden. */
+.zcr-copy-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .zcr-rename-form, .zcr-appearance { width: 100%; }
 .zcr-rename-form { display: flex; gap: 4px; margin-top: 6px; }
 .zcr-rename-form input { min-width: 0; flex: 1; padding: 5px; border: 1px solid var(--zcr-border); border-radius: 5px; background: Field; color: FieldText; }
@@ -294,29 +309,43 @@ body.zcr-dock-open #split-view .primary-view,
 /* The composer keeps exactly one control at its start: a plus menu with every attachment route. */
 .zcr-plus { color: var(--fill-secondary, GrayText); }
 .zcr-plus:hover, .zcr-plus[aria-expanded="true"] { background: var(--fill-quinary, ButtonFace); }
+/* One opaque, shadowed surface stacked above the transcript and every composer sibling. */
 .zcr-plus-menu {
   position: absolute;
   inset-inline-start: 8px;
   bottom: calc(100% + 6px);
-  z-index: 7;
+  z-index: 24;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 200px;
-  padding: 6px;
+  gap: 0;
+  min-width: 240px;
+  max-width: min(320px, calc(100% - 16px));
+  padding: 4px;
+  box-sizing: border-box;
   border: 1px solid var(--zcr-border);
   border-radius: 10px;
-  background: var(--material-menu, Canvas);
-  box-shadow: 0 4px 16px color-mix(in srgb, CanvasText 14%, transparent);
+  background: var(--material-menu, var(--material-background, Canvas));
+  box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
 }
 .zcr-plus-menu[hidden] { display: none; }
-.zcr-plus-menu > input { min-width: 0; max-width: 100%; padding: 4px 6px; color: inherit; background: Field; border: 1px solid var(--zcr-border); border-radius: 5px; }
+/* Grouped sections are plain divs: the dock resets `section`/`button`, not these wrappers. */
+.zcr-plus-group { display: flex; flex-direction: column; padding: 2px 0; }
+.zcr-plus-group + .zcr-plus-group { border-top: 1px solid var(--zcr-border); margin-top: 2px; padding-top: 4px; }
+.zcr-plus-heading { padding: 4px 8px 2px; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); }
+.zcr-plus-row { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 12px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; }
+.zcr-plus-row:hover, .zcr-plus-row:focus-visible { background: var(--fill-quinary, ButtonFace); }
+.zcr-plus-row:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
+.zcr-plus-row-title { color: var(--fill-primary, CanvasText); font-size: calc(13px * var(--zcr-chat-text-scale, 1)); }
+.zcr-plus-row-description { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); line-height: 15px; }
+/* Flat-menu bridge: the current DOM still appends plain `.zcr-button` rows; the grouped rows land
+   with the paired popover patch, and this rule stops matching once they do. */
 .zcr-plus-menu > .zcr-button { justify-content: flex-start; }
-.zcr-plus-menu :focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
-.zcr-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: 11px; min-width: 0; }
+.zcr-plus-menu input { width: calc(100% - 24px); min-width: 0; max-width: 100%; margin: 2px 12px 4px; padding: 4px 6px; box-sizing: border-box; color: inherit; background: Field; border: 1px solid var(--zcr-border); border-radius: 5px; }
+.zcr-plus-menu input:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
+.zcr-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); min-width: 0; }
 .zcr-acquisition-target select { min-width: 0; width: 100%; max-width: 100%; min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
 .zcr-tasks { min-width: 0; }
-.zcr-message-author { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
+.zcr-message-actions .zcr-icon-button,
 .zcr-message-header .zcr-icon-button,
 .zcr-citation-meta .zcr-icon-button,
 .zcr-chrome-source .zcr-icon-button {
@@ -350,21 +379,30 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-message-text pre { margin: 8px 0; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; max-width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); line-height: 1.45; background: color-mix(in srgb, CanvasText 5%, transparent); border: 1px solid var(--zcr-border); border-radius: 6px; }
 .zcr-message-text code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
 .zcr-message-text :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, CanvasText 7%, transparent); }
-.zcr-code-copy { position: absolute; top: 4px; inset-inline-end: 4px; z-index: 1; min-height: 24px; padding: 2px 6px; font-size: 11px; color: var(--fill-secondary, GrayText); background: var(--material-menu, Canvas); border-color: transparent; }
+.zcr-code-copy { position: absolute; top: 4px; inset-inline-end: 4px; z-index: 1; min-height: 24px; padding: 2px 6px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); background: var(--material-menu, Canvas); border-color: transparent; }
 .zcr-code-copy:hover { color: var(--fill-primary, CanvasText); background: var(--fill-quinary, ButtonFace); }
 .zcr-code-copy[data-zcr-copied="true"] { color: AccentColor; }
 .zcr-message-text .katex-display, .zcr-message-text .zcr-math-fallback { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
-.zcr-message[data-role="user"] { align-self: flex-end; max-width: 92%; }
-.zcr-message[data-role="user"] .zcr-message-text { background: var(--fill-quinary, ButtonFace); border-radius: 18px; padding: 8px 12px; }
+/* The user bubble reads near-black in light mode and inverts with the theme in dark mode through
+   the tokens; no raw hex, so the bubble is never a hardcoded black. Assistant stays plain prose. */
+.zcr-message[data-role="user"] { align-items: flex-end; align-self: flex-end; max-width: 92%; }
+.zcr-message[data-role="user"] .zcr-message-body { align-self: flex-end; align-items: flex-end; max-width: min(92%, 640px); }
+.zcr-message[data-role="user"] .zcr-message-text {
+  background: var(--fill-primary, CanvasText);
+  color: var(--material-background, var(--color-background, Canvas));
+  border-radius: 20px;
+  padding: 10px 14px;
+}
 .zcr-message-meta { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); }
+.zcr-message[data-role="user"] .zcr-message-meta { text-align: end; }
 .zcr-message-attachments { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.zcr-message-reference { color: var(--fill-secondary, GrayText); font-size: 11px; overflow-wrap: anywhere; }
+.zcr-message-reference { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); overflow-wrap: anywhere; }
 .zcr-image-card { margin: 4px 0; min-width: 0; }
 .zcr-image-card > button { display: block; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--zcr-border); border-radius: 8px; }
 .zcr-image-card img { display: block; width: 100%; max-height: 240px; object-fit: contain; background: var(--fill-quinary, Canvas); }
-.zcr-image-card figcaption { margin-top: 4px; font-size: 11px; color: var(--fill-secondary, GrayText); overflow-wrap: anywhere; }
+.zcr-image-card figcaption { margin-top: 4px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); overflow-wrap: anywhere; }
 .zcr-image-preview { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; padding: 12px; box-sizing: border-box; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 8px; }
-.zcr-image-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.zcr-image-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); overflow-wrap: anywhere; }
 .zcr-image-preview > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
 .zcr-image-preview > button { align-self: flex-end; }
 .zcr-draft-image > .zcr-button { padding: 0; border: 0; min-width: 0; }
@@ -376,8 +414,10 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-citation-text { margin: 0; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); line-height: 1.45; overflow-wrap: anywhere; color: var(--fill-primary, CanvasText); }
 .zcr-citation-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); margin-top: 2px; }
 
+/* One composer layer above the transcript: every popover inside it stacks over the answer text. */
 .zcr-draft {
   position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -471,7 +511,7 @@ body.zcr-dock-open #split-view .primary-view,
 }
 .zcr-conversation-actions { display: flex; gap: 4px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--zcr-border); }
 .zcr-conversation-actions .zcr-button { width: 100%; text-align: left; border: 0; }
-.zcr-settings-content { padding: 4px; font-size: 12px; }
+.zcr-settings-content { padding: 4px; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
 .zcr-settings-content p { margin-top: 8px; color: var(--fill-secondary, GrayText); }
 
 .zcr-composer-bar {
@@ -522,24 +562,26 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-context-ring[data-zcr-context-state="pinned-catalog"] { color: var(--fill-secondary, GrayText); }
 /* Unknown context is a complete, closed ring in a neutral tone: a state, not a loading placeholder. */
 .zcr-context-ring[data-zcr-context-state="unknown"] { color: var(--fill-secondary, GrayText); }
+/* Theme-token fill, never a raw hex and never the accent color: near-black in light mode, inverted
+   in dark. Disabled keeps the same non-transparent fill and only dims through opacity. */
 .zcr-send {
   width: var(--zcr-toolbar-button-size, 28px);
   min-width: var(--zcr-toolbar-button-size, 28px);
   height: var(--zcr-toolbar-button-size, 28px);
   min-height: var(--zcr-toolbar-button-size, 28px);
   border-radius: 50%;
-  background: var(--zcr-accent, AccentColor);
-  color: AccentColorText;
+  background: var(--fill-primary, CanvasText);
+  color: var(--material-background, var(--color-background, Canvas));
 }
-.zcr-send:hover { background: var(--zcr-accent, AccentColor); opacity: .88; }
-.zcr-send:disabled { opacity: .35; }
-.zcr-send:focus-visible { outline: 2px solid AccentColor; outline-offset: 2px; }
+.zcr-send:hover { opacity: .88; }
+.zcr-send:disabled { background: var(--fill-primary, CanvasText); opacity: .35; }
+.zcr-send:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--fill-secondary, GrayText); }
 
 .zcr-picker-menu {
   position: absolute;
   right: 8px;
   bottom: calc(100% + 6px);
-  z-index: 6;
+  z-index: 23;
   min-width: 220px;
   max-width: min(280px, calc(100% - 16px));
   max-height: 280px;
@@ -549,7 +591,7 @@ body.zcr-dock-open #split-view .primary-view,
   background: var(--material-menu, var(--material-background, Canvas));
   border: 1px solid var(--zcr-border);
   border-radius: 8px;
-  box-shadow: 0 4px 16px color-mix(in srgb, CanvasText 14%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
 }
 .zcr-picker-section + .zcr-picker-section {
   border-top: 1px solid var(--color-panedivider, GrayText);
@@ -558,7 +600,7 @@ body.zcr-dock-open #split-view .primary-view,
 }
 .zcr-picker-heading {
   padding: 6px 12px 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
   color: var(--fill-secondary, GrayText);
 }
 .zcr-picker-option {
@@ -572,14 +614,14 @@ body.zcr-dock-open #split-view .primary-view,
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--zcr-chat-text-scale, 1));
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 .zcr-picker-option:hover { background: var(--fill-quinary, ButtonFace); }
 .zcr-picker-option:disabled { opacity: .5; cursor: default; }
-.zcr-picker-option:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+.zcr-picker-option:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
 .zcr-picker-option svg { flex: 0 0 auto; width: 14px; height: 14px; }
 .zcr-picker-toggle-row {
   display: flex;
@@ -792,14 +834,14 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .zcr-workspace-muted { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
 .zcr-workspace-status { margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
-.zcr-workspace-preview { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 13; max-width: 100%; max-height: 280px; overflow: auto; padding: 12px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; background: var(--material-menu, var(--material-background, Canvas)); color: inherit; box-shadow: 0 4px 16px color-mix(in srgb, CanvasText 14%, transparent); }
+.zcr-workspace-preview { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 26; max-width: 100%; max-height: 280px; overflow: auto; padding: 12px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; background: var(--material-menu, var(--material-background, Canvas)); color: inherit; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
 .zcr-workspace-preview[hidden], .zcr-workspace-status[hidden] { display: none; }
 .zcr-workspace-preview pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; user-select: text; }
 .zcr-workspace-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .zcr-workspace-editor { margin-top: 8px; }
 
 /* One keyboard-owned command menu shared by every composer chooser. */
-.zcr-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 12; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background: var(--material-menu, var(--material-background, Canvas)); border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; box-shadow: 0 4px 16px color-mix(in srgb, CanvasText 14%, transparent); }
+.zcr-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background: var(--material-menu, var(--material-background, Canvas)); border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
 .zcr-command-menu[hidden] { display: none; }
 .zcr-command-heading { margin: 4px 8px; color: var(--fill-secondary, GrayText); font-size: 11px; }
 .zcr-command-toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
