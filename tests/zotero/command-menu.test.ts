@@ -70,6 +70,39 @@ it('closes when keyboard focus leaves both the input and its chooser', () => {
   expect(menu.isOpen()).toBe(false);
 });
 
+it('keeps a references chooser and a commands chooser from rendering each other\'s candidates', () => {
+  const { menu } = setup();
+  menu.update({ kind: 'commands', heading: 'Installed workflows', items: [{ id: 'skill:derive', label: '/Derive' }, { id: 'reference:paper', label: 'A paper' }] });
+  expect(menu.element.dataset.zcrCommandKind).toBe('commands');
+  expect(menu.element.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(menu.element.querySelector('[role="option"]')!.textContent).toContain('/Derive');
+  // A workflow chooser has no reference-type axis, so its filter row is not usable.
+  expect(menu.toolbar.style.display).toBe('none');
+  menu.update({ kind: 'references', heading: 'References', items: [{ id: 'reference:paper', label: 'A paper' }, { id: 'skill:derive', label: '/Derive' }] });
+  expect(menu.element.dataset.zcrCommandKind).toBe('references');
+  expect(menu.element.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(menu.element.querySelector('[role="option"]')!.textContent).toContain('A paper');
+  expect(menu.toolbar.style.display).toBe('');
+});
+
+it('uses the caller\'s honest empty state for commands and the shared No matches for references', () => {
+  const { menu } = setup();
+  menu.update({ kind: 'commands', heading: 'Installed workflows', empty: 'No workflows installed.', items: [] });
+  expect(menu.element.textContent).toContain('No workflows installed.');
+  expect(menu.element.textContent).not.toContain('No matches');
+  menu.update({ kind: 'references', heading: 'References', items: [] });
+  expect(menu.element.textContent).toContain('No matches');
+  expect(menu.element.textContent).not.toContain('No workflows installed.');
+});
+
+it('keeps an untyped chooser backward compatible and unstyled by kind', () => {
+  const { menu } = setup();
+  menu.update({ heading: 'Anything', items: [{ id: 'plain-a', label: 'A' }, { id: 'plain-b', label: 'B' }] });
+  expect(menu.element.dataset.zcrCommandKind).toBeUndefined();
+  expect(menu.element.querySelectorAll('[role="option"]')).toHaveLength(2);
+  expect(menu.toolbar.style.display).toBe('');
+});
+
 it('settles the status from the newest update so a reopened chooser never keeps a stale Searching label', () => {
   const { menu } = setup();
   menu.update({ heading: 'References', items: [], loading: true });

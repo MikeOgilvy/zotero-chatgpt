@@ -71,29 +71,32 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   const search = () => {
     if (disposed || !state) return;
     searchController?.abort(); const current = ++querySerial;
-    for (const [kind, control] of filterControls) control.setAttribute('aria-pressed', String(kind === (mode === 'skills' ? 'skills' : filter)));
+    for (const [kind, control] of filterControls) control.setAttribute('aria-pressed', String(kind === filter));
     if (mode === 'skills') {
       const needle = query.toLocaleLowerCase();
-      menu.update({ heading: 'Installed workflows', items: state.settings.skills.filter(skill => `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(needle)).map(skill => ({
+      const installed = state.settings.skills;
+      menu.update({ kind: 'commands', heading: 'Installed workflows', empty: installed.length ? 'No matching workflows' : 'No workflows installed.', items: installed.filter(skill => `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(needle)).map(skill => ({
         id: `skill:${skill.id}`, label: `/${skill.name}`, description: [skill.description, `${skill.origin} · v${skill.version}`, !skill.enabled ? 'Disabled' : '', ...skill.unsupportedDependencies].filter(Boolean).join(' · '), disabled: !skill.enabled || !!skill.unsupportedDependencies.length,
       })) });
       return;
     }
     const controller = new AbortController(); searchController = controller;
-    menu.update({ heading: 'References', items: [], loading: true });
+    menu.update({ kind: 'references', heading: 'References', items: [], loading: true });
     void actions.searchReferences(query, filter, controller.signal).then(results => {
       if (disposed || controller.signal.aborted || current !== querySerial || !menu.isOpen()) return;
       references.clear();
       const items = results.filter(reference => (reference.kind === 'article' || reference.kind === 'chat') && (filter === 'all' || reference.kind === filter));
       for (const reference of items) references.set(`reference:${reference.id}`, reference);
-      menu.update({ heading: 'References', items: items.map(reference => ({ id: `reference:${reference.id}`, label: reference.label, description: referenceDetail(reference) })) });
+      menu.update({ kind: 'references', heading: 'References', items: items.map(reference => ({ id: `reference:${reference.id}`, label: reference.label, description: referenceDetail(reference) })) });
     }).catch(error => {
-      if (!disposed && !controller.signal.aborted && current === querySerial && menu.isOpen()) menu.update({ heading: 'References', items: [], error: failure(error) });
+      if (!disposed && !controller.signal.aborted && current === querySerial && menu.isOpen()) menu.update({ kind: 'references', heading: 'References', items: [], error: failure(error) });
     });
   };
-  const filterControls = new Map<ReferenceFilter | 'skills', HTMLButtonElement>();
-  for (const [kind, label] of [['all', 'All'], ['article', 'Articles'], ['chat', 'Chats'], ['skills', 'Workflows']] as const) {
-    const control = button(label, () => { mode = kind === 'skills' ? 'skills' : 'references'; if (kind !== 'skills') filter = kind; search(); input.focus(); });
+  // Only reference-type filters live here. Installed workflows are the '/'-menu's own scope,
+  // reached by typing '/', not by crossing over from an '@' reference search.
+  const filterControls = new Map<ReferenceFilter, HTMLButtonElement>();
+  for (const [kind, label] of [['all', 'All'], ['article', 'Articles'], ['chat', 'Chats']] as const) {
+    const control = button(label, () => { mode = 'references'; filter = kind; search(); input.focus(); });
     filterControls.set(kind, control); menu.toolbar.append(control);
   }
   /** The composer's single plus button routes here; no visible '@' trigger is mounted. */

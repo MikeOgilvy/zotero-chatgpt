@@ -1,5 +1,12 @@
 export interface CommandCandidate { id: string; label: string; description?: string; disabled?: boolean }
-export interface CommandMenuState { heading: string; items: CommandCandidate[]; loading?: boolean; error?: string }
+/**
+ * The composer has two different affordances: '@' mentions context references and '/' runs an
+ * installed workflow for this chat. The kind is what keeps them from rendering each other's
+ * candidates, filter controls or empty state, so it travels with the state instead of being
+ * inferred from a heading or a label.
+ */
+export type CommandMenuKind = 'references' | 'commands';
+export interface CommandMenuState { heading: string; items: CommandCandidate[]; loading?: boolean; error?: string; kind?: CommandMenuKind; empty?: string }
 export interface CommandMenu {
   element: HTMLElement;
   toolbar: HTMLElement;
@@ -10,6 +17,9 @@ export interface CommandMenu {
 }
 
 let serial = 0;
+
+/** Candidate ids are namespaced so a menu can refuse the other kind's entries. */
+const CANDIDATE_PREFIX: Record<CommandMenuKind, string> = { references: 'reference:', commands: 'skill:' };
 
 /** One keyboard owner for every composer chooser. Candidate text is always inert. */
 export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElement, choose: (id: string) => Promise<void>): CommandMenu {
@@ -26,7 +36,7 @@ export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElem
   if (ownsPosition) container.style.position = 'relative';
   const attributes = new Map(['aria-controls', 'aria-expanded', 'aria-autocomplete', 'aria-activedescendant'].map(name => [name, input.getAttribute(name)]));
   input.setAttribute('aria-controls', list.id); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false');
-  let items: CommandCandidate[] = []; let active = ''; let composing = false; let busy = false; let disposed = false; let revision = 0;
+  let items: CommandCandidate[] = []; let active = ''; let composing = false; let busy = false; let disposed = false; let revision = 0; let kind: CommandMenuKind | null = null;
   const isOpen = () => !element.hidden && !disposed;
   const close = () => { element.hidden = true; revision++; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
   const markActive = () => {
@@ -67,7 +77,16 @@ export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElem
   };
   const update = (state: CommandMenuState) => {
     if (disposed) return;
-    revision++; items = state.items; heading.textContent = state.heading; list.setAttribute('aria-label', state.heading);
+    revision++;
+    kind = state.kind ?? null;
+    // A references chooser never renders a workflow and a commands chooser never renders a
+    // reference, even if a caller accidentally hands it a mixed list.
+    items = kind ? state.items.filter(item => item.id.startsWith(CANDIDATE_PREFIX[kind!])) : state.items;
+    if (kind) element.dataset.zcrCommandKind = kind; else delete element.dataset.zcrCommandKind;
+    // A workflow chooser has no reference-type axis: hide its filter row instead of showing
+    // reference filters that cannot apply. `hidden` loses to the flex rule, so clear the display.
+    toolbar.style.display = kind === 'commands' ? 'none' : '';
+    heading.textContent = state.heading; list.setAttribute('aria-label', state.heading);
     if (!items.some(item => item.id === active && !item.disabled)) active = items.find(item => !item.disabled)?.id ?? '';
     list.replaceChildren(...items.map((item, index) => {
       const row = create('button', 'zcr-command-option'); row.type = 'button'; row.tabIndex = -1; row.id = `${list.id}-${index}`; row.dataset.candidateId = item.id;
@@ -79,7 +98,7 @@ export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElem
       row.addEventListener('click', () => { active = item.id; markActive(); void chooseActive(); });
       return row;
     }));
-    status.textContent = state.error || (state.loading ? 'Searching…' : !items.length ? 'No matches' : ''); status.hidden = !status.textContent;
+    status.textContent = state.error || (state.loading ? 'Searching…' : !items.length ? (state.empty ?? 'No matches') : ''); status.hidden = !status.textContent;
     element.hidden = false; input.setAttribute('aria-expanded', 'true'); markActive(); place();
   };
   const onKey = (event: KeyboardEvent) => {
