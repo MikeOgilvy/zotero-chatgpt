@@ -50,7 +50,6 @@ const COPY: Readonly<Record<string, string>> = {
   'Add references or workflows': '添加引用或工作流', 'Close preview': '关闭预览', 'Reference preview': '引用预览',
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
   'Reference first PDF page': '引用 PDF 起始页', 'Reference last PDF page': '引用 PDF 结束页',
-  'Research profile for this chat': '此对话的研究配置', Profile: '配置', 'Global preferences': '全局偏好',
   "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.": '回答偏好、研究配置和工作流可用性位于 Zotero 的偏好设置窗口中。',
   'Answer language': '回答语言', 'Answer detail': '回答详细程度', 'Mathematical explanation': '数学解释方式',
   'Research background': '研究背景', 'Citation style': '引用风格', 'Annotation style': '标注风格',
@@ -107,8 +106,8 @@ const TEXT = [
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
   '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
   '.zcr-workspace-settings select[name="detail"] option', '.zcr-workspace-settings select[name="mathematics"] option',
-  '.zcr-workspace-settings select[name="workflow"] option', '[data-zcr-profile] option[value=""]',
-  '[data-zcr-collection-target] option[value=""]', '.zcr-plus-menu', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status', '.zcr-chat-profile-label',
+  '.zcr-workspace-settings select[name="workflow"] option',
+  '[data-zcr-collection-target] option[value=""]', '.zcr-plus-menu', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
@@ -119,7 +118,7 @@ const TEXT = [
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
-  '.zcr-document-context > summary', '.zcr-context-range input', '[data-zcr-profile]',
+  '.zcr-document-context > summary', '.zcr-context-range input',
   '.zcr-plus-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
 ].join(',');
@@ -201,7 +200,7 @@ function actionLabel(text: string): string {
   if (contextReported) return `上次运行时用量报告：${contextReported[1]} 个输入词元；模型窗口 ${contextReported[2]}（${contextReported[3] === 'runtime reported' ? '运行时报告' : '内置目录估算'}）。这是上次报告，并非剩余空间。`;
   const trySkill = /^Try (.+) in draft$/u.exec(text); if (trySkill) return `在草稿中试用 ${trySkill[1]}`;
   for (const [source, target] of [
-    ['Preview workflow ', '预览工作流 '], ['Remove workflow ', '移除工作流 '], ['Preview profile ', '预览配置 '], ['Remove profile ', '移除配置 '],
+    ['Preview workflow ', '预览工作流 '], ['Remove workflow ', '移除工作流 '],
     ['Preview ', '预览 '], ['Remove ', '移除 '], ['Confirm delete ', '确认删除 '], ['Cancel delete ', '取消删除 '],
     ['Duplicate ', '创建副本：'], ['Export ', '导出 '], ['Edit ', '编辑 '], ['Delete ', '删除 '],
   ] as const) if (text.startsWith(source)) return target + text.slice(source.length);

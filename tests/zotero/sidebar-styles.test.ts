@@ -276,3 +276,11 @@ it('pins the archived section below the grouped list as a hairlined, rotational,
   expect(cs(list).overflowY).toBe('auto');
   expect(cs(list).maxHeight).not.toBe('');
 });
+
+it('keeps a visible keyboard ring on the composer context controls that remain', () => {
+  // The per-chat research-profile select is gone from the composer row; the reference and workflow
+  // chips that stay there must keep a real focus ring. happy-dom drops AccentColor declarations, so
+  // the shipped declaration is asserted directly, as the other ring guards in this file do.
+  expect(shippedCss()).toMatch(/\.zcr-workspace-control:focus-visible\s*\{[^}]*outline:\s*2px solid\b/u);
+});
+

@@ -168,46 +168,28 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     for (const reference of state.draft.references) chip(`${reference.label}${reference.range ? ` · pp.${reference.range[0]}–${reference.range[1]}` : ''}`, `Preview ${reference.label}`, () => { void openReference(reference); }, `Remove ${reference.label}`, () => actions.removeReference(reference.id));
     const selectedSkill = state.settings.skills.find(skill => skill.id === state!.draft.skillId);
     if (selectedSkill) chip(`/${selectedSkill.name}`, `Preview workflow ${selectedSkill.name}`, () => showPreview(selectedSkill.name, selectedSkill.markdown, `${selectedSkill.origin} · v${selectedSkill.version}`), `Remove workflow ${selectedSkill.name}`, () => actions.selectSkill(null));
-    const selectedProfile = state.settings.profiles.find(profile => profile.id === state!.draft.profileId);
-    if (selectedProfile) chip(selectedProfile.name, `Preview profile ${selectedProfile.name}`, () => showPreview(selectedProfile.name, Object.entries(selectedProfile.preferences).map(([name, value]) => `${name}: ${value}`).join('\n')), `Remove profile ${selectedProfile.name}`, () => actions.selectProfile(null));
     chips.replaceChildren(...nodes);
   };
 
-  // The per-chat research profile is chat context, not a setting: it stays a compact labelled select
-  // in the composer's context row, so the More menu owns no preference or management UI.
-  const scopeBar = create('div', '', 'zcr-chat-scope'); scopeBar.dataset.zcrChatScope = '';
-  const profileChip = create('label', '', 'zcr-chat-profile'); profileChip.dataset.zcrChatProfile = '';
-  const profileLabel = create('span', 'Profile', 'zcr-chat-profile-label');
-  const profile = create('select'); profile.dataset.zcrProfile = ''; profile.setAttribute('aria-label', 'Research profile for this chat');
-  profileChip.append(profileLabel, profile); mounts.context.append(scopeBar);
-  profile.addEventListener('change', () => {
-    const selected = profile.value || null;
-    void run(async () => {
-      try { await actions.selectProfile(selected); }
-      catch (error) { profile.value = state?.draft.profileId ?? ''; throw error; }
-    }, profile);
-  });
-  /** The status slot only exists for the scoped controls above; it must stay beside them, not in More. */
-  scopeBar.append(profileChip, status);
+  // Per-chat research profiles are gone from the composer: profiles are configured in Zotero's own
+  // Preferences window, and a request uses those global preferences. A draft saved before this
+  // removal still carries `profileId` and keeps applying at send time (see presenter.selectProfile),
+  // so the field stays in the data model but has no control here.
+  /** The status slot reports refusals from the scoped controls (reference and workflow chips). */
+  mounts.context.append(status);
   // Global answer preferences, research profiles and workflow availability live in Zotero's own
   // Preferences window; this pane only chooses what applies to the current chat.
   const globalHint = create('p', "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.", 'zcr-workspace-muted');
   globalHint.dataset.zcrGlobalHint = '';
   advanced.append(globalHint);
-  let chipsKey = ''; let profilesKey = '';
+  let chipsKey = '';
   return { openCommands, update: next => {
     if (disposed) return; state = next;
-    const nextChips = JSON.stringify([next.draft, next.settings.skills.map(skill => [skill.id, skill.name, skill.revision]), next.settings.profiles]);
+    const nextChips = JSON.stringify([next.draft, next.settings.skills.map(skill => [skill.id, skill.name, skill.revision])]);
     if (nextChips !== chipsKey) { chipsKey = nextChips; renderChips(); }
-    const nextProfiles = JSON.stringify(next.settings.profiles);
-    if (nextProfiles !== profilesKey) {
-      profilesKey = nextProfiles; const none = create('option', 'Global preferences'); none.value = '';
-      profile.replaceChildren(none, ...next.settings.profiles.map(item => { const option = create('option', item.name); option.value = item.id; return option; }));
-    }
-    profile.value = next.draft.profileId ?? '';
   }, dispose: () => {
     if (disposed) return; disposed = true; searchController?.abort(); previewController?.abort(); querySerial++;
     input.removeEventListener('input', onInput); input.removeEventListener('click', onInput); input.removeEventListener('keyup', onCaretKey); input.removeEventListener('compositionstart', onStart); input.removeEventListener('compositionend', onEnd);
-    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); advanced.remove();
+    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); status.remove(); advanced.remove();
   } };
 }

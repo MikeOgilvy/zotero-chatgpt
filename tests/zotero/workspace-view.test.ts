@@ -65,18 +65,29 @@ it('previews reference and skill chips as inert text and removes them through ca
   await vi.waitFor(() => { expect(actions.removeReference).toHaveBeenCalledWith('paper-one'); expect(actions.selectSkill).toHaveBeenCalledWith(null); });
 });
 
-it('keeps the per-chat profile chip in the composer context and points at the native Preferences window', async () => {
-  const { advanced, context, actions, pane, document } = setup();
-  // The profile is chat context, not a setting: it sits with the draft chips in the composer row.
-  const profile = context.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
-  expect(profile.closest('[data-zcr-chat-scope]')).not.toBeNull();
-  expect(profile.closest('[data-zcr-workspace-settings]')).toBeNull();
-  profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
-  await vi.waitFor(() => expect(actions.selectProfile).toHaveBeenCalledWith('math'));
+it('renders no per-chat research-profile control in the composer and points at the native Preferences window', () => {
+  const { advanced, context, actions, pane } = setup();
+  // The profile select, its visible "Profile" label and its scope row are gone from the composer.
+  expect(context.querySelector('[data-zcr-profile]')).toBeNull();
+  expect(context.querySelector('[data-zcr-chat-scope]')).toBeNull();
+  expect(context.querySelector('.zcr-chat-profile-label')).toBeNull();
+  expect(pane.textContent).not.toContain('Global preferences');
+  expect(actions.selectProfile).not.toHaveBeenCalled();
   // The global controls moved to Zotero's own Preferences window, not the sidebar.
   expect(advanced.querySelector('[name="background"]')).toBeNull();
   expect(advanced.querySelector('[name="profile-name"]')).toBeNull();
   expect(pane.querySelector('[data-zcr-global-hint]')?.textContent).toMatch(/Zotero's Preferences window/u);
+});
+
+it('keeps the / workflow chooser and its installed-workflows heading after the profile control is removed', async () => {
+  const { pane, context, type, key, actions } = setup();
+  expect(context.querySelector('[data-zcr-profile]')).toBeNull();
+  type('/Der');
+  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  expect(menu.hidden).toBe(false);
+  expect(menu.textContent).toContain('Installed workflows');
+  key('Enter');
+  await vi.waitFor(() => expect(actions.selectSkill).toHaveBeenCalledWith('derive'));
 });
 
 it('no longer offers any per-chat override controls in the sidebar', () => {
@@ -117,13 +128,16 @@ it('reports a refused removal beside the composer controls instead of inside Mor
 });
 
 
-it('restores the chat profile chip when selecting a profile is refused', async () => {
-  const { context, pane, document } = setup({ selectProfile: vi.fn().mockRejectedValue(new Error('Profile unavailable')) });
-  const profile = context.querySelector<HTMLSelectElement>('[data-zcr-profile]')!;
-  profile.value = 'math'; profile.dispatchEvent(new document.defaultView!.Event('change'));
-  await vi.waitFor(() => expect(pane.textContent).toContain('Profile unavailable'));
-  expect(profile.value).toBe('');
-  expect(context.querySelector<HTMLElement>('.zcr-workspace-status')?.hidden).toBe(false);
+it('loads a chat with a legacy persisted per-chat profile value without a profile control or error', () => {
+  const { context, pane, view, state } = setup();
+  expect(() => view.update({ ...state, draft: { ...state.draft, profileId: 'math' } })).not.toThrow();
+  // The legacy value stays in the draft (the presenter still applies it) but exposes no UI here.
+  expect(context.querySelector('[data-zcr-profile]')).toBeNull();
+  expect(context.querySelector('[data-zcr-chat-scope]')).toBeNull();
+  expect(pane.querySelector('[data-zcr-workspace-chips]')?.children).toHaveLength(0);
+  expect(pane.textContent).not.toContain('Mathematics');
+  // The status slot that reports refusals from the remaining scoped controls still exists.
+  expect(context.contains(pane.querySelector<HTMLElement>('.zcr-workspace-status'))).toBe(true);
 });
 
 it('leaves a newer query and its open menu intact when an earlier selection finishes', async () => {
