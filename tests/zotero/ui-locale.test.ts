@@ -24,7 +24,7 @@ it('switches visible controls, accessible names and placeholders without replaci
 
 it('never translates source, chat, history, candidate, profile or workflow content even when it matches a control', () => {
   const { root, add } = setup(); const protectedNodes: HTMLElement[] = [];
-  for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-source-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
+  for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
     const node = add('div', className, 'Send'); node.setAttribute('aria-label', 'Send'); protectedNodes.push(node);
     const embedded = add('button', 'zcr-button', 'Stop', node); embedded.dataset.zcrAction = 'send'; protectedNodes.push(embedded);
   }
@@ -58,16 +58,14 @@ it('localizes controls added by later renders and restores the latest externally
   locale.update('en'); expect(status.textContent).toBe('Stopped'); expect(button.textContent).toBe('Reconcile task'); locale.dispose();
 });
 
-it('translates only fixed task and PDF progress templates while preserving identifiers and source page labels', () => {
+it('translates only fixed task progress templates while preserving identifiers', () => {
   const { root, add } = setup(); const task = add('details', 'zcr-task-card'); task.dataset.zcrTaskId = 'one'; const summary = add('summary', '', 'Annotations · Review · 2/3 selected', task);
   const counts = add('p', 'zcr-task-counts', '2 ready · 1 unresolved', task);
   const reading = add('details', 'zcr-task-card'); reading.dataset.zcrReadingJob = 'job'; const progress = add('summary', '', 'Reading · running · 1/3 passes', reading);
-  const pdf = add('details', 'zcr-document-context'); const pdfSummary = add('summary', '', 'Current PDF · 12/20 pages with text', pdf);
-  const pages = add('div', 'zcr-context-pages'); const page = add('details', '', '', pages); const pageSummary = add('summary', '', 'p. Send · text extracted', page);
   const locale = mountUILocale(root); locale.update('zh');
   expect(summary.textContent).toBe('标注 · 待审核 · 已选择 2/3'); expect(counts.textContent).toBe('2 待处理 · 1 未定位');
-  expect(progress.textContent).toBe('阅读 · 运行中 · 1/3 轮'); expect(pdfSummary.textContent).toBe('当前 PDF · 12/20 页有文本'); expect(pageSummary.textContent).toBe('第 Send 页 · 已提取文本');
-  locale.update('en'); expect(summary.textContent).toBe('Annotations · Review · 2/3 selected'); expect(pageSummary.textContent).toBe('p. Send · text extracted'); locale.dispose();
+  expect(progress.textContent).toBe('阅读 · 运行中 · 1/3 轮');
+  locale.update('en'); expect(summary.textContent).toBe('Annotations · Review · 2/3 selected'); expect(progress.textContent).toBe('Reading · running · 1/3 passes'); locale.dispose();
 });
 
 it('translates workflow and reference action labels without translating dynamic names', () => {

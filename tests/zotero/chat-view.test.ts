@@ -721,9 +721,10 @@ it('renders an empty transcript as plain, scrollable space with no mark and a wo
   expect(root.querySelector('[data-zcr-action="send"]')).not.toBeNull();
 });
 
-it('leaves the automatic-PDF preference to Zotero Preferences instead of the sidebar', async () => {
+it('leaves the automatic-PDF preference to Zotero Preferences and off the chat surface', async () => {
   const sent: SendInput[] = [];
-  const { root } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+  const prepare = vi.fn(() => Promise.resolve(documentA));
+  const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
   const settings = root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]');
   const menu = root.querySelector<HTMLElement>('[data-zcr-settings-menu]');
   expect(settings?.getAttribute('aria-label')).toBe('More');
@@ -736,44 +737,71 @@ it('leaves the automatic-PDF preference to Zotero Preferences instead of the sid
   expect(menu?.querySelectorAll('input[type="checkbox"], select')).toHaveLength(0);
   expect(menu?.querySelector('[data-zcr-account-usage]')).not.toBeNull();
   expect(sent).toHaveLength(0);
-  // The reader still applies the stored opt-out to background preparation without a sidebar control.
-  expect(root.querySelector('[data-zcr-document-context]')?.textContent).toMatch(/Current PDF/u);
+  // The reader still applies the stored opt-out to background preparation, with no panel to show it.
+  await vi.waitFor(() => expect(prepare).toHaveBeenCalled());
+  await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
+  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
+  expect(sent).toHaveLength(0);
 });
 
-it('shows local PDF coverage and extraction gaps without claiming transmission or image understanding', async () => {
+it('keeps the whole PDF-context cluster off the chat surface while reading stays a background act', async () => {
   const partial = { ...documentA, pages: [documentA.pages[0]!, { ...documentA.pages[1]!, text: '', status: 'empty' as const }] };
-  const { root } = await mountReadyChat({ messages: [], document: { prepare: () => Promise.resolve(partial), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {}, needsDisclosure: () => true } });
-  await new Promise(resolve => setTimeout(resolve, 5));
-  const context = root.querySelector('[data-zcr-document-context]');
-  expect(context?.textContent).toContain('1/2'); expect(context?.textContent).toMatch(/no text|empty/iu);
-  expect(context?.textContent).toMatch(/not sent/iu); expect(context?.textContent).toMatch(/unknown/iu);
-  expect(root.querySelector('[data-zcr-context-disclosure]')?.textContent).toMatch(/PDF text/iu);
+  const prepare = vi.fn(() => Promise.resolve(partial)); const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+  await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
+  // Every piece of the old cluster is gone: the panel, its summary hook, the consent block, the
+  // page-range inputs and both buttons, and the scope/context-window prose.
+  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
+  expect(root.querySelector('[data-zcr-context-summary]')).toBeNull();
+  expect(root.querySelector('.zcr-document-panel')).toBeNull();
+  expect(root.querySelector('.zcr-context-range')).toBeNull();
+  expect(root.querySelector('[aria-label="First PDF page"]')).toBeNull();
+  expect(root.querySelector('[aria-label="Last PDF page"]')).toBeNull();
+  expect([...root.querySelectorAll('button')].map(node => node.textContent)).not.toContain('Use pages');
+  expect([...root.querySelectorAll('button')].map(node => node.textContent)).not.toContain('Whole PDF');
+  expect(root.textContent).not.toMatch(/Model context window|not sent to Codex|Only this PDF is in scope/u);
+  // The context-usage ring the owner asked to keep still renders in the composer row.
+  expect(root.querySelector('[data-zcr-context-usage]')).not.toBeNull();
+  // The two survivors are bare siblings in the chat, not panel contents: the consent line stays
+  // hidden until a request actually needs it, and the page indicator is no longer wrapped by any
+  // removed container.
+  const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
+  expect(disclosure.hasAttribute('hidden')).toBe(true);
+  expect(disclosure.closest('.zcr-document-panel')).toBeNull();
+  expect(root.querySelector<HTMLElement>('[data-zcr-context-source]')?.closest('.zcr-document-panel')).toBeNull();
+  // Reading the current PDF is still a local background act: it prepared without sending anything.
+  expect(prepare).toHaveBeenCalled();
+  expect(sent).toHaveLength(0);
 });
 
-it('keeps the Current PDF panel collapsed while local preparation runs in the background', async () => {
+it('prepares the current PDF locally in the background with no panel and no model request', async () => {
   const prepare = vi.fn(() => Promise.resolve(documentA)); const sent: SendInput[] = [];
   const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
-  const details = root.querySelector<HTMLDetailsElement>('[data-zcr-document-context]')!;
-  const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
   // Opening the sidebar prepares the PDF locally with no click and no model request.
   await vi.waitFor(() => expect(prepare).toHaveBeenCalled());
   await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
   expect(sent).toHaveLength(0);
-  // The reader sees one compact summary line, never an expanded block or a pinned consent banner.
-  expect(details.open).toBe(false);
-  expect(disclosure.hasAttribute('hidden')).toBe(true);
-  expect(details.querySelector('summary')?.textContent).toMatch(/Current PDF/u);
+  // Nothing about that preparation is rendered: not even a collapsed summary line survives.
+  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
+  expect(root.querySelector('[data-zcr-context-summary]')).toBeNull();
 });
 
-it('shows the send disclosure only when a request actually needs consent', async () => {
-  const { root, presenter } = await mountReadyChat({ messages: [], document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {}, needsDisclosure: () => true } });
+it('keeps the one-time PDF send consent reachable without the removed panel', async () => {
+  const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {}, needsDisclosure: () => true } });
   const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
   expect(disclosure.hasAttribute('hidden')).toBe(true);
-  expect(disclosure.textContent).toMatch(/go to Codex/u);
-  // An explain with automatic PDF text on needs consent: the prompt appears with its button.
+  // An explain with automatic PDF text on needs consent. The removed panel used to own that gate,
+  // so without the surviving consent line the explain would be dropped with no signal at all.
   await presenter.explain(citationA);
   expect(disclosure.hasAttribute('hidden')).toBe(false);
-  expect(disclosure.querySelector<HTMLButtonElement>('button')?.hidden).toBe(false);
+  const action = disclosure.querySelector<HTMLButtonElement>('[data-zcr-action="acknowledge-context"]')!;
+  expect(action.hidden).toBe(false);
+  // Acknowledging re-runs the pending explain, so the request is not silently dropped.
+  action.click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(presenter.snapshot().document.disclosure).toBe(false);
+  await vi.waitFor(() => expect(disclosure.hasAttribute('hidden')).toBe(true));
 });
 
 it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {
