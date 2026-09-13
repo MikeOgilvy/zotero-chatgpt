@@ -335,6 +335,19 @@ it('explains the live list when the running runtime reports models', async () =>
   expect(note).not.toMatch(/not a live report/u);
 });
 
+it('keeps the bundled copy when the runtime reports models none of which are offerable', async () => {
+  // The runtime is running and reported models, but only excluded families: no row joins from it, so
+  // the "this combines what the runtime reported" sentence would be false and is not shown.
+  const { host } = fixture(undefined, { readLiveModels: () => Promise.resolve(['gpt-5.5', 'gpt-5.4', 'codex-auto-review']) });
+  const { ready, root, find } = mount(host);
+  await ready;
+  expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
+  expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-6-astra"]').checked).toBe(true);
+  const note = find('[data-zcr-pref="models-note"]').textContent ?? '';
+  expect(note).toMatch(/not in the bundled catalog/u);
+  expect(note).not.toMatch(/running Codex runtime reported/u);
+});
+
 it('keeps the bundled catalog list when the live read fails instead of half-rendering', async () => {
   const { host } = fixture(undefined, { readLiveModels: () => Promise.reject(new Error('The runtime is unavailable.')) });
   const { ready, root, find } = mount(host);

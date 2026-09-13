@@ -37,7 +37,8 @@ it('carries the runtime live model ids as JSON text, and stays absent when the h
   const ids = ['gpt-6-astra', 'gpt-5.3-codex-spark'];
   const present = fixture(undefined, undefined, () => Promise.resolve(ids));
   expect(await present.service.readLiveModels!()).toBe(JSON.stringify(ids));
-  // The service forwards the ids verbatim; the offerable-family filter lives in core, not here.
+  // The service forwards the ids verbatim; the offerable-family filter is owned by core (and reused
+  // by the pane), not re-implemented here.
   expect(await present.service.readLiveModels!()).toBe('["gpt-6-astra","gpt-5.3-codex-spark"]');
 
   const none = fixture(undefined, undefined, () => Promise.resolve(null));

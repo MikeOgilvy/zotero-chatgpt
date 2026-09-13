@@ -1,5 +1,5 @@
 import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { defaultAllowedModels, MODEL_ID, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
+import { defaultAllowedModels, isOfferableModelId, MODEL_ID, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
 import { mountUILocale } from '../chat/ui-locale.ts';
 import { createHistorySection, type HistorySection } from './history-section.ts';
@@ -119,16 +119,18 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   const fail = (text: string): void => { clear(status); show(error, text); };
 
   /**
-   * The runtime's live model ids, or null when there is no live list to show. A missing port, a null
-   * report, an empty report and a failed read all mean the same thing to the pane — the bundled
-   * catalog is all it can list — so none of them can half-render a row or invent an id.
+   * The runtime's offerable live model ids, or null when there is no live list to show. A missing
+   * port, a null report, an empty report, a failed read and a report whose ids are all outside the
+   * offerable families all mean the same thing to the pane — the bundled catalog is all it can show —
+   * so none of them can half-render a row, invent an id, or switch the note to a live-list claim the
+   * rows do not support.
    */
   async function readLiveModels(): Promise<string[] | null> {
     if (!host.readLiveModels) return null;
     try {
       const raw = await host.readLiveModels();
       if (!Array.isArray(raw)) return null;
-      const ids = [...new Set(raw.filter((id): id is string => typeof id === 'string' && MODEL_ID.test(id)))];
+      const ids = [...new Set(raw.filter((id): id is string => typeof id === 'string' && MODEL_ID.test(id) && isOfferableModelId(id)))];
       return ids.length ? ids : null;
     } catch {
       return null;
