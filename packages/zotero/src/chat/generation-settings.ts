@@ -30,6 +30,15 @@ function offeredRank(id: string): number {
   return index === -1 ? OFFERED_MODEL_RANK.length : index;
 }
 
+/** The historical GPT-6 / GPT-5.6 families, in catalog order. */
+function familyModels(models: readonly ModelOption[]): ModelOption[] {
+  return models.filter(model => OFFERED_MODEL_FAMILY.test(model.id));
+}
+/** Newest-first by the explicit rank, then by id. Never mutates the caller's array. */
+function rankedModels(models: readonly ModelOption[]): ModelOption[] {
+  return models.slice().sort((a, b) => offeredRank(a.id) - offeredRank(b.id) || a.id.localeCompare(b.id));
+}
+
 /**
  * The models the picker may offer, newest-first. Every other family stays in the runtime snapshot
  * for capability lookups and historical message captions but never appears in the menu. When the
@@ -38,15 +47,23 @@ function offeredRank(id: string): number {
  *
  * `allowedIds` is the Preferences allowlist from `enforcedAllowedModelIds`. `undefined` keeps the
  * historical family rule exactly as it was. When provided, exactly those catalog ids are offered in
- * the same rank order; a stale list whose ids are all gone from the live catalog falls back to the
- * full list instead of blanking a working picker.
+ * the same rank order, including ids outside the two families.
+ *
+ * A stale list whose ids are all gone from the live catalog (or an empty list) must never blank the
+ * picker and must never change the owner's default model. It degrades to the historical family
+ * result — newest-first, `gpt-6-astra` first — not to raw catalog order, which would leak every
+ * other family back into the menu and promote the catalog head to the default. Only when even the
+ * family rule yields nothing is the raw full list kept.
  */
 export function offeredModels(models: readonly ModelOption[], allowedIds?: readonly string[]): ModelOption[] {
-  const offered = allowedIds === undefined
-    ? models.filter(model => OFFERED_MODEL_FAMILY.test(model.id))
-    : models.filter(model => allowedIds.includes(model.id));
-  if (!offered.length) return models.slice();
-  return offered.slice().sort((a, b) => offeredRank(a.id) - offeredRank(b.id) || a.id.localeCompare(b.id));
+  if (allowedIds === undefined) {
+    const family = familyModels(models);
+    return family.length ? rankedModels(family) : models.slice();
+  }
+  const offered = models.filter(model => allowedIds.includes(model.id));
+  if (offered.length) return rankedModels(offered);
+  const family = familyModels(models);
+  return family.length ? rankedModels(family) : models.slice();
 }
 
 /**

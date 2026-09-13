@@ -195,9 +195,24 @@ it('labels the model chip as model + effort + Fast without inventing missing tie
 /**
  * The Preferences allowlist half of `offeredModels`. `undefined` is the untouched default and must
  * reproduce the historical GPT-6 / GPT-5.6 rule byte for byte; an explicit list is authoritative
- * over the picker, including ids outside those two families, but a list whose ids are all gone from
- * the live catalog must keep the full list rather than blank the menu.
+ * over the picker, including ids outside those two families. A list whose ids are all gone from the
+ * live catalog (or an empty list) must degrade to the same family default — never to raw catalog
+ * order, which would blank nothing but would change the default model and leak other families.
  */
+it('pins the stale/empty fallback to the family set with gpt-6-astra first', () => {
+  for (const stale of [['retired-model'], ['retired-model', 'gpt-9-ghost'], []] as const) {
+    const ids = offeredModels(liveModels, stale).map(model => model.id);
+    expect(ids).toEqual(offeredIds);
+    expect(ids[0]).toBe('gpt-6-astra');
+    expect(ids[0]).not.toBe('gpt-5.6-sol');
+    // No other family leaks back in, and the default model is unchanged.
+    expect(ids).not.toContain('gpt-5.5');
+    expect(ids).not.toContain('gpt-5.3-codex-spark');
+    expect(catalogDefaultSettings(liveModels, stale)?.model).toBe('gpt-6-astra');
+    expect(composerControls(liveModels, null, stale)[0]?.options.map(option => option.value)).toEqual(offeredIds);
+  }
+});
+
 it('keeps the historical family set exactly when the allowlist is undefined', () => {
   for (const input of [liveModels, embeddedModels]) {
     const untouched = offeredModels(input, undefined).map(model => model.id);
@@ -217,30 +232,41 @@ it('offers exactly the allowed ids in the same rank order when an allowlist is p
   expect(offeredModels(liveModels, ['gpt-5.5']).map(model => model.id)).toEqual(['gpt-5.5']);
 });
 
-it('falls back to the full list when a stale allowlist matches nothing in the live catalog', () => {
-  expect(offeredModels(liveModels, ['retired-model', 'gpt-9-ghost']).map(model => model.id))
-    .toEqual(liveModels.map(model => model.id));
+it('degrades a stale allowlist to the family set, never to raw catalog order', () => {
+  // The bug this pins: raw `models.slice()` would make the catalog head (gpt-5.6-sol) first and
+  // default, and would leak gpt-5.5 / gpt-5.3-codex-spark back into the picker. A stale list must
+  // degrade to today's family default instead: newest-first, gpt-6-astra first, only the two
+  // families offered.
+  const stale = offeredModels(liveModels, ['retired-model', 'gpt-9-ghost']).map(model => model.id);
+  expect(stale).toEqual(offeredIds);
+  expect(stale[0]).toBe('gpt-6-astra');
+  expect(stale[0]).not.toBe('gpt-5.6-sol');
+  expect(stale).not.toEqual(liveModels.map(model => model.id));
   // A partially stale list keeps only the ids the catalog still carries.
   expect(offeredModels(liveModels, ['gpt-5.5', 'retired-model']).map(model => model.id)).toEqual(['gpt-5.5']);
 });
 
-it('treats an explicitly empty allowlist differently from the untouched default', () => {
+it('keeps an explicitly empty allowlist from blanking the picker and from changing the default', () => {
   const untouched = offeredModels(embeddedModels).map(model => model.id);
   const empty = offeredModels(embeddedModels, []).map(model => model.id);
   expect(untouched).toEqual(offeredIds);
-  // An empty list filters everything out, so the picker falls back to the full list, not `[]`.
-  expect(empty).toEqual(embeddedModels.map(model => model.id));
-  expect(empty).not.toEqual(untouched);
+  // An empty list filters everything out; it degrades to the same family default, never `[]` and
+  // never raw catalog order. It therefore matches the untouched default exactly.
+  expect(empty).toEqual(offeredIds);
+  expect(empty[0]).toBe('gpt-6-astra');
+  expect(empty).toEqual(untouched);
+  expect(empty).not.toEqual(embeddedModels.map(model => model.id));
   expect(empty.length).toBeGreaterThan(0);
 });
 
 it('derives the catalog default from the allowlist when one is provided', () => {
   expect(catalogDefaultSettings(liveModels, ['gpt-5.6-luna', 'gpt-5.6-terra']))
     .toEqual({ model: 'gpt-5.6-terra', serviceTier: null, effort: 'medium' });
-  // A stale allowlist still yields the full list rather than no default. The fallback keeps the
-  // catalog's own order, exactly like the family rule's existing full-list fallback.
+  // A stale allowlist degrades to the family default rather than no default or the catalog head.
   expect(catalogDefaultSettings(liveModels, ['retired-model']))
-    .toEqual({ model: 'gpt-5.6-sol', serviceTier: null, effort: 'medium' });
+    .toEqual({ model: 'gpt-6-astra', serviceTier: null, effort: 'medium' });
+  expect(catalogDefaultSettings(liveModels, []))
+    .toEqual({ model: 'gpt-6-astra', serviceTier: null, effort: 'medium' });
 });
 
 it('aligns a legacy conversation pinned to a now-excluded model to the first allowed model', () => {
