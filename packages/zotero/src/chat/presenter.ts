@@ -502,7 +502,10 @@ export class ConversationPresenter {
     if (enabled && !this.submitting) void this.prepareContext().catch(() => {});
   }
   setDocumentRange(first: number | null, last: number | null): void {
-    const range: [number, number] | null = first === null && last === null ? null : [first ?? 1, last ?? first ?? 1];
+    const bound = (value: number | null) => value !== null && Number.isFinite(value) && value >= 1 ? Math.floor(value) : null;
+    const low = bound(first); const high = bound(last);
+    const range: [number, number] | null = low === null && high === null ? null
+      : low === null ? [high!, high!] : high === null ? [low, low] : low <= high ? [low, high] : [high, low];
     this.update({ document: { ...this.state.document, range, prepared: null, phase: 'idle', error: null } });
     this.draftVersion++; this.stageDraft();
     if (!this.submitting) { this.documentJob?.controller.abort(); if (this.state.document.enabled) void this.prepareContext().catch(() => {}); }

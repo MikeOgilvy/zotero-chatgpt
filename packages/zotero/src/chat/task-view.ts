@@ -190,7 +190,18 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
     };
     const cancel = button('Cancel reading', 'reading-cancel', () => execute('cancel', () => actions.cancelReading(job.id), cancel));
     const reconcile = button('Reconcile reading', 'reading-reconcile', () => execute('reconcile', () => actions.reconcileReading(job.id), reconcile)); controls.append(cancel, reconcile);
-    if (actions.describeReading) void actions.describeReading(job.id).then(description => { if (!removed && description) { question.textContent = description.question; scope.textContent = description.scopeLabel; question.hidden = false; scope.hidden = false; } }).catch(() => {});
+    let described = false; let describing = false;
+    const loadDescription = () => {
+      if (!actions.describeReading || described || describing) return;
+      describing = true;
+      void actions.describeReading(job.id).then(description => {
+        describing = false;
+        if (removed || !description) return;
+        described = true;
+        question.textContent = description.question; scope.textContent = description.scopeLabel; question.hidden = false; scope.hidden = false;
+      }).catch(() => { describing = false; });
+    };
+    loadDescription();
     const refresh = () => {
       if (removed) return;
       summary.textContent = `Reading · ${job.status} · ${job.steps.filter(step => step.status === 'completed').length}/${job.steps.length} passes`;
@@ -210,7 +221,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       cancel.hidden = ['completed', 'cancelled', 'failed'].includes(job.status); cancel.disabled = pending.has('cancel') || job.cancelRequested || job.status === 'cancelling';
       reconcile.hidden = !['uncertain', 'paused'].includes(job.status) && job.persistence !== 'unconfirmed'; reconcile.disabled = pending.has('reconcile');
     };
-    return { node, update: (next: ReadingJob) => { if (next.revision < job.revision) return; if (next.revision > job.revision) actionError = null; job = next; if (!userToggled && previousStatus !== job.status) node.open = job.status !== 'completed'; previousStatus = job.status; refresh(); }, dispose: () => { removed = true; node.remove(); } };
+    return { node, update: (next: ReadingJob) => { if (next.revision < job.revision) return; if (next.revision > job.revision) actionError = null; job = next; loadDescription(); if (!userToggled && previousStatus !== job.status) node.open = job.status !== 'completed'; previousStatus = job.status; refresh(); }, dispose: () => { removed = true; node.remove(); } };
   };
   return { update: state => {
     if (disposed) return;

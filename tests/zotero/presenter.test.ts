@@ -359,6 +359,18 @@ describe('conversation presenter', () => {
     expect(f.last().draft.question).toBe('新对话的问题');
     expect(f.last().draft.citations).toEqual([]);
   });
+  it('normalizes a blank or reversed page range instead of preparing an impossible slice', async () => {
+    const f = fixture(); await f.presenter.activate();
+    expect(f.last().document.range).toBeNull();
+    f.presenter.setDocumentRange(5, 2);
+    expect(f.last().document.range).toEqual([2, 5]);
+    f.presenter.setDocumentRange(Number(''), Number(''));
+    expect(f.last().document.range).toBeNull();
+    f.presenter.setDocumentRange(3, null);
+    expect(f.last().document.range).toEqual([3, 3]);
+    f.presenter.setDocumentRange(1.7, 4.2);
+    expect(f.last().document.range).toEqual([1, 4]);
+  });
   it('reuses an idle empty chat instead of stacking duplicate empty sessions', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
