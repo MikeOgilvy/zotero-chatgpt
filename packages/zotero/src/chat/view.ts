@@ -1,6 +1,6 @@
 import { requestProgress, type Citation, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
 import type { HistoryEntry } from '../../../contracts/src/workspace.ts';
-import { currentContextUsage, mountContextRing, mountDocumentContext } from './context-view.ts';
+import { currentContextUsage, mountContextRing } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
 import { mountUILocale } from './ui-locale.ts';
@@ -27,6 +27,13 @@ export interface ChatViewHooks {
   zoomTargets?: Array<Document | HTMLElement>;
   pasteTargets?: Array<Document | HTMLElement>;
   readerZoom?: ReaderZoomHost;
+  /**
+   * Collapse the reader dock through the reader's own close path (the same one the toolbar toggle
+   * and native pane action use). The view calls it only when closing the last unarchived chat
+   * leaves nothing to display; without it — as in a bare view test — the pane just stays open in
+   * its new-chat state.
+   */
+  closeDock?(): void;
   uuid?(): string;
 }
 const HTML = 'http://www.w3.org/1999/xhtml';
@@ -87,6 +94,9 @@ const COPY = {
   collectionsFailed: 'Collections could not be loaded.',
   /** Shown when a live request has no readable timing: an honest unknown, never an invented duration. */
   elapsedUnknown: 'Elapsed time unavailable',
+  /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
+  sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
+  continueWithPdf: 'Continue with current PDF',
 } as const;
 const VIEW_ACTION_FAILED = COPY.actionFailed;
 /** Stable English section labels; `mountUILocale` translates the rendered heading text. */
@@ -352,11 +362,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   currentTitle.dataset.zcrCurrentTitle = '';
   // The current chat title carries the reference's rounded neutral chip: the title truncates and a
   // small cross sits at its right edge. Closing leaves the chat on disk and in history and asks no
-  // confirmation; the destructive remove lives only on the fallback host-list row.
-  const closeCurrent = button(COPY.closeChat, 'close-conversation', () => { presenter.closeConversation(); }, 'remove', 'zcr-current-close');
+  // confirmation; the destructive remove lives only on the fallback host-list row. When the close
+  // leaves no unarchived chat for this attachment, the reader collapses its whole dock through the
+  // reader's own close path instead of leaving an empty panel; otherwise the pane stays open in its
+  // new-chat state and the `+` stays available.
+  const closeCurrent = button(COPY.closeChat, 'close-conversation', () => {
+    if (presenter.closeConversation()) hooks.closeDock?.();
+  }, 'remove', 'zcr-current-close');
   context.append(currentTitle, closeCurrent);
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
+  // The first outbound scope notice stays even though the PDF coverage panel is gone: it is the only
+  // way to acknowledge the disclosure, and without it an explain that needs consent can never send.
+  const scopeNotice = el('div', 'zcr-context-disclosure');
+  scopeNotice.dataset.zcrContextDisclosure = '';
+  const scopeNoticeCopy = el('p', '', COPY.sendScope);
+  const acknowledgeScope = button(COPY.continueWithPdf, 'acknowledge-context', () => { presenter.acknowledgeContext(); });
+  scopeNotice.append(scopeNoticeCopy, acknowledgeScope);
+  scopeNotice.hidden = true; acknowledgeScope.hidden = true;
   const actions = el('div', 'zcr-chrome-actions');
   const fresh = button(COPY.newChat, 'new-conversation', () => { void presenter.newConversation(); }, 'plus');
   const historyBtn = button(COPY.history, 'history', () => { toggleHistory(); }, 'clock');
@@ -386,10 +409,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   settingsContent.dataset.zcrSettingsContent = '';
   settingsMenu.append(conversationActions, settingsContent);
   const accountUsage = el('p', 'zcr-account-usage'); accountUsage.dataset.zcrAccountUsage = ''; settingsContent.append(accountUsage);
-  const documentPanel = el('div', 'zcr-document-panel');
-  documentPanel.dataset.zcrContextSummary = '';
-  const documentView = mountDocumentContext(documentPanel, presenter, hooks.openDocumentPage ? async (document, pageIndex) => { await hooks.openDocumentPage!(document, pageIndex); } : undefined);
-  documentPanel.append(contextSource);
   const historyPanel = el('div', 'zcr-history-panel');
   historyPanel.id = `${viewId}-history`;
   historyPanel.dataset.zcrHistory = '';
@@ -542,7 +561,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, settingsMenu, documentPanel, main); root.append(chat);
+  chat.append(chrome, settingsMenu, contextSource, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
@@ -1105,7 +1124,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     paintTiming(state);
     const uiLanguage = state.workspace?.uiLanguage ?? 'en';
     if (lastLanguage !== uiLanguage) { lastLanguage = uiLanguage; localizer.update(uiLanguage); }
-    documentView.update(state);
+    // The consent prompt is a state, not a banner: it appears only when a request actually needs it.
+    scopeNotice.hidden = !state.pendingExplain;
+    acknowledgeScope.hidden = !state.pendingExplain;
     const quotas = state.runtime?.rateLimits;
     accountUsage.textContent = quotas ? quotas.map(quota => `${quota.label}: ${quota.usedPercent === null ? 'usage unknown' : `${quota.usedPercent}% used`}${quota.resetsAt === null ? '' : ` · resets ${new Date(quota.resetsAt * 1000).toLocaleString()}`}`).join('\n') || 'Account usage: no limits reported.' : 'Account usage: unavailable.';
     if (state.workspace) {
@@ -1159,7 +1180,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     login.hidden = account === 'signedIn' || pendingLogin || state.connection !== 'ready'; cancelLogin.hidden = !pendingLogin;
     retry.hidden = state.connection !== 'error';
     auth.hidden = login.hidden && cancelLogin.hidden && retry.hidden;
-    fresh.hidden = !state.conversation;
+    // The `+` starts a chat and stays available in every state, including right after a close:
+    // tying it to having a current conversation is the regression that hid it with the chat.
+    fresh.hidden = false;
     historyBtn.hidden = false;
     alert.textContent = state.message ?? ''; alert.hidden = !state.message;
     updateContext(state);

@@ -1014,13 +1014,31 @@ export class ConversationPresenter {
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   /**
+   * Does the sidebar still have an unarchived chat to list for this attachment once `closingId` is
+   * gone? `state.conversations` is `client.list(this.paper)` — the attachment-scoped listing the
+   * sidebar's host-list path renders. `state.history` is the workspace listing it renders otherwise;
+   * that listing is profile-wide, so it is scoped here by the same paper identity this presenter
+   * uses everywhere else. Archived chats do not count: they live in the collapsed Archived section
+   * and the default history scope is unarchived. This reads those two existing listings instead of
+   * inventing a separate count.
+   */
+  private hasUnarchivedChatForPaper(closingId: string | null): boolean {
+    const paper = paperId(this.paper);
+    if (this.state.conversations.some(conversation => conversation.id !== closingId && !conversation.archivedAt && paperId(conversation.paper) === paper)) return true;
+    return this.state.history.some(entry => entry.id !== closingId && paperId(entry.paper) === paper);
+  }
+  /**
    * Leave the current conversation without deleting or rewriting anything. The chat stays on disk
    * and in history; the pane returns to its new-conversation state with the unbound draft. The
    * stored "current" pointer is left alone, so an explicit close must stop the adoption paths from
    * silently restoring the closed chat: the next request starts a fresh one instead.
+   *
+   * Returns true when nothing unarchived is left to list for this attachment, i.e. the caller
+   * should collapse the reader dock through its own close path rather than leave an empty panel.
    */
-  closeConversation(): void {
-    if (this.disposed || !this.state.conversation) return;
+  closeConversation(): boolean {
+    if (this.disposed || !this.state.conversation) return false;
+    const closingId = this.state.conversation.id;
     this.stageDraft();
     const position = this.positions.get('unbound');
     const unbound = this.drafts.get('unbound');
@@ -1035,6 +1053,7 @@ export class ConversationPresenter {
       document: { ...this.state.document, range: clone(position?.range ?? null), prepared: null, phase: 'idle', error: null },
     });
     this.stageDraft();
+    return !this.hasUnarchivedChatForPaper(closingId);
   }
   async deleteConversation(id: string): Promise<void> {
     try {

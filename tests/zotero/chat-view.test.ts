@@ -53,6 +53,7 @@ async function mountReadyChat(options: {
   archive?: (id: string, archived: boolean) => Promise<Conversation>;
   clipboardImages?: () => Promise<ImageAttachment[]>;
   workspace?: ReaderWorkspace;
+  closeDock?: () => void;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -169,6 +170,7 @@ async function mountReadyChat(options: {
   const scale = options.textScale ?? { value: 1 };
   const timers = options.captureTimers ? captureIntervalTimers(doc.defaultView as unknown as ViewWindow) : null;
   const teardown = mountChatView(root, presenter, {
+    ...(options.closeDock ? { closeDock: options.closeDock } : {}),
     openCitation: options.openCitation ?? (() => Promise.resolve()),
     readTextScale: () => scale.value,
     writeTextScale: value => { scale.value = value; },
@@ -933,6 +935,96 @@ it('keeps the closed chat’s draft and starts a fresh chat from the empty state
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${closed}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(closed));
   expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('Draft kept for the closed chat');
+});
+
+/**
+ * Two regressions the owner reported together. Closing the current chat used to hide the `+` as
+ * well, so the empty state had no way to start again. And the owner chose that closing the last
+ * unarchived chat for the PDF should collapse the whole dock through the reader's own close path,
+ * but must not collapse it while other chats for that attachment remain.
+ */
+it('keeps the New chat control available in the empty state after closing the current chat', async () => {
+  const confirm = vi.fn(() => true);
+  const { root, presenter } = await mountReadyChat({ messages: [], confirm });
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
+  expect(fresh.hidden).toBe(false);
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  expect(presenter.snapshot().conversation).toBeNull();
+  // Observable DOM state, not a stylesheet claim: the control is present and interactive, and it
+  // still starts a chat from the empty state.
+  expect(fresh.hidden).toBe(false);
+  expect(fresh.disabled).toBe(false);
+  expect(fresh.getAttribute('aria-label')).toMatch(/New chat/u);
+  fresh.click();
+  await vi.waitFor(() => {
+    expect(presenter.snapshot().conversation).not.toBeNull();
+    expect(root.querySelector<HTMLElement>('[data-zcr-chat-pill]')).not.toBeNull();
+  });
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it('collapses the dock when closing the last unarchived chat for the attachment', async () => {
+  const closeDock = vi.fn();
+  const { root, presenter } = await mountReadyChat({ messages: [], closeDock });
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  expect(presenter.snapshot().conversation).toBeNull();
+  // Nothing unarchived is left to list for this attachment, so the reader's own close path runs
+  // exactly once.
+  expect(closeDock).toHaveBeenCalledTimes(1);
+  expect(presenter.closeConversation()).toBe(false);
+  expect(closeDock).toHaveBeenCalledTimes(1);
+  expect(fresh.hidden).toBe(false);
+});
+
+it('does not collapse the dock while other unarchived chats for the attachment remain', async () => {
+  const first: Conversation = {
+    id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
+    activeRequestId: null, messages: [], lastSeq: 0,
+    createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
+  };
+  const second: Conversation = {
+    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
+    createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
+  };
+  const closeDock = vi.fn();
+  const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, second], closeDock });
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
+  const closeCurrent = () => root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
+  closeCurrent();
+  expect(presenter.snapshot().conversation).toBeNull();
+  expect(closeDock).not.toHaveBeenCalled();
+  expect(fresh.hidden).toBe(false);
+  // Closing the first chat is not the "last" one either: the chat closed above is still an
+  // unarchived history entry for this attachment, so the dock must stay open.
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${first.id}"]`)!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first.id));
+  closeCurrent();
+  expect(presenter.snapshot().conversation).toBeNull();
+  expect(closeDock).not.toHaveBeenCalled();
+  expect(fresh.hidden).toBe(false);
+});
+
+it('does not count an archived chat as a reason to keep the dock open', async () => {
+  const first: Conversation = {
+    id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
+    activeRequestId: null, messages: [], lastSeq: 0,
+    createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
+  };
+  const archived: Conversation = {
+    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002', archivedAt: '2026-09-12T09:00:00.000Z',
+    createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-12T09:00:00.000Z',
+  };
+  const closeDock = vi.fn();
+  const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, archived], closeDock });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  expect(presenter.snapshot().conversation).toBeNull();
+  // The only other chat for this PDF is archived, and archived chats do not keep the dock open.
+  expect(closeDock).toHaveBeenCalledTimes(1);
 });
 
 it('hides the More details prompt in the transcript while keeping the citation', async () => {

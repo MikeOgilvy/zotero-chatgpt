@@ -406,8 +406,6 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-image-preview > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
 .zcr-image-preview > button { align-self: flex-end; }
 .zcr-draft-image > .zcr-button { padding: 0; border: 0; min-width: 0; }
-.zcr-sent-context { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--zcr-border); overflow-wrap: anywhere; }
-.zcr-sent-context p { margin: 6px 0; }
 .zcr-message[data-status="failed"] .zcr-message-meta, .zcr-message[data-status="uncertain"] .zcr-message-meta { color: var(--fill-primary, CanvasText); }
 .zcr-draft-citations { display: flex; flex-direction: column; gap: 6px; }
 .zcr-citation { border-left: 2px solid var(--color-panedivider, GrayText); padding: 2px 0 2px 8px; }
@@ -777,19 +775,12 @@ body.zcr-dock-open #split-view .primary-view,
 /* Expanded archived rows scroll on their own so a long archive cannot push the row off screen. */
 .zcr-history-archived-list { max-height: 45%; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 6px; }
 
-/* Current PDF context uses the same native spacing and colors as chat chrome. */
-.zcr-sidebar .zcr-document-panel { flex: 0 1 auto; min-height: 0; max-height: 42%; overflow: auto; font-size: .9em; }
-.zcr-sidebar .zcr-document-context { padding: 6px 0; }
-.zcr-sidebar .zcr-document-context > summary { cursor: pointer; color: var(--fill-secondary, GrayText); }
-.zcr-sidebar .zcr-document-context p, .zcr-sidebar .zcr-context-disclosure p { margin: 6px 0; }
-.zcr-sidebar .zcr-context-disclosure { padding: 8px; background: var(--material-toolbar, ButtonFace); border-radius: 5px; }
-.zcr-sidebar .zcr-context-range { display: flex; gap: 4px; flex-wrap: wrap; }
-.zcr-sidebar .zcr-context-range input { width: 82px; min-width: 0; color: inherit; background: var(--material-background, transparent); }
-.zcr-sidebar .zcr-source-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 200px; overflow: auto; user-select: text; }
-.zcr-sidebar .zcr-context-pages details { margin: 5px 0; }
+/* The first outbound scope notice. Compact and inline: it is a consent state above the transcript,
+   not a permanent banner, and it follows the same native spacing and colors as the chrome. */
+.zcr-sidebar .zcr-context-disclosure { margin: 0 8px 8px; padding: 8px; background: var(--material-toolbar, ButtonFace); border-radius: 5px; }
+.zcr-sidebar .zcr-context-disclosure[hidden] { display: none; }
+.zcr-sidebar .zcr-context-disclosure p { margin: 0 0 6px; }
 .zcr-sidebar .zcr-settings-menu label { display: flex; gap: 6px; align-items: center; }
-.zcr-sidebar .zcr-document-context :focus-visible { outline: 2px solid var(--color-accent, Highlight); outline-offset: 2px; }
-
 /* Task ledgers: one stylesheet for every mounted view instead of a copy per mount. */
 .zcr-task-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font: inherit; font-size: 12px; }
 .zcr-task-view [hidden] { display: none !important; }

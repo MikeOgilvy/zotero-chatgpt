@@ -26,6 +26,8 @@ const COPY: Readonly<Record<string, string>> = {
   'Move image earlier': '将图片前移', 'Move image later': '将图片后移',
   'Use current PDF text automatically': '自动使用当前 PDF 文本',
   'Changes affect future requests. Earlier text remains in this chat; start a new chat to exclude it.': '更改将影响之后的请求。已有文本仍保留在当前对话中；新建对话即可排除它。',
+  'Continue with current PDF': '继续使用当前 PDF',
+  'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.': '发送时，此 PDF 的提取文本、选中文本和附加图片将通过你的 ChatGPT 账户发送至 Codex。打开侧栏仅会在本地准备文本。你可以在 Zotero 的偏好设置窗口中关闭自动使用 PDF 文本。',
   'This action could not be completed.': '此操作未能完成。',
   'The source could not be opened.': '无法打开原文。',
   'The image could not be saved.': '无法保存图片。',
@@ -81,7 +83,7 @@ const COPY: Readonly<Record<string, string>> = {
 
 // Content areas are never localized, including controls embedded in rendered Markdown.
 const CONTENT = [
-  '.zcr-message-text', '.zcr-rendered', '.zcr-citation-text', '.zcr-source-text', '.zcr-current-title', '.zcr-initial-title',
+  '.zcr-message-text', '.zcr-rendered', '.zcr-citation-text', '.zcr-current-title', '.zcr-initial-title',
   '.zcr-history-item', '.zcr-message-reference', '.zcr-command-option', '.zcr-command-label', '.zcr-command-description',
   '.zcr-task-question', '.zcr-task-quote', '.zcr-task-scope', '.zcr-workspace-preview pre', '.zcr-workspace-preview-title strong',
   'script', 'style', 'svg', 'math', '[data-zcr-ui="false"]',
@@ -90,8 +92,7 @@ const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-
 const TEXT = [
   BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
   '.zcr-history-heading', '.zcr-history-empty', '.zcr-history-archived-label', '.zcr-message-author', '.zcr-status-line', '.zcr-message-meta',
-  '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-document-context > summary', '.zcr-document-context > p',
-  '.zcr-context-disclosure > p', '.zcr-context-pages details > summary', '.zcr-sent-context > strong', '.zcr-sent-context > p',
+  '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-context-disclosure > p',
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
   '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
   '.zcr-workspace-settings select[name="detail"] option', '.zcr-workspace-settings select[name="mathematics"] option',
@@ -107,7 +108,6 @@ const TEXT = [
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
-  '.zcr-document-context > summary', '.zcr-context-range input',
   '.zcr-plus-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
 ].join(',');
@@ -123,12 +123,6 @@ function progress(text: string): string {
   if (match) return `等待 ${match[1]} 秒`;
   match = /^Answered in (\d+)s$/u.exec(text);
   if (match) return `回答用时 ${match[1]} 秒`;
-  match = /^Preparing PDF · (\d+)\/(\d+|\?)$/u.exec(text);
-  if (match) return `正在准备 PDF · ${match[1]}/${match[2]}`;
-  match = /^Current PDF · (\d+)\/(\d+) pages with text$/u.exec(text);
-  if (match) return `当前 PDF · ${match[1]}/${match[2]} 页有文本`;
-  match = /^p\. (.+) · (text extracted|no text|extraction failed|partial extraction)$/u.exec(text);
-  if (match) return `第 ${match[1]} 页 · ${{ 'text extracted': '已提取文本', 'no text': '无文本', 'extraction failed': '提取失败', 'partial extraction': '部分提取' }[match[2]!]}`;
   match = /^(Annotations|Acquire literature) · (Preparing|Review|Running|Completed|Partly completed|Cancelled|Unconfirmed|Undone|Conflict|Failed) · (.+)$/u.exec(text);
   if (match) {
     const outcome = match[3]!.replace(/^(\d+\/\d+) selected$/u, '已选择 $1').replace(/^(\d+\/\d+) annotations applied$/u, '已应用 $1 个标注').replace(/^(\d+) metadata item(?:s|\(s\))? · (\d+) PDFs attached$/u, '$1 个元数据条目 · 已附加 $2 个 PDF');
@@ -140,8 +134,6 @@ function progress(text: string): string {
   if (match && STATUS[match[3]!]) return `${match[1] === 'Synthesis' ? '综合' : match[2] ? `阅读第 ${match[2]} 轮` : '阅读所选来源'} · ${STATUS[match[3]!]!}`;
   const counts = text.split(' · ').map(part => /^(\d+) (.+)$/u.exec(part));
   if (counts.length && counts.every(part => part && STATUS[part[2]!])) return counts.map(part => `${part![1]} ${STATUS[part![2]!]!}`).join(' · ');
-  match = /^Local text: (\d+\/\d+) pages\. (\d+) pages have no text; (\d+) extraction errors; (\d+) partial pages\. (\d+) pages outside the selected range\.$/u.exec(text);
-  if (match) return `本地文本：${match[1]} 页。${match[2]} 页无文本；${match[3]} 页提取失败；${match[4]} 页部分提取。所选范围之外有 ${match[5]} 页。`;
   match = /^Review (\d+) annotation suggestions$/u.exec(text);
   if (match) return `审核 ${match[1]} 条标注建议`;
   match = /^PDF (\S+) · candidate pages (.+)$/u.exec(text);

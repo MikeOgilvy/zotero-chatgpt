@@ -143,6 +143,10 @@ function entry(reader: HostReader): ReaderEntry {
         openDocumentPage: (document, pageIndex, quote) =>
           openSourcePage(nativeSourceNavigator(Zotero, () => reader, document.paper), document, pageIndex, quote ?? null),
         zoomTargets: zoomDocuments(reader, root),
+        // The reader's own close callback: collapses the dock exactly as the toolbar toggle does,
+        // restoring the previous Zotero context pane, zoom/anchor and focus. The view calls it only
+        // when the last unarchived chat for this attachment is closed.
+        closeDock: close,
         uuid: () => crypto.randomUUID(),
         readerZoom: {
           zoomIn: () => { pane.controller.manualZoom(); zoomReader(reader, 'in'); },
