@@ -98,7 +98,10 @@ export class ReaderDocumentCache {
       }
       if (unread !== null) for (let number = unread; number <= last; number++) pages.push({ pageIndex: number - 1, pageLabel: label(number), text: '', status: 'error' });
       checkSignal(signal);
-      const document = validateDocument({ id: identifier(await digest(JSON.stringify([key, pages]))), paper: scope, revision, parserVersion: PARSER, totalPages: total, pages });
+      // Keep the source identity a digest over per-page hashes, so equal extraction yields equal ids
+      // across cache eviction and any different page text (including a clipped or gap page) changes it.
+      const hashes = await Promise.all(pages.map(page => digest(JSON.stringify(page))));
+      const document = validateDocument({ id: identifier(await digest(JSON.stringify([key, hashes]))), paper: scope, revision, parserVersion: PARSER, totalPages: total, pages });
       // Retry transient extraction failures; an empty/scanned page is a stable, explicit gap.
       if (!pages.some(p => p.status === 'error' || p.partial)) {
         this.entries.set(key, document);
