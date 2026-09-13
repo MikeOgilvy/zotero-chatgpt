@@ -1013,6 +1013,8 @@ export class ConversationPresenter {
     const current = this.state.draft;
     if (current.question.trim() || current.citations.length || current.images.length || current.references.length) return;
     this.changeDraft({ ...current, question: submitted.question, citations: clone(submitted.citations), images: clone(submitted.images) });
+    // Once handed back there is nothing left to restore, so the remembered draft is released.
+    this.submitted.delete(conversationId);
   }
   async cancelQueuedRequest(requestId: string): Promise<void> {
     const conversation = this.state.conversation; if (!conversation?.queuedRequestIds?.includes(requestId)) throw new ReaderError('NOT_FOUND', 'This request is not queued in the current chat.');
