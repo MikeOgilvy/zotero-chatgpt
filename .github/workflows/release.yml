@@ -1,7 +1,8 @@
 name: Release dry-run
 
-# Source-completable GitHub Actions plan only. It never creates a GitHub Release,
-# never calls `gh release`, and never uploads XPI assets.
+# Source-completable GitHub Actions plan only. It never creates a GitHub Release, never calls
+# `gh release`, never pushes a tag and never uploads an XPI asset. `scripts/release.mjs` refuses
+# `--publish`/`--gh-release`/`--upload` and always reports githubRelease=null.
 on:
   workflow_dispatch:
 
@@ -11,15 +12,21 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: "24"
+          # Same pinned toolchain as CI (.nvmrc 24.11.0, engines >=24 <25).
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: node scripts/runtime-prepare.mjs
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
-      - run: node scripts/release.mjs --dry-run
+      - run: npm run package:dev
+      - run: npm run verify:artifacts
+      # Produces a local, reviewable plan against the real dist/ XPI (name and SHA-256 come from the
+      # packaged artifact). This step is inert: it writes no file and performs no network operation.
+      - run: node scripts/release.mjs --dry-run --json

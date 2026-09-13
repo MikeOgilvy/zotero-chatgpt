@@ -1,5 +1,9 @@
 name: CI
 
+# Non-host pipeline only. Host acceptance (dedicated `.zcr-dev/` Zotero profile, GUI, native
+# annotations, upgrade/rollback) and `--live` model checks are intentionally NOT part of CI: they
+# require a macOS GUI Zotero instance and, for `--live`, an authorized account. See
+# docs/development.md. CI never publishes, never tags and never uploads a release asset.
 on:
   push:
   pull_request:
@@ -8,6 +12,7 @@ permissions:
   contents: read
 
 jobs:
+  # Pure Node checks. No Zotero, no network beyond npm, no model requests.
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -15,9 +20,29 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: "24"
+          # Pin the documented toolchain (.nvmrc 24.11.0, engines >=24 <25) instead of a moving major.
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
+
+  # Packaging must exercise the same commands docs/development.md promises. scripts/runtime-prepare.mjs
+  # fetches the pinned, SHA-256-verified Codex 0.144.1 darwin/arm64 archive into the ignored
+  # `.zcr-dev/runtime-cache/`; CI only packages and hashes it, it never executes it. The XPI name is
+  # derived from packages/zotero/manifest.json, so a version bump cannot silently drift out of sync.
+  package:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node scripts/runtime-prepare.mjs
+      - run: npm run package:dev
+      - run: npm run verify:artifacts
