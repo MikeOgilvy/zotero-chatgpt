@@ -119,7 +119,7 @@ it('keeps the page a programmatic jump moved to while the viewer location still 
     get currentScale() { return typeof location.scale === 'number' ? location.scale / 100 : 1; },
     set currentScale(value: number) { location.scale = value * 100; },
     get currentScaleValue() { return location.scale; },
-    set currentScaleValue(value: number) { location.scale = value * 100; },
+    set currentScaleValue(value: number | string) { location.scale = typeof value === 'number' ? value * 100 : value; },
     scrollPageIntoView: ({ pageNumber }: { pageNumber: number }) => {
       currentPageNumber = pageNumber; appliedPage = pageNumber;
       frames.push(() => { currentPageNumber = appliedPage; location.pageNumber = appliedPage; location.top = (appliedPage - 1) * PAGE_HEIGHT; });

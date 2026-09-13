@@ -67,6 +67,10 @@ async function runHostSmoke(config) {
       sidebarCollapsed: win.ZoteroContextPane?.collapsed,
     });
     toggle().click(); await until(() => panel()?.dataset.zcrConversation === conversationA, 'same-conversation-restored');
+    await check('reopen-keeps-current-page', pdf().pdfViewer.currentPageNumber === 2, {
+      page: pdf().pdfViewer.currentPageNumber,
+      locationPage: pdf().pdfViewer._location?.pageNumber,
+    });
     await check('draft-preserved', input().value === 'Unsent synthetic question about the current PDF');
     const readRange = context().querySelectorAll('input'); readRange[0].value = '2'; readRange[1].value = '2';
     context().querySelector('.zcr-context-range button').click();
