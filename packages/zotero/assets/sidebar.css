@@ -256,6 +256,46 @@ body.zcr-dock-open #split-view .primary-view,
   outline-offset: 1px;
 }
 
+/* The chats the reader has open side by side. The dock is one attachment pane, so the strip names
+   every open chat and marks the one on screen; it only appears once a second chat exists. A narrow
+   dock scrolls the strip inside itself instead of pushing chips past the edge. */
+.zcr-panes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0 2px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.zcr-pane-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fill-secondary, GrayText);
+  font: inherit;
+  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.zcr-pane-tab:hover { background: var(--fill-quinary, ButtonFace); color: var(--fill-primary, CanvasText); }
+/* The chat on screen is the marked chip: the same neutral fill the title pill uses, never an accent. */
+.zcr-pane-tab[aria-selected="true"] {
+  background: var(--fill-quaternary, ButtonFace);
+  border-color: var(--zcr-border);
+  color: var(--fill-primary, CanvasText);
+}
+.zcr-pane-tab:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
+
 .zcr-button {
   font: inherit;
   font-size: var(--zcr-control-font-size, 12px);

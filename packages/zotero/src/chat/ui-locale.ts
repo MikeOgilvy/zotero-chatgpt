@@ -2,7 +2,7 @@ export type UILanguage = 'en' | 'zh';
 
 const COPY: Readonly<Record<string, string>> = {
   'Sign in with ChatGPT': '使用 ChatGPT 登录', 'Cancel sign-in': '取消登录', Reconnect: '重新连接',
-  'New chat': '新建对话', 'Chat history': '对话历史', 'Search chats…': '搜索对话…',
+  'New chat': '新建对话', 'Chat history': '对话历史', 'Search chats…': '搜索对话…', 'Open chats': '已打开的对话',
   'Close chat': '关闭对话', 'Delete chat': '删除对话', 'Rename chat': '重命名对话', 'Save name': '保存名称', 'Chat name': '对话名称',
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
   'Account usage': '账户用量', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
@@ -128,6 +128,8 @@ const COPY: Readonly<Record<string, string>> = {
 // Content areas are never localized, including controls embedded in rendered Markdown.
 const CONTENT = [
   '.zcr-message-text', '.zcr-rendered', '.zcr-citation-text', '.zcr-current-title', '.zcr-initial-title',
+  // An open-chat chip shows the chat's own title: a chat named "Send" must not be renamed on screen.
+  '.zcr-pane-tab',
   '.zcr-history-item', '.zcr-message-reference', '.zcr-command-option', '.zcr-command-label', '.zcr-command-description',
   '.zcr-task-question', '.zcr-task-quote', '.zcr-task-scope', '.zcr-workspace-preview pre', '.zcr-workspace-preview-title strong',
   'script', 'style', 'svg', 'math', '[data-zcr-ui="false"]',
@@ -157,6 +159,8 @@ const TEXT = [
 ].join(',');
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
+  // The open-chat strip's own name is copy; the chat titles inside it are data and stay verbatim.
+  '.zcr-panes',
   '.zcr-plus-menu input', '.zcr-rename-form input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-workspace-search', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.

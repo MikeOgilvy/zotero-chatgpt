@@ -1328,6 +1328,77 @@ it('closes the current chat from the title pill cross without confirming, deleti
   expect(remove).not.toHaveBeenCalled();
 });
 
+/**
+ * The owner's side-by-side request, seen from the dock: starting a chat keeps the one on screen
+ * open, and the panel shows which chats are open and switches between them. A single open chat needs
+ * no switcher, so the strip only appears once there is a second pane to reach.
+ */
+it('keeps the open chats as a pane strip and switches back to a chat with its own draft', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const first = presenter.snapshot().conversation!.id;
+  const strip = () => root.querySelector<HTMLElement>('[data-zcr-panes]')!;
+  const tabs = () => [...strip().querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+  expect(strip().hidden).toBe(true);
+  presenter.setQuestion('第一问');
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!.click();
+  await vi.waitFor(() => expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first, presenter.snapshot().conversation!.id]));
+  const second = presenter.snapshot().conversation!.id;
+  expect(second).not.toBe(first);
+  expect(strip().hidden).toBe(false);
+  // Same-name chats are told apart exactly as the history list does it, and the chat on screen is
+  // the one the strip marks.
+  await vi.waitFor(() => expect(tabs()[1]!.textContent).toBe('Synthetic Paper A · 2'));
+  expect(tabs()[0]!.textContent).toBe('Synthetic Paper A');
+  expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true']);
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('');
+  // One click brings the first chat back, with its own draft: nothing was replaced or lost. The
+  // strip keeps the chip node it already had, so the click target is still the one that was pressed.
+  tabs()[0]!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first));
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('第一问');
+  expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('Synthetic Paper A');
+});
+
+it('reaches every open chat from the arrow keys and keeps one chip in the tab order', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const first = presenter.snapshot().conversation!.id;
+  await presenter.newConversation();
+  const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
+  const tabs = () => [...strip.querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+  // Roving tabindex: only the chat on screen is a stop for Tab; the arrows reach the others.
+  expect(tabs().map(tab => tab.tabIndex)).toEqual(tabs().map(tab => (tab.dataset.zcrConversationId === presenter.snapshot().conversation?.id ? 0 : -1)));
+  expect(tabs()[0]!.tabIndex).toBe(-1);
+  const win = root.ownerDocument.defaultView!;
+  tabs()[1]!.focus();
+  tabs()[1]!.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  expect(root.ownerDocument.activeElement).toBe(tabs()[0]);
+  tabs()[0]!.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  expect(root.ownerDocument.activeElement).toBe(tabs()[1]);
+  // Moving the focus is not a switch: the chat on screen only changes when a chip is activated.
+  expect(presenter.snapshot().conversation?.id).not.toBe(first);
+  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('Synthetic Paper A · 2');
+});
+
+it('drops the chip of a closed chat and hides the strip with the last open pane', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const first = presenter.snapshot().conversation!.id;
+  presenter.setQuestion('第一问');
+  await presenter.newConversation();
+  const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
+  const tabs = () => [...strip.querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+  expect(tabs()).toHaveLength(2);
+  // Closing the chat on screen from the chrome cross leaves the other open chat on screen, so the
+  // strip is down to one chip and steps out of the way.
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first));
+  expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first]);
+  expect(strip.hidden).toBe(true);
+  // Closed, not deleted: the chat is still listed for this attachment.
+  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(tabs()[0]!.dataset.zcrConversationId);
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('第一问');
+});
+
 it('keeps the closed chat’s draft and starts a fresh chat from the empty state on the next send', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const closed = presenter.snapshot().conversation!.id;

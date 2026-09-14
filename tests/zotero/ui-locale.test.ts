@@ -22,9 +22,22 @@ it('switches visible controls, accessible names and placeholders without replaci
   locale.update('en'); expect(send.textContent).toBe('Send'); expect(input.placeholder).toBe('Ask a question…'); expect(send.title).toBe('Send'); locale.dispose();
 });
 
+it('translates the open-chat strip name while a chat named like a control stays verbatim', () => {
+  const { root, add } = setup();
+  const strip = add('div', 'zcr-panes'); strip.setAttribute('role', 'tablist'); strip.setAttribute('aria-label', 'Open chats');
+  const tab = add('button', 'zcr-pane-tab', 'Send', strip);
+  tab.dataset.zcrAction = 'select-pane'; tab.setAttribute('aria-selected', 'true'); tab.title = 'Send';
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(strip.getAttribute('aria-label')).toBe('已打开的对话');
+  // A chip carries the chat's own name: a chat called "Send" keeps that name on screen and for AT.
+  expect(tab.textContent).toBe('Send');
+  expect(tab.title).toBe('Send');
+  locale.update('en'); expect(strip.getAttribute('aria-label')).toBe('Open chats'); locale.dispose();
+});
+
 it('never translates source, chat, history, candidate, profile or workflow content even when it matches a control', () => {
   const { root, add } = setup(); const protectedNodes: HTMLElement[] = [];
-  for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
+  for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-pane-tab', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
     const node = add('div', className, 'Send'); node.setAttribute('aria-label', 'Send'); protectedNodes.push(node);
     const embedded = add('button', 'zcr-button', 'Stop', node); embedded.dataset.zcrAction = 'send'; protectedNodes.push(embedded);
   }

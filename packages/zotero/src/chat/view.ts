@@ -45,6 +45,7 @@ const COPY = {
   cancelLogin: 'Cancel sign-in',
   retry: 'Reconnect',
   newChat: 'New chat',
+  openChats: 'Open chats',
   untitled: 'Untitled',
   history: 'Chat history',
   searchChats: 'Search chats…',
@@ -477,6 +478,19 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (presenter.closeConversation()) hooks.closeDock?.();
   }, 'remove', 'zcr-current-close');
   context.append(currentTitle, closeCurrent);
+  /**
+   * The open chats, in the order they were opened. The dock is one attachment pane, so the chats the
+   * reader has side by side cannot all be shown at once: the strip names every open chat, marks the
+   * chat on screen, and switches to another one. It exists only while a second chat is open — with a
+   * single chat the title chip above already says everything — and scrolls inside itself rather than
+   * squeezing a chip past the dock edge.
+   */
+  const panes = el('div', 'zcr-panes');
+  panes.dataset.zcrPanes = '';
+  panes.hidden = true;
+  panes.setAttribute('role', 'tablist');
+  panes.setAttribute('aria-label', COPY.openChats);
+  const paneNodes = new Map<string, HTMLButtonElement>();
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
   // The paper's declared metadata is still read in the background and frozen into every request
@@ -637,7 +651,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, renameForm, contextSource, documentStatus, scopeNotice, main); root.append(chat);
+  chat.append(chrome, panes, renameForm, contextSource, documentStatus, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -937,6 +951,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (isComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
     event.preventDefault(); open(); focusMenu(panel, event.key === 'ArrowUp');
   });
+  // The open-chat strip is a tablist with one tab stop, so the arrows and Home/End move the focus
+  // between the open chats without activating one: browsing the strip must never change what the
+  // composer is editing. Enter or Space activates the focused chip through its own click.
+  panes.addEventListener('keydown', event => {
+    if (isComposing(event) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const items = [...panes.querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+    if (!items.length) return;
+    const current = items.indexOf(doc.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : (Math.max(current, 0) + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    event.preventDefault(); items[next]?.focus();
+  });
   historySearch.addEventListener('input', () => {
     if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value).catch(reportViewError); else applyHistoryFilter();
   });
@@ -1082,6 +1108,52 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     contextSource.hidden = !citation;
     renderDocumentStatus(state);
+  };
+  /**
+   * Reconcile the open-chat strip. A chip is kept by conversation id instead of rebuilt, so a click
+   * or an arrow key lands on a node that is still in the document: switching chats never steals the
+   * focus the reader put on the strip.
+   */
+  const renderPanes = (state: PresenterState) => {
+    const open = state.openConversations;
+    const visible = open.length > 1;
+    panes.hidden = !visible;
+    const ids = new Set(open.map(entry => entry.id));
+    for (const [id, node] of paneNodes) if (!ids.has(id)) { node.remove(); paneNodes.delete(id); }
+    let cursor = panes.firstElementChild;
+    for (const conversation of open) {
+      let tab = paneNodes.get(conversation.id);
+      if (!tab) {
+        tab = el('button', 'zcr-pane-tab');
+        tab.type = 'button';
+        tab.dataset.zcrPaneTab = '';
+        tab.dataset.zcrAction = 'select-pane';
+        tab.dataset.zcrConversationId = conversation.id;
+        tab.id = `${viewId}-pane-${conversation.id}`;
+        tab.addEventListener('click', () => { void presenter.openConversation(conversation.id).catch(reportViewError); });
+        paneNodes.set(conversation.id, tab);
+      }
+      const active = conversation.id === state.conversation?.id;
+      // Same-name chats are told apart exactly as the history list tells them apart, and the title is
+      // the chip's own text: it is the reader's data, not copy that needs translating. Writes are
+      // guarded because this runs on every streamed delta, not only when the pane set changes.
+      const label = conversationLabel(conversation, state.conversations);
+      if (tab.textContent !== label) tab.textContent = label;
+      if (tab.title !== label) tab.title = label;
+      const selected = String(active);
+      if (tab.getAttribute('aria-selected') !== selected) tab.setAttribute('aria-selected', selected);
+      // One tab stop for the whole strip, the canonical tablist pattern: Tab reaches the chat on
+      // screen (or the strip's single entry), and the arrow keys reach the rest.
+      const stop = active ? 0 : -1;
+      if (tab.tabIndex !== stop) tab.tabIndex = stop;
+      if (tab !== cursor) panes.insertBefore(tab, cursor);
+      cursor = tab.nextElementSibling;
+    }
+    // The chat on screen is the panel the marked chip names. With a single open chat there is no
+    // tablist, so the transcript is not a tab panel either.
+    const activeTab = visible && state.conversation ? paneNodes.get(state.conversation.id) : undefined;
+    if (activeTab) { transcript.setAttribute('role', 'tabpanel'); transcript.setAttribute('aria-labelledby', activeTab.id); }
+    else { transcript.removeAttribute('role'); transcript.removeAttribute('aria-labelledby'); }
   };
   const historyRow = (source: HistoryRowSource) => {
     const row = el('div', 'zcr-history-row');
@@ -1326,6 +1398,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       state.connection, state.runtime?.revision ?? 0, state.runtime?.account.state ?? '', state.runtime?.login?.state ?? '',
       state.generating, state.message ?? '', state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
       state.conversation?.activeRequestId ?? '', state.conversations.map(c => `${c.id}:${c.title}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}`).join('\n'),
+      state.openConversations.map(c => `${c.id}:${c.title}`).join('\n'),
       state.draft.citations.map(c => c.id).join('\n'), state.draft.images.map(image => image.id).join('\n'), JSON.stringify(state.draft.settings), state.focusToken,
       state.draft.question.trim().length > 0,
       state.history.map(item => `${item.id}:${item.title}:${item.updatedAt}:${item.preview}`).join('\n'), state.tasks.map(task => `${task.id}:${task.revision}`).join(','), state.readingJobs.map(job => `${job.id}:${job.revision}`).join(','), state.queueing, state.conversation?.queuedRequestIds?.join(','), state.messageFocus?.token,
@@ -1354,6 +1427,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     historyBtn.hidden = false;
     alert.textContent = state.message ?? ''; alert.hidden = !state.message;
     updateContext(state);
+    renderPanes(state);
     const historyKey = state.workspace ? JSON.stringify([state.history, state.historyQuery]) : state.conversations.map(c => `${c.id}:${c.title}:${c.createdAt}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
     if (historyList.dataset.options !== historyKey) {
       historyList.dataset.options = historyKey;

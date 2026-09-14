@@ -443,6 +443,32 @@ it('uses neutral secondary-token rings on the transcript and popover controls', 
   expect(css).not.toMatch(/\.zcr-plus-menu\s+:focus-visible\s*\{[^}]*AccentColor/u);
 });
 
+it('scrolls the open-chat strip inside the dock and rings its chips neutrally', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const strip = el('div', 'zcr-panes');
+  const tab = el('button', 'zcr-pane-tab', 'A chat');
+  const current = el('button', 'zcr-pane-tab', 'Current chat');
+  current.setAttribute('aria-selected', 'true');
+  strip.append(tab, current); doc.body.append(strip);
+  // A narrow dock scrolls the chips inside the strip instead of pushing them past the edge.
+  expect(cs(strip).overflowX).toBe('auto');
+  expect(cs(strip).flexWrap === '' || cs(strip).flexWrap === 'nowrap').toBe(true);
+  // A long chat name truncates in place rather than widening the row past the dock.
+  expect(cs(tab).whiteSpace).toBe('nowrap');
+  expect(cs(tab).textOverflow).toBe('ellipsis');
+  // The chat on screen is marked with the shared neutral fill, and the keyboard ring is neutral too.
+  expect(shippedRule(doc, '.zcr-pane-tab[aria-selected="true"]').cssText).toContain('var(--fill-quaternary');
+  expect(shippedRule(doc, '.zcr-pane-tab:focus-visible').outlineColor).not.toContain('AccentColor');
+  expect(shippedCss()).not.toMatch(/\.zcr-pane-tab[^{},]*\{[^}]*AccentColor/u);
+  // The chips ride the chat text scale like the rest of the chrome, independently of the PDF.
+  const sidebar = el('div', 'zcr-sidebar');
+  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
+  const scaled = el('button', 'zcr-pane-tab', 'A chat');
+  sidebar.append(scaled); doc.body.append(sidebar);
+  expect(cs(scaled).fontSize).toBe('calc(11px * 1.5)');
+});
+
 it('centers a scaled muted timestamp divider and keeps transcript type on the chat scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
