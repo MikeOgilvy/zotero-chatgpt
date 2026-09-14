@@ -2244,7 +2244,7 @@ it('separates the reference and skill rows into their own titled groups', async 
   // Skill opens the '/' chooser: the skill scope, not a reference search.
   plus.click(); skill.click();
   await vi.waitFor(() => expect(commandMenu.dataset.zcrCommandKind).toBe('commands'));
-  expect(commandMenu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed workflows');
+  expect(commandMenu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed skills');
   expect(commandMenu.querySelector('[role="listbox"]')).not.toBeNull();
   expect(menu.hidden).toBe(true);
   // Neither shortcut rewrites the draft.

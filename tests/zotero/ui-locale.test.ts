@@ -70,8 +70,8 @@ it('translates only fixed task progress templates while preserving identifiers',
 
 it('translates workflow and reference action labels without translating dynamic names', () => {
   const { root, add } = setup(); const button = add('button', 'zcr-workspace-control', 'Try in draft'); button.setAttribute('aria-label', 'Try Send in draft'); button.title = 'Try Send in draft';
-  const remove = add('button', 'zcr-workspace-control', '×'); remove.setAttribute('aria-label', 'Remove workflow Stop');
-  const locale = mountUILocale(root); locale.update('zh'); expect(button.textContent).toBe('在草稿中试用'); expect(button.title).toBe('在草稿中试用 Send'); expect(remove.getAttribute('aria-label')).toBe('移除工作流 Stop');
+  const remove = add('button', 'zcr-workspace-control', '×'); remove.setAttribute('aria-label', 'Remove skill Stop');
+  const locale = mountUILocale(root); locale.update('zh'); expect(button.textContent).toBe('在草稿中试用'); expect(button.title).toBe('在草稿中试用 Send'); expect(remove.getAttribute('aria-label')).toBe('移除 skill Stop');
   locale.update('en'); expect(button.title).toBe('Try Send in draft'); locale.dispose();
 });
 

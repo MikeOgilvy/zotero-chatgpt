@@ -383,7 +383,7 @@ export class ConversationPresenter {
   }
   async selectSkill(id: string | null): Promise<void> {
     await this.loadLocal();
-    if (id !== null) { const skill = this.state.workspace?.skills.find(skill => skill.id === id); if (!skill || !skill.enabled || skill.unsupportedDependencies.length) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Choose an enabled workflow with supported dependencies.'); }
+    if (id !== null) { const skill = this.state.workspace?.skills.find(skill => skill.id === id); if (!skill || !skill.enabled || skill.unsupportedDependencies.length) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Choose an enabled skill with supported dependencies.'); }
     this.changeDraft({ ...this.state.draft, skillId: id });
   }
   async selectProfile(id: string | null): Promise<void> {
@@ -416,35 +416,35 @@ export class ConversationPresenter {
   async saveSkill(edit: PresenterSkillEdit): Promise<ReaderSkill> {
     const workspace = await this.getWorkspace(); const settings = await workspace.settings();
     const prior = edit.id ? settings.skills.find(skill => skill.id === edit.id) : undefined;
-    if (edit.id && !prior) throw new ReaderError('NOT_FOUND', 'The workflow is no longer installed.');
+    if (edit.id && !prior) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.');
     const visible = edit.id ? this.state.workspace?.skills.find(skill => skill.id === edit.id) : undefined;
-    if (prior && (edit.revision ?? visible?.revision) !== prior.revision) throw new ReaderError('REQUEST_CONFLICT', 'This workflow changed after editing began. Reopen it before saving.');
+    if (prior && (edit.revision ?? visible?.revision) !== prior.revision) throw new ReaderError('REQUEST_CONFLICT', 'This skill changed after editing began. Reopen it before saving.');
     const id = prior?.id ?? `user-${this.services.uuid()}`;
     const saved = await workspace.saveSkill({ ...(prior ?? { id, revision: '', origin: 'user' as const, permissions: [], unsupportedDependencies: [] }), ...edit, id, description: edit.description.trim() || edit.name });
     this.update({ workspace: await workspace.settings() }); return saved;
   }
   async duplicateSkill(id: string): Promise<ReaderSkill> {
     const workspace = await this.getWorkspace(); const settings = await workspace.settings(); const prior = settings.skills.find(skill => skill.id === id);
-    if (!prior) throw new ReaderError('NOT_FOUND', 'The workflow is no longer installed.');
+    if (!prior) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.');
     const saved = await workspace.saveSkill({ ...clone(prior), id: `user-${this.services.uuid()}`, name: `${prior.name} copy`, origin: 'user', revision: '' });
     this.update({ workspace: await workspace.settings() }); return saved;
   }
   async setSkillEnabled(id: string, enabled: boolean): Promise<void> {
     const workspace = await this.getWorkspace(); const settings = await workspace.settings(); const skill = settings.skills.find(skill => skill.id === id);
-    if (!skill) throw new ReaderError('NOT_FOUND', 'The workflow is no longer installed.');
+    if (!skill) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.');
     await workspace.saveSkill({ ...skill, enabled }); this.update({ workspace: await workspace.settings() });
     if (!enabled && this.state.draft.skillId === id) await this.selectSkill(null);
   }
   async deleteSkill(id: string): Promise<void> { const workspace = await this.getWorkspace(); await workspace.deleteSkill(id); this.update({ workspace: await workspace.settings() }); if (this.state.draft.skillId === id) await this.selectSkill(null); }
   async importSkill(): Promise<ReaderSkill | null> {
-    if (!this.services.library?.pickSkill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Workflow import is unavailable.');
+    if (!this.services.library?.pickSkill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Skill import is unavailable.');
     const text = await this.services.library.pickSkill(); if (text === null) return null;
     const workspace = await this.getWorkspace(); const skill = await workspace.importSkill(text); this.update({ workspace: await workspace.settings() }); return skill;
   }
   async exportSkill(id: string): Promise<void> {
-    if (!this.services.library?.exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Workflow export is unavailable.');
+    if (!this.services.library?.exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Skill export is unavailable.');
     const skill = (await (await this.getWorkspace()).settings()).skills.find(skill => skill.id === id);
-    if (!skill) throw new ReaderError('NOT_FOUND', 'The workflow is no longer installed.'); await this.services.library.exportText(`${skill.name}.md`, skill.markdown);
+    if (!skill) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.'); await this.services.library.exportText(`${skill.name}.md`, skill.markdown);
   }
   async exportPreferences(): Promise<void> {
     if (!this.services.library?.exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Preference export is unavailable.');
@@ -925,7 +925,7 @@ export class ConversationPresenter {
     // the send path reports the degradation out loud.
     const profile = draft.profileId ? settings.profiles.find(profile => profile.id === draft.profileId) : undefined;
     const skill = draft.skillId ? settings.skills.find(skill => skill.id === draft.skillId) : null;
-    if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected workflow is unavailable or disabled.');
+    if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected skill is unavailable or disabled.');
     return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
   }
   /**

@@ -61,7 +61,7 @@ it('previews reference and skill chips as inert text and removes them through ca
   button('Preview Shared title').click();
   await vi.waitFor(() => expect(pane.textContent).toContain(malicious.text));
   expect(pane.querySelector('svg, script, img')).toBeNull();
-  button('Remove Shared title').click(); button('Remove workflow Derive').click();
+  button('Remove Shared title').click(); button('Remove skill Derive').click();
   await vi.waitFor(() => { expect(actions.removeReference).toHaveBeenCalledWith('paper-one'); expect(actions.selectSkill).toHaveBeenCalledWith(null); });
 });
 
@@ -81,13 +81,13 @@ it('renders no per-chat research-profile control in the composer and points at t
   expect(pane.textContent).not.toMatch(/Zotero's Preferences window/u);
 });
 
-it('keeps the / workflow chooser and its installed-workflows heading after the profile control is removed', async () => {
+it('keeps the / workflow chooser and its installed-skill heading after the profile control is removed', async () => {
   const { pane, context, type, key, actions } = setup();
   expect(context.querySelector('[data-zcr-profile]')).toBeNull();
   type('/Der');
   const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
   expect(menu.hidden).toBe(false);
-  expect(menu.textContent).toContain('Installed workflows');
+    expect(menu.textContent).toContain('Installed skills');
   key('Enter');
   await vi.waitFor(() => expect(actions.selectSkill).toHaveBeenCalledWith('derive'));
 });
@@ -98,14 +98,14 @@ it('no longer offers any per-chat override controls in the sidebar', () => {
   expect(pane.textContent).not.toMatch(/Chat overrides|Answer language for this chat|Clear chat overrides/u);
 });
 
-it('offers no workflow authoring, import or export in the sidebar', () => {
+it('offers no skill authoring, import or export in the sidebar', () => {
   const { pane } = setup();
-  for (const label of ['Create workflow', 'Import workflow', 'Save workflow', 'Cancel editing', 'Duplicate', 'Export', 'Try in draft', 'Edit', 'Delete']) {
+  for (const label of ['Create skill', 'Import skill', 'Save skill', 'Cancel editing', 'Duplicate', 'Export', 'Try in draft', 'Edit', 'Delete']) {
     expect(pane.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`), label).toBeNull();
   }
   expect(pane.querySelector('[data-zcr-skill-id]')).toBeNull();
   expect(pane.querySelector('[data-zcr-skill-editor]')).toBeNull();
-  expect(pane.textContent).not.toMatch(/Installed workflows|SKILL\.md content|No workflows installed/u);
+  expect(pane.textContent).not.toMatch(/Installed skills|SKILL\.md content|No skills installed/u);
   expect(pane.querySelector('[name="workflow"]')).toBeNull();
 });
 
@@ -181,7 +181,7 @@ it('opens the skill chooser from the composer shortcut as well as the slash trig
   expect(menu.hidden).toBe(false);
   // The shortcut lands on the '/'-scope: a skill chooser, never a reference search.
   expect(menu.dataset.zcrCommandKind).toBe('commands');
-  expect(menu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed workflows');
+  expect(menu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed skills');
   expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent).join(' ')).toContain('/Derive');
   expect(actions.searchReferences).not.toHaveBeenCalled();
   // Like the reference shortcut it only picks a scope: the draft and the caret are untouched.

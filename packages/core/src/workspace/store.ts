@@ -20,7 +20,7 @@ const settingKeys = ['schemaVersion', 'preferences', 'profiles', 'skills', 'uiLa
 const skillKeys = ['id', 'name', 'description', 'version', 'revision', 'markdown', 'origin', 'enabled', 'workflow', 'permissions', 'unsupportedDependencies'] as const;
 function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Saved workspace data could not be read; it was left untouched.'); }
 function failedSave(): never { throw new ReaderError('INTERNAL_ERROR', 'Workspace data could not be saved.'); }
-function changedSkill(): never { throw new ReaderError('REQUEST_CONFLICT', 'This workflow has changed since it was opened. Load the newer revision before editing it.'); }
+function changedSkill(): never { throw new ReaderError('REQUEST_CONFLICT', 'This skill has changed since it was opened. Load the newer revision before editing it.'); }
 function registry(settings: WorkspaceSettings) {
   return { ...settings, skills: settings.skills.map(skill => Object.fromEntries(Object.entries(skill).filter(([key]) => key !== 'markdown'))) };
 }

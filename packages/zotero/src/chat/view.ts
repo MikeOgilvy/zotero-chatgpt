@@ -608,7 +608,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
   let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
   // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
-  // lives behind it; the reference/workflow chooser stays reachable by typing '@' or '/'. Capturing
+  // lives behind it; the reference/skill chooser stays reachable by typing '@' or '/'. Capturing
   // the selected region is the one route the owner asked to be a single visible click instead.
   const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
   plus.dataset.zcrPlus = '';

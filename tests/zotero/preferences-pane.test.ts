@@ -428,11 +428,10 @@ it('renders the pane copy in the stored UI language and never translates identif
   const { ready, root, find } = mount(host);
   await ready;
   const label = (pref: string): string => find(`[data-zcr-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
-  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['外观', 'PDF 文本', '模型', 'Codex 指令', '已安装的工作流']);
-  // The model note is stateful copy that follows the stored language. Its shortened English source
-  // is a new dictionary key: until `ui-locale.ts` carries it the localizer leaves the source in
-  // place, so accept either form here instead of pinning a translation that has not landed yet.
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/bundled catalog|随包目录/u);
+  expect([...find('[data-zcr-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['外观', 'PDF 文本', '模型', 'Codex 指令', '已安装的 skill']);
+  // The model note is stateful copy that follows the stored language; the key now exists, so it is
+  // asserted exactly instead of accepting the untranslated English source.
+  expect(find('[data-zcr-pref="models-note"]').textContent).toBe('勾选的模型会在对话中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。');
   expect(label('uiLanguage')).toBe('界面语言');
   expect(label('textScale')).toBe('聊天字号（0.5–3）');
   expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');

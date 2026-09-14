@@ -247,7 +247,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
 
     // The builtin list is withdrawn to `annotate` for now (see `OFFERED_BUILTIN_SKILLS`); the
     // definitions stay installed and the owner's own user/imported workflows still list here.
-    const workflows = fieldset(doc, container, 'Installed workflows');
+    const workflows = fieldset(doc, container, 'Installed skills');
     const skills = element(doc, 'div');
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
@@ -460,7 +460,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     try {
       await host.setSkillEnabled(id, enabled);
       await reload(false);
-      if (!disposed) show(status, 'Workflow updated.');
+      if (!disposed) show(status, 'Skill updated.');
     } catch (caught) {
       if (!disposed) { fail(message(caught)); await reload(false); }
     } finally {

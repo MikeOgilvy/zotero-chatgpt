@@ -55,7 +55,7 @@ it('keeps / on installed workflows so it can neither list nor filter context ref
   const { type, menu, toolbar, options, filterButton } = setup();
   type('/');
   await vi.waitFor(() => expect(options().length).toBeGreaterThan(0));
-  expect(menu().querySelector('.zcr-command-heading')!.textContent).toBe('Installed workflows');
+  expect(menu().querySelector('.zcr-command-heading')!.textContent).toBe('Installed skills');
   expect(menu().dataset.zcrCommandKind).toBe('commands');
   expect(options().join(' ')).toContain('/Derive');
   expect(options().join(' ')).not.toContain('Shared title');
@@ -69,23 +69,23 @@ it('shows an honest workflow empty state for / without inventing candidates', ()
   type('/nope');
   expect(options()).toHaveLength(0);
   expect(status().hidden).toBe(false);
-  expect(status().textContent).toBe('No matching workflows');
+  expect(status().textContent).toBe('No matching skills');
 });
 
-it('states that no workflows are installed when the workspace has none', () => {
+it('states that no skills are installed when the workspace has none', () => {
   const { view, state, type, status, options } = setup();
   view.update({ ...state, settings: { ...state.settings, skills: [] } });
   type('/');
   expect(options()).toHaveLength(0);
-  expect(status().textContent).toBe('No workflows installed.');
+  expect(status().textContent).toBe('No skills installed.');
 });
 
 it('keeps the reference empty state distinct from the workflow one', async () => {
   const { type, status } = setup({ searchReferences: vi.fn().mockResolvedValue([]) });
   type('@nope');
   await vi.waitFor(() => expect(status().textContent).toBe('No matches'));
-  expect(status().textContent).not.toBe('No workflows installed.');
-  expect(status().textContent).not.toBe('No matching workflows');
+  expect(status().textContent).not.toBe('No skills installed.');
+  expect(status().textContent).not.toBe('No matching skills');
 });
 
 it('routes each trigger to its own action and never the other', async () => {
@@ -109,7 +109,7 @@ it('does not let a typed prefix cross into the other candidate source', async ()
   expect(options().join(' ')).not.toContain('/Derive');
   type('/article Shared');
   expect(options()).toHaveLength(0);
-  expect(status().textContent).toBe('No matching workflows');
+  expect(status().textContent).toBe('No matching skills');
 });
 
 it('does not open either chooser for @ or / inside a word', () => {

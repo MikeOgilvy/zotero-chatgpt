@@ -343,7 +343,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       const bytes = await readFile(path, SKILL_BYTES);
       try { const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (text.includes('\0')) fail('SKILL.md must contain UTF-8 text.'); return text; }
       catch { fail('SKILL.md must contain valid UTF-8 text.'); }
-    }, 'The selected workflow file could not be read.'),
+    }, 'The selected skill file could not be read.'),
     exportText: (name, text) => boundary(async () => {
       const bytes = new TextEncoder().encode(text); if (bytes.length > MAX_EXPORT_BYTES) fail('This text exceeds the native export size limit.', 'PAYLOAD_TOO_LARGE');
       const picker = filePicker('Export text', 'save', name); picker.appendFilter('Text', '*.md; *.txt; *.json');

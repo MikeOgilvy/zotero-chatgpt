@@ -77,11 +77,11 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
       await (await host.workspace()).saveSettings(value);
     },
     async setSkillEnabled(id: string, enabled: boolean): Promise<void> {
-      if (typeof enabled !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'A workflow is either enabled or disabled.');
+      if (typeof enabled !== 'boolean') throw new ReaderError('INVALID_REQUEST', 'A skill is either enabled or disabled.');
       const workspace = await host.workspace();
       const settings = await workspace.settings();
       const skill = settings.skills.find(item => item.id === id);
-      if (!skill) throw new ReaderError('NOT_FOUND', 'The workflow is no longer installed.');
+      if (!skill) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.');
       // saveSkill enforces the skill revision conflict; saveSettings would silently keep a newer file.
       await workspace.saveSkill({ ...skill, enabled });
     },

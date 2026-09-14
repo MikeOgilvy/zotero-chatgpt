@@ -20,9 +20,9 @@ function referenceDetail(reference: ReaderReference): string {
 }
 
 /**
- * Scoped, per-chat controls only. Persistence, library reads and workflow execution stay in explicit
- * ports, and installed-workflow authoring lives in Zotero's own Preferences window: here the reader
- * only chooses a workflow for this chat through the `/` chooser.
+ * Scoped, per-chat controls only. Persistence, library reads and skill execution stay in explicit
+ * ports, and installed-skill authoring lives in Zotero's own Preferences window: here the reader
+ * only chooses a skill for this chat through the `/` chooser.
  */
 export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { openCommands(): void; openSkills(): void; update(state: WorkspaceViewState): void; dispose(): void } {
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
@@ -59,7 +59,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     const selected = trigger ? { ...trigger } : null; const original = input.value;
     if (id.startsWith('skill:')) {
       const skill = state?.settings.skills.find(item => `skill:${item.id}` === id);
-      if (!skill || !skill.enabled || skill.unsupportedDependencies.length) throw new Error('This workflow is not available.');
+      if (!skill || !skill.enabled || skill.unsupportedDependencies.length) throw new Error('This skill is not available.');
       await actions.selectSkill(skill.id);
     } else {
       const reference = references.get(id); if (!reference) throw new Error('Choose a current search result.');
@@ -74,7 +74,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     if (mode === 'skills') {
       const needle = query.toLocaleLowerCase();
       const installed = state.settings.skills;
-      menu.update({ kind: 'commands', heading: 'Installed workflows', empty: installed.length ? 'No matching workflows' : 'No workflows installed.', items: installed.filter(skill => `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(needle)).map(skill => ({
+      menu.update({ kind: 'commands', heading: 'Installed skills', empty: installed.length ? 'No matching skills' : 'No skills installed.', items: installed.filter(skill => `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(needle)).map(skill => ({
         id: `skill:${skill.id}`, label: `/${skill.name}`, description: [skill.description, `${skill.origin} · v${skill.version}`, !skill.enabled ? 'Disabled' : '', ...skill.unsupportedDependencies].filter(Boolean).join(' · '), disabled: !skill.enabled || !!skill.unsupportedDependencies.length,
       })) });
       return;
@@ -91,7 +91,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
       if (!disposed && !controller.signal.aborted && current === querySerial && menu.isOpen()) menu.update({ kind: 'references', heading: 'References', items: [], error: failure(error) });
     });
   };
-  // Only reference-type filters live here. Installed workflows are the '/'-menu's own scope,
+  // Only reference-type filters live here. Installed skills are the '/'-menu's own scope,
   // reached by typing '/', not by crossing over from an '@' reference search.
   const filterControls = new Map<ReferenceFilter, HTMLButtonElement>();
   for (const [kind, label] of [['all', 'All'], ['article', 'Articles'], ['chat', 'Chats']] as const) {
@@ -175,7 +175,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     };
     for (const reference of state.draft.references) chip(`${reference.label}${reference.range ? ` · pp.${reference.range[0]}–${reference.range[1]}` : ''}`, `Preview ${reference.label}`, () => { void openReference(reference); }, `Remove ${reference.label}`, () => actions.removeReference(reference.id));
     const selectedSkill = state.settings.skills.find(skill => skill.id === state!.draft.skillId);
-    if (selectedSkill) chip(`/${selectedSkill.name}`, `Preview workflow ${selectedSkill.name}`, () => showPreview(selectedSkill.name, selectedSkill.markdown, `${selectedSkill.origin} · v${selectedSkill.version}`), `Remove workflow ${selectedSkill.name}`, () => actions.selectSkill(null));
+    if (selectedSkill) chip(`/${selectedSkill.name}`, `Preview skill ${selectedSkill.name}`, () => showPreview(selectedSkill.name, selectedSkill.markdown, `${selectedSkill.origin} · v${selectedSkill.version}`), `Remove skill ${selectedSkill.name}`, () => actions.selectSkill(null));
     chips.replaceChildren(...nodes);
   };
 
