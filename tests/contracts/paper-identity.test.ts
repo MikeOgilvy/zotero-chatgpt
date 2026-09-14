@@ -26,6 +26,15 @@ describe('paper identity', () => {
   it('accepts the verified bibliographic fields and returns them unchanged', () => {
     expect(validatePaperIdentity(extended)).toEqual(extended);
   });
+  it('re-validates its own output byte for byte, which is what a rebuilt request relies on to hash the same', () => {
+    // hashInput (sessions/service.ts:463-464) hashes the validated input, and a stored identity is
+    // re-validated on load, so canonical key order and presence must survive a second pass.
+    for (const value of [extended, base, { ...base, tags: [] as string[] }]) {
+      const stored = validatePaperIdentity(value);
+      expect(validatePaperIdentity(stored)).toEqual(stored);
+      expect(JSON.stringify(validatePaperIdentity(stored))).toBe(JSON.stringify(stored));
+    }
+  });
   it('preserves an explicit empty array so a rebuilt request hashes the same shape', () => {
     const value = { ...base, tags: [] as string[] };
     expect(validatePaperIdentity(value)).toEqual(value);
