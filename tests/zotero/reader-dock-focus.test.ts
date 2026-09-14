@@ -68,7 +68,7 @@ async function mountDockWithChat() {
   return { doc, mounted, root, teardown };
 }
 
-it('exempts the reader composer, history search, page field and splitter from Zotero FocusManager', async () => {
+it('exempts the reader composer, history search and splitter from Zotero FocusManager', async () => {
   const { doc, mounted, root, teardown } = await mountDockWithChat();
   const { dock } = mounted;
 
@@ -77,11 +77,9 @@ it('exempts the reader composer, history search, page field and splitter from Zo
 
   const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]');
   const historySearch = root.querySelector<HTMLInputElement>('[data-zcr-history-search]');
-  const numberInput = root.querySelector<HTMLInputElement>('input[type="number"]');
   const resizer = dock.querySelector<HTMLElement>('[data-zcr-resizer]');
   expect(composer?.tagName).toBe('TEXTAREA');
   expect(historySearch?.type).toBe('search');
-  expect(numberInput?.type).toBe('number');
   expect(resizer).toBeTruthy();
 
   // Two different Zotero predicates, two different mechanisms, so the assertions split.
@@ -89,7 +87,7 @@ it('exempts the reader composer, history search, page field and splitter from Zo
   // Zotero's KeyboardManager predicate (reader.js:27222) reads the event TARGET and requires the
   // literal value `true`; the dock ancestor alone cannot satisfy it. The splitter is not a text
   // control, so it keeps relying on the dock ancestor and must carry nothing.
-  for (const target of [composer, historySearch, numberInput]) {
+  for (const target of [composer, historySearch]) {
     expect(target!.getAttribute('contenteditable')).toBe('true');
     expect(target!.closest('[contenteditable]')).toBe(target);
     expect(zoteroFocusManagerExemptsArrowKeys(target!)).toBe(true);

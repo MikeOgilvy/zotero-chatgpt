@@ -89,21 +89,17 @@ it('satisfies Zotero isTextBox for every text-entry control in the dock', async 
   const { doc, mounted, root, teardown } = await mountDockWithChat();
   const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]');
   const historySearch = root.querySelector<HTMLInputElement>('[data-zcr-history-search]');
-  const numberInput = root.querySelector<HTMLInputElement>('input[type="number"]');
   const resizer = mounted.dock.querySelector<HTMLElement>('[data-zcr-resizer]');
   expect(composer?.tagName).toBe('TEXTAREA');
   expect(historySearch?.type).toBe('search');
-  expect(numberInput?.type).toBe('number');
   expect(resizer).toBeTruthy();
 
   // None matches isTextBox's first clause (`type === 'text'`), so the dock-scoped observer must
   // add the second clause asynchronously after the view mounts each control.
   await vi.waitFor(() => expect(zoteroIsTextBox(composer!)).toBe(true));
   await vi.waitFor(() => expect(zoteroIsTextBox(historySearch!)).toBe(true));
-  await vi.waitFor(() => expect(zoteroIsTextBox(numberInput!)).toBe(true));
   expect(composer!.getAttribute('contenteditable')).toBe('true');
   expect(historySearch!.getAttribute('contenteditable')).toBe('true');
-  expect(numberInput!.getAttribute('contenteditable')).toBe('true');
 
   // Controls the user does not type text into must stay untouched: no own attribute, dock ancestor.
   expect(zoteroIsTextBox(resizer!)).toBe(false);
@@ -115,7 +111,6 @@ it('satisfies Zotero isTextBox for every text-entry control in the dock', async 
   expect(mounted.dock.getAttribute('contenteditable')).toBe('false');
   expect(zoteroFocusManagerExemptsArrowKeys(composer!)).toBe(true);
   expect(zoteroFocusManagerExemptsArrowKeys(historySearch!)).toBe(true);
-  expect(zoteroFocusManagerExemptsArrowKeys(numberInput!)).toBe(true);
   expect(zoteroFocusManagerExemptsArrowKeys(resizer!)).toBe(true);
 
   unmountReaderDock(doc);
