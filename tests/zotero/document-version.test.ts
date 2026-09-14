@@ -61,9 +61,22 @@ it('reports one honest failure when the PDF never loads and stays cancellable wh
   let waits = 0;
   const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { delay: () => { waits += 1; return Promise.resolve(); } });
   await expect(source.capture()).rejects.toThrow(/could not be read locally/i);
-  expect(waits).toBe(40);
+  expect(waits).toBe(240);
   const abort = new AbortController(); abort.abort();
   await expect(source.capture(abort.signal)).rejects.toThrow(/cancel/i);
+});
+it('keeps waiting for a real article PDF that takes longer than two seconds to appear', async () => {
+  // The reader's internal view can take a while to expose its document on a large article, and the
+  // old bound was 40 * 50ms. A PDF that appears later than that was reported as "could not be read
+  // locally" even though it was loading normally.
+  const f = fixture();
+  const application = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!;
+  const pdf = application.pdfDocument!;
+  delete application.pdfDocument;
+  let waits = 0;
+  const source = nativeDocumentSource(f.zotero, () => f.reader, paperA, { delay: () => { waits += 1; if (waits === 60) application.pdfDocument = pdf; return Promise.resolve(); } });
+  await expect(source.capture()).resolves.toHaveProperty('revision.sha256');
+  expect(waits).toBe(60);
 });
 it('fails a loaded-bytes read that never settles instead of leaving preparation pending forever', async () => {
   const f = fixture();

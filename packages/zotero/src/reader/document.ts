@@ -130,7 +130,14 @@ export class ReaderDocumentCache {
 }
 
 const READY_POLL_MS = 50;
-const READY_ATTEMPTS = 40;
+/**
+ * How long to wait for the reader to expose its loaded PDF. The old bound was 40 polls (two
+ * seconds), which is nothing next to how long a real, large article can take to attach its document
+ * to the internal view: the owner got "could not be read locally" while the PDF was still loading
+ * normally. Twelve seconds costs nothing when the reader is ready, because the loop exits on the
+ * first poll that sees the document, and the wait is cancellable through the caller's signal.
+ */
+const READY_ATTEMPTS = 240;
 /**
  * The owner's flow is "open a PDF and ask", so a local whole-document read is expected to be
  * instantaneous next to any model call: the fixture is milliseconds and a large PDF's file read plus
