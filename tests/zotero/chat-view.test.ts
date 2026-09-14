@@ -2130,7 +2130,7 @@ it('groups the plus popover into titled sections with title and description rows
   expect(groups[0]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Attach');
   expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
   const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
-  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'capture-region', 'capture-page', 'composer-references']);
+  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'capture-region', 'composer-references']);
   for (const row of rows) {
     expect(row.tagName).toBe('BUTTON');
     const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
@@ -2140,8 +2140,10 @@ it('groups the plus popover into titled sections with title and description rows
     // The accessible name is the title alone, never the concatenated row text.
     expect(row.getAttribute('aria-label')).toBe(title);
   }
-  // The page-number field stays inside the attach group, next to the route that reads it.
-  expect(groups[0]!.querySelector('input[type="number"]')).not.toBeNull();
+  // Capturing one PDF page is gone: the page-number field it needed is gone with it.
+  expect(menu.querySelector('input[type="number"]')).toBeNull();
+  expect(menu.querySelector('[data-zcr-action="capture-page"]')).toBeNull();
+  expect(menu.textContent).not.toMatch(/Capture page/u);
 });
 
 it('labels the plus popover as a dialog that matches the field and rows it contains', async () => {
@@ -2183,13 +2185,6 @@ it('opens every attachment route from the plus menu and closes it after a choice
   const region = vi.spyOn(presenter, 'captureRegion').mockResolvedValue(undefined);
   route('capture-region').click();
   await vi.waitFor(() => expect(region).toHaveBeenCalledTimes(1));
-
-  plus.click();
-  const page = vi.spyOn(presenter, 'capturePage').mockResolvedValue(undefined);
-  menu.querySelector<HTMLInputElement>('input[type="number"]')!.value = '4';
-  route('capture-page').click();
-  // The page-number input stays one-based for the reader; the presenter takes a zero-based index.
-  await vi.waitFor(() => expect(page).toHaveBeenCalledWith(3));
 
   plus.click();
   plus.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));

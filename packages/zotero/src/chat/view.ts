@@ -82,14 +82,11 @@ const COPY = {
   attach: 'Add images or context',
   chooseImages: 'Choose images…',
   captureRegion: 'Capture selected region',
-  capturePage: 'Capture page',
-  capturePageNumber: 'PDF page to capture',
   addReferences: 'Add references or workflows',
   attachHeading: 'Attach',
   referenceHeading: 'Reference',
   chooseImagesHint: 'From your computer',
   captureRegionHint: 'From the current PDF',
-  capturePageHint: 'The current PDF page',
   addReferencesHint: 'Saved chats, articles and workflows',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
@@ -611,7 +608,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   // A labelled, non-modal dialog rather than `role="menu"`: the popover holds plain action rows plus
   // the page-number field, and neither plain buttons nor an `<input>` are valid children of a menu.
   const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'dialog'); plusMenu.setAttribute('aria-label', COPY.attach);
-  const pageNumber = el('input'); pageNumber.type = 'number'; pageNumber.min = '1'; pageNumber.value = '1'; pageNumber.setAttribute('aria-label', COPY.capturePageNumber);
   // Codex-style grouped rows: a small heading, a title and a supporting description. The accessible
   // name stays the title, never the description.
   const plusRow = (title: string, description: string, action: string, onClick: () => void) => {
@@ -622,13 +618,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     row.addEventListener('click', onClick);
     return row;
   };
+  // The dialog holds plain action rows only: a page-number field would be an invalid child, and the
+  // owner removed the one-page capture route that needed it.
   const attachGroup = el('div', 'zcr-plus-group');
   attachGroup.append(
     el('div', 'zcr-plus-heading', COPY.attachHeading),
     plusRow(COPY.chooseImages, COPY.chooseImagesHint, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
     plusRow(COPY.captureRegion, COPY.captureRegionHint, 'capture-region', () => { togglePlus(false); void presenter.captureRegion().catch(reportViewError); }),
-    plusRow(COPY.capturePage, COPY.capturePageHint, 'capture-page', () => { togglePlus(false); void presenter.capturePage(Number(pageNumber.value) - 1).catch(reportViewError); }),
-    pageNumber,
   );
   const referenceGroup = el('div', 'zcr-plus-group');
   referenceGroup.append(
