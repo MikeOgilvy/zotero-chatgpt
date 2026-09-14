@@ -134,6 +134,40 @@ describe('conversation store', () => {
     const first = await s.create(paperA, 'Paper A', settings); const second = await s.create(paperA, 'Paper A', settings);
     expect((await s.current(paperA))?.id).toBe(second.id); expect((await s.list(paperA)).map(c => c.id)).toEqual([first.id, second.id]);
   });
+  it('names a second chat by the smallest free sibling suffix, not by how many chats are stored', async () => {
+    const { store: s } = store();
+    const first = await s.create(paperA, 'Paper A', settings);
+    const second = await s.create(paperA, 'Paper A', settings);
+    const third = await s.create(paperA, 'Paper A', settings);
+    expect([first.title, second.title, third.title]).toEqual(['Paper A', 'Paper A · 讨论 2', 'Paper A · 讨论 3']);
+    // A chat stored under a different title is not a collision for this one, so it gets no counter,
+    // and it does not shift the numbering either.
+    const other = await s.create(paperA, 'Paper B', settings);
+    expect(other.title).toBe('Paper B');
+    const fourth = await s.create(paperA, 'Paper A', settings);
+    expect(fourth.title).toBe('Paper A · 讨论 4');
+    // Removing a sibling frees its number: numbering counts the chats that actually hold the title,
+    // so an ordinary chat never inherits a counter from chats that are no longer there.
+    await s.remove(paperA, second.id);
+    const fifth = await s.create(paperA, 'Paper A', settings);
+    expect(fifth.title).toBe('Paper A · 讨论 2');
+    // Stored titles are data: nothing above was rewritten by the later numbering.
+    expect((await s.get(third.id)).title).toBe('Paper A · 讨论 3');
+    expect((await s.get(other.id)).title).toBe('Paper B');
+  });
+  it('keeps an unreadable sibling from blocking the new chat name', async () => {
+    const { storage, store: s } = store();
+    const first = await s.create(paperA, 'Paper A', settings);
+    const second = await s.create(paperA, 'Paper A', settings);
+    expect(second.title).toBe('Paper A · 讨论 2');
+    storage.files.set(`conversations/${first.id}.json`, new TextEncoder().encode('{"schemaVersion":3,"id":'));
+    const third = await s.create(paperA, 'Paper A', settings);
+    expect(third.id).not.toBe(first.id);
+    // A sibling the store cannot read cannot reserve a name, so this chat is not numbered around it.
+    expect(third.title).toBe('Paper A');
+    // The unreadable record is evidence and was not rewritten by the naming pass.
+    expect(new TextDecoder().decode(storage.files.get(`conversations/${first.id}.json`))).toBe('{"schemaVersion":3,"id":');
+  });
   it('selects a listed conversation as current without dropping the others', async () => {
     const { store: s } = store();
     const first = await s.create(paperA, 'Paper A', settings); const second = await s.create(paperA, 'Paper A', settings);

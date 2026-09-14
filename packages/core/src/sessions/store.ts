@@ -247,11 +247,33 @@ export class ConversationStore {
       return clone(result);
     });
   }
+  /**
+   * The name a new chat gets. The first chat about an attachment is the plain title; a sibling that
+   * would collide gets the smallest unused `· 讨论 N`, so the number counts the chats that actually
+   * hold that title rather than every chat ever stored for the paper. Scanning is best-effort: a
+   * sibling this store cannot read is skipped instead of blocking the new chat or inventing a
+   * number, and the stored titles are never rewritten (they are data).
+   */
+  private async nextTitle(index: PaperIndex, title: string): Promise<string> {
+    const taken = new Set<string>();
+    for (const id of index.conversations) {
+      try {
+        const raw = await this.readJson(this.conversationPath(id));
+        if (raw !== null) taken.add(str(asRecord(raw).title));
+      } catch { /* an unreadable sibling cannot decide this chat's name */ }
+    }
+    if (!taken.has(title)) return title;
+    for (let suffix = 2; suffix <= taken.size + 2; suffix += 1) {
+      const candidate = `${title} · 讨论 ${suffix}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+    return `${title} · 讨论 ${taken.size + 3}`;
+  }
   create(paper: PaperScope, title: string, settings: GenerationSettings): Promise<StoredConversation> {
     return this.serial(async () => {
       const index = await this.loadIndex(paper);
       const now = this.clock.now(); const id = this.clock.uuid();
-      const name = index.conversations.length ? `${title} · 讨论 ${index.conversations.length + 1}` : title;
+      const name = await this.nextTitle(index, title);
       const conversation: StoredConversation = { schemaVersion: 3, documents: {}, paperIdentity: { title, authors: [] }, logSeq: 0, id, paper: validatePaperScope(paper), title: name, settings: validateSettings(settings), activeRequestId: null, messages: [], lastSeq: 0, createdAt: now, updatedAt: now, upstream: { threadId: null, permissionMode: 'read' }, requests: [] };
       await this.writeJson(this.conversationPath(id), { ...conversation, documents: undefined, documentIds: [] });
       const updated: PaperIndex = { ...index, conversations: [...index.conversations, id], current: id };
