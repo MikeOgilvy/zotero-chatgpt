@@ -250,3 +250,23 @@ it('translates the plus section headings and each row title and description', ()
   expect(row.getAttribute('aria-label')).toBe('选择图片…'); expect(row.title).toBe('选择图片…');
   locale.update('en'); expect(title.textContent).toBe('Choose images…'); expect(description.textContent).toBe('From your computer'); locale.dispose();
 });
+
+it('translates the attach-file row and the file refusals while leaving the file name verbatim', () => {
+  const { add, root } = setup();
+  const row = add('button', 'zcr-plus-row', ''); row.dataset.zcrAction = 'pick-file';
+  row.setAttribute('aria-label', 'Attach file…'); row.title = 'Attach file…';
+  const title = add('span', 'zcr-plus-row-title', 'Attach file…', row);
+  const description = add('span', 'zcr-plus-row-description', 'Text or image from your computer', row);
+  const error = add('div', 'zcr-error', 'This file has no text to attach.');
+  const empty = add('div', 'zcr-error', 'This file is not UTF-8 text, so it cannot become text context. Attach a text file or an image.');
+  // An attached file is data, so its own name is never translated, even when it matches a UI word.
+  const chip = add('div', 'zcr-workspace-chip', 'Send');
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(title.textContent).toBe('附加文件…');
+  expect(description.textContent).toBe('来自你电脑的文本或图片');
+  expect(row.getAttribute('aria-label')).toBe('附加文件…'); expect(row.title).toBe('附加文件…');
+  expect(error.textContent).toBe('此文件没有可附加的文本。');
+  expect(empty.textContent).toBe('此文件不是 UTF-8 文本，无法作为文本上下文。请附加文本文件或图片。');
+  expect(chip.textContent).toBe('Send');
+  locale.update('en'); expect(title.textContent).toBe('Attach file…'); expect(error.textContent).toBe('This file has no text to attach.'); locale.dispose();
+});

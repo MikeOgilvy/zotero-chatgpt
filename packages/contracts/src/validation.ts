@@ -2,7 +2,14 @@ import { ReaderError, type Citation, type GenerationSettings, type ImageAttachme
 import { validateDocument, validateRevision } from './document.ts';
 import { validateBatch, validateContextReport, validateReferenceInput, validateWorkflow } from './workspace-validation.ts';
 // Limits are first-version engineering choices from the contracts appendix.
-export const LIMITS = { payloadBytes: 256 * 1024, citationCodePoints: 8000, citationsPerRequest: 4, questionCodePoints: 4000, titleChars: 1024, authors: 50, authorChars: 256, rectsPerPage: 512, imagesPerRequest: 4, imageBytes: 2 * 1024 * 1024, metadataFieldChars: 512, abstractChars: 2048, metadataTags: 24, metadataTagChars: 128 } as const;
+export const LIMITS = { payloadBytes: 256 * 1024, citationCodePoints: 8000, citationsPerRequest: 4, questionCodePoints: 4000, titleChars: 1024, authors: 50, authorChars: 256, rectsPerPage: 512, imagesPerRequest: 4, imageBytes: 2 * 1024 * 1024, metadataFieldChars: 512, abstractChars: 2048, metadataTags: 24, metadataTagChars: 128,
+  /**
+   * Bound on one reference's text snapshot, including `@chat` snapshots and text files attached by
+   * the owner. It is deliberately the same bound the payload check uses, because reference text
+   * travels inside the request body (`validateSendInput` strips `document`, not `references`), so a
+   * larger attachment could not be sent anyway. An oversized file is refused, never truncated.
+   */
+  referenceTextBytes: 48 * 1024 } as const;
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 const DATA_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,[A-Za-z0-9+/]+={0,2}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;

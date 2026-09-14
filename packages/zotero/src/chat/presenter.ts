@@ -362,6 +362,12 @@ export class ConversationPresenter {
   async previewReference(reference: ReaderReference, signal = new AbortController().signal): Promise<ReferenceInput> {
     const frozen = validateReference(reference); aborted(signal);
     if (frozen.kind === 'chat') return frozen.text !== undefined ? frozen : (await this.getWorkspace()).snapshotChat(frozen.conversationId!, frozen.messageIds);
+    // An attached file carries its own text snapshot and has no native readable source, so its
+    // preview is the frozen body itself: the host is never asked to re-open the chosen path.
+    if (frozen.kind === 'file') {
+      if (frozen.text === undefined || !frozen.text.trim()) throw new ReaderError('INVALID_REQUEST', 'This attached file has no readable text. Attach it again.');
+      return frozen;
+    }
     if (!this.services.library) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native reference reading is unavailable.');
     return validateReferenceInput(await this.services.library.read(frozen, signal));
   }
@@ -456,6 +462,20 @@ export class ConversationPresenter {
     if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while choosing images. Choose them again.');
     if (this.state.draft.images.length + images.length > LIMITS.imagesPerRequest) throw new ReaderError('PAYLOAD_TOO_LARGE', `Attach at most ${LIMITS.imagesPerRequest} images per message.`);
     for (const image of images) this.addImage(image);
+  }
+  /**
+   * One explicitly chosen local file, already routed and bounded by the host port: text-like files
+   * arrive as reference text and image files arrive as validated image attachments. Nothing else is
+   * done here, so the picker's caps are the only caps, and a file that arrives attached is a file the
+   * owner chose — the composer never asks the host for a path of its own.
+   */
+  async pickFile(): Promise<void> {
+    if (!this.services.library?.pickFile) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Attaching a file is unavailable.');
+    const key = this.draftKey(); const picked = await this.services.library.pickFile();
+    if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while choosing a file. Choose it again.');
+    if (this.state.draft.images.length + picked.images.length > LIMITS.imagesPerRequest) throw new ReaderError('PAYLOAD_TOO_LARGE', `Attach at most ${LIMITS.imagesPerRequest} images per message.`);
+    for (const image of picked.images) this.addImage(image);
+    for (const reference of picked.references) await this.addReference(reference);
   }
   /**
    * Clipboard images for the reader composer. A reader iframe sees only the DOM paste data it was

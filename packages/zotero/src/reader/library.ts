@@ -2,7 +2,7 @@ import { ReaderError, paperId, type Citation, type DocumentContext, type Documen
 import { clone } from '../../../contracts/src/clone.ts';
 import { LIMITS, validateCitation, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
-import type { LibraryReferencePort, ReaderReference } from '../../../contracts/src/workspace.ts';
+import type { LibraryReferencePort, PickedFile, ReaderReference } from '../../../contracts/src/workspace.ts';
 import { SKILL_BYTES } from '../../../core/src/workspace/skills.ts';
 import { paperIdentityOf, type PaperMetadata } from './metadata.ts';
 import { currentSelection } from './current-selection.ts';
@@ -57,7 +57,7 @@ export interface LibraryFilePicker {
   show: () => Promise<number>;
 }
 export interface LibraryFileIO {
-  stat(path: string): Promise<{ size: number }>;
+  stat(path: string): Promise<{ size: number; type?: string }>;
   read(path: string, options: { maxBytes: number }): Promise<Uint8Array>;
   write(path: string, bytes: Uint8Array): Promise<unknown>;
 }
@@ -79,12 +79,43 @@ export interface NativeLibraryReferencePort extends LibraryReferencePort {
   capturePage(paper: PaperScope, pageIndex: number, signal?: AbortSignal): Promise<ImageAttachment>;
   exportImage(image: ImageAttachment): Promise<void>;
   collections(): Promise<Array<NativeCollectionTarget & { name: string }>>;
+  pickFile(): Promise<PickedFile>;
 }
 
 const KEY = /^[A-Z0-9]{8}$/u;
 const MAX_RESULTS = 50;
 const MAX_RASTER_PIXELS = 8_000_000;
 const MAX_EXPORT_BYTES = 1024 * 1024;
+/**
+ * The file routes this port can honestly take. The **extension decides the route** and the **bytes
+ * then have to prove it**: a text-extension file must decode as UTF-8 without control bytes, and an
+ * image-extension file must carry a PNG/JPEG/GIF/WebP magic and pass the native decode, so a renamed
+ * binary or a `.png` that is not an image is refused rather than mis-sent. Sniffing content alone
+ * would be worse in the other direction: a truncated or plain-text `.png` would silently become
+ * "text context" the owner never asked for.
+ */
+const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'] as const;
+const TEXT_FILE_EXTENSIONS = [
+  'txt', 'text', 'md', 'markdown', 'rst', 'org',
+  'csv', 'tsv', 'json', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'properties', 'env', 'log',
+  'xml', 'html', 'htm', 'xhtml', 'svg', 'tex', 'latex', 'bib', 'ris', 'srt', 'vtt',
+  'py', 'ipynb', 'js', 'mjs', 'cjs', 'ts', 'mts', 'cts', 'tsx', 'jsx', 'css', 'scss', 'less',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'r', 'rmd', 'jl', 'm', 'mm', 'java', 'kt', 'scala', 'groovy', 'gradle',
+  'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'pl', 'lua', 'swift', 'dart', 'sql', 'graphql', 'proto',
+] as const;
+const IMAGE_FILE_PATTERNS = IMAGE_FILE_EXTENSIONS.map(extension => `*.${extension}`).join('; ');
+const TEXT_FILE_PATTERNS = TEXT_FILE_EXTENSIONS.map(extension => `*.${extension}`).join('; ');
+/**
+ * Cheap 32-bit FNV-1a over the bytes just read. Its only job is to keep the same file from being
+ * attached twice under two ids, and to keep two same-named files apart inside one draft; it is not a
+ * security hash and is never used as a document identity or a content-address.
+ */
+function contentFingerprint(bytes: Uint8Array): string {
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) { hash ^= byte; hash = Math.imul(hash, 0x01000193) >>> 0; }
+  return hash.toString(16).padStart(8, '0');
+}
+function fileExtension(name: string): string { return /\.([a-z0-9]+)$/iu.exec(name)?.[1]?.toLowerCase() ?? ''; }
 function fail(message: string, code: ConstructorParameters<typeof ReaderError>[0] = 'INVALID_REQUEST'): never { throw new ReaderError(code, message); }
 /**
  * The one rectangle the raster path takes. A selection is often several per-line rects, so the union
@@ -250,7 +281,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     }
     return results;
   };
-  const filePicker = (title: string, kind: 'images' | 'skill' | 'save', name = '') => {
+  const filePicker = (title: string, kind: 'images' | 'skill' | 'save' | 'file', name = '') => {
     const picker = options.createFilePicker?.() ?? (() => {
       const FilePicker = globals().ChromeUtils?.importESModule('chrome://zotero/content/modules/filePicker.mjs').FilePicker;
       return FilePicker ? new FilePicker() : fail('The native file picker is unavailable.', 'UNSUPPORTED_INTERACTION');
@@ -262,6 +293,9 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
   };
   const readFile = async (path: string, maximum: number): Promise<Uint8Array> => {
     const files = io(); const stat = await files.stat(path);
+    // A directory or a device would make `size` meaningless and could hang a native read, so only a
+    // regular file is ever read; the check is skipped when the host cannot report a type.
+    if (stat.type !== undefined && stat.type !== 'regularFile') fail('Choose a regular file, not a folder.');
     if (!Number.isSafeInteger(stat.size) || stat.size <= 0 || stat.size > maximum) fail('The selected file is empty or exceeds the supported size limit.', 'PAYLOAD_TOO_LARGE');
     const bytes = await files.read(path, { maxBytes: maximum + 1 });
     if (!bytes.length || bytes.length > maximum) fail('The selected file exceeds the supported size limit.', 'PAYLOAD_TOO_LARGE');
@@ -387,6 +421,29 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       try { const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (text.includes('\0')) fail('SKILL.md must contain UTF-8 text.'); return text; }
       catch { fail('SKILL.md must contain valid UTF-8 text.'); }
     }, 'The selected skill file could not be read.'),
+    // One explicitly chosen file, attached as real content rather than as a reference to a file the
+    // model would have to open itself. The extension chooses the route and the bytes then have to
+    // prove it, and the chosen path is dropped here: what leaves this port is a bare file name plus
+    // either decoded UTF-8 text (reference context) or a validated image attachment. The model never
+    // receives a filesystem path, cannot request a different one, and reads the body as data.
+    pickFile: () => boundary(async () => {
+      const picker = filePicker('Attach a file', 'file');
+      picker.appendFilter('Images', IMAGE_FILE_PATTERNS); picker.appendFilter('Text', TEXT_FILE_PATTERNS); picker.appendFilter('All files', '*');
+      if (await picker.show() !== picker.returnOK) return { references: [], images: [] };
+      const path = picker.file ?? picker.files?.[0]; if (!path) fail('No file was selected.');
+      const name = bareName(path, 'attachment'); const extension = fileExtension(name);
+      if ((IMAGE_FILE_EXTENSIONS as readonly string[]).includes(extension)) return { references: [], images: [await image(await readFile(path, LIMITS.imageBytes), name)] };
+      if (!(TEXT_FILE_EXTENSIONS as readonly string[]).includes(extension)) fail(`Attach a text file (${TEXT_FILE_EXTENSIONS.slice(0, 6).join(', ')}, …) or an image (${IMAGE_FILE_EXTENSIONS.join(', ')}).`);
+      const bytes = await readFile(path, LIMITS.referenceTextBytes);
+      let body: string;
+      try { body = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+      catch { fail('This file is not UTF-8 text, so it cannot become text context. Attach a text file or an image.'); }
+      if (!body.trim()) fail('This file has no text to attach.');
+      // A misnamed binary would otherwise reach the model as mojibake. The readable whitespace
+      // controls (`\t`, `\n`, `\r`) stay; any other C0 control byte is treated as proof of binary.
+      if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(body)) fail('This file looks like binary data, so it cannot become text context.');
+      return { references: [{ id: `file-${options.clientId}-${contentFingerprint(bytes)}`, kind: 'file', label: name, text: body, capturedAt: now() }], images: [] };
+    }, 'The selected file could not be read.'),
     exportText: (name, text) => boundary(async () => {
       const bytes = new TextEncoder().encode(text); if (bytes.length > MAX_EXPORT_BYTES) fail('This text exceeds the native export size limit.', 'PAYLOAD_TOO_LARGE');
       const picker = filePicker('Export text', 'save', name); picker.appendFilter('Text', '*.md; *.txt; *.json');

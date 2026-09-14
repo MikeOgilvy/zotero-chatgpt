@@ -5,6 +5,7 @@ import { ReaderDocumentCache, type DocumentSource } from '../../packages/zotero/
 import { paperA, citationA, citationB, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 import { forgetSelection, rememberSelection } from '../../packages/zotero/src/reader/current-selection.ts';
 import type { ReaderReference } from '../../packages/contracts/src/workspace.ts';
+import { validateReference } from '../../packages/contracts/src/workspace-validation.ts';
 
 const uuid = '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e';
 const png = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
@@ -317,4 +318,87 @@ it('exports generated output images above the input limit while retaining the or
   const writtenBytes = write![1];
   expect(writtenBytes.length).toBe(bytes.length);
   expect(Buffer.from(writtenBytes).equals(Buffer.from(bytes))).toBe(true);
+});
+
+// Item A — attaching a real file. This port is the only place a local path is ever touched; the
+// tests below pin both halves of that contract: the file is really read through the host file port,
+// and nothing that leaves the port can name the chosen location or bypass a cap.
+const TEXT_FILE = '# Weekly analysis\n\nEvidence on p. 3.\n';
+/** One mutable file port so each case states its bytes once instead of queueing one-shot mocks. */
+function fileSetup(f: ReturnType<typeof setup>) {
+  const state: { path: string; bytes: Uint8Array; type: string | undefined } = { path: '', bytes: new Uint8Array(), type: undefined };
+  f.io.stat.mockImplementation(() => Promise.resolve(state.type ? { size: state.bytes.length, type: state.type } : { size: state.bytes.length }));
+  f.io.read.mockImplementation(() => Promise.resolve(state.bytes));
+  const at = (path: string, bytes: Uint8Array, type?: string) => { state.path = path; state.bytes = bytes; state.type = type; f.picker.file = path; delete f.picker.files; };
+  return {
+    text: (path: string, body = TEXT_FILE) => at(path, new TextEncoder().encode(body)),
+    bytes: at,
+  };
+}
+
+it('attaches a text file as bounded reference text and never leaks the chosen path', async () => {
+  const f = setup(); const file = fileSetup(f); file.text('/synthetic/Notes/Weekly.Analysis.md');
+  const picked = await f.port.pickFile();
+  expect(picked.images).toEqual([]);
+  expect(picked.references).toHaveLength(1);
+  const [reference] = picked.references;
+  expect(reference).toMatchObject({ kind: 'file', label: 'Weekly.Analysis.md', text: TEXT_FILE, capturedAt: '2026-09-12T00:00:00Z' });
+  // The bare name, not the path, and no paper/document: the model is handed content, never a location.
+  expect(reference!.paper).toBeUndefined();
+  expect(JSON.stringify(picked)).not.toContain('/synthetic');
+  expect(JSON.stringify(picked)).not.toContain('Notes');
+  // The bytes really came from the host file port, bounded by the reference text cap.
+  expect(f.io.read).toHaveBeenCalledWith('/synthetic/Notes/Weekly.Analysis.md', { maxBytes: 48 * 1024 + 1 });
+  expect(validateReference(reference)).toEqual(reference);
+});
+
+it('keeps one id per file body so the same file cannot be attached twice', async () => {
+  const f = setup(); const file = fileSetup(f);
+  file.text('/synthetic/Notes/Weekly.Analysis.md');
+  const first = await f.port.pickFile();
+  file.text('/synthetic/other/weekly-copy.txt');
+  const renamed = await f.port.pickFile();
+  file.text('/synthetic/Notes/Weekly.Analysis.md', '# A different body\n');
+  const changed = await f.port.pickFile();
+  // Same bytes under another name share one id (the presenter dedupes on it); other bytes do not.
+  expect(renamed.references[0]?.id).toBe(first.references[0]?.id);
+  expect(changed.references[0]?.id).not.toBe(first.references[0]?.id);
+});
+
+it('routes an image-extension file to the validated image path', async () => {
+  const f = setup(); const file = fileSetup(f); file.bytes('/synthetic/figure.png', png);
+  const picked = await f.port.pickFile();
+  expect(picked.references).toEqual([]);
+  expect(picked.images[0]).toMatchObject({ mime: 'image/png', name: 'figure.png' });
+  expect(f.io.read).toHaveBeenCalledWith('/synthetic/figure.png', { maxBytes: 2 * 1024 * 1024 + 1 });
+  // A text body behind a .png extension still has to pass the shared image validation.
+  file.bytes('/synthetic/figure.png', new TextEncoder().encode('not really an image'));
+  await expect(f.port.pickFile()).rejects.toThrow(/image/iu);
+});
+
+it('refuses an unsupported, oversized, binary, non-UTF8, empty or non-regular file instead of guessing', async () => {
+  const f = setup(); const file = fileSetup(f);
+  file.bytes('/synthetic/paper.pdf', new TextEncoder().encode('%PDF-1.7'));
+  await expect(f.port.pickFile()).rejects.toThrow(/text file|image/iu);
+  file.bytes('/synthetic/notes.txt', new Uint8Array(48 * 1024 + 2));
+  await expect(f.port.pickFile()).rejects.toThrow(/large|limit/iu);
+  // Neither an unsupported extension nor an oversized file is ever handed to the native reader.
+  expect(f.io.read).not.toHaveBeenCalled();
+  file.bytes('/synthetic/notes.txt', Uint8Array.from([0x68, 0x69, 0x00, 0x01]));
+  await expect(f.port.pickFile()).rejects.toThrow(/binary/iu);
+  file.bytes('/synthetic/notes.txt', Uint8Array.from([0xc0, 0x80]));
+  await expect(f.port.pickFile()).rejects.toThrow(/UTF-8/iu);
+  file.text('/synthetic/notes.txt', '   \n\t');
+  await expect(f.port.pickFile()).rejects.toThrow(/no text/iu);
+  // A folder whose name happens to carry a text extension is refused before any bytes are read.
+  const reads = f.io.read.mock.calls.length;
+  file.bytes('/synthetic/notes.txt', new Uint8Array(64), 'directory');
+  await expect(f.port.pickFile()).rejects.toThrow(/folder/iu);
+  expect(f.io.read.mock.calls.length).toBe(reads);
+});
+
+it('treats a cancelled file selection as no attachment and never reads anything', async () => {
+  const f = setup(); fileSetup(f); vi.mocked(f.picker.show).mockResolvedValueOnce(1);
+  await expect(f.port.pickFile()).resolves.toEqual({ references: [], images: [] });
+  expect(f.io.read).not.toHaveBeenCalled();
 });

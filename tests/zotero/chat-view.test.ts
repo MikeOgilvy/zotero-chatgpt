@@ -2336,7 +2336,7 @@ it('groups the plus popover into titled sections with title and description rows
   expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
   expect(groups[2]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Skill');
   const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
-  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'composer-references', 'composer-skill']);
+  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'pick-file', 'composer-references', 'composer-skill']);
   for (const row of rows) {
     expect(row.tagName).toBe('BUTTON');
     const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
@@ -2418,6 +2418,18 @@ it('opens every attachment route from the plus menu and closes it after a choice
   const pick = vi.spyOn(presenter, 'pickImages').mockResolvedValue(undefined);
   route('pick-images').click();
   await vi.waitFor(() => expect(pick).toHaveBeenCalledTimes(1));
+  expect(menu.hidden).toBe(true);
+
+  plus.click();
+  // Attaching a real file is its own route beside the image route, and it goes through the presenter
+  // so the draft, caps and error reporting stay in one place.
+  const attachFile = route('pick-file');
+  expect(attachFile.title).toBe('Attach file…');
+  expect(attachFile.getAttribute('aria-label')).toBe('Attach file…');
+  expect(attachFile.textContent).toContain('Text or image from your computer');
+  const attach = vi.spyOn(presenter, 'pickFile').mockResolvedValue(undefined);
+  attachFile.click();
+  await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
   expect(menu.hidden).toBe(true);
 
   plus.click();

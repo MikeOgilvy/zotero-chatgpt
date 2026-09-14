@@ -1,6 +1,6 @@
 import { ReaderError, paperId, type ContextBatch, type ContextReport } from './index.ts';
 import type { HistoryEntry, Personalization, ReaderReference, ReaderSkill, ReferenceInput, WorkflowSnapshot } from './workspace.ts';
-import { validatePaperIdentity, validatePaperScope } from './validation.ts';
+import { LIMITS, validatePaperIdentity, validatePaperScope } from './validation.ts';
 import { validateDocument } from './document.ts';
 function fail(): never { throw new ReaderError('INVALID_REQUEST', 'The workflow or reference snapshot is invalid.'); }
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -27,14 +27,14 @@ export function validatePreferences(value: unknown): Partial<Personalization> {
 }
 export function validateReference(value: unknown): ReaderReference {
   const source = object(value, ['id', 'kind', 'label', 'paper', 'identity', 'conversationId', 'messageIds', 'text', 'range', 'capturedAt']);
-  if (!['article', 'chat', 'collection', 'note', 'annotation'].includes(String(source.kind))) fail();
+  if (!['article', 'chat', 'collection', 'note', 'annotation', 'file'].includes(String(source.kind))) fail();
   const capturedAt = timestamp(source.capturedAt);
   const result: ReaderReference = { id: text(source.id, 256, 1), kind: source.kind as ReaderReference['kind'], label: text(source.label, 2048, 1), capturedAt };
   if (source.paper !== undefined) result.paper = validatePaperScope(source.paper);
   if (source.identity !== undefined) result.identity = validatePaperIdentity(source.identity);
   if (source.conversationId !== undefined) result.conversationId = uuid(source.conversationId);
   if (source.messageIds !== undefined) { result.messageIds = array(source.messageIds, 32).map(id => text(id, 128, 1)); if (new Set(result.messageIds).size !== result.messageIds.length) fail(); }
-  if (source.text !== undefined) { result.text = text(source.text, 48 * 1024); if (new TextEncoder().encode(result.text).length > 48 * 1024) fail(); }
+  if (source.text !== undefined) { result.text = text(source.text, LIMITS.referenceTextBytes); if (new TextEncoder().encode(result.text).length > LIMITS.referenceTextBytes) fail(); }
   if (source.range !== undefined) { const pair = array(source.range, 2).map(n => count(n, 10000)); if (pair.length !== 2 || pair[0]! < 1 || pair[1]! < pair[0]!) fail(); result.range = [pair[0]!, pair[1]!]; }
   return result;
 }

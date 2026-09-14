@@ -36,10 +36,16 @@ export interface WorkspaceSettings {
    */
   allowedModels?: AllowedModel[];
 }
-/** References contain a bounded snapshot, never recursively nested conversations. */
+/**
+ * References contain a bounded snapshot, never recursively nested conversations. `file` is one local
+ * file the owner attached explicitly through the native picker: `label` is the bare file name and
+ * `text` is the decoded UTF-8 body. The local path is deliberately never part of a reference, so
+ * nothing downstream (including the request sent to the model) can name a filesystem location, and
+ * the body is data the model may read, never an instruction it may follow.
+ */
 export interface ReaderReference {
   id: string;
-  kind: 'article' | 'chat' | 'collection' | 'note' | 'annotation';
+  kind: 'article' | 'chat' | 'collection' | 'note' | 'annotation' | 'file';
   label: string;
   paper?: PaperScope;
   identity?: PaperIdentity;
@@ -49,6 +55,13 @@ export interface ReaderReference {
   range?: [number, number];
   capturedAt: string;
 }
+/**
+ * What one explicit native file pick produced. The route is decided by the file itself: a text-like
+ * file becomes reference text, an image file becomes image input. `references` carry the bare name
+ * and the decoded text only — never the chosen path — and `images` are the same validated
+ * attachments the image picker produces, so every existing cap still applies.
+ */
+export interface PickedFile { references: ReaderReference[]; images: ImageAttachment[] }
 export interface WorkflowSnapshot {
   skill: ReaderSkill | null;
   preferences: Personalization;
@@ -151,6 +164,12 @@ export interface LibraryReferencePort {
   open(paper: PaperScope): Promise<void>;
   pickImages?(): Promise<ImageAttachment[]>;
   pickSkill?(): Promise<string | null>;
+  /**
+   * One explicitly chosen local file, read through the host's own file port. Text-like files become
+   * reference text and image files become image input; an unsupported or oversized file is refused
+   * with a message instead of being truncated or guessed at.
+   */
+  pickFile?(): Promise<PickedFile>;
   exportText?(name: string, text: string): Promise<void>;
   /**
    * Rasterizes a PDF region as an image attachment. `citation` is a frozen selection of the same

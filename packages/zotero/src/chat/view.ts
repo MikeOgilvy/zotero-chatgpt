@@ -81,6 +81,10 @@ const COPY = {
   sourceOpenFailed: 'The source could not be opened.',
   attach: 'Add images or context',
   chooseImages: 'Choose images…',
+  // One local file the owner picks explicitly. Text files arrive as text context for the model and
+  // image files as image input; the copy says so instead of promising a general file upload.
+  attachFile: 'Attach file…',
+  attachFileHint: 'Text or image from your computer',
   captureRegion: 'Capture selected region',
   addReference: 'Add references',
   addSkill: 'Add a skill',
@@ -662,6 +666,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   attachGroup.append(
     el('div', 'zcr-plus-heading', COPY.attachHeading),
     plusRow(COPY.chooseImages, COPY.chooseImagesHint, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
+    plusRow(COPY.attachFile, COPY.attachFileHint, 'pick-file', () => { togglePlus(false); void presenter.pickFile().catch(reportViewError); }),
   );
   const referenceGroup = el('div', 'zcr-plus-group');
   referenceGroup.append(
@@ -1409,7 +1414,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         attachments.dataset.rendered = attachmentKey;
         attachments.replaceChildren(...message.citations.map(citation => citationCard(citation, false)), ...[...(message.images ?? []), ...(message.generatedImages ?? [])].map(imageCard));
         if (message.workflow?.skill) attachments.append(el('span', 'zcr-message-reference', `/${message.workflow.skill.name} · v${message.workflow.skill.version}`));
-        for (const reference of message.references ?? []) attachments.append(el('span', 'zcr-message-reference', `${reference.kind === 'chat' ? '@chat' : '@article'} · ${reference.label}`));
+        for (const reference of message.references ?? []) attachments.append(el('span', 'zcr-message-reference', `${reference.kind === 'chat' ? '@chat' : reference.kind === 'file' ? '@file' : '@article'} · ${reference.label}`));
       }
       const statusLabel = queued ? 'Queued' : message.role === 'assistant' ? STATUS_LABEL[message.status] : message.status === 'cancelled' ? 'Cancelled before sending' : '';
       const caption = settingsCaption(message.settings, state.runtime?.models ?? []);

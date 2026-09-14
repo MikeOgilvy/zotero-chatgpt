@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterReading, type PresenterServices } from '../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput } from '../../packages/contracts/src/index.ts';
-import type { ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
+import type { ReaderReference, ReaderSkill, ReaderWorkspace, PickedFile, SavedDraft, WorkspaceSettings } from '../../packages/contracts/src/workspace.ts';
 import type { AgentTaskRecord, AgentTasks } from '../../packages/contracts/src/tasks.ts';
 import type { ReadingJob } from '../../packages/core/src/context/coordinator.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
@@ -55,7 +55,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     }),
     diagnostics: () => Promise.resolve({ pluginVersion: 'test', runtimeVersion: 'test', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }), subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, close: () => Promise.resolve(),
   };
-  const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickImages: vi.fn(() => Promise.resolve([copy(imageA)])), pickSkill: vi.fn(() => Promise.resolve(userSkill.markdown)), exportText: vi.fn(() => Promise.resolve()), exportImage: vi.fn(() => Promise.resolve()) };
+  const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickImages: vi.fn(() => Promise.resolve([copy(imageA)])), pickSkill: vi.fn(() => Promise.resolve(userSkill.markdown)), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportText: vi.fn(() => Promise.resolve()), exportImage: vi.fn(() => Promise.resolve()) };
   let id = 0;
   const services: PresenterServices = { ensureStarted: vi.fn(() => options.offline ? Promise.reject(new Error('Runtime unavailable')) : Promise.resolve(client)), openAuthorization: () => undefined, uuid: () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++id).padStart(12, '0')}`, now: () => '2026-09-12T00:00:00Z', getWorkspace: () => Promise.resolve(workspace), library, openHistory: vi.fn(() => Promise.resolve()), ...(options.searchTimeoutMs === undefined ? {} : { searchTimeoutMs: options.searchTimeoutMs }), ...(options.document ? { document: { prepare: () => Promise.resolve(copy(documentA)), validate: () => Promise.resolve(), readEnabled: () => true, writeEnabled: () => {} } } : {}) };
   const presenter = new ConversationPresenter(paperA, 'Paper A', services);
@@ -137,6 +137,33 @@ it('captures @chat through bounded workspace snapshots and persists appearance i
   await f.presenter.saveAppearance({ uiLanguage: 'zh', textScale: 1.5 });
   expect(f.workspaceSettings()).toMatchObject({ uiLanguage: 'zh', textScale: 1.5 });
   expect(f.presenter.snapshot().draft.settings).toEqual(generation); f.presenter.dispose();
+});
+
+it('attaches one chosen file as text context, dedupes it, and previews the frozen body without re-reading the path', async () => {
+  const f = fixture(); await f.presenter.activate();
+  const attached: ReaderReference = { id: 'file-9a1c3e5f-1', kind: 'file', label: 'Weekly.Analysis.md', text: '# Weekly\nEvidence on p. 3.', capturedAt: '2026-09-12T00:00:00Z' };
+  f.library.pickFile.mockResolvedValueOnce({ references: [copy(attached)], images: [copy(imageA)] });
+  await f.presenter.pickFile();
+  expect(f.presenter.snapshot().draft.references).toEqual([copy(attached)]);
+  expect(f.presenter.snapshot().draft.images.map(image => image.id)).toEqual([imageA.id]);
+  // The host is never asked to open the chosen file again: the body travels inside the reference.
+  expect(f.library.read).not.toHaveBeenCalled();
+  // A second identical pick is a no-op rather than a duplicate attachment.
+  f.library.pickFile.mockResolvedValueOnce({ references: [copy(attached)], images: [] });
+  await f.presenter.pickFile();
+  expect(f.presenter.snapshot().draft.references).toHaveLength(1);
+  await expect(f.presenter.previewReference(copy(attached))).resolves.toEqual(copy(attached));
+  expect(f.library.read).not.toHaveBeenCalled();
+  // A file reference without a body is refused instead of being sent as an empty snapshot.
+  const bare: ReaderReference = { id: 'file-9a1c3e5f-2', kind: 'file', label: 'empty.txt', capturedAt: '2026-09-12T00:00:00Z' };
+  await expect(f.presenter.previewReference(bare)).rejects.toThrow(/text/iu);
+  // Image caps still apply to a picked file that arrives as an image.
+  const full = fixture(); await full.presenter.activate();
+  for (let index = 0; index < 4; index += 1) full.presenter.addImage({ ...copy(imageA), id: `6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b2${index}` });
+  full.library.pickFile.mockResolvedValueOnce({ references: [], images: [copy(imageA)] });
+  await expect(full.presenter.pickFile()).rejects.toThrow(/at most 4 images/iu);
+  expect(full.library.pickFile).toHaveBeenCalled();
+  f.presenter.dispose(); full.presenter.dispose();
 });
 
 it('lists a record carrying archivedAt as an ordinary chat in the one listing and never rewrites it', async () => {
