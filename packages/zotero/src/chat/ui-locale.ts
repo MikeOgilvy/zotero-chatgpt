@@ -22,6 +22,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Capture page': '截取页面', 'PDF page to capture': '要截取的 PDF 页码', 'Save literature to': '文献保存位置',
   Reference: '引用', 'From your computer': '来自你的电脑',
   'Saved chats, articles and workflows': '已保存的对话、文章与工作流',
+  Skill: 'Skill', 'Add a skill': '添加 skill', 'Installed skills for this chat': '此对话可用的 skill', 'Add references': '添加引用', 'Saved chats and articles': '已保存的对话与文章',
   'Target collection': '目标分类', 'Choose a collection…': '选择分类…', 'Preview image': '预览图片',
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
   'Move image earlier': '将图片前移', 'Move image later': '将图片后移',

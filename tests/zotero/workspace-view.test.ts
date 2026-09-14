@@ -170,6 +170,24 @@ it('does not select a disabled or unsupported installed workflow', () => {
   type('/Derive'); key('Enter'); expect(actions.selectSkill).not.toHaveBeenCalled();
 });
 
+it('opens the skill chooser from the composer shortcut as well as the slash trigger', async () => {
+  const { pane, input, view, actions } = setup();
+  view.openSkills();
+  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  expect(menu.hidden).toBe(false);
+  // The shortcut lands on the '/'-scope: a skill chooser, never a reference search.
+  expect(menu.dataset.zcrCommandKind).toBe('commands');
+  expect(menu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed workflows');
+  expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent).join(' ')).toContain('/Derive');
+  expect(actions.searchReferences).not.toHaveBeenCalled();
+  // Like the reference shortcut it only picks a scope: the draft and the caret are untouched.
+  expect(input.value).toBe('');
+  expect(input.ownerDocument.activeElement).toBe(input);
+  // And choosing from it runs that skill for this chat.
+  input.dispatchEvent(new input.ownerDocument.defaultView!.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(actions.selectSkill).toHaveBeenCalledWith('derive'));
+});
+
 it('supports explicit @chat and /skill entrypoints in the same composer', async () => {
   const { type, key, actions } = setup();
   type('@chat recent');

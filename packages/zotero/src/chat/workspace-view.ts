@@ -24,7 +24,7 @@ function referenceDetail(reference: ReaderReference): string {
  * ports, and installed-workflow authoring lives in Zotero's own Preferences window: here the reader
  * only chooses a workflow for this chat through the `/` chooser.
  */
-export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { openCommands(): void; update(state: WorkspaceViewState): void; dispose(): void } {
+export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { openCommands(): void; openSkills(): void; update(state: WorkspaceViewState): void; dispose(): void } {
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
   const chips = create('div', '', 'zcr-workspace-chips'); chips.dataset.zcrWorkspaceChips = ''; mounts.context.append(chips);
@@ -99,8 +99,14 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     const control = button(label, () => { mode = 'references'; filter = kind; search(); input.focus(); });
     filterControls.set(kind, control); menu.toolbar.append(control);
   }
-  /** The composer's single plus button routes here; no visible '@' trigger is mounted. */
+  /** The composer's plus popover routes here for references; no visible '@' trigger is mounted. */
   const openCommands = () => { trigger = null; query = ''; mode = 'references'; search(); input.focus(); };
+  /**
+   * The Skill row in the same popover opens the `/` chooser directly, so choosing a skill for this
+   * chat no longer requires the reader to know the slash syntax. It keeps the same "never rewrite the
+   * draft" contract as the reference shortcut: only the menu's own scope changes.
+   */
+  const openSkills = () => { trigger = null; query = ''; mode = 'skills'; search(); input.focus(); };
   const onInput = () => {
     if (composing) return;
     const end = input.selectionStart; const prefix = input.value.slice(0, end);
@@ -186,7 +192,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   globalHint.dataset.zcrGlobalHint = '';
   advanced.append(globalHint);
   let chipsKey = '';
-  return { openCommands, update: next => {
+  return { openCommands, openSkills, update: next => {
     if (disposed) return; state = next;
     const nextChips = JSON.stringify([next.draft, next.settings.skills.map(skill => [skill.id, skill.name, skill.revision])]);
     if (nextChips !== chipsKey) { chipsKey = nextChips; renderChips(); }

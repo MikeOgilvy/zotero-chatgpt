@@ -82,11 +82,14 @@ const COPY = {
   attach: 'Add images or context',
   chooseImages: 'Choose images…',
   captureRegion: 'Capture selected region',
-  addReferences: 'Add references or workflows',
+  addReference: 'Add references',
+  addSkill: 'Add a skill',
   attachHeading: 'Attach',
   referenceHeading: 'Reference',
+  skillHeading: 'Skill',
   chooseImagesHint: 'From your computer',
-  addReferencesHint: 'Saved chats, articles and workflows',
+  addReferenceHint: 'Saved chats and articles',
+  addSkillHint: 'Installed skills for this chat',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
   imageDropFailed: 'The dropped image could not be attached.',
@@ -632,9 +635,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const referenceGroup = el('div', 'zcr-plus-group');
   referenceGroup.append(
     el('div', 'zcr-plus-heading', COPY.referenceHeading),
-    plusRow(COPY.addReferences, COPY.addReferencesHint, 'composer-references', () => { togglePlus(false); workspaceView?.openCommands(); }),
+    plusRow(COPY.addReference, COPY.addReferenceHint, 'composer-references', () => { togglePlus(false); workspaceView?.openCommands(); }),
   );
-  plusMenu.append(attachGroup, referenceGroup);
+  // References and skills are two different affordances, so they get two headings and two rows: the
+  // reference row opens the '@' chooser and the skill row opens the '/' chooser.
+  const skillGroup = el('div', 'zcr-plus-group');
+  skillGroup.append(
+    el('div', 'zcr-plus-heading', COPY.skillHeading),
+    plusRow(COPY.addSkill, COPY.addSkillHint, 'composer-skill', () => { togglePlus(false); workspaceView?.openSkills(); }),
+  );
+  plusMenu.append(attachGroup, referenceGroup, skillGroup);
   composer.append(plusMenu);
   leading.append(plus, captureRegion);
   const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;

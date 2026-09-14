@@ -2150,11 +2150,12 @@ it('groups the plus popover into titled sections with title and description rows
   const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
   root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!.click();
   const groups = [...menu.querySelectorAll<HTMLElement>('.zcr-plus-group')];
-  expect(groups).toHaveLength(2);
+  expect(groups).toHaveLength(3);
   expect(groups[0]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Attach');
   expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
+  expect(groups[2]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Skill');
   const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
-  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'composer-references']);
+  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'composer-references', 'composer-skill']);
   for (const row of rows) {
     expect(row.tagName).toBe('BUTTON');
     const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
@@ -2170,6 +2171,37 @@ it('groups the plus popover into titled sections with title and description rows
   expect(menu.querySelector('[data-zcr-action="capture-page"]')).toBeNull();
   expect(menu.querySelector('[data-zcr-action="capture-region"]')).toBeNull();
   expect(menu.textContent).not.toMatch(/Capture page|Capture selected region/u);
+});
+
+it('separates the reference and skill rows into their own titled groups', async () => {
+  const { root } = await mountReadyChat({ messages: [], workspace: historyWorkspace([]) });
+  const view = root.ownerDocument.defaultView!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
+  const reference = menu.querySelector<HTMLButtonElement>('[data-zcr-action="composer-references"]')!;
+  const skill = menu.querySelector<HTMLButtonElement>('[data-zcr-action="composer-skill"]')!;
+  expect(reference.querySelector('.zcr-plus-row-title')?.textContent).toBe('Add references');
+  expect(skill.querySelector('.zcr-plus-row-title')?.textContent).toBe('Add a skill');
+  // The reference row advertises no skills and the skill row advertises no references.
+  expect(reference.textContent).not.toMatch(/skill/iu);
+  expect(skill.textContent).not.toMatch(/reference/iu);
+  const commandMenu = root.querySelector<HTMLElement>('.zcr-command-menu')!;
+  // Reference opens the '@' chooser, which is a reference-type chooser and says so.
+  plus.click(); reference.click();
+  await vi.waitFor(() => expect(commandMenu.dataset.zcrCommandKind).toBe('references'));
+  expect(commandMenu.querySelector('.zcr-command-heading')?.textContent).toBe('References');
+  expect(menu.hidden).toBe(true);
+  input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(commandMenu.hidden).toBe(true);
+  // Skill opens the '/' chooser: the skill scope, not a reference search.
+  plus.click(); skill.click();
+  await vi.waitFor(() => expect(commandMenu.dataset.zcrCommandKind).toBe('commands'));
+  expect(commandMenu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed workflows');
+  expect(commandMenu.querySelector('[role="listbox"]')).not.toBeNull();
+  expect(menu.hidden).toBe(true);
+  // Neither shortcut rewrites the draft.
+  expect(input.value).toBe('');
 });
 
 it('labels the plus popover as a dialog that matches the field and rows it contains', async () => {
