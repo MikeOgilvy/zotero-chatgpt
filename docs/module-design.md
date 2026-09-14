@@ -11,10 +11,10 @@
 | `packages/contracts/src` | 文献身份、来源版本、消息、工作区、原生任务和端口；`validation`、`document`、`workspace-validation` 校验跨模块数据 |
 | `core/codex` | JSONL、握手、模型/能力/用量、固定版本策略、错误及恢复历史解析 |
 | `core/sessions` | 会话、请求哈希、串行状态变更、持久化队列、上游线程、取消与对账 |
-| `core/context` | 全文/聚焦/分批计划、预算估算、固定输入与分步结果、恢复和批次占用 |
+| `core/context` | 全文/聚焦/分批计划、预算估算、固定输入与分步结果、恢复和批次占用；`bibliography.ts` 是书目字段清单、长度上限与"缺失即缺失"规则的唯一实现，同时供请求的紧凑书目块与侧栏书目卡片使用 |
 | `core/workspace` | 离线历史、草稿、图片资产、偏好、研究主题和 SKILL.md |
 | `core/tasks` | 原生任务候选、任务级审批、写入意图、结果账本、对账与撤销 |
-| `zotero/reader` | 当前附件、原生 dock/缩放/选区、文本及版本校验、原文定位、页面图像、显式文章引用 |
+| `zotero/reader` | 当前附件、原生 dock/缩放/选区、文本及版本校验、原文定位、页面图像、显式文章引用；`selection.ts` 从 Zotero 条目抽取书目字段，`metadata.ts` 只是 `core/context/bibliography.ts` 的再导出以保留原有导入路径 |
 | `zotero/agent` | 无状态 NativeAgentPort：定位引文、标注、元数据/查重、集合成员关系及 OA 附件 |
 | `zotero/chat` | Presenter 与视图投影、统一输入、历史/任务/上下文、净化 Markdown 和 KaTeX |
 | `zotero/runtime` | 本地服务、GeckoStorage、发行资产校验、生成图像加载、自有进程监督器 |
