@@ -29,7 +29,6 @@ function mountPane(service: PreferencesService) {
     read: () => Promise.resolve(settings),
     save: vi.fn<PreferencesPaneHost['save']>(() => Promise.resolve()),
     setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
-    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: vi.fn(),
     readHistory: () => Promise.resolve(listing),
@@ -57,7 +56,7 @@ it('forwards the runtime live list to the pane so a Spark id composes end to end
   await ready;
   expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull();
   expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/running runtime reported/u);
+  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/running runtime's report/u);
 });
 
 it('keeps the bundled families and honest copy when the service has no live model port', async () => {

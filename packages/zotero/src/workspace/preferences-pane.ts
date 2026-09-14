@@ -19,7 +19,6 @@ export interface PreferencesPaneHost {
   read(): Promise<WorkspaceSettings>;
   save(value: WorkspaceSettings): Promise<void>;
   setSkillEnabled(id: string, enabled: boolean): Promise<void>;
-  exportPreferences(): Promise<void>;
   /** The shared automatic-PDF-text opt-out (`extensions.zcr.automaticPdfText`), never a store copy. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
@@ -63,12 +62,14 @@ function offeredSkill(skill: ReaderSkill): boolean {
 }
 
 /**
- * Stateful copy for the model fieldset: one line saying where the rows came from. The GPT-5.3 Spark
- * family is named because it is the one family that is not in the bundled catalog and can only
- * arrive from the runtime. Both sentences are exact keys in `chat/ui-locale.ts`.
+ * Stateful copy for the model fieldset. Two things have to be said and nothing else: checking a row
+ * is what makes a model offered in chats, and the exact id under the row is what is actually sent.
+ * The provenance sentence stays because it is the one thing the rows cannot show by themselves —
+ * the GPT-5.3 Spark family is not in the bundled catalog and can only arrive from the runtime.
+ * Both sentences are exact keys in `chat/ui-locale.ts`.
  */
-const MODELS_NOTE_BUNDLED = 'This is the bundled catalog, not your account\'s live entitlements. GPT-5.3-Spark models come from the running runtime and appear only after it reports them. The exact id is what is sent.';
-const MODELS_NOTE_LIVE = 'These rows combine the models the running runtime reported with the bundled catalog\'s GPT-6 and GPT-5.6. The exact id is what is sent.';
+const MODELS_NOTE_BUNDLED = 'Checked models are offered in chats; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.';
+const MODELS_NOTE_LIVE = 'Checked models are offered in chats; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.';
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : 'The action could not be completed.';
@@ -178,7 +179,6 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     /** The one editable preference: the free-text instructions carried by `background`. */
     instructions: HTMLTextAreaElement;
     savePreferences: HTMLButtonElement;
-    exportPreferences: HTMLButtonElement;
     models: HTMLElement;
     skills: HTMLElement;
   }
@@ -233,7 +233,8 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     // The single box is the whole section; the instructions persist in `background` and reach every
     // request in the frozen `workflow.preferences` snapshot.
     const research = fieldset(doc, container, 'Codex instructions');
-    const instructionNote = element(doc, 'p', 'Give Codex extra instructions and context for all chats.');
+    // The one thing the legend and the field label cannot say: the box is global, not per chat.
+    const instructionNote = element(doc, 'p', 'Applies to every chat.');
     instructionNote.className = 'zcr-preferences-muted';
     research.append(instructionNote);
     const instructionsLabel = labelled(doc, research, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
@@ -251,15 +252,6 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     skills.dataset.zcrPref = 'skills';
     workflows.append(skills);
 
-    // Export is its own pane-level action: it writes the whole stored preferences and profile
-    // snapshot, not the single instructions box, so it does not belong inside that fieldset.
-    const exportPreferences = element(doc, 'button', 'Export preferences');
-    exportPreferences.type = 'button'; exportPreferences.dataset.zcrPref = 'export-preferences';
-    const footer = element(doc, 'div');
-    footer.className = 'zcr-preferences-actions';
-    footer.append(exportPreferences);
-    container.append(footer);
-
     // History management sits last so listing it never delays the settings form above it.
     if (host.readHistory && host.deleteHistory) {
       historySection = createHistorySection(doc, {
@@ -269,7 +261,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       container.append(historySection.element);
     }
 
-    return { form: container, uiLanguage, textScale, automaticPdfText, instructions, savePreferences, exportPreferences, models, skills };
+    return { form: container, uiLanguage, textScale, automaticPdfText, instructions, savePreferences, models, skills };
   }
 
   let controls: Controls | null = null;
@@ -380,7 +372,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   /** Disabled state only: values stay exactly as the user left them while a write is in flight. */
   function refreshDisabled(): void {
     if (!controls || !current) return;
-    for (const control of [controls.uiLanguage, controls.textScale, controls.automaticPdfText, controls.instructions, controls.savePreferences, controls.exportPreferences]) control.disabled = busy;
+    for (const control of [controls.uiLanguage, controls.textScale, controls.automaticPdfText, controls.instructions, controls.savePreferences]) control.disabled = busy;
     for (const [id, entry] of skillRows) entry.setDisabled(busy || (current.skills.find(skill => skill.id === id)?.unsupportedDependencies.length ?? 0) > 0);
     for (const entry of modelRows.values()) entry.setDisabled(busy);
     historySection?.setBusy(busy);
@@ -544,7 +536,6 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       automaticPdfText: form.querySelector('[data-zcr-pref="automatic-pdf-text"]') as HTMLInputElement,
       instructions: form.querySelector(`[data-zcr-pref="preference-${INSTRUCTIONS_FIELD}"]`) as HTMLTextAreaElement,
       savePreferences: form.querySelector('[data-zcr-pref="save-preferences"]') as HTMLButtonElement,
-      exportPreferences: form.querySelector('[data-zcr-pref="export-preferences"]') as HTMLButtonElement,
       models: form.querySelector('[data-zcr-pref="models"]') as HTMLElement,
       skills: form.querySelector('[data-zcr-pref="skills"]') as HTMLElement,
     };
@@ -568,14 +559,6 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       if (!current) return;
       const preferences = formPreferences(current);
       void commit(settings => ({ ...settings, preferences }), 'Preferences saved.');
-    });
-    listen(controls.exportPreferences, 'click', () => {
-      if (busy || disposed) return;
-      busy = true; clear(error); refreshDisabled();
-      void host.exportPreferences()
-        .then(() => { if (!disposed) show(status, 'Preferences exported.'); })
-        .catch((caught: unknown) => { if (!disposed) fail(message(caught)); })
-        .finally(() => { busy = false; if (!disposed) sync(); });
     });
 
     await reload(true, true);

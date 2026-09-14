@@ -111,7 +111,9 @@ it('offers no workflow authoring, import or export in the sidebar', () => {
 
 it('offers no global preference, research-profile or workflow-availability control in the sidebar', () => {
   const { pane, button } = setup();
-  for (const label of ['Save preferences', 'Export preferences', 'Save as new profile', 'Update selected profile', 'Delete selected profile']) expect(button(label), label).toBeUndefined();
+  // Two changes meet here: the More menu is gone, so there is no export control, and the settings
+  // mount that used to hold a global language override is gone too, so the pane itself is searched.
+  for (const label of ['Save preferences', 'Save as new profile', 'Update selected profile', 'Delete selected profile']) expect(button(label), label).toBeUndefined();
   expect(pane.querySelector('[name="language"]')).toBeNull();
   expect(pane.querySelector('[data-zcr-skill-enabled="derive"]')).toBeNull();
   // Workflow availability is a native Preferences checkbox; the sidebar only selects one for the chat.

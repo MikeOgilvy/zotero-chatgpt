@@ -45,7 +45,6 @@ function fixture(initialEntries: HistoryEntry[], overrides: Partial<PreferencesP
     read: () => Promise.resolve(copy(settings)),
     save: vi.fn<PreferencesPaneHost['save']>(value => { Object.assign(settings, copy(value)); return Promise.resolve(); }),
     setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
-    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: vi.fn(),
     readHistory, deleteHistory,
@@ -234,6 +233,25 @@ it('skips an unfinished chat in bulk removal and says so instead of arming a del
   await vi.waitFor(() => expect(rows()).toEqual([running.id]));
 });
 
+it('reports a partly failed removal with the store\'s own counts and never claims full success', async () => {
+  const first = entry(1, 'First'); const second = entry(2, 'Second');
+  const { host } = fixture([first, second], {
+    deleteHistory: vi.fn<NonNullable<PreferencesPaneHost['deleteHistory']>>(() => Promise.resolve(
+      report('delete', [first.id], [{ id: second.id, message: 'The chat is no longer stored.' }]),
+    )),
+  });
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, second.id]));
+
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${first.id}"]`).click();
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-history="error"]').hidden).toBe(false));
+  // The failure restates the store's own numbers, and no success status contradicts it.
+  expect(find('[data-zcr-history="error"]').textContent).toBe('Deleted 1 of 2 chats. 1 could not be changed.');
+  expect(find<HTMLElement>('[data-zcr-history="status"]').hidden).toBe(true);
+});
+
 it('searches through the store, filters by paper, and states an empty result honestly', async () => {
   const alpha = entry(1, 'Alpha', { paper: paperA, preview: 'alpha content' });
   const beta = entry(2, 'Beta', { paper: paperB, paperTitle: 'Beta paper', preview: 'beta content' });
@@ -294,7 +312,6 @@ it('renders no history section at all when the host offers no history management
     read: () => Promise.resolve({ ...defaultSettings(), uiLanguage: 'en', textScale: 1 }),
     save: vi.fn<PreferencesPaneHost['save']>(() => Promise.resolve()),
     setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
-    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: vi.fn(),
   };
@@ -335,4 +352,138 @@ it('renders the history copy in the stored UI language', async () => {
   expect(find<HTMLButtonElement>('[data-zcr-history="confirm"]').textContent).toBe('永久删除');
   expect(find<HTMLButtonElement>('[data-zcr-history="cancel"]').textContent).toBe('取消');
   find<HTMLButtonElement>('[data-zcr-history="cancel"]').click();
+});
+
+it('states an empty history without claiming a search that was never made', async () => {
+  const { host } = fixture([]);
+  const { ready, find } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(find('[data-zcr-history="counts"]').textContent).toBe('0 stored chats'));
+  const empty = find<HTMLElement>('[data-zcr-history="empty"]');
+  expect(empty.hidden).toBe(false);
+  // Nothing was searched and no paper is selected: the empty state must not claim a search.
+  expect(empty.textContent).not.toMatch(/match this search/iu);
+  expect(empty.textContent).toMatch(/no saved chats/iu);
+});
+
+it('keeps counts, empty state and status in agreement after deleting the last chat', async () => {
+  const only = entry(1, 'Only chat');
+  const { host } = fixture([only]);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([only.id]));
+
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${only.id}"]`).click();
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+
+  // All four surfaces describe the same, real state: no chats stored, nothing to search, success.
+  expect(find('[data-zcr-history="counts"]').textContent).toBe('0 stored chats');
+  const empty = find<HTMLElement>('[data-zcr-history="empty"]');
+  expect(empty.hidden).toBe(false);
+  expect(empty.textContent).not.toMatch(/match this search/iu);
+  expect(find('[data-zcr-history="status"]').textContent).toBe('Deleted 1 of 1 chat.');
+  expect(find<HTMLElement>('[data-zcr-history="error"]').hidden).toBe(true);
+});
+
+it('says a search matched nothing only while a search is actually active', async () => {
+  const chat = entry(1, 'Bayesian notes');
+  const { host } = fixture([chat]);
+  const { ready, find, input, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+
+  const search = find<HTMLInputElement>('[data-zcr-history="search"]');
+  search.value = 'nothing matches this'; input(search);
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+  expect(find('[data-zcr-history="empty"]').textContent).toBe('No saved chats match this search.');
+
+  search.value = ''; input(search);
+  await vi.waitFor(() => expect(rows()).toEqual([chat.id]));
+  expect(find<HTMLElement>('[data-zcr-history="empty"]').hidden).toBe(true);
+});
+
+it('keeps focus on a surviving chat after deleting the row the keyboard was on', async () => {
+  const first = entry(1, 'First'); const second = entry(2, 'Second'); const third = entry(3, 'Third');
+  const { host } = fixture([first, second, third]);
+  const { ready, find, rows, document, root } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, second.id, third.id]));
+
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${second.id}"]`).click();
+  const confirm = find<HTMLButtonElement>('[data-zcr-history="confirm"]');
+  confirm.focus();
+  expect(document.activeElement).toBe(confirm);
+  confirm.click();
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, third.id]));
+
+  // Focus must not fall back to the document body: it lands on the row that took the deleted one's
+  // place, so a keyboard user can keep deleting without tabbing back through the whole pane.
+  const active = document.activeElement as HTMLElement | null;
+  expect(active).not.toBe(document.body);
+  expect(active?.closest('[data-zcr-history-id]')?.getAttribute('data-zcr-history-id')).toBe(third.id);
+  expect(root.contains(active)).toBe(true);
+});
+
+it('updates the surviving rows in place instead of rebuilding the whole list', async () => {
+  const first = entry(1, 'First'); const second = entry(2, 'Second'); const third = entry(3, 'Third');
+  const { host } = fixture([first, second, third]);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, second.id, third.id]));
+  const survivor = find(`[data-zcr-history-id="${third.id}"]`);
+
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${second.id}"]`).click();
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, third.id]));
+
+  // The same element survives, so scroll anchoring and any focus inside it are not thrown away.
+  expect(find(`[data-zcr-history-id="${third.id}"]`)).toBe(survivor);
+});
+
+it('never claims a delete succeeded when the list cannot be re-read afterwards', async () => {
+  const only = entry(1, 'Only chat');
+  const { host, readHistory } = fixture([only]);
+  const { ready, find, rows } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([only.id]));
+
+  readHistory.mockRejectedValueOnce(new Error('The workspace is stopping.'));
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${only.id}"]`).click();
+  find<HTMLButtonElement>('[data-zcr-history="confirm"]').click();
+  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-history="error"]').hidden).toBe(false));
+
+  // The honest failure stays visible and no success status contradicts it.
+  expect(find<HTMLElement>('[data-zcr-history="status"]').hidden).toBe(true);
+  expect(find('[data-zcr-history="error"]').textContent).toMatch(/could not be re-read|workspace is stopping/iu);
+  // Counts are not left behind claiming a state nobody could read.
+  expect(find<HTMLElement>('[data-zcr-history="counts"]').hidden).toBe(true);
+});
+
+it('lets a newer read own the pane instead of claiming the delete could not be re-read', async () => {
+  const first = entry(1, 'First'); const second = entry(2, 'Second');
+  const { host, readHistory, state } = fixture([first, second]);
+  const { ready, find, input, rows, document } = mount(host);
+  await ready;
+  await vi.waitFor(() => expect(rows()).toEqual([first.id, second.id]));
+
+  // Hold the delete's own re-read open so a search can start a newer read over it.
+  let release!: () => void;
+  readHistory.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(listingOf(state.entries, '')); }));
+  find<HTMLButtonElement>(`[data-zcr-history-delete="${second.id}"]`).click();
+  const confirm = find<HTMLButtonElement>('[data-zcr-history="confirm"]');
+  // Focus sits on the confirmation, so the delete's own focus restore proves the flow finished.
+  confirm.focus(); confirm.click();
+  await vi.waitFor(() => expect(readHistory).toHaveBeenCalledTimes(2));
+
+  const search = find<HTMLInputElement>('[data-zcr-history="search"]');
+  search.value = 'First'; input(search);
+  await vi.waitFor(() => expect(readHistory).toHaveBeenCalledTimes(3));
+
+  release();
+  await vi.waitFor(() => expect(document.activeElement).not.toBe(confirm));
+  // The newer read owns the pane, so the older one must not overwrite it with a claim that the store
+  // could not be re-read; the delete's own authoritative report is what stands.
+  expect(find<HTMLElement>('[data-zcr-history="error"]').hidden).toBe(true);
+  expect(find('[data-zcr-history="status"]').textContent).toBe('Deleted 1 of 1 chat.');
 });

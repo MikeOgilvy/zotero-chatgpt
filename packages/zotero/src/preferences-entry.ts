@@ -13,7 +13,6 @@ interface PreferencesBridge {
   readSettings(): Promise<string> | string;
   writeSettings(json: string): Promise<void> | void;
   setSkillEnabled(id: string, enabled: boolean): Promise<void> | void;
-  exportPreferences(): Promise<void> | void;
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /**
@@ -66,7 +65,6 @@ function mount(root: Element): void {
     read: async () => JSON.parse(await bridge.readSettings()) as WorkspaceSettings,
     save: value => Promise.resolve(bridge.writeSettings(JSON.stringify(value))),
     setSkillEnabled: (id, enabled) => Promise.resolve(bridge.setSkillEnabled(id, enabled)),
-    exportPreferences: () => Promise.resolve(bridge.exportPreferences()),
     readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
     writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
     // The live model list is optional like History: an older host renders the bundled families and

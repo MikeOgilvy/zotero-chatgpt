@@ -172,7 +172,7 @@ it('carries the runtime live model list across the bridge so a Spark model becom
     await vi.waitFor(() => expect(element.querySelector('[data-zcr-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull());
     // Only the offerable family joins; the excluded GPT-5.5 the runtime also reported does not.
     expect(element.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
-    expect(element.querySelector('[data-zcr-pref="models-note"]')?.textContent).toMatch(/running runtime reported/u);
+    expect(element.querySelector('[data-zcr-pref="models-note"]')?.textContent).toMatch(/running runtime's report/u);
   } finally {
     delete bridge.readLiveModels;
     pane().unmount(element);
