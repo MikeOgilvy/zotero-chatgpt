@@ -25,9 +25,16 @@ export interface HistorySection {
   readonly element: HTMLElement;
   setLanguage(language: 'en' | 'zh'): void;
   setBusy(busy: boolean): void;
-  refresh(): Promise<void>;
+  /**
+   * Reads and renders the listing. Only `listed` means this call read the store and put a listing on
+   * screen; `superseded` means a newer read owns the pane now, and `failed` means the store could not
+   * be read at all.
+   */
+  refresh(): Promise<HistoryRefresh>;
   dispose(): void;
 }
+/** @see HistorySection.refresh */
+export type HistoryRefresh = 'listed' | 'superseded' | 'failed';
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const SEARCH_DEBOUNCE_MS = 200;
@@ -57,7 +64,17 @@ const UNFINISHED = 'work in progress';
 const REFUSED_UNFINISHED = 'A chat with an unfinished answer or native task was skipped: finish or cancel it before deleting.';
 const LIST_FAILED = 'The saved chat list could not be read. Nothing was changed.';
 const ACTION_FAILED = 'The change could not be confirmed. Reopen this section to see what is actually stored.';
-const EMPTY = 'No saved chats match this search.';
+/**
+ * Two distinct empty states, so the section never claims a search that was not made: a filtered
+ * listing (a search or paper filter is active) matched nothing, versus a store with no chats at all.
+ */
+const EMPTY_FILTERED = 'No saved chats match this search.';
+const EMPTY_STORE = 'No saved chats yet.';
+/**
+ * A deletion the pane submitted but could not subsequently confirm from the store. Distinct from
+ * `LIST_FAILED`, which says nothing was changed — that would be false after a successful delete.
+ */
+const DELETE_UNCONFIRMED = 'The chats were submitted for removal, but the saved chat list could not be re-read. Reopen this section to see what is stored.';
 
 // Every user-facing string in this section lives in `chat/ui-locale.ts`; nothing is duplicated here.
 
@@ -212,69 +229,116 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     return parts;
   }
 
+  /**
+   * The meta line as fresh nodes. The paper title is only repeated when it differs from the chat
+   * title; the timestamp, counts and status phrases are each their own text node so the localizer
+   * can translate them individually. Chat and paper titles are the owner's data, never copy.
+   */
+  function metaNodes(entry: HistoryEntry): Array<Text | HTMLElement> {
+    const nodes: Array<Text | HTMLElement> = [];
+    const showPaper = Boolean(entry.identity.title) && entry.identity.title !== entry.title;
+    metaOf(entry, showPaper).forEach(([text, content], index) => {
+      if (index) nodes.push(doc.createTextNode(' · '));
+      if (content) {
+        const node = el(doc, 'span', text);
+        node.dataset.zcrUi = 'false';
+        nodes.push(node);
+      } else nodes.push(doc.createTextNode(text));
+    });
+    return nodes;
+  }
+
+  /**
+   * One row per chat, reused across refreshes and updated in place. Rebuilding a row (or the whole
+   * list) on every read would detach the control the keyboard is on and throw away the browser's
+   * scroll anchoring, which is what made deleting a chat jump; only the text nodes change here.
+   */
+  function historyRow(entry: HistoryEntry): { readonly row: HTMLElement; update(entry: HistoryEntry): void } {
+    const row = el(doc, 'div');
+    row.className = 'zcr-preferences-history-row';
+    row.dataset.zcrHistoryId = entry.id;
+
+    const selectLabel = el(doc, 'label');
+    const toggle = el(doc, 'input');
+    toggle.type = 'checkbox';
+    toggle.dataset.zcrHistorySelect = entry.id;
+    listen(toggle, 'change', () => { if (toggle.checked) selected.add(entry.id); else selected.delete(entry.id); renderBulk(); });
+    // The chat title appears exactly once, on the row that selects it.
+    const title = el(doc, 'strong');
+    title.dataset.zcrUi = 'false';
+    selectLabel.append(toggle, title);
+
+    const meta = el(doc, 'p');
+    meta.className = 'zcr-preferences-muted';
+    const preview = el(doc, 'p');
+    preview.className = 'zcr-preferences-muted';
+    preview.dataset.zcrUi = 'false';
+
+    const remove = el(doc, 'button', 'Delete chat');
+    remove.type = 'button';
+    remove.dataset.zcrHistoryDelete = entry.id;
+    listen(remove, 'click', () => requestDelete([entry.id]));
+    const rowActions = el(doc, 'div');
+    rowActions.className = 'zcr-preferences-actions';
+    rowActions.append(remove);
+
+    row.append(selectLabel, meta, preview, rowActions);
+
+    const update = (next: HistoryEntry): void => {
+      toggle.checked = selected.has(next.id);
+      title.textContent = next.title || next.identity.title;
+      meta.replaceChildren(...metaNodes(next));
+      if (next.preview) { preview.textContent = next.preview; preview.hidden = false; } else { preview.textContent = ''; preview.hidden = true; }
+      if (next.unfinishedWork) { remove.dataset.zcrHistoryLocked = 'true'; remove.title = UNFINISHED; } else { delete remove.dataset.zcrHistoryLocked; remove.removeAttribute('title'); }
+    };
+    update(entry);
+    return { row, update };
+  }
+
+  const historyRows = new Map<string, { readonly row: HTMLElement; update(entry: HistoryEntry): void }>();
+
+  /**
+   * Puts the desired rows into the list, keeping every node that is already in the right position
+   * untouched: a `replaceChildren` (or any re-insertion) of a focused node moves focus to the body.
+   */
+  function reconcileRows(nodes: HTMLElement[]): void {
+    const desired = new Set(nodes);
+    for (const child of [...list.children] as HTMLElement[]) if (!desired.has(child)) child.remove();
+    let index = 0;
+    for (const node of nodes) {
+      if (list.children[index] === node) { index += 1; continue; }
+      list.insertBefore(node, list.children[index] ?? null);
+      index += 1;
+    }
+  }
+
+  /** The empty state distinguishes "nothing was searched" from "the active search matched nothing". */
+  function renderEmpty(): void {
+    if (!current) { empty.textContent = ''; empty.hidden = true; return; }
+    const filtered = query !== '' || paper !== null;
+    empty.textContent = filtered ? EMPTY_FILTERED : EMPTY_STORE;
+    empty.hidden = visibleEntries().length > 0;
+  }
+
   function renderRows(): void {
     const entries = visibleEntries();
     // The listing is already sorted newest first, so the slice is the newest chats, not an arbitrary set.
     const shown = entries.slice(0, ROW_LIMIT);
     const rendered = new Set(shown.map(entry => entry.id));
     for (const id of [...selected]) if (!rendered.has(id)) selected.delete(id);
-    const rows = shown.map(entry => {
-      const row = el(doc, 'div');
-      row.className = 'zcr-preferences-history-row';
-      row.dataset.zcrHistoryId = entry.id;
-
-      const selectLabel = el(doc, 'label');
-      const toggle = el(doc, 'input');
-      toggle.type = 'checkbox';
-      toggle.dataset.zcrHistorySelect = entry.id;
-      toggle.checked = selected.has(entry.id);
-      listen(toggle, 'change', () => { if (toggle.checked) selected.add(entry.id); else selected.delete(entry.id); renderBulk(); });
-      // The chat title appears exactly once, on the row that selects it.
-      const title = el(doc, 'strong', entry.title || entry.identity.title);
-      title.dataset.zcrUi = 'false';
-      selectLabel.append(toggle, title);
-
-      const meta = el(doc, 'p');
-      meta.className = 'zcr-preferences-muted';
-      // The paper title is only repeated when it differs from the chat title; the timestamp, counts
-      // and status phrases are each their own text node so the localizer can translate them.
-      const showPaper = Boolean(entry.identity.title) && entry.identity.title !== entry.title;
-      const parts = metaOf(entry, showPaper);
-      parts.forEach(([text, content], index) => {
-        if (index) meta.append(doc.createTextNode(' · '));
-        if (content) {
-          const node = el(doc, 'span', text);
-          node.dataset.zcrUi = 'false';
-          meta.append(node);
-        } else meta.append(doc.createTextNode(text));
-      });
-      row.append(selectLabel, meta);
-      if (entry.preview) {
-        const preview = el(doc, 'p');
-        preview.className = 'zcr-preferences-muted';
-        preview.dataset.zcrUi = 'false';
-        preview.textContent = entry.preview;
-        row.append(preview);
-      }
-
-      const remove = el(doc, 'button', 'Delete chat');
-      remove.type = 'button';
-      remove.dataset.zcrHistoryDelete = entry.id;
-      if (entry.unfinishedWork) { remove.dataset.zcrHistoryLocked = 'true'; remove.title = UNFINISHED; }
-      listen(remove, 'click', () => requestDelete([entry.id]));
-      const rowActions = el(doc, 'div');
-      rowActions.className = 'zcr-preferences-actions';
-      rowActions.append(remove);
-      row.append(rowActions);
-      return row;
+    for (const [id, cached] of historyRows) if (!rendered.has(id)) { cached.row.remove(); historyRows.delete(id); }
+    const nodes = shown.map(entry => {
+      let cached = historyRows.get(entry.id);
+      if (!cached) { cached = historyRow(entry); historyRows.set(entry.id, cached); }
+      cached.update(entry);
+      return cached.row;
     });
-    list.replaceChildren(...rows);
-    // Rows rebuilt above are detached; their listeners would otherwise pile up on every refresh.
+    reconcileRows(nodes);
+    // Rows removed above are detached; their listeners would otherwise pile up on every refresh.
     pruneListeners();
     truncated.textContent = entries.length > shown.length ? showing(shown.length, entries.length) : '';
     truncated.hidden = entries.length <= shown.length;
-    empty.textContent = EMPTY;
-    empty.hidden = entries.length > 0 || !current;
+    renderEmpty();
     renderBulk();
   }
 
@@ -319,7 +383,6 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     deleteSelected.textContent = 'Delete selected';
     cancel.textContent = 'Cancel';
     confirmDelete.textContent = 'Delete permanently';
-    empty.textContent = EMPTY;
     renderFilters();
     renderRows();
     renderConfirm();
@@ -351,9 +414,39 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     renderConfirm();
   }
 
+  /**
+   * Where the keyboard was when a delete started, so the focus the removed row took with it can be
+   * put back on the row that replaces it. Only an interaction that started inside the section moves
+   * focus; a mouse-only visit is never yanked into the list.
+   */
+  let focusAnchorIndex = -1;
+  let focusInsideSection = false;
+  function beginDeleteFocus(ids: string[]): void {
+    const active = doc.activeElement as HTMLElement | null;
+    focusInsideSection = Boolean(active) && box.contains(active);
+    const order = ([...list.children] as HTMLElement[]).map(node => node.dataset.zcrHistoryId ?? '');
+    const indices = ids.map(id => order.indexOf(id)).filter(index => index >= 0);
+    focusAnchorIndex = indices.length ? Math.min(...indices) : 0;
+  }
+  function settleFocus(): void {
+    const inside = focusInsideSection; const anchor = focusAnchorIndex;
+    focusInsideSection = false; focusAnchorIndex = -1;
+    if (!inside) return;
+    const nodes = [...list.querySelectorAll<HTMLElement>('[data-zcr-history-id]')];
+    if (!nodes.length) { search.focus(); return; }
+    // The row that took the deleted one's place first, then the rows above it; a locked row is skipped.
+    const start = Math.min(Math.max(anchor, 0), nodes.length - 1);
+    for (const node of [...nodes.slice(start), ...nodes.slice(0, start).reverse()]) {
+      const button = node.querySelector<HTMLButtonElement>('[data-zcr-history-delete]');
+      if (button && !button.disabled) { button.focus(); return; }
+    }
+    search.focus();
+  }
+
   async function apply(ids: string[]): Promise<void> {
     if (busy || disposed || !ids.length) return;
     if (ids.some(id => entryById(id)?.unfinishedWork)) { showFailure(REFUSED_UNFINISHED); return; }
+    beginDeleteFocus(ids);
     busy = true; clearMessages(); applyBusy();
     let result: { text: string; failure: boolean } | null = null;
     try {
@@ -375,24 +468,41 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     }
     if (disposed || !result) return;
     // Re-read first so the reported outcome cannot be overwritten by the refresh's own status reset.
-    await refresh();
+    const listed = await refresh();
     if (disposed) return;
+    settleFocus();
+    if (listed === 'superseded') {
+      // A newer read owns the pane now — it is about to render, or already has. The store's own
+      // report is still the authoritative statement of what this delete did, so it is what stands;
+      // claiming the list "could not be re-read" here would be false.
+      if (result.failure) showFailure(result.text); else showStatus(result.text);
+      return;
+    }
+    if (listed === 'failed') {
+      // The store deleted nothing we could then show: never print a success the pane cannot back up,
+      // and never reuse the "nothing was changed" copy after a change did go through.
+      showFailure(result.failure ? result.text : DELETE_UNCONFIRMED);
+      return;
+    }
     if (result.failure) showFailure(result.text); else showStatus(result.text);
   }
 
-  async function refresh(): Promise<void> {
+  /** @see HistorySection.refresh — returns how the read ended, never a bare success. */
+  async function refresh(): Promise<HistoryRefresh> {
     const token = ++seq;
     try {
       const raw = await host.readHistory(query);
-      if (disposed || token !== seq) return;
+      if (disposed || token !== seq) return 'superseded';
       if (!isHistoryListing(raw)) {
         current = null;
         list.replaceChildren();
+        historyRows.clear();
+        pruneListeners();
         counts.textContent = ''; counts.hidden = true;
-        empty.hidden = true;
+        empty.textContent = ''; empty.hidden = true;
         renderBulk();
         showFailure(LIST_FAILED);
-        return;
+        return 'failed';
       }
       current = raw;
       const known = new Set(current.entries.map(entry => entry.id));
@@ -403,14 +513,18 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       renderRows();
       renderBulk();
       renderConfirm();
+      return 'listed';
     } catch (caught) {
-      if (disposed || token !== seq) return;
+      if (disposed || token !== seq) return 'superseded';
       current = null;
       list.replaceChildren();
+      historyRows.clear();
+      pruneListeners();
       counts.textContent = ''; counts.hidden = true;
-      empty.hidden = true;
+      empty.textContent = ''; empty.hidden = true;
       renderBulk();
       showFailure(reason(caught));
+      return 'failed';
     }
   }
 
@@ -447,6 +561,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       timer = null;
       for (const { element, type, handler } of listeners) element.removeEventListener(type, handler);
       listeners.length = 0;
+      historyRows.clear();
       box.remove();
     },
   };
