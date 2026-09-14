@@ -5,6 +5,7 @@ import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
 import type { LibraryReferencePort, ReaderReference } from '../../../contracts/src/workspace.ts';
 import { SKILL_BYTES } from '../../../core/src/workspace/skills.ts';
 import { paperIdentityOf, type PaperMetadata } from './metadata.ts';
+import { currentSelection } from './current-selection.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from './document.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
 import { imageFromBytes } from '../chat/pick-images.ts';
@@ -85,6 +86,14 @@ const MAX_RESULTS = 50;
 const MAX_RASTER_PIXELS = 8_000_000;
 const MAX_EXPORT_BYTES = 1024 * 1024;
 function fail(message: string, code: ConstructorParameters<typeof ReaderError>[0] = 'INVALID_REQUEST'): never { throw new ReaderError(code, message); }
+/**
+ * The one rectangle the raster path takes. A selection is often several per-line rects, so the union
+ * is used instead of one line or the first rect: the capture must show the whole selected area.
+ */
+function boundingRect(rects: Rect[]): Rect {
+  if (!rects.length) fail('Select a PDF region before capturing it.');
+  return [Math.min(...rects.map(rect => rect[0])), Math.min(...rects.map(rect => rect[1])), Math.max(...rects.map(rect => rect[2])), Math.max(...rects.map(rect => rect[3]))];
+}
 function check(signal: AbortSignal): void { if (signal.aborted) fail('Reference preparation cancelled.'); }
 async function waitRead<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   check(signal); let abort = () => {};
@@ -384,13 +393,23 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       const result = await picker.show(); if (result !== picker.returnOK && result !== picker.returnReplace) return;
       if (!picker.file) fail('No export file was selected.'); await io().write(picker.file, bytes);
     }, 'The selected export file could not be written.'),
-    captureRegion: citation => {
-      if (!citation) return Promise.reject(new ReaderError('INVALID_REQUEST', 'Select a PDF region before capturing it.'));
+    // The region comes from an explicit frozen selection (a citation the owner pushed into the draft)
+    // or, failing that, from the selection the popup last recorded for this paper. Anything is
+    // rendered through the same source-audited path as a whole page, so a capture is always an image
+    // of the PDF that is open right now: the revision is re-read before and after the raster.
+    captureRegion: (paper, citation) => {
+      const scope = scopeOf(paper);
+      if (!citation) {
+        const selected = currentSelection(scope);
+        if (!selected) return Promise.reject(new ReaderError('INVALID_REQUEST', 'Select a PDF region before capturing it.'));
+        return capture(scope, selected.pageIndex, boundingRect(selected.rects));
+      }
       const frozen = validateCitation(citation);
-      if (frozen.positions.length !== 1) return Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Select a region on one PDF page.'));
+      // A reference to another article can sit in the same draft; capturing it would silently render a
+      // PDF the owner is not looking at, so the citation must belong to the open paper.
+      if (paperId(frozen.paper) !== paperId(scope)) return Promise.reject(new ReaderError('INVALID_REQUEST', 'That selection belongs to another PDF. Select a region in this PDF first.'));
       const position = frozen.positions[0]!;
-      const rect: Rect = [Math.min(...position.rects.map(rect => rect[0])), Math.min(...position.rects.map(rect => rect[1])), Math.max(...position.rects.map(rect => rect[2])), Math.max(...position.rects.map(rect => rect[3]))];
-      return capture(frozen.paper, position.pageIndex, rect, frozen.documentRevision ?? frozen.sourceRevision);
+      return capture(scope, position.pageIndex, boundingRect(position.rects), frozen.documentRevision ?? frozen.sourceRevision);
     },
     capturePage: (paper, pageIndex, signal) => capture(paper, pageIndex, undefined, undefined, signal),
     exportImage: original => boundary(async () => {

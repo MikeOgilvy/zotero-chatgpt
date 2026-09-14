@@ -2292,6 +2292,12 @@ it('keeps the plus and the capture-region shortcut at the composer start and rem
   expect(region.getAttribute('aria-label')).toBe('Capture selected region');
   expect(region.getAttribute('title')).toBe('Capture selected region');
   expect(region.hidden).toBe(false);
+  // The glyph is a selection marquee with a filled centre mark. Corner brackets alone rendered as a
+  // bare empty square at the toolbar icon size, which is how the owner read the broken control.
+  const glyph = region.querySelector('svg')!;
+  expect(glyph.querySelectorAll('[data-zcr-icon-mark]')).toHaveLength(1);
+  expect(glyph.querySelector('[data-zcr-icon-mark]')!.getAttribute('fill')).toBe('currentColor');
+  expect(plus.querySelectorAll('[data-zcr-icon-mark]')).toHaveLength(0);
   // The old Attach details and the literal '@' trigger are gone, not merely hidden.
   expect(root.querySelector('.zcr-attachment-menu, .zcr-input-actions')).toBeNull();
   expect([...root.querySelectorAll('button')].filter(node => node.textContent?.trim() === '@')).toHaveLength(0);
@@ -2306,6 +2312,9 @@ it('captures the selected region from the composer shortcut and reports its refu
   const capture = vi.spyOn(presenter, 'captureRegion').mockResolvedValue(undefined);
   region.click();
   await vi.waitFor(() => expect(capture).toHaveBeenCalledTimes(1));
+  // The button passes nothing: the host captures the region the owner last selected, not whatever
+  // citation happens to be in the draft.
+  expect(capture).toHaveBeenCalledWith();
   const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
   expect(slot.hidden).toBe(true);
   capture.mockRejectedValueOnce(new Error('/Users/somebody/private/state.json missing'));

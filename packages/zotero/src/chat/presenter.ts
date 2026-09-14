@@ -467,9 +467,18 @@ export class ConversationPresenter {
     if (this.services.readClipboardImage) return Promise.resolve(this.services.readClipboardImage());
     return imagesFromGeckoClipboard(pluginClipboardAccess(), () => this.services.uuid());
   }
-  async captureRegion(citation = this.state.draft.citations.at(-1)): Promise<void> {
+  /**
+   * Captures a PDF region as an image attachment. The composer's capture button passes nothing: the
+   * host then uses the region the owner last selected in this paper (`reader/current-selection.ts`).
+   * The last draft citation is only a fallback for the "Ask in sidechat" flow, and only when it is a
+   * selection of this same paper — a reference to another article must never be rasterized instead of
+   * the PDF on screen.
+   */
+  async captureRegion(citation?: Citation): Promise<void> {
     if (!this.services.library?.captureRegion) throw new ReaderError('UNSUPPORTED_INTERACTION', 'PDF region capture is unavailable.');
-    const key = this.draftKey(); const image = await this.services.library.captureRegion(citation ? clone(citation) : undefined);
+    const fallback = this.state.draft.citations.filter(candidate => paperId(candidate.paper) === paperId(this.paper)).at(-1);
+    const target = citation ?? fallback;
+    const key = this.draftKey(); const image = await this.services.library.captureRegion(clone(this.paper), target ? clone(target) : undefined);
     if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while capturing the PDF. Capture it again.');
     if (image) this.addImage(image);
   }

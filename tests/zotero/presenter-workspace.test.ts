@@ -7,7 +7,7 @@ import type { ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, Workspa
 import type { AgentTaskRecord, AgentTasks } from '../../packages/contracts/src/tasks.ts';
 import type { ReadingJob } from '../../packages/core/src/context/coordinator.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
-import { paperA, paperB, citationA, imageA, settings } from '../contracts/factories.ts';
+import { paperA, paperB, citationA, citationB, imageA, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
@@ -214,6 +214,28 @@ it('reorders images without mutating the previously captured draft', async () =>
   f.presenter.moveImage(second.id, -1);
   expect(f.presenter.snapshot().draft.images.map(image => image.id)).toEqual([second.id, imageA.id]);
   expect(before.images.map(image => image.id)).toEqual([imageA.id, second.id]); f.presenter.dispose();
+});
+
+it('captures the region of the open paper and never a draft reference to another PDF', async () => {
+  const f = fixture(); await f.presenter.activate();
+  const captureRegion = vi.fn(() => Promise.resolve(copy(imageA)));
+  f.services.library!.captureRegion = captureRegion;
+  // The composer's capture button passes no citation: the host resolves the region the owner selected.
+  await f.presenter.captureRegion();
+  expect(captureRegion).toHaveBeenCalledWith(paperA, undefined);
+  expect(f.presenter.snapshot().draft.images.map(image => image.id)).toEqual([imageA.id]);
+  // A citation for another article sitting in the draft must not become the captured region, because
+  // that would rasterize a PDF the owner is not looking at.
+  f.presenter.addCitation(copy(citationB));
+  await f.presenter.captureRegion();
+  expect(captureRegion).toHaveBeenLastCalledWith(paperA, undefined);
+  // A selection of this same paper is a usable explicit region, and the caller can still name one.
+  captureRegion.mockClear(); f.presenter.addCitation(copy(citationA));
+  await f.presenter.captureRegion();
+  expect(captureRegion).toHaveBeenLastCalledWith(paperA, citationA);
+  captureRegion.mockClear(); await f.presenter.captureRegion(copy(citationB));
+  expect(captureRegion).toHaveBeenLastCalledWith(paperA, citationB);
+  f.presenter.dispose();
 });
 
 function readingPort(conversationId: string) {

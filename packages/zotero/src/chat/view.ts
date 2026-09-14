@@ -136,9 +136,11 @@ const ICONS = {
   send: 'M8 13V3M4.5 6.5 8 3l3.5 3.5',
   stop: 'M5 5h6v6H5z',
   plus: 'M8 3v10M3 8h10',
-  // A dashed marquee: the four corners with their sides, so it reads as "select an area" next to the
-  // plus rather than as another upload or image button.
-  region: 'M2.5 5.5V2.5h3M13.5 5.5V2.5h-3M2.5 10.5v3h3M13.5 10.5v3h-3M6.5 2.5h3M6.5 13.5h3M2.5 6.5v3M13.5 6.5v3',
+  // Four corner brackets: "select an area" next to the plus rather than another upload or image
+  // button. On its own a closed marquee rendered as a bare empty square at 20px — which is exactly how
+  // the owner read the control — so the corners are open and a filled centre mark is drawn on top
+  // (ICON_MARKS below).
+  region: 'M2.5 6V3.5A1 1 0 0 1 3.5 2.5H6M10 2.5h2.5A1 1 0 0 1 13.5 3.5V6M13.5 10v2.5A1 1 0 0 1 12.5 13.5H10M6 13.5H3.5A1 1 0 0 1 2.5 12.5V10',
   more: 'M3.25 8a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Zm3.9 0a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Zm3.9 0a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Z',
   clock: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM8 5.25V8.2l2.15 1.25',
   copy: 'M6 6h7v7H6zM3 3h7v2',
@@ -148,6 +150,11 @@ const ICONS = {
   historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
   historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
 } as const;
+/**
+ * A second, filled mark drawn inside the same 16px box. The region glyph's corner brackets read as an
+ * empty frame on their own, so the centre square is what makes it read as "capture this area".
+ */
+const ICON_MARKS: Partial<Record<keyof typeof ICONS, string>> = { region: 'M6.3 6.3h3.4v3.4H6.3z' };
 const STATUS_LINE = {
   idle: 'Open the Codex sidebar to connect.',
   starting: 'Starting Codex…',
@@ -381,6 +388,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
     svg.append(path);
+    const mark = ICON_MARKS[name];
+    if (mark) {
+      const inner = doc.createElementNS(SVG, 'path');
+      inner.setAttribute('d', mark);
+      inner.setAttribute('fill', 'currentColor'); inner.setAttribute('stroke', 'none');
+      inner.dataset.zcrIconMark = '';
+      svg.append(inner);
+    }
     return svg;
   };
   const button = (label: string, action: string, onClick: () => void, glyph?: keyof typeof ICONS, className = 'zcr-icon-button') => {

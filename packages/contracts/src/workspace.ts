@@ -152,7 +152,13 @@ export interface LibraryReferencePort {
   pickImages?(): Promise<ImageAttachment[]>;
   pickSkill?(): Promise<string | null>;
   exportText?(name: string, text: string): Promise<void>;
-  captureRegion?(citation?: Citation): Promise<ImageAttachment | null>;
+  /**
+   * Rasterizes a PDF region as an image attachment. `citation` is a frozen selection of the same
+   * paper; without it the host uses the region the owner last selected in that paper. The paper is
+   * always explicit so the captured image can never come from a reference that merely happens to be
+   * open in the draft.
+   */
+  captureRegion?(paper: PaperScope, citation?: Citation): Promise<ImageAttachment | null>;
   capturePage?(paper: PaperScope, pageIndex: number): Promise<ImageAttachment | null>;
   exportImage?(image: ImageAttachment): Promise<void>;
 }

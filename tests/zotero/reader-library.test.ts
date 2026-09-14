@@ -2,7 +2,8 @@ import { expect, it, vi } from 'vitest';
 import { Window as HappyWindow } from 'happy-dom';
 import { createLibraryReferencePort, type LibraryDocumentSource, type LibraryFilePicker, type LibraryItem, type LibraryReader, type LibraryReferenceOptions, type NativeLibraryHost } from '../../packages/zotero/src/reader/library.ts';
 import { ReaderDocumentCache, type DocumentSource } from '../../packages/zotero/src/reader/document.ts';
-import { paperA, citationA, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
+import { paperA, citationA, citationB, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
+import { forgetSelection, rememberSelection } from '../../packages/zotero/src/reader/current-selection.ts';
 import type { ReaderReference } from '../../packages/contracts/src/workspace.ts';
 
 const uuid = '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e';
@@ -177,12 +178,36 @@ it('captures frozen PDF coordinates and whole pages with real paper provenance, 
   const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
   const f = setup({ rasterize });
   const citation = { ...citationA, positions: [{ ...citationA.positions[0]!, pageIndex: 0 }] };
-  const image = await f.port.captureRegion!(citation);
+  const image = await f.port.captureRegion!(paperA, citation);
   expect(rasterize).toHaveBeenCalledWith(expect.objectContaining({ paper: paperA, pageIndex: 0, rect: citation.positions[0]!.rects[0], scale: 2 }));
   expect(image?.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 0, revision: f.pdf.revision });
   const page = await f.port.capturePage(paperA, 1); expect(page.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 1, revision: f.pdf.revision });
   await f.port.exportImage(page); expect(f.io.write).toHaveBeenCalledWith('/synthetic/SKILL.md', png);
-  await expect(f.port.captureRegion!()).rejects.toThrow(/select|region/iu);
+  // No citation and nothing selected: the owner is told what to do instead of getting an empty image.
+  forgetSelection(paperA);
+  await expect(f.port.captureRegion!(paperA)).rejects.toThrow(/select|region/iu);
+});
+
+it('captures the region the owner last selected without requiring a citation in the draft', async () => {
+  const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
+  const f = setup({ rasterize });
+  forgetSelection(paperA);
+  // The popup records what was selected; the composer button then captures it. Two per-line rects are
+  // unioned, so a wrapped selection is captured whole rather than as one line.
+  rememberSelection(paperA, { pageIndex: 0, rects: [[10, 20, 50, 40], [10, 44, 90, 64]] });
+  const image = await f.port.captureRegion!(paperA);
+  expect(rasterize).toHaveBeenCalledWith(expect.objectContaining({ paper: paperA, pageIndex: 0, rect: [10, 20, 90, 64] }));
+  expect(image?.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 0, revision: f.pdf.revision });
+  // A region recorded for another PDF is never used for this one.
+  forgetSelection(paperA);
+  await expect(f.port.captureRegion!(paperA)).rejects.toThrow(/select|region/iu);
+});
+
+it('refuses to rasterize a citation that belongs to a different PDF than the open paper', async () => {
+  const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
+  const f = setup({ rasterize });
+  await expect(f.port.captureRegion!(paperA, citationB)).rejects.toThrow(/another PDF/iu);
+  expect(rasterize).not.toHaveBeenCalled();
 });
 
 it('handles native tab lookup throwing for a not-yet-created tab', async () => {
@@ -231,7 +256,7 @@ it('uses native PDF coordinates at fixed resolution without changing reader zoom
   const nativeWindow = { document, PDFViewerApplication: { pdfDocument: pdf, pdfViewer } };
   f.host.Reader._readers.push({ itemID: 2, _internalReader: { _primaryView: { _iframeWindow: nativeWindow } } });
   const citation = { ...citationA, positions: [{ pageIndex: 0, rects: [[10, 20, 50, 40] as [number, number, number, number]] }] };
-  const result = await f.port.captureRegion!(citation);
+  const result = await f.port.captureRegion!(paperA, citation);
   expect(result?.mime).toBe('image/png'); expect(dimensions).toEqual([[80, 40]]);
   expect(getViewport).toHaveBeenLastCalledWith({ scale: 2, offsetX: -20, offsetY: -40 });
   expect(pdfViewer.currentScale).toBe(1.5); expect(pdfViewer.currentScaleValue).toBe('page-width');
