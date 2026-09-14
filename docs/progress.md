@@ -11,6 +11,7 @@
 - **门禁（2026-09-14 同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` PASS（**计数与条件见下『测试计数（唯一权威）』**）；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（**92,661,386 bytes**，SHA-256 `061f46801f494b900d2fc27445f05ad1e57052a7f3f3962a0f72a014d652ea6e`）；`npm run verify:artifacts` **79 files PASS**，与 `dist/SHA256SUMS` 一致。均为代码 + 单元 + 产物证据。
 - **产物诚实边界**：见下 [产物边界（重要）](#产物边界重要)。
 - **本轮删除（忽略目录，不产生提交）**：`dist/` 旧包 `0.3.0a1`（102,969,823 B）/ `0.4.0a1`（92,643,635 B）/ `0.4.0a2`（92,643,635 B）/ `0.4.0a3`（92,668,286 B）、`build/`（215 MB）、`.zcr-dev/` 旧日志 37 份（11 MB）与旧报告/ `build-info-*.json` 6 份。保留 `dist/0.4.0a4` + `SHA256SUMS`，以及 `.zcr-dev/{profile,data,context,live,verification,pin-bump,probes,fixtures,s6-virgin,s6-upgrade,runtime-cache}` 与新增的 `artifact-backup/`。删除前已用 `ps` 确认无 Zotero 进程使用任何 `.zcr-dev/` profile，且逐文件 `rg` 确认无仓库引用。
+- **0.3.0a1 XPI 字节已删除**：`dist/zotero-codex-reader-0.3.0a1-dev.xpi`（102,969,823 B）的字节已不在磁盘上，只能从 tag `v0.3.0a1`（提交 `2b5b310`）重新打包复现。因此历史上**用该真实 a1 包跑过的 s6 升级/回退宿主流程无法逐字重跑**；`tests/build/prepare-s6-upgrade.test.ts` 已改为使用明确合成的本地缺失路径，不再依赖该已删除产物（URL 拒绝与参数配对校验先于任何文件访问；文件存在性校验仍由“两版本不同”用例用真实 fixture XPI 覆盖）。
 - **安装状态**：owner 正常 profile 当前装的是宿主已验证的 a4（`5a6bb161…`，构建于 `96f8c2c`）供验收。
 
 ### 产物边界（重要）

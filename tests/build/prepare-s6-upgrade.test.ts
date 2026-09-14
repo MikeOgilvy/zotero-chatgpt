@@ -10,6 +10,18 @@ const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const prepare = path.join(repositoryRoot, 'scripts/prepare-host-test.mjs');
 const temporaryDirectories: string[] = [];
 
+// A deliberately synthetic, never-created local path. The two cases below fail during argument
+// validation *before* any XPI file is opened:
+//   - the GitHub-URL case throws inside `requireLocalXpi` on the *upgrade* argument, and
+//   - the missing-pairing case throws on the `--upgrade-xpi`/`--rollback-xpi` check.
+// So the counterpart path is never stat'ed. It used to point at the real
+// `dist/zotero-codex-reader-0.3.0a1-dev.xpi`, which no longer exists (the a1 XPI bytes were deleted
+// and are only regenerable from the `v0.3.0a1` tag); the tests passed solely because the URL/pairing
+// rejection happened first. Using a clearly-synthetic path makes that intent explicit and removes
+// the hidden dependency on a deleted artifact. File-existence validation is still covered by the
+// different-versions case below, which builds two real fixture XPIs.
+const SYNTHETIC_MISSING_LOCAL_XPI = '/synthetic/zcr-s6-nonexistent-0.3.0a1-dev.xpi';
+
 function failureMessage(error: unknown): string {
   if (error instanceof Error && 'stderr' in error && typeof error.stderr === 'string' && error.stderr.trim()) return error.stderr;
   if (error instanceof Error && 'stdout' in error && typeof error.stdout === 'string' && error.stdout.trim()) return error.stdout;
@@ -43,7 +55,7 @@ describe('S6 two-version host prepare', () => {
       '--upgrade-xpi',
       'https://github.com/example/zotero-codex-reader/releases/download/v0.1.0/plugin.xpi',
       '--rollback-xpi',
-      path.join(repositoryRoot, 'dist/zotero-codex-reader-0.3.0a1-dev.xpi'),
+      SYNTHETIC_MISSING_LOCAL_XPI,
     ], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /GitHub Release download is not authorized/i.test(failureMessage(error)));
   });
 
@@ -52,7 +64,7 @@ describe('S6 two-version host prepare', () => {
       prepare,
       '--s6',
       '--upgrade-xpi',
-      path.join(repositoryRoot, 'dist/zotero-codex-reader-0.3.0a1-dev.xpi'),
+      SYNTHETIC_MISSING_LOCAL_XPI,
     ], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /both --upgrade-xpi and --rollback-xpi/i.test(failureMessage(error)));
   });
 
