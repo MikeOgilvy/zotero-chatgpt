@@ -303,6 +303,47 @@ it('hides the paper card for a bare PDF that has nothing beyond a title', async 
   expect(card.querySelectorAll('[data-zcr-bibliography-key]')).toHaveLength(0);
 });
 
+it('shows the local read of this PDF so a successful auto-read is not invisible', async () => {
+  const { root } = await mountReadyChat({
+    document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  await vi.waitFor(() => expect(status.hidden).toBe(false));
+  expect(status.textContent).toBe('Read all 2 pages locally');
+});
+
+it('reports reading in progress instead of leaving the owner with no evidence at all', async () => {
+  const { root } = await mountReadyChat({
+    document: { prepare: () => new Promise(() => {}), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  await vi.waitFor(() => expect(status.hidden).toBe(false));
+  expect(status.textContent).toBe('Reading this PDF…');
+});
+
+it('claims only the pages that really carried text when part of the PDF is scanned', async () => {
+  const partial = { ...documentA, pages: [
+    { ...documentA.pages[0]! },
+    { pageIndex: 1, pageLabel: 'ii', text: '', status: 'empty' as const },
+  ] };
+  const { root } = await mountReadyChat({
+    document: { prepare: () => Promise.resolve(partial), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  await vi.waitFor(() => expect(status.hidden).toBe(false));
+  expect(status.textContent).toBe('Read 1 of 2 pages locally');
+});
+
+it('shows no reading status at all when the owner has switched the local read off', async () => {
+  const { root } = await mountReadyChat({
+    document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  expect(status.hidden).toBe(true);
+  expect(status.textContent).toBe('');
+});
+
 it('sends every field the reader read in the paper identity instead of a four-field subset', async () => {
   const sent: SendInput[] = [];
   const identity: PaperIdentity = {

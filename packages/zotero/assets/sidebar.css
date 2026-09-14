@@ -388,6 +388,15 @@ body.zcr-dock-open #split-view .primary-view,
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* Local reading status. Quiet by default: it states a fact about this PDF, not an alert. */
+.zcr-document-status {
+  flex: 0 0 auto;
+  margin: 0 10px 6px;
+  color: var(--fill-secondary, GrayText);
+  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  line-height: 1.4;
+}
+.zcr-document-status[hidden] { display: none; }
 .zcr-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: calc(13px * var(--zcr-chat-text-scale, 1)); }
 .zcr-message-text.zcr-rendered { white-space: normal; }
 .zcr-message-text.zcr-rendered p { margin: 0 0 .55em; }

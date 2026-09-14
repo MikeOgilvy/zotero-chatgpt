@@ -97,6 +97,15 @@ const COPY = {
   bibliographyTitle: 'Title',
   bibliographyAuthors: 'Authors',
   bibliographyShortened: 'Shortened',
+  // Local reading status. The sidebar used to render preparation state in a panel that was removed,
+  // which made a successful whole-PDF read invisible: nothing on screen changed, so an owner could
+  // not tell that their article had been read. These lines report the read that actually happened,
+  // including the honest case where only some pages carried text.
+  documentReading: 'Reading this PDF…',
+  documentReadingPages: (done: number, total: number) => `Reading this PDF… ${done} of ${total} pages`,
+  documentReadAll: (total: number) => `Read all ${total} pages locally`,
+  documentReadSome: (read: number, total: number) => `Read ${read} of ${total} pages locally`,
+  documentReadNone: 'No text could be read from this PDF locally',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
   imageDropFailed: 'The dropped image could not be attached.',
@@ -459,6 +468,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const bibliography = el('section', 'zcr-bibliography');
   bibliography.dataset.zcrBibliography = '';
   bibliography.hidden = true;
+  // The local read of this PDF, next to the paper card. It is the only on-screen evidence that the
+  // article was read at all, so it reports counts from the prepared document rather than a spinner.
+  const documentStatus = el('p', 'zcr-document-status');
+  documentStatus.dataset.zcrDocumentStatus = '';
+  documentStatus.hidden = true;
   // The first outbound scope notice stays even though the PDF coverage panel is gone: it is the only
   // way to acknowledge the disclosure, and without it an explain that needs consent can never send.
   const scopeNotice = el('div', 'zcr-context-disclosure');
@@ -609,7 +623,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, renameForm, contextSource, bibliography, scopeNotice, main); root.append(chat);
+  chat.append(chrome, renameForm, contextSource, bibliography, documentStatus, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -1002,6 +1016,27 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     for (const field of known) list.append(row(BIBLIOGRAPHY_LABELS[field.key], field.value ?? '', field.key, field.truncated === true));
     bibliography.replaceChildren(el('p', 'zcr-bibliography-heading', COPY.bibliographyHeading), list);
   };
+  /**
+   * The local reading status. Counts come from the prepared pages, so "read all N pages" is only said
+   * when every page really carried text: a scanned page reported as empty still counts against the
+   * total. A failed read stays silent here because the composer already announces the coded error,
+   * and a read the owner switched off is not reported as a reading at all.
+   */
+  let documentStatusKey: string | null = null;
+  const renderDocumentStatus = (state: PresenterState) => {
+    const { enabled, phase, prepared, progress } = state.document;
+    const pages = prepared?.pages ?? [];
+    const read = pages.filter(page => page.status === 'text' && page.text.length > 0).length;
+    const text = !enabled || phase === 'error' ? ''
+      : phase === 'preparing' ? (progress.total > 0 ? COPY.documentReadingPages(progress.done, progress.total) : COPY.documentReading)
+      : phase === 'ready' && prepared ? (read === 0 ? COPY.documentReadNone : read >= prepared.totalPages ? COPY.documentReadAll(prepared.totalPages) : COPY.documentReadSome(read, prepared.totalPages))
+      : '';
+    const key = `${phase}:${text}`;
+    if (key === documentStatusKey) return;
+    documentStatusKey = key;
+    documentStatus.hidden = text === '';
+    if (text) documentStatus.textContent = text; else documentStatus.replaceChildren();
+  };
   const updateContext = (state: PresenterState) => {
     const title = state.conversation ? conversationLabel(state.conversation, state.conversations) : state.paperTitle || COPY.untitled;
     if (currentTitle.textContent !== title) currentTitle.textContent = title;
@@ -1031,6 +1066,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     contextSource.hidden = !citation;
     renderBibliography(state);
+    renderDocumentStatus(state);
   };
   const historyRow = (source: HistoryRowSource) => {
     const row = el('div', 'zcr-history-row');

@@ -137,6 +137,8 @@ const TEXT = [
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
   // Paper card: labels only. The title, authors and every field value stay verbatim data.
   '.zcr-bibliography-heading', '.zcr-bibliography-label', '.zcr-bibliography-shortened',
+  // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
+  '.zcr-document-status',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
   '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
   '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',
@@ -179,6 +181,17 @@ function progress(text: string): string {
   if (match) return `审核 ${match[1]} 条标注建议`;
   match = /^PDF (\S+) · candidate pages (.+)$/u.exec(text);
   if (match) return `PDF ${match[1]} · 候选页 ${match[2] === 'none' ? '无' : match[2]}`;
+  // Local reading status. Every count is data and is re-emitted verbatim.
+  match = /^Reading this PDF…$/u.exec(text);
+  if (match) return '正在读取此 PDF……';
+  match = /^Reading this PDF… (\d+) of (\d+) pages$/u.exec(text);
+  if (match) return `正在读取此 PDF……第 ${match[1]}/${match[2]} 页`;
+  match = /^Read all (\d+) pages locally$/u.exec(text);
+  if (match) return `已在本地读取全部 ${match[1]} 页`;
+  match = /^Read (\d+) of (\d+) pages locally$/u.exec(text);
+  if (match) return `已在本地读取 ${match[2]} 页中的 ${match[1]} 页`;
+  match = /^No text could be read from this PDF locally$/u.exec(text);
+  if (match) return '无法在本地从此 PDF 提取到文本';
   match = /^Target collection: (.*)$/u.exec(text);
   if (match) return `目标分类：${match[1]}`;
   match = /^Source: (\S+)\nPermissions: (.*)\nUnsupported dependencies: (.*)$/u.exec(text);

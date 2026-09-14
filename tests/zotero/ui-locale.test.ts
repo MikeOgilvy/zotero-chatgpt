@@ -216,6 +216,23 @@ it('translates the paper card labels while every bibliographic value stays verba
   expect(abstract.textContent).toBe('A long abstractShortened'); locale.dispose();
 });
 
+it('translates the local reading status and re-emits every page count verbatim', () => {
+  const { root, add } = setup();
+  const all = add('p', 'zcr-document-status', 'Read all 12 pages locally');
+  const some = add('p', 'zcr-document-status', 'Read 8 of 12 pages locally');
+  const waiting = add('p', 'zcr-document-status', 'Reading this PDF… 3 of 12 pages');
+  const alone = add('p', 'zcr-document-status', 'Reading this PDF…');
+  const none = add('p', 'zcr-document-status', 'No text could be read from this PDF locally');
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(all.textContent).toBe('已在本地读取全部 12 页');
+  expect(some.textContent).toBe('已在本地读取 12 页中的 8 页');
+  expect(waiting.textContent).toBe('正在读取此 PDF……第 3/12 页');
+  expect(alone.textContent).toBe('正在读取此 PDF……');
+  expect(none.textContent).toBe('无法在本地从此 PDF 提取到文本');
+  locale.update('en');
+  expect(some.textContent).toBe('Read 8 of 12 pages locally'); locale.dispose();
+});
+
 it('stays inside its pane and stops observing after disposal', async () => {
   const { document, root, add } = setup(); const outside = add('button', 'zcr-button', 'Send', document.body); const inside = add('button', 'zcr-button', 'Send');
   const locale = mountUILocale(root); locale.update('zh'); expect(inside.textContent).toBe('发送'); expect(outside.textContent).toBe('Send');
