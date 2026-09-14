@@ -210,7 +210,12 @@ it('opens the reference chooser from the composer plus shortcut without a visibl
   const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
   expect(menu.hidden).toBe(false);
   expect(menu.textContent).toContain('References');
-  expect(input.ownerDocument.activeElement).toBe(input);
+  // The chooser carries its own search field, so opening it from the popover puts the caret where
+  // the query is typed instead of showing an empty query as though the library had no matches.
+  const search = pane.querySelector<HTMLInputElement>('.zcr-workspace-search')!;
+  expect(search.hidden).toBe(false);
+  expect(search.type).toBe('search');
+  expect(input.ownerDocument.activeElement).toBe(search);
   // The shortcut never rewrites the draft: it only chooses the search scope.
   expect(input.value).toBe('');
 });
@@ -221,11 +226,11 @@ it('settles the chooser on empty results, an honest failure or a late abandoned 
   const { pane, view, input, key } = setup({ searchReferences: search });
   const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
 
-  // No matches is an honest empty state, never a permanent 'Searching…'.
+  // An empty query asks for a query instead of claiming the library holds no matches.
   view.openCommands();
   expect(menu.textContent).toContain('Searching…');
   searches[0]!.resolve([]);
-  await vi.waitFor(() => expect(menu.textContent).toContain('No matches'));
+  await vi.waitFor(() => expect(menu.textContent).toContain('Type a title, author or year to search.'));
   expect(menu.textContent).not.toContain('Searching…');
 
   // A refused host search is reported verbatim instead of leaving the spinner running.
@@ -262,4 +267,46 @@ it('keeps the reopened chooser on its own request when an abandoned search settl
   expect(menu.textContent).not.toContain('Abandoned source');
   searches[1]!([reference]);
   await vi.waitFor(() => expect(menu.textContent).toContain('Shared title'));
+});
+
+it('searches from the chooser field itself and never lets it fight the composer', async () => {
+  const { document, pane, input, actions, type, view } = setup();
+  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const search = pane.querySelector<HTMLInputElement>('.zcr-workspace-search')!;
+  const searchType = (value: string) => { search.value = value; search.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
+  const searchKey = (value: string) => search.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+
+  // The field is the chooser's own query, and the caret stays in it for as long as it is used.
+  view.openCommands();
+  await vi.waitFor(() => expect(actions.searchReferences).toHaveBeenCalledWith('', 'all', expect.any(AbortSignal)));
+  expect(document.activeElement).toBe(search);
+  searchType('Shared');
+  await vi.waitFor(() => expect(actions.searchReferences).toHaveBeenLastCalledWith('Shared', 'all', expect.any(AbortSignal)));
+  await vi.waitFor(() => expect(menu.querySelector('[role="option"]')?.textContent).toContain('Shared title'));
+  expect(document.activeElement).toBe(search);
+
+  // Enter in the field chooses the active result, and the chooser still never rewrites the draft.
+  searchKey('Enter');
+  await vi.waitFor(() => expect(actions.addReference).toHaveBeenCalledWith(reference));
+  expect(input.value).toBe('');
+
+  // A query that matched nothing keeps the reference chooser's own empty state, unchanged.
+  const empty = setup({ searchReferences: vi.fn().mockResolvedValue([]) });
+  const emptyMenu = empty.pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const emptySearch = empty.pane.querySelector<HTMLInputElement>('.zcr-workspace-search')!;
+  empty.view.openCommands();
+  emptySearch.value = 'nothing';
+  emptySearch.dispatchEvent(new empty.document.defaultView!.Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(emptyMenu.textContent).toContain('No matches'));
+
+  // Typing '@' in the composer still owns the caret: the field mirrors the query rather than taking it.
+  // The query differs from the one typed above, so this fails if the field is not actually mirrored.
+  type('Compare @Ada');
+  await vi.waitFor(() => expect(actions.searchReferences).toHaveBeenLastCalledWith('Ada', 'all', expect.any(AbortSignal)));
+  await vi.waitFor(() => expect(search.value).toBe('Ada'));
+  expect(document.activeElement).toBe(input);
+
+  // The skills scope keeps the field hidden: that query belongs to the '/'-menu, not to this one.
+  view.openSkills();
+  expect(search.hidden).toBe(true);
 });

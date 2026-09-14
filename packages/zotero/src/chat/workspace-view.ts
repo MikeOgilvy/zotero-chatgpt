@@ -71,6 +71,9 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     if (disposed || !state) return;
     searchController?.abort(); const current = ++querySerial;
     for (const [kind, control] of filterControls) control.setAttribute('aria-pressed', String(kind === filter));
+    // The field is the reference chooser's own; the skills scope is still driven by the composer.
+    searchField.hidden = mode !== 'references';
+    if (doc.activeElement !== searchField && searchField.value !== query) searchField.value = query;
     if (mode === 'skills') {
       const needle = query.toLocaleLowerCase();
       const installed = state.settings.skills;
@@ -86,7 +89,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
       references.clear();
       const items = results.filter(reference => (reference.kind === 'article' || reference.kind === 'chat') && (filter === 'all' || reference.kind === filter));
       for (const reference of items) references.set(`reference:${reference.id}`, reference);
-      menu.update({ kind: 'references', heading: 'References', items: items.map(reference => ({ id: `reference:${reference.id}`, label: reference.label, description: referenceDetail(reference) })) });
+      menu.update({ kind: 'references', heading: 'References', items: items.map(reference => ({ id: `reference:${reference.id}`, label: reference.label, description: referenceDetail(reference) })), empty: query ? 'No matches' : 'Type a title, author or year to search.' });
     }).catch(error => {
       if (!disposed && !controller.signal.aborted && current === querySerial && menu.isOpen()) menu.update({ kind: 'references', heading: 'References', items: [], error: failure(error) });
     });
@@ -98,8 +101,23 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     const control = button(label, () => { mode = 'references'; filter = kind; search(); input.focus(); });
     filterControls.set(kind, control); menu.toolbar.append(control);
   }
+  /**
+   * The reference chooser opened from the plus popover has no '@' trigger to type after, so the menu
+   * carries this field itself: without it the popover could only ever show the empty-query state.
+   * Typing here runs exactly the search the '@' route runs. The field only mirrors the query while
+   * the composer owns the caret, so the two routes never fight over the same text, and the menu's own
+   * key handling already covers Arrow/Enter/Escape for anything focused inside it.
+   */
+  const searchField = create('input', '', 'zcr-workspace-search');
+  searchField.type = 'search'; searchField.hidden = true;
+  searchField.placeholder = 'Search references…'; searchField.setAttribute('aria-label', 'Search references');
+  searchField.addEventListener('input', () => {
+    if (disposed) return;
+    mode = 'references'; query = searchField.value.trim(); search();
+  });
+  menu.toolbar.append(searchField);
   /** The composer's plus popover routes here for references; no visible '@' trigger is mounted. */
-  const openCommands = () => { trigger = null; query = ''; mode = 'references'; search(); input.focus(); };
+  const openCommands = () => { trigger = null; query = ''; mode = 'references'; search(); searchField.focus(); };
   /**
    * The Skill row in the same popover opens the `/` chooser directly, so choosing a skill for this
    * chat no longer requires the reader to know the slash syntax. It keeps the same "never rewrite the

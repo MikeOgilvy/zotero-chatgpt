@@ -885,6 +885,10 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-command-menu[hidden] { display: none; }
 .zcr-command-heading { margin: 4px 8px; color: var(--fill-secondary, GrayText); font-size: 11px; }
 .zcr-command-toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The reference chooser's own search field: it shares the toolbar row with the kind filters but
+   takes the whole row, so a long query is readable at any sidebar width or text scale. */
+.zcr-workspace-search { flex: 1 1 100%; min-width: 0; min-height: 28px; padding: 4px 8px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; font-size: 12px; }
+.zcr-workspace-search:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
 .zcr-command-list { min-height: 0; overflow: auto; }
 .zcr-command-option { display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 28px; padding: 6px 8px; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; border-radius: 5px; cursor: pointer; box-sizing: border-box; }
 .zcr-command-option[aria-selected=true], .zcr-command-option:hover { background: var(--fill-quinary, ButtonFace); }

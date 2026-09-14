@@ -77,6 +77,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Preferences saved.': '偏好已保存。',
   'Name, version and SKILL.md content are required.': '请填写名称、版本和 SKILL.md 内容。', 'No skills installed.': '尚未安装 skill。',
   References: '引用', All: '全部', Articles: '文献', Chats: '对话', Skills: 'skill', 'Searching…': '正在搜索…', 'Adding…': '正在添加…', 'No matches': '无匹配项',
+  'Search references…': '搜索文献…', 'Search references': '搜索文献', 'Type a title, author or year to search.': '输入标题、作者或年份进行搜索。',
   Tasks: '任务', Include: '选中', 'Include this candidate': '选中此候选项', 'Verified metadata': '已核验的元数据',
   'Existing item': '已有条目', 'Choose metadata': '选择元数据', 'Choose existing item': '选择已有条目', 'Obtain a verified PDF': '获取已核验的 PDF',
   'Approve selected': '批准所选项', 'Approving…': '正在批准…', 'Cancel task': '取消任务', 'Cancellation requested': '已请求取消',
@@ -157,7 +158,7 @@ const TEXT = [
 const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
   '.zcr-plus-menu input', '.zcr-rename-form input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
-  '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
+  '.zcr-workspace-preview input', '.zcr-workspace-search', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.
   '.zcr-preferences [data-zcr-history="search"]',
 ].join(',');
