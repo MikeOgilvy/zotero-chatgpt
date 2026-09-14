@@ -5,6 +5,8 @@ const COPY: Readonly<Record<string, string>> = {
   'New chat': '新建对话', 'Chat history': '对话历史', 'Search chats…': '搜索对话…', 'Open chats': '已打开的对话',
   'Close chat': '关闭对话', 'Delete chat': '删除对话', 'Rename chat': '重命名对话', 'Save name': '保存名称', 'Chat name': '对话名称',
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
+  // The read-only column's own copy. The chat name in its header is reader data and stays verbatim.
+  'Read-only': '只读', 'Edit this chat': '编辑此对话',
   'Account usage': '账户用量', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
   'Model and generation settings': '模型与生成设置', Effort: '推理强度', Options: '选项', Fast: '快速', Model: '模型',
   Low: '低', Medium: '中', High: '高', 'Extra High': '极高', Today: '今天', Yesterday: '昨天', 'Previous 7 days': '过去 7 天', Older: '更早',
@@ -130,6 +132,8 @@ const CONTENT = [
   '.zcr-message-text', '.zcr-rendered', '.zcr-citation-text', '.zcr-current-title', '.zcr-initial-title',
   // An open-chat chip shows the chat's own title: a chat named "Send" must not be renamed on screen.
   '.zcr-pane-tab',
+  // The read-only column's header names the chat it shows, which is that chat's own title.
+  '.zcr-pane-preview-title',
   '.zcr-history-item', '.zcr-message-reference', '.zcr-command-option', '.zcr-command-label', '.zcr-command-description',
   '.zcr-task-question', '.zcr-task-quote', '.zcr-task-scope', '.zcr-workspace-preview pre', '.zcr-workspace-preview-title strong',
   'script', 'style', 'svg', 'math', '[data-zcr-ui="false"]',
@@ -149,6 +153,8 @@ const TEXT = [
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
   // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
   '.zcr-document-status',
+  // The read-only column's own note; the title beside it is reader data (see CONTENT).
+  '.zcr-pane-preview-note',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
   '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
   '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',

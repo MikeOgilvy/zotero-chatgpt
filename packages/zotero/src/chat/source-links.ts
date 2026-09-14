@@ -202,6 +202,10 @@ function degrade(anchor: HTMLAnchorElement): void {
  * links are disabled with a constant explanation. Click authority is captured in a closure so
  * later DOM or caller mutations cannot retarget an already-linked citation.
  *
+ * `readOnly` renders a citation as a citation without making it operable: the visual source and page
+ * markers stay, but no handler is wired, no authority is bound and the reserved href is removed, so
+ * the transcript column that shows it has no way to open the PDF from it.
+ *
  * Each anchor is isolated: a malformed citation must never throw out of this function and blank
  * the whole answer, and a failure must never leave a reserved `zcr.invalid` link live.
  */
@@ -209,6 +213,7 @@ export function linkAnswerSources(
   fragment: DocumentFragment,
   sources: AnswerSource[],
   open: (source: AnswerSource, pageIndex: number, quote: string | null) => Promise<SourceOpenOutcome | void>,
+  readOnly = false,
 ): void {
   const byId = new Map(sources.map(source => [source.id, source]));
   for (const anchor of fragment.querySelectorAll('a')) {
@@ -220,7 +225,7 @@ export function linkAnswerSources(
         continue;
       }
       originalHref.set(anchor, originalHref.get(anchor) ?? anchor.getAttribute('href')!);
-      wire(anchor);
+      if (!readOnly) wire(anchor);
       const pageIndex = reference.pageIndex;
       const source = reference.id === null || pageIndex === null ? undefined : byId.get(reference.id);
       const page = source?.pages.find(candidate => candidate.pageIndex === pageIndex);
@@ -234,6 +239,9 @@ export function linkAnswerSources(
       anchor.dataset.zcrPage = String(pageIndex);
       anchor.textContent = `p. ${page.pageLabel}`;
       clearStatus(anchor);
+      // Read-only: the citation is shown, not offered. It keeps its source markers and page label but
+      // has no href and no authority, so nothing in the read-only column can open the PDF.
+      if (readOnly) continue;
       // The link title is untrusted model text; it only ever becomes a literal search string.
       const quote = normalizeQuote(anchor.getAttribute('title'));
       bindings.set(anchor, { source: deepFreezeSource(source), pageIndex, quote, open });

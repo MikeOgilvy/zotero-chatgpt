@@ -469,6 +469,51 @@ it('scrolls the open-chat strip inside the dock and rings its chips neutrally', 
   expect(cs(scaled).fontSize).toBe('calc(11px * 1.5)');
 });
 
+it('lays the two chat columns side by side and separates them with a hairline', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const columns = el('div', 'zcr-columns');
+  columns.setAttribute('data-zcr-columns', 'two');
+  const main = el('div', 'zcr-chat-main');
+  const preview = el('section', 'zcr-pane-preview');
+  const header = el('div', 'zcr-pane-preview-header');
+  const title = el('span', 'zcr-pane-preview-title', 'A long chat name that has to truncate in a half-width column');
+  const messages = el('div', 'zcr-messages');
+  header.append(title); preview.append(header, messages); columns.append(main, preview); doc.body.append(columns);
+  const css = shippedCss();
+  // The split is a row with a real gap, and both columns take an equal share of the measured width,
+  // so neither side is ever a squeezed leftover of the other.
+  expect(cs(columns).flexDirection).toBe('row');
+  expect(Number.parseFloat(cs(columns).gap)).toBeGreaterThan(0);
+  expect(css).toMatch(/\.zcr-columns\[data-zcr-columns="two"\]\s*>\s*\*\s*\{[^}]*flex:\s*1 1 0/u);
+  // Both columns can shrink instead of overflowing the dock, whatever the columns resolve to.
+  expect(Number.parseFloat(cs(main).minWidth)).toBe(0);
+  expect(Number.parseFloat(cs(preview).minWidth)).toBe(0);
+  // The read-only column is its own flex column that scrolls inside itself.
+  expect(cs(preview).display).toBe('flex');
+  expect(cs(preview).flexDirection).toBe('column');
+  // The transcript keeps the dock's own scrolling rule rather than the whole column growing.
+  expect(cs(messages).overflow).toContain('auto');
+  expect(Number.parseFloat(cs(messages).minHeight)).toBe(0);
+  // A hairline separates it from the editable column, and its title truncates rather than widening.
+  expect(css).toMatch(/\.zcr-columns\[data-zcr-columns="two"\]\s+\.zcr-pane-preview\s*\{[^}]*border-inline-start:\s*1px solid/u);
+  expect(cs(title).whiteSpace).toBe('nowrap');
+  expect(cs(title).textOverflow).toBe('ellipsis');
+  // The column's own note rides the chat text scale, like the rest of the chrome.
+  const sidebar = el('div', 'zcr-sidebar');
+  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
+  const note = el('span', 'zcr-pane-preview-note', 'Read-only');
+  sidebar.append(note); doc.body.append(sidebar);
+  expect(cs(note).fontSize).toBe('calc(11px * 1.5)');
+  // Activating the column is a keyboard-reachable control with the neutral ring the owner kept.
+  const activate = el('button', 'zcr-icon-button zcr-pane-preview-open');
+  activate.setAttribute('data-zcr-action', 'activate-pane');
+  preview.append(activate);
+  expect(cs(activate).cursor).toBe('pointer');
+  expect(shippedRule(doc, '.zcr-pane-preview-open:focus-visible').outlineColor).not.toContain('AccentColor');
+  expect(css).not.toMatch(/\.zcr-pane-preview[^{},]*\{[^}]*AccentColor/u);
+});
+
 it('centers a scaled muted timestamp divider and keeps transcript type on the chat scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);

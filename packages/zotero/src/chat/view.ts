@@ -4,6 +4,7 @@ import { currentContextUsage, mountContextRing } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
 import { mountUILocale } from './ui-locale.ts';
+import { previewChatId, readableColumnCount } from './pane-layout.ts';
 import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
@@ -51,6 +52,11 @@ const COPY = {
   searchChats: 'Search chats…',
   closeChat: 'Close chat',
   deleteChat: 'Delete chat',
+  // The second column beside the chat being edited: a note that it holds no composer, and the one
+  // control that makes the chat it shows the editable one. The note is an element node (`CONTENT`
+  // match) like the other button labels, so the localization pass rewrites it in place.
+  readOnly: 'Read-only',
+  editChat: 'Edit this chat',
   newContent: 'New content',
   askPlaceholder: 'Ask a question…',
   question: 'Question',
@@ -440,10 +446,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   // Each fenced block and table gets its own wrapper so wide content scrolls locally and the
   // copy affordance never scrolls away with the code.
-  const enhanceCodeBlocks = (host: HTMLElement) => {
+  const enhanceCodeBlocks = (host: HTMLElement, readOnly = false) => {
     for (const pre of [...host.querySelectorAll('pre')]) {
       const wrapper = el('div', 'zcr-code-block');
       pre.replaceWith(wrapper); wrapper.append(pre);
+      // The wrapper is structural, so a read-only transcript still gets it; the copy button is an
+      // action, so it is not created at all there rather than being created and then hidden.
+      if (readOnly) continue;
       const source = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
       const copy = button(COPY.copy, 'copy-code', () => copyText(source, copy));
       copy.classList.add('zcr-code-copy');
@@ -651,7 +660,81 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, panes, renameForm, contextSource, documentStatus, scopeNotice, main); root.append(chat);
+  /**
+   * The two chat columns. The editable pane is always the first child, so the one composer never
+   * moves and the keyboard order stays stable; the second column is a read-only transcript of another
+   * open chat. It is only laid out when the measured container really has room for two readable
+   * columns (`pane-layout.ts`), and it has no composer of its own: clicking a message or pressing
+   * Enter on the column makes its chat the editable one, and the strip above stays the switcher.
+   */
+  const columns = el('div', 'zcr-columns');
+  columns.dataset.zcrColumns = 'one';
+  const previewPane = el('section', 'zcr-pane-preview');
+  previewPane.dataset.zcrPanePreview = '';
+  previewPane.hidden = true;
+  previewPane.setAttribute('role', 'region');
+  previewPane.tabIndex = -1;
+  const previewTitle = el('span', 'zcr-pane-preview-title');
+  previewTitle.id = `${viewId}-preview-title`;
+  const previewNote = el('span', 'zcr-pane-preview-note', COPY.readOnly);
+  previewNote.id = `${viewId}-preview-note`;
+  // The column is announced by its own note and by the chat it shows; the note is copy that the
+  // localization pass may rewrite, the title is the reader's own chat name.
+  previewPane.setAttribute('aria-labelledby', `${previewTitle.id} ${previewNote.id}`);
+  const previewOpen = button(COPY.editChat, 'activate-pane', () => { activatePreview(); }, 'historyDraft', 'zcr-icon-button zcr-pane-preview-open');
+  const previewHeader = el('div', 'zcr-pane-preview-header');
+  previewHeader.append(previewTitle, previewNote, previewOpen);
+  const previewMessages = el('div', 'zcr-messages zcr-pane-preview-messages');
+  previewMessages.dataset.zcrPreviewMessages = '';
+  previewPane.append(previewHeader, previewMessages);
+  /** The chat painted in the read-only column, or null when nothing is painted there. */
+  let previewPaneId: string | null = null;
+  /**
+   * The chat that was being edited at the previous render. Activation swaps the two roles, so this is
+   * what decides which chat the second column shows; it is deliberately outside `PresenterState`
+   * (the presenter owns the canonical `current` pointer, this is only how the previous role is shown).
+   */
+  let renderedActiveId: string | null = null;
+  /** The width the split is measured against: the columns' own content box, never the whole dock. */
+  const measureColumns = (): number => {
+    const rect = columns.getBoundingClientRect?.();
+    if (rect && rect.width > 0) return rect.width;
+    return columns.clientWidth || 0;
+  };
+  const activatePreview = () => {
+    const id = previewPaneId;
+    if (!id) return;
+    // The previously active chat becomes the read-only one. Focus goes back into the one composer
+    // rather than staying on a control this activation replaces, which would drop the reader onto
+    // the page body mid-keyboard.
+    void presenter.openConversation(id).then(() => presenter.focusInput()).catch(reportViewError);
+  };
+  previewPane.addEventListener('click', event => {
+    // A selection inside the column is the owner reading or copying a passage, not asking for that
+    // chat to become editable: doing so would also take the selection away from them.
+    const selection = doc.defaultView?.getSelection?.() ?? null;
+    const anchorNode = selection?.anchorNode ?? null;
+    if (selection && !selection.isCollapsed && anchorNode && previewPane.contains(anchorNode)) return;
+    // Following a link in the answer is reading too, and the answer's own handler already opened it;
+    // swapping the panes under the click would move the answer the owner is looking at.
+    const target = event.target as Element | null;
+    if (target?.closest?.('a[href]')) return;
+    event.preventDefault();
+    activatePreview();
+  });
+  previewPane.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (isComposing(event)) return;
+    // Enter activates once: the column's own control must not also fire a click that activates twice.
+    event.preventDefault();
+    activatePreview();
+  });
+  previewMessages.addEventListener('scroll', () => {
+    // Recorded per chat in the presenter's own position map, never written into the chat being edited.
+    if (previewPaneId) presenter.setPaneScrollTop(previewPaneId, previewMessages.scrollTop);
+  });
+  columns.append(main, previewPane);
+  chat.append(chrome, panes, renameForm, contextSource, documentStatus, scopeNotice, columns); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -732,13 +815,19 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       event.preventDefault(); buttons[(current + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
     }
   });
-  const imageCard = (image: ImageAttachment) => {
+  const imageCard = (image: ImageAttachment, readOnly = false) => {
     const card = el('figure', 'zcr-image-card'); card.dataset.zcrImage = image.id;
-    const open = button('Preview image', 'preview-image', () => previewImage(image, open));
     const thumbnail = el('img'); thumbnail.src = image.dataUrl; thumbnail.alt = image.name; thumbnail.loading = 'lazy';
-    // An image grows the transcript after the last render already scrolled: re-pin only if it was pinned.
-    thumbnail.addEventListener('load', () => { if (sticking) messages.scrollTop = messages.scrollHeight; });
-    open.replaceChildren(thumbnail); card.append(open);
+    if (readOnly) {
+      // The picture is the message; only the preview affordance is an action. A read-only figure shows
+      // the image in place rather than offering a dialog it must not open.
+      card.append(thumbnail);
+    } else {
+      const open = button('Preview image', 'preview-image', () => previewImage(image, open));
+      // An image grows the transcript after the last render already scrolled: re-pin only if it was pinned.
+      thumbnail.addEventListener('load', () => { if (sticking) messages.scrollTop = messages.scrollHeight; });
+      open.replaceChildren(thumbnail); card.append(open);
+    }
     card.append(el('figcaption', '', image.origin?.kind === 'generated' ? 'Generated image' : image.name));
     return card;
   };
@@ -1001,16 +1090,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       group.hidden = filterRows(group.querySelectorAll<HTMLElement>('.zcr-history-row')) === 0;
     }
   };
-  const citationCard = (citation: Citation, removable: boolean) => {
+  const citationCard = (citation: Citation, removable: boolean, readOnly = false) => {
     const card = el('div', 'zcr-citation'); card.dataset.zcrCitation = citation.id;
     const quote = el('blockquote', 'zcr-citation-text', citation.text.length > 240 ? `${[...citation.text].slice(0, 240).join('')}…` : citation.text);
     const meta = el('div', 'zcr-citation-meta');
     meta.append(el('span', '', COPY.page(pageLabel(citation))));
-    if (hooks.openCitation) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(() => reportViewMessage(COPY.sourceOpenFailed)); }, 'source'));
+    // Jumping back into the PDF is an action, so a read-only transcript shows the page marker without
+    // offering the jump.
+    if (hooks.openCitation && !readOnly) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(() => reportViewMessage(COPY.sourceOpenFailed)); }, 'source'));
     if (removable) meta.append(button(COPY.remove, 'remove-citation', () => { presenter.removeCitation(citation.id); }, 'remove'));
     card.append(quote, meta); return card;
   };
-  const messageNode = (message: Message) => {
+  /**
+   * One transcript message. `readOnly` is the second column's mode: the same node shape and the same
+   * painters, but the mutation actions — copy answer, branch, retry, cancel-queued, source jump,
+   * annotation review — and the meta caption are never created, so there is nothing in the column to
+   * tab to or activate. This is a genuine mode, not a CSS hiding pass.
+   */
+  const messageNode = (message: Message, readOnly = false) => {
     const article = el('article', 'zcr-message'); article.dataset.zcrMessage = message.id; article.dataset.role = message.role;
     if (message.action) article.dataset.action = message.action;
     // Codex-like shape: the body holds the text bubble, the attachments and the hover/focus actions;
@@ -1025,6 +1122,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       const href = link.getAttribute('href'); if (href) hooks.openLink?.(href);
     });
     const attachments = el('div', 'zcr-message-attachments'); attachments.dataset.zcrMessageAttachments = '';
+    if (readOnly) {
+      // Text and attachments only: the author still aligns the message, and the paper's own title,
+      // pages and images stay legible without a single control.
+      body.append(text, attachments);
+      article.append(body);
+      return article;
+    }
     const taskSummary = button('Review annotation suggestions', 'review-annotations', () => {
       const task = latestViewState.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId);
       const card = task && [...taskPanel.querySelectorAll<HTMLDetailsElement>('[data-zcr-task-id]')].find(card => card.dataset.zcrTaskId === task.id);
@@ -1057,6 +1161,84 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let renderedConversationId: string | null = null;
   const messageNodes = new Map<string, HTMLElement>();
   const renderedMessages = new Map<string, { text: string; status: Message['status']; action: Message['action'] }>();
+  /** One message node's painted state, so a streamed delta repaints only the node it belongs to. */
+  type RenderRecord = Map<string, { text: string; status: Message['status']; action: Message['action'] }>;
+  interface RenderView {
+    /** The read-only column's mode: no actions are queried and no live sources are wired. */
+    readOnly: boolean;
+    /** The chat that owns the message, which is what answer citations resolve against. */
+    conversation: Conversation | null;
+    models: NonNullable<PresenterState['runtime']>['models'];
+    tasks: PresenterState['tasks'];
+    /** Request ids a queued send covers, or null for a transcript that cannot queue. */
+    queued: ReadonlySet<string> | null;
+  }
+  /**
+   * The text and attachments of one message, shared by the editable pane and the read-only column so
+   * both render an answer the same way. Only the actions differ, and they are never created for a
+   * read-only node: no citation jump, no code copy button, no preview dialog.
+   */
+  const paintBody = (node: HTMLElement, message: Message, rendered: RenderRecord, view: RenderView) => {
+    const annotationTask = message.role === 'assistant' ? view.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId) : undefined;
+    const text = node.querySelector<HTMLElement>('[data-zcr-text]')!;
+    const previous = rendered.get(message.id);
+    if (!previous || previous.text !== message.text || previous.status !== message.status || previous.action !== message.action) {
+      rendered.set(message.id, { text: message.text, status: message.status, action: message.action });
+      if (message.role === 'assistant' && message.text) {
+        text.classList.add('zcr-rendered');
+        const fragment = renderAnswer(doc, message.text, { deferMath: message.status === 'streaming' || message.status === 'pending' });
+        // Always run the pass, even with no sources: reserved citation links must be neutralized
+        // rather than left as external `zcr.invalid` URLs for the generic link handler to launch.
+        linkAnswerSources(fragment, view.conversation ? answerSources(view.conversation, message) : [], openAnswerSource, view.readOnly);
+        text.replaceChildren(fragment);
+        enhanceCodeBlocks(text, view.readOnly);
+      } else if (hiddenExplainText(message)) {
+        text.classList.remove('zcr-rendered');
+        text.textContent = '';
+      } else {
+        text.classList.remove('zcr-rendered');
+        text.textContent = message.text;
+      }
+    }
+    text.hidden = hiddenExplainText(message) || !!annotationTask;
+    const attachments = node.querySelector<HTMLElement>('[data-zcr-message-attachments]')!;
+    const attachmentKey = [...message.citations.map(citation => citation.id), ...(message.images ?? []).map(image => image.id), ...(message.generatedImages ?? []).map(image => image.id), message.workflow?.skill?.revision ?? '', ...(message.references ?? []).map(reference => reference.id)].join(':');
+    if (attachments.dataset.rendered !== attachmentKey) {
+      attachments.dataset.rendered = attachmentKey;
+      attachments.replaceChildren(...message.citations.map(citation => citationCard(citation, false, view.readOnly)), ...[...(message.images ?? []), ...(message.generatedImages ?? [])].map(image => imageCard(image, view.readOnly)));
+      if (message.workflow?.skill) attachments.append(el('span', 'zcr-message-reference', `/${message.workflow.skill.name} · v${message.workflow.skill.version}`));
+      for (const reference of message.references ?? []) attachments.append(el('span', 'zcr-message-reference', `${reference.kind === 'chat' ? '@chat' : reference.kind === 'file' ? '@file' : '@article'} · ${reference.label}`));
+    }
+  };
+  /**
+   * The parts of a node that only exist in the chat being edited: the queued-send cancel, the
+   * annotation review and the status caption. It is only ever called for the editable pane, where
+   * those nodes really are present.
+   */
+  const paintActions = (node: HTMLElement, message: Message, view: RenderView) => {
+    const queued = view.queued?.has(message.requestId) === true;
+    const cancelQueued = node.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]'); if (cancelQueued) cancelQueued.hidden = !queued;
+    const annotationTask = message.role === 'assistant' ? view.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId) : undefined;
+    const taskSummary = node.querySelector<HTMLButtonElement>('[data-zcr-action="review-annotations"]');
+    if (taskSummary) {
+      taskSummary.hidden = !annotationTask;
+      if (annotationTask) taskSummary.textContent = `Review ${annotationTask.items.length} annotation suggestions`;
+    }
+    const meta = node.querySelector<HTMLElement>('[data-zcr-meta]'); if (!meta) return;
+    const statusLabel = queued ? 'Queued' : message.role === 'assistant' ? STATUS_LABEL[message.status] : message.status === 'cancelled' ? 'Cancelled before sending' : '';
+    const caption = settingsCaption(message.settings, view.models);
+    const label = [statusLabel, caption].filter(Boolean).join(' · ');
+    if (meta.textContent !== label) meta.textContent = label;
+  };
+  /**
+   * The messages a transcript shows. The map phase of one request is not a conversation turn: its
+   * intermediate user messages stay out of both columns unless one is explicitly focused.
+   */
+  const transcriptOf = (conversation: Conversation | null, keep: string | null): Message[] => {
+    const all = conversation?.messages ?? [];
+    const intermediate = new Set(all.filter(message => message.role === 'user' && message.batch?.phase === 'map').map(message => message.requestId));
+    return all.filter(message => !intermediate.has(message.requestId) || message.id === keep);
+  };
   let focusToken = 0; let contentKey = ''; let chromeKey = ''; let messageTimeKey = '';
   /**
    * The local reading status. Counts come from the prepared pages, so "read all N pages" is only said
@@ -1154,6 +1336,62 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const activeTab = visible && state.conversation ? paneNodes.get(state.conversation.id) : undefined;
     if (activeTab) { transcript.setAttribute('role', 'tabpanel'); transcript.setAttribute('aria-labelledby', activeTab.id); }
     else { transcript.removeAttribute('role'); transcript.removeAttribute('aria-labelledby'); }
+  };
+  /**
+   * The read-only column: one other open chat, rendered by the same message painter with the
+   * read-only flag on. It keeps its own node map, so a streamed delta in the chat beside it never
+   * touches a node of the transcript being edited, and each column scrolls on its own anchor.
+   */
+  const previewNodes = new Map<string, HTMLElement>();
+  const previewRendered: RenderRecord = new Map();
+  let renderedPreviewId: string | null = null;
+  let previewContentKey = '';
+  const renderPreview = (state: PresenterState, conversation: Conversation | null, twoColumns: boolean) => {
+    columns.dataset.zcrColumns = twoColumns ? 'two' : 'one';
+    previewPane.hidden = !twoColumns;
+    if (!conversation || !twoColumns) {
+      // A hidden column holds no anchor and reports none: when it comes back it is re-read from the
+      // presenter, so a clamped box cannot record a position that was never read.
+      previewPaneId = null;
+      renderedPreviewId = null;
+      return;
+    }
+    previewPaneId = conversation.id;
+    // Same-name chats are told apart as the strip and the history list tell them apart; the title is
+    // the reader's own chat name and is never translated.
+    const label = conversationLabel(conversation, state.conversations);
+    if (previewTitle.textContent !== label) previewTitle.textContent = label;
+    if (previewTitle.title !== label) previewTitle.title = label;
+    const switched = renderedPreviewId !== conversation.id;
+    if (switched) {
+      renderedPreviewId = conversation.id;
+      previewNodes.clear(); previewRendered.clear(); previewContentKey = '';
+      previewMessages.replaceChildren();
+    }
+    const list = transcriptOf(conversation, null);
+    const ids = new Set(list.map(message => message.id));
+    for (const [id, node] of previewNodes) if (!ids.has(id)) { node.remove(); previewNodes.delete(id); previewRendered.delete(id); }
+    let cursor = previewMessages.firstElementChild;
+    for (const message of list) {
+      let node = previewNodes.get(message.id);
+      if (!node) { node = messageNode(message, true); previewNodes.set(message.id, node); }
+      if (node !== cursor) previewMessages.insertBefore(node, cursor);
+      cursor = node.nextElementSibling;
+    }
+    // The column follows its chat's newest answer only while it is parked at the bottom, so reading
+    // back through it is never yanked away by a message that arrives meanwhile.
+    const pinned = previewMessages.scrollHeight - previewMessages.scrollTop - previewMessages.clientHeight < 48;
+    const contentKey = list.map(message => `${message.id}:${message.status}:${message.text.length}`).join('\n');
+    const contentChanged = contentKey !== previewContentKey;
+    previewContentKey = contentKey;
+    for (const message of list) {
+      const node = previewNodes.get(message.id); if (!node) continue;
+      paintBody(node, message, previewRendered, { readOnly: true, conversation, models: state.runtime?.models ?? [], tasks: [], queued: null });
+    }
+    // The anchor the owner left this chat at lives in the presenter's per-chat position map; falling
+    // back to the bottom is the same choice as a chat whose position was never measured.
+    if (switched) previewMessages.scrollTop = presenter.paneScrollTop(conversation.id) ?? previewMessages.scrollHeight;
+    else if (contentChanged && pinned) previewMessages.scrollTop = previewMessages.scrollHeight;
   };
   const historyRow = (source: HistoryRowSource) => {
     const row = el('div', 'zcr-history-row');
@@ -1391,14 +1629,23 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     const nextTasks = `${state.tasks.map(task => `${task.id}:${task.revision}`).join(',')}/${state.readingJobs.map(job => `${job.id}:${job.revision}`).join(',')}`;
     if (nextTasks !== tasksKey) { tasksKey = nextTasks; taskView.update({ tasks: state.tasks, readingJobs: state.readingJobs }); }
-    const allMessages = state.conversation?.messages ?? [];
-    const intermediateRequests = new Set(allMessages.filter(message => message.role === 'user' && message.batch?.phase === 'map').map(message => message.requestId));
-    const list = allMessages.filter(message => !intermediateRequests.has(message.requestId) || state.messageFocus?.messageId === message.id);
+    // Which chat the read-only column shows, and whether the dock has room for it at all. The
+    // decision is measured before the render gate so a resize (and a chat scale change) can open or
+    // close the second column even when no state changed.
+    const previewFor = previewChatId(state.conversation?.id ?? null, renderedActiveId, state.openConversations.map(entry => entry.id));
+    renderedActiveId = state.conversation?.id ?? null;
+    const previewConversation = previewFor === null ? null : state.openConversations.find(entry => entry.id === previewFor) ?? null;
+    const twoColumns = !!previewConversation && readableColumnCount(measureColumns(), state.workspace?.textScale ?? hooks.readTextScale?.() ?? 1) === 2;
+    const list = transcriptOf(state.conversation, state.messageFocus?.messageId ?? null);
     const nextChrome = [
       state.connection, state.runtime?.revision ?? 0, state.runtime?.account.state ?? '', state.runtime?.login?.state ?? '',
       state.generating, state.message ?? '', state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
       state.conversation?.activeRequestId ?? '', state.conversations.map(c => `${c.id}:${c.title}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}`).join('\n'),
-      state.openConversations.map(c => `${c.id}:${c.title}`).join('\n'),
+      state.openConversations.map(c => `${c.id}:${c.title}:${c.lastSeq}:${c.activeRequestId ?? ''}`).join('\n'),
+      // The column shows another chat's transcript, so its own content has to be able to open the
+      // second column; the layout flag re-renders when the dock is measured or resized.
+      previewConversation ? previewConversation.messages.map(message => `${message.id}:${message.status}:${message.text.length}`).join('\n') : '',
+      twoColumns ? 'two' : 'one',
       state.draft.citations.map(c => c.id).join('\n'), state.draft.images.map(image => image.id).join('\n'), JSON.stringify(state.draft.settings), state.focusToken,
       state.draft.question.trim().length > 0,
       state.history.map(item => `${item.id}:${item.title}:${item.updatedAt}:${item.preview}`).join('\n'), state.tasks.map(task => `${task.id}:${task.revision}`).join(','), state.readingJobs.map(job => `${job.id}:${job.revision}`).join(','), state.queueing, state.conversation?.queuedRequestIds?.join(','), state.messageFocus?.token,
@@ -1428,6 +1675,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     alert.textContent = state.message ?? ''; alert.hidden = !state.message;
     updateContext(state);
     renderPanes(state);
+    renderPreview(state, previewConversation, twoColumns);
     const historyKey = state.workspace ? JSON.stringify([state.history, state.historyQuery]) : state.conversations.map(c => `${c.id}:${c.title}:${c.createdAt}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}:${c.id === state.conversation?.id ? '1' : '0'}`).join('\n');
     if (historyList.dataset.options !== historyKey) {
       historyList.dataset.options = historyKey;
@@ -1487,49 +1735,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const contentChanged = nextKey !== contentKey;
     const follow = followAnswerScroll(nearBottom, contentChanged && contentKey !== '');
     contentKey = nextKey;
+    const editableView: RenderView = {
+      readOnly: false,
+      conversation: state.conversation,
+      models: state.runtime?.models ?? [],
+      tasks: state.tasks,
+      queued: state.conversation?.queuedRequestIds ? new Set(state.conversation.queuedRequestIds) : null,
+    };
     for (const message of list) {
       const node = messageNodes.get(message.id); if (!node) continue;
       node.dataset.status = message.status;
-      const queued = state.conversation?.queuedRequestIds?.includes(message.requestId) === true;
-      const cancelQueued = node.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]'); if (cancelQueued) cancelQueued.hidden = !queued;
-      const text = node.querySelector<HTMLElement>('[data-zcr-text]')!;
-      const annotationTask = message.role === 'assistant' ? state.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId) : undefined;
-      const taskSummary = node.querySelector<HTMLButtonElement>('[data-zcr-action="review-annotations"]')!;
-      taskSummary.hidden = !annotationTask;
-      if (annotationTask) taskSummary.textContent = `Review ${annotationTask.items.length} annotation suggestions`;
-      const previous = renderedMessages.get(message.id);
-      if (!previous || previous.text !== message.text || previous.status !== message.status || previous.action !== message.action) {
-        renderedMessages.set(message.id, { text: message.text, status: message.status, action: message.action });
-        if (message.role === 'assistant' && message.text) {
-          text.classList.add('zcr-rendered');
-          const fragment = renderAnswer(doc, message.text, { deferMath: message.status === 'streaming' || message.status === 'pending' });
-          // Always run the pass, even with no sources: reserved citation links must be neutralized
-          // rather than left as external `zcr.invalid` URLs for the generic link handler to launch.
-          linkAnswerSources(fragment, state.conversation ? answerSources(state.conversation, message) : [], openAnswerSource);
-          text.replaceChildren(fragment);
-          enhanceCodeBlocks(text);
-        } else if (hiddenExplainText(message)) {
-          text.classList.remove('zcr-rendered');
-          text.textContent = '';
-        } else {
-          text.classList.remove('zcr-rendered');
-          text.textContent = message.text;
-        }
-      }
-      text.hidden = hiddenExplainText(message) || !!annotationTask;
-      const meta = node.querySelector<HTMLElement>('[data-zcr-meta]')!;
-      const attachments = node.querySelector<HTMLElement>('[data-zcr-message-attachments]')!;
-      const attachmentKey = [...message.citations.map(citation => citation.id), ...(message.images ?? []).map(image => image.id), ...(message.generatedImages ?? []).map(image => image.id), message.workflow?.skill?.revision ?? '', ...(message.references ?? []).map(reference => reference.id)].join(':');
-      if (attachments.dataset.rendered !== attachmentKey) {
-        attachments.dataset.rendered = attachmentKey;
-        attachments.replaceChildren(...message.citations.map(citation => citationCard(citation, false)), ...[...(message.images ?? []), ...(message.generatedImages ?? [])].map(imageCard));
-        if (message.workflow?.skill) attachments.append(el('span', 'zcr-message-reference', `/${message.workflow.skill.name} · v${message.workflow.skill.version}`));
-        for (const reference of message.references ?? []) attachments.append(el('span', 'zcr-message-reference', `${reference.kind === 'chat' ? '@chat' : reference.kind === 'file' ? '@file' : '@article'} · ${reference.label}`));
-      }
-      const statusLabel = queued ? 'Queued' : message.role === 'assistant' ? STATUS_LABEL[message.status] : message.status === 'cancelled' ? 'Cancelled before sending' : '';
-      const caption = settingsCaption(message.settings, state.runtime?.models ?? []);
-      const label = [statusLabel, caption].filter(Boolean).join(' · ');
-      if (meta.textContent !== label) meta.textContent = label;
+      paintBody(node, message, renderedMessages, editableView);
+      paintActions(node, message, editableView);
     }
     if (conversationChanged) { messages.scrollTop = state.scrollTop || messages.scrollHeight; hasNewContent = false; }
     else if (contentChanged && follow.stick) {
@@ -1581,8 +1798,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (state.messageFocus && messages.dataset.focusToken !== String(state.messageFocus.token)) { messages.dataset.focusToken = String(state.messageFocus.token); messageNodes.get(state.messageFocus.messageId)?.scrollIntoView?.({ block: 'center' }); }
   };
   const unbind = presenter.bind(update);
+  /**
+   * The dock is resizable and the reader's dock width is what decides whether two chats fit. The
+   * observer only re-runs the same render, which is gated on its own key, so a resize costs nothing
+   * when the layout does not actually change. `columns` is the measured element, not the dock: the
+   * threshold is about the space the two columns really get.
+   */
+  const resizeObserver = doc.defaultView && 'ResizeObserver' in doc.defaultView
+    ? new (doc.defaultView as unknown as { ResizeObserver: new (callback: () => void) => { observe(node: Element): void; disconnect(): void } }).ResizeObserver(() => update(latestViewState))
+    : null;
+  try { resizeObserver?.observe(columns); } catch { /* an unmeasurable dock keeps the strip as the UI */ }
   return () => {
-    presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose(); clearTimingInterval();
+    presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); resizeObserver?.disconnect(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose(); clearTimingInterval();
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKey);
     for (const target of pasteDocuments) target.removeEventListener('paste', onPaste, true);
