@@ -57,8 +57,10 @@ const COPY = {
   question: 'Question',
   send: 'Send',
   stop: 'Stop',
-  chromeSettings: 'More',
-  chatOptions: 'Chat options',
+  renameChat: 'Rename chat',
+  saveName: 'Save name',
+  chatName: 'Chat name',
+  accountUsage: 'Account usage',
   returnToSource: 'Return to source',
   remove: 'Remove',
   you: 'You',
@@ -428,8 +430,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const chrome = el('div', 'zcr-chrome');
   const context = el('div', 'zcr-chrome-main');
   context.dataset.zcrContext = '';
-  const currentTitle = el('span', 'zcr-current-title');
+  const currentTitle = el('button', 'zcr-current-title');
+  currentTitle.type = 'button';
   currentTitle.dataset.zcrCurrentTitle = '';
+  currentTitle.dataset.zcrAction = 'rename-conversation';
+  currentTitle.setAttribute('aria-haspopup', 'dialog');
+  currentTitle.setAttribute('aria-expanded', 'false');
+  currentTitle.setAttribute('aria-controls', `${viewId}-rename`);
+  currentTitle.addEventListener('click', () => { toggleRename(); });
   // The current chat title carries the reference's rounded neutral chip: the title truncates and a
   // small cross sits at its right edge. Closing leaves the chat on disk and in history and asks no
   // confirmation; the destructive remove lives only on the fallback host-list row. When the close
@@ -456,29 +464,23 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historyBtn.setAttribute('aria-haspopup', 'dialog');
   historyBtn.setAttribute('aria-expanded', 'false');
   historyBtn.setAttribute('aria-controls', `${viewId}-history`);
-  const overflow = button(COPY.chromeSettings, 'settings', () => { toggleSettings(); }, 'more');
-  overflow.setAttribute('aria-haspopup', 'dialog');
-  overflow.setAttribute('aria-expanded', 'false');
-  overflow.setAttribute('aria-controls', `${viewId}-options`);
-  actions.append(fresh, historyBtn, overflow);
+  actions.append(fresh, historyBtn);
   chrome.append(context, actions);
-  const settingsMenu = el('div', 'zcr-settings-menu');
-  settingsMenu.id = `${viewId}-options`;
-  settingsMenu.dataset.zcrSettingsMenu = '';
-  settingsMenu.hidden = true;
-  settingsMenu.setAttribute('role', 'dialog');
-  settingsMenu.setAttribute('aria-label', COPY.chatOptions);
-  const conversationActions = el('div', 'zcr-conversation-actions');
-  conversationActions.dataset.zcrConversationActions = '';
-  const renameForm = el('div', 'zcr-rename-form'); renameForm.hidden = true;
-  const renameInput = el('input'); renameInput.type = 'text'; renameInput.maxLength = 1024; renameInput.setAttribute('aria-label', 'Chat name');
-  const rename = button('Rename chat', 'rename-conversation', () => { renameForm.hidden = !renameForm.hidden; renameInput.value = presenter.snapshot().conversation?.title ?? ''; if (!renameForm.hidden) { renameInput.focus(); renameInput.select(); } });
-  renameForm.append(renameInput, button('Save name', 'save-conversation-name', () => { const id = presenter.snapshot().conversation?.id; if (id) void presenter.renameConversation(id, renameInput.value).then(() => { renameForm.hidden = true; }).catch(reportViewError); }));
-  conversationActions.prepend(rename); conversationActions.append(renameForm);
-  const settingsContent = el('div', 'zcr-settings-content');
-  settingsContent.dataset.zcrSettingsContent = '';
-  settingsMenu.append(conversationActions, settingsContent);
-  const accountUsage = el('p', 'zcr-account-usage'); accountUsage.dataset.zcrAccountUsage = ''; settingsContent.append(accountUsage);
+  // Renaming the open chat moved out of a More menu when that menu went away: the chat's own title
+  // in the chip is the control, so the rename is where the owner already looks for the chat's name
+  // and no second three-dot surface is reintroduced. The form is a small popover under the chrome.
+  const renameForm = el('div', 'zcr-rename-form'); renameForm.dataset.zcrRenameForm = ''; renameForm.hidden = true;
+  renameForm.id = `${viewId}-rename`;
+  renameForm.setAttribute('role', 'dialog');
+  renameForm.setAttribute('aria-label', COPY.renameChat);
+  const renameInput = el('input'); renameInput.type = 'text'; renameInput.maxLength = 1024;
+  renameInput.setAttribute('aria-label', COPY.chatName);
+  const saveName = button(COPY.saveName, 'save-conversation-name', () => {
+    const id = presenter.snapshot().conversation?.id;
+    if (!id) return;
+    void presenter.renameConversation(id, renameInput.value).then(() => { toggleRename(false); currentTitle.focus(); }).catch(reportViewError);
+  });
+  renameForm.append(renameInput, saveName);
   const historyPanel = el('div', 'zcr-history-panel');
   historyPanel.id = `${viewId}-history`;
   historyPanel.dataset.zcrHistory = '';
@@ -598,7 +600,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, settingsMenu, contextSource, scopeNotice, main); root.append(chat);
+  chat.append(chrome, renameForm, contextSource, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -699,18 +701,22 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const next = open ?? menu.hidden;
     menu.hidden = !next;
     picker.setAttribute('aria-expanded', String(next));
-    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); settingsMenu.hidden = true; overflow.setAttribute('aria-expanded', 'false'); togglePlus(false); }
+    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); toggleRename(false); togglePlus(false); }
   };
-  const toggleSettings = (open?: boolean) => {
-    const next = open ?? settingsMenu.hidden;
-    settingsMenu.hidden = !next;
-    overflow.setAttribute('aria-expanded', String(next));
+  /**
+   * The rename popover hangs off the chat's own title. Opening it fills the field from the live
+   * conversation and selects the text; closing it returns focus to the title button, so the
+   * affordance is keyboard-reachable without a menu trigger.
+   */
+  const toggleRename = (open?: boolean) => {
+    const next = open ?? renameForm.hidden;
+    renameForm.hidden = !next;
+    currentTitle.setAttribute('aria-expanded', String(next));
     if (next) {
-      historyPanel.hidden = true;
-      historyBtn.setAttribute('aria-expanded', 'false');
-      menu.hidden = true;
-      picker.setAttribute('aria-expanded', 'false');
-      togglePlus(false);
+      historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
+      menu.hidden = true; picker.setAttribute('aria-expanded', 'false'); togglePlus(false);
+      renameInput.value = presenter.snapshot().conversation?.title ?? '';
+      renameInput.focus(); renameInput.select();
     }
   };
   const toggleHistory = (open?: boolean) => {
@@ -720,8 +726,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (next) {
       menu.hidden = true;
       picker.setAttribute('aria-expanded', 'false');
-      settingsMenu.hidden = true;
-      overflow.setAttribute('aria-expanded', 'false');
+      toggleRename(false);
       togglePlus(false);
       historySearch.focus();
     }
@@ -733,7 +738,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     plus.setAttribute('aria-expanded', String(next));
     if (next) {
       menu.hidden = true; picker.setAttribute('aria-expanded', 'false');
-      settingsMenu.hidden = true; overflow.setAttribute('aria-expanded', 'false');
+      toggleRename(false);
       historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
     }
   };
@@ -817,12 +822,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   });
   input.addEventListener('keydown', event => {
     if (isComposing(event)) return;
-    if (event.key === 'Escape' && !settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); return; }
+    if (event.key === 'Escape' && !renameForm.hidden) { event.preventDefault(); toggleRename(false); currentTitle.focus(); return; }
     if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); togglePicker(false); return; }
     if (event.key !== 'Enter' || event.shiftKey) return;
     // An open chooser owns Enter. Closing it must never submit the draft.
-    if (!menu.hidden || !settingsMenu.hidden || !historyPanel.hidden) {
-      event.preventDefault(); togglePicker(false); toggleSettings(false); toggleHistory(false); return;
+    if (!menu.hidden || !renameForm.hidden || !historyPanel.hidden) {
+      event.preventDefault(); togglePicker(false); toggleRename(false); toggleHistory(false); return;
     }
     event.preventDefault(); void presenter.send();
   });
@@ -851,12 +856,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     });
   };
   bindMenuKeys(menu, picker, () => togglePicker(false));
-  bindMenuKeys(settingsMenu, overflow, () => toggleSettings(false));
+  bindMenuKeys(renameForm, currentTitle, () => toggleRename(false));
   bindMenuKeys(historyPanel, historyBtn, () => toggleHistory(false));
   bindMenuKeys(plusMenu, plus, () => togglePlus(false));
   for (const [trigger, panel, open] of [
     [picker, menu, () => togglePicker(true)],
-    [overflow, settingsMenu, () => toggleSettings(true)],
     [historyBtn, historyPanel, () => toggleHistory(true)],
     [plus, plusMenu, () => togglePlus(true)],
   ] as const) trigger.addEventListener('keydown', event => {
@@ -873,14 +877,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!target || !target.isConnected) return;
     if (!menu.hidden && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
     if (!historyPanel.hidden && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
-    if (!settingsMenu.hidden && !settingsMenu.contains(target) && !overflow.contains(target)) toggleSettings(false);
+    if (!renameForm.hidden && !renameForm.contains(target) && !currentTitle.contains(target)) toggleRename(false);
     if (!plusMenu.hidden && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
     if (!plusMenu.hidden) { event.preventDefault(); togglePlus(false); plus.focus(); }
     else if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
-    else if (!settingsMenu.hidden) { event.preventDefault(); toggleSettings(false); overflow.focus(); }
+    else if (!renameForm.hidden) { event.preventDefault(); toggleRename(false); currentTitle.focus(); }
     else if (!historyPanel.hidden) { event.preventDefault(); toggleHistory(false); historyBtn.focus(); }
   };
   doc.addEventListener('click', onDocumentClick);
@@ -962,7 +966,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const title = state.conversation ? conversationLabel(state.conversation, state.conversations) : state.paperTitle || COPY.untitled;
     if (currentTitle.textContent !== title) currentTitle.textContent = title;
     currentTitle.title = state.conversation?.title || state.paperTitle || COPY.untitled;
-    conversationActions.hidden = !state.conversation;
+    // The title is only a rename control while a chat is open; with no chat it is plain text and the
+    // popover cannot be opened on it.
+    if (state.conversation) currentTitle.dataset.zcrAction = 'rename-conversation';
+    else delete currentTitle.dataset.zcrAction;
+    currentTitle.setAttribute('aria-label', state.conversation ? `${COPY.renameChat}: ${title}` : title);
+    if (!state.conversation && !renameForm.hidden) toggleRename(false);
     // The chip and its close cross exist only while a chat is open; the empty state keeps the
     // paper title plain, with no close affordance and no destructive control.
     if (state.conversation) context.setAttribute('data-zcr-chat-pill', '');
@@ -1149,6 +1158,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       modelSection.append(row);
     }
     sections.push(modelSection);
+    // Account usage moved here when the More menu went away: the model picker already reports the
+    // account's own allowances, and rate limits are account data, not a chat setting. It renders as
+    // its own section so it stays readable and is announced as text, never as a menu row.
+    const quotas = state.runtime?.rateLimits;
+    const accountSection = el('div', 'zcr-picker-section');
+    accountSection.dataset.zcrPickerSection = 'account';
+    accountSection.append(el('div', 'zcr-picker-heading', COPY.accountUsage));
+    const usage = el('p', 'zcr-account-usage');
+    usage.dataset.zcrAccountUsage = '';
+    usage.textContent = quotas ? quotas.map(quota => `${quota.label}: ${quota.usedPercent === null ? 'usage unknown' : `${quota.usedPercent}% used`}${quota.resetsAt === null ? '' : ` · resets ${new Date(quota.resetsAt * 1000).toLocaleString()}`}`).join('\n') || 'Account usage: no limits reported.' : 'Account usage: unavailable.';
+    accountSection.append(usage);
+    sections.push(accountSection);
     menu.replaceChildren(...sections);
   };
   const update = (state: PresenterState) => {
@@ -1159,10 +1180,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // The consent prompt is a state, not a banner: it appears only when a request actually needs it.
     scopeNotice.hidden = !state.pendingExplain;
     acknowledgeScope.hidden = !state.pendingExplain;
-    const quotas = state.runtime?.rateLimits;
-    accountUsage.textContent = quotas ? quotas.map(quota => `${quota.label}: ${quota.usedPercent === null ? 'usage unknown' : `${quota.usedPercent}% used`}${quota.resetsAt === null ? '' : ` · resets ${new Date(quota.resetsAt * 1000).toLocaleString()}`}`).join('\n') || 'Account usage: no limits reported.' : 'Account usage: unavailable.';
     if (state.workspace) {
-      if (!workspaceView) workspaceView = mountWorkspaceView({ input, context: composerContext, leading, settings: settingsContent }, {
+      if (!workspaceView) workspaceView = mountWorkspaceView({ input, context: composerContext, leading }, {
         searchReferences: (query, kind, signal) => presenter.searchReferences(query, kind, signal), previewReference: (reference, signal) => presenter.previewReference(reference, signal),
         addReference: async reference => { await presenter.addReference(reference); }, removeReference: async id => { await presenter.removeReference(id); },
         selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id),
@@ -1347,7 +1366,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     if (!composing && input.value !== state.draft.question) { input.value = state.draft.question; resizeInput(); }
     const signedIn = account === 'signedIn' && state.connection === 'ready';
-    const pickerKey = `${JSON.stringify(state.draft.settings ?? state.conversation?.settings ?? null)}\n${state.runtime?.models.map(entry => entry.id).join(',')}\n${signedIn}`;
+    const pickerKey = `${JSON.stringify(state.draft.settings ?? state.conversation?.settings ?? null)}\n${state.runtime?.models.map(entry => entry.id).join(',')}\n${signedIn}\n${JSON.stringify(state.runtime?.rateLimits ?? null)}`;
     if (menu.dataset.rendered !== pickerKey) {
       menu.dataset.rendered = pickerKey;
       renderPicker(state, signedIn);

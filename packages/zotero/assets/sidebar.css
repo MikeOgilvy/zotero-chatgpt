@@ -158,7 +158,16 @@ body.zcr-dock-open #split-view .primary-view,
   font-weight: 500;
   line-height: 18px;
   color: var(--fill-primary, CanvasText);
+  /* The title is the rename control, so it is a button with none of a button's default chrome and
+     the pointer cursor that says it can be activated. */
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
+.zcr-current-title:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; border-radius: 4px; }
 .zcr-chrome-source, .zcr-context-citation {
   display: flex;
   flex-wrap: nowrap;
@@ -300,9 +309,6 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-copy-answer[data-zcr-copied="true"] { color: var(--fill-primary, CanvasText); }
 /* Copy is icon-only; the labelled feedback node stays in the DOM but is visually hidden. */
 .zcr-copy-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.zcr-rename-form { width: 100%; }
-.zcr-rename-form { display: flex; gap: 4px; margin-top: 6px; }
-.zcr-rename-form input { min-width: 0; flex: 1; padding: 5px; border: 1px solid var(--zcr-border); border-radius: 5px; background: Field; color: FieldText; }
 /* The composer keeps exactly one control at its start: a plus menu with every attachment route. */
 .zcr-plus { color: var(--fill-secondary, GrayText); }
 .zcr-plus:hover, .zcr-plus[aria-expanded="true"] { background: var(--fill-quinary, ButtonFace); }
@@ -489,27 +495,26 @@ body.zcr-dock-open #split-view .primary-view,
 }
 .zcr-draft-image .zcr-icon-button svg { width: 12px; height: 12px; }
 .zcr-draft-image .zcr-icon-button:hover, .zcr-draft-image .zcr-icon-button:focus-visible { opacity: 1; background: var(--material-menu, Canvas); }
-.zcr-settings-menu {
+/* The rename popover hangs under the chrome, anchored to the right edge where the title chip sits.
+   It replaces the old More menu's rename row, so it carries the same opaque-base treatment and the
+   same top offset the toolbar-height variable defines. */
+.zcr-rename-form {
   position: absolute;
   top: calc(var(--zcr-toolbar-button-size, 28px) + 8px);
   right: 0;
   z-index: 7;
   width: min(280px, 100%);
-  max-height: calc(100% - 40px);
-  overflow: auto;
-  padding: 8px;
   box-sizing: border-box;
-  /* Same opaque-base treatment as the composer popovers: the material token can be translucent. */
+  display: flex;
+  gap: 4px;
+  padding: 8px;
   background-color: Canvas;
   background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
   border: 1px solid var(--zcr-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--fill-primary, CanvasText) 12%, transparent);
 }
-.zcr-conversation-actions { display: flex; gap: 4px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--zcr-border); }
-.zcr-conversation-actions .zcr-button { width: 100%; text-align: left; border: 0; }
-.zcr-settings-content { padding: 4px; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
-.zcr-settings-content p { margin-top: 8px; color: var(--fill-secondary, GrayText); }
+.zcr-rename-form input { min-width: 0; flex: 1; padding: 5px; border: 1px solid var(--zcr-border); border-radius: 5px; background: Field; color: FieldText; }
 
 .zcr-composer-bar {
   display: flex;
@@ -629,6 +634,15 @@ body.zcr-dock-open #split-view .primary-view,
   padding: 6px 12px 4px;
   font-size: calc(11px * var(--zcr-chat-text-scale, 1));
   color: var(--fill-secondary, GrayText);
+}
+/* Account usage lives in the picker's own section: it is read-only account data, so it is plain
+   wrapped text at the sidebar's chat scale rather than a row the owner could activate. */
+.zcr-picker-section .zcr-account-usage {
+  margin: 0;
+  padding: 2px 12px 8px;
+  white-space: pre-line;
+  color: var(--fill-secondary, GrayText);
+  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
 }
 .zcr-picker-option {
   display: flex;
@@ -808,7 +822,6 @@ body.zcr-dock-open #split-view .primary-view,
 .zcr-sidebar .zcr-context-disclosure { margin: 0 8px 8px; padding: 8px; background: var(--material-toolbar, ButtonFace); border-radius: 5px; }
 .zcr-sidebar .zcr-context-disclosure[hidden] { display: none; }
 .zcr-sidebar .zcr-context-disclosure p { margin: 0 0 6px; }
-.zcr-sidebar .zcr-settings-menu label { display: flex; gap: 6px; align-items: center; }
 /* Task ledgers: one stylesheet for every mounted view instead of a copy per mount. */
 .zcr-task-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font: inherit; font-size: 12px; }
 .zcr-task-view [hidden] { display: none !important; }

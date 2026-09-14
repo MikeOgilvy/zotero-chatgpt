@@ -212,7 +212,7 @@ it('shapes the current chat title as a rounded neutral chip with a small close c
   const chrome = el('div', 'zcr-chrome');
   const chip = el('div', 'zcr-chrome-main');
   chip.setAttribute('data-zcr-chat-pill', '');
-  const title = el('span', 'zcr-current-title', 'A very long conversation name that must truncate');
+  const title = el('button', 'zcr-current-title', 'A very long conversation name that must truncate');
   const close = el('button', 'zcr-current-close');
   close.setAttribute('aria-label', 'Close chat');
   chip.append(title, close); chrome.append(chip); doc.body.append(chrome);
@@ -222,6 +222,9 @@ it('shapes the current chat title as a rounded neutral chip with a small close c
   // The title truncates inside the chip instead of pushing the cross out of the row.
   expect(cs(title).whiteSpace).toBe('nowrap');
   expect(cs(title).textOverflow).toBe('ellipsis');
+  // It is a control now, so it carries no default button chrome and reads as clickable.
+  expect(cs(title).borderTopWidth).toBe('0px');
+  expect(cs(title).cursor).toBe('pointer');
   // The cross is a compact control, not a full toolbar button.
   expect(cs(close).width).toBe('18px');
   expect(cs(close).borderTopLeftRadius).toBe('999px');
@@ -378,6 +381,28 @@ it('pushes the chrome actions to the row end even when the open chat makes the t
   // The action group keeps its intrinsic size; the auto margin is what moves it, not a stretch.
   expect(actions.flexGrow).toBe('0');
   expect(actions.flexShrink).toBe('0');
+});
+
+it('floats the rename popover under the chrome with the opaque menu treatment', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const chat = el('section', 'zcr-chat');
+  const form = el('div', 'zcr-rename-form');
+  const field = el('input');
+  form.append(field); chat.append(form); doc.body.append(chat);
+  // It is a popover, not an inline row: renaming hangs off the title without pushing the transcript.
+  expect(cs(form).position).toBe('absolute');
+  const rule = shippedRule(doc, '.zcr-rename-form');
+  // It hangs below the toolbar row rather than over it, so the title stays visible while renaming.
+  expect(rule.cssText).toContain('--zcr-toolbar-button-size');
+  expect(rule.cssText).toContain('var(--zcr-border');
+  // happy-dom drops the gradient, so the opaque menu base is pinned in the shipped text.
+  expect(shippedCss()).toMatch(/\.zcr-rename-form\s*\{[^}]*var\(--material-menu/u);
+  // The field takes the remaining width so a long title stays editable in a narrow dock.
+  expect(Number.parseFloat(cs(field).flexGrow)).toBeGreaterThan(0);
+  // The menu it replaced is gone, not merely hidden.
+  expect(shippedCss()).not.toMatch(/\.zcr-settings-menu/u);
+  expect(shippedCss()).not.toMatch(/\.zcr-conversation-actions/u);
 });
 
 it('lays out the composer leading row so the plus and the capture-region shortcut share it', () => {

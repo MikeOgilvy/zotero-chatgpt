@@ -5,7 +5,7 @@ const COPY: Readonly<Record<string, string>> = {
   'New chat': '新建对话', 'Chat history': '对话历史', 'Search chats…': '搜索对话…',
   'Close chat': '关闭对话', 'Delete chat': '删除对话', 'Rename chat': '重命名对话', 'Save name': '保存名称', 'Chat name': '对话名称',
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
-  More: '更多', 'Chat options': '对话选项', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
+  'Account usage': '账户用量', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
   'Model and generation settings': '模型与生成设置', Effort: '推理强度', Options: '选项', Fast: '快速', Model: '模型',
   Low: '低', Medium: '中', High: '高', 'Extra High': '极高', Today: '今天', Yesterday: '昨天', 'Previous 7 days': '过去 7 天', Older: '更早',
   'Open the Codex sidebar to connect.': '打开 Codex 侧栏以连接。', 'Starting Codex…': '正在启动 Codex…',
@@ -52,7 +52,6 @@ const COPY: Readonly<Record<string, string>> = {
   'Add references or workflows': '添加引用或工作流', 'Close preview': '关闭预览', 'Reference preview': '引用预览',
   'Use reference pages': '使用这些引用页面', 'Use entire reference': '使用完整引用',
   'Reference first PDF page': '引用 PDF 起始页', 'Reference last PDF page': '引用 PDF 结束页',
-  "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.": '回答偏好、研究配置和工作流可用性位于 Zotero 的偏好设置窗口中。',
   'Instructions': '指令', 'Codex instructions': 'Codex 指令', 'Give Codex extra instructions and context for all chats.': '为所有对话提供额外的指令和上下文。',
   'Save': '保存', 'Export preferences': '导出偏好',
   'Installed workflows': '已安装的工作流', 'Create workflow': '创建工作流', 'Import workflow': '导入工作流',
@@ -119,7 +118,7 @@ const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-
 const TEXT = [
   BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
   '.zcr-history-heading', '.zcr-history-empty', '.zcr-status-line', '.zcr-message-meta',
-  '.zcr-settings-content > label', '.zcr-settings-content > p', '.zcr-context-disclosure > p', '.zcr-error',
+  '.zcr-context-disclosure > p', '.zcr-error',
   '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
   '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
   '.zcr-workspace-settings select[name="detail"] option', '.zcr-workspace-settings select[name="mathematics"] option',
@@ -137,8 +136,8 @@ const TEXT = [
   '.zcr-preferences [data-zcr-history="paper"] option',
 ].join(',');
 const ATTRIBUTES = [
-  BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-settings-menu', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
-  '.zcr-plus-menu input', '.zcr-conversation-actions input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
+  BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
+  '.zcr-plus-menu input', '.zcr-rename-form input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.
   '.zcr-preferences [data-zcr-history="search"]',
@@ -241,6 +240,7 @@ function actionLabel(text: string): string {
   if (contextReported) return `上次运行时用量报告：${contextReported[1]} 个输入词元；模型窗口 ${contextReported[2]}（${contextReported[3] === 'runtime reported' ? '运行时报告' : '内置目录估算'}）。这是上次报告，并非剩余空间。`;
   const trySkill = /^Try (.+) in draft$/u.exec(text); if (trySkill) return `在草稿中试用 ${trySkill[1]}`;
   for (const [source, target] of [
+    ['Rename chat: ', '重命名对话：'],
     ['Preview workflow ', '预览工作流 '], ['Remove workflow ', '移除工作流 '],
     ['Preview ', '预览 '], ['Remove ', '移除 '], ['Confirm delete ', '确认删除 '], ['Cancel delete ', '取消删除 '],
     ['Duplicate ', '创建副本：'], ['Export ', '导出 '], ['Edit ', '编辑 '], ['Delete ', '删除 '],

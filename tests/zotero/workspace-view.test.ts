@@ -11,20 +11,20 @@ const reference: ReaderReference = { id: 'paper-one', kind: 'article', label: 'S
 function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const document = new Window().document as unknown as Document;
   const pane = document.createElement('section'); pane.dataset.zcrSidebar = '';
-  const context = document.createElement('div'); const input = document.createElement('textarea'); const leading = document.createElement('div'); const advanced = document.createElement('div');
-  pane.append(context, input, leading, advanced); document.body.append(pane);
+  const context = document.createElement('div'); const input = document.createElement('textarea'); const leading = document.createElement('div');
+  pane.append(context, input, leading); document.body.append(pane);
   const actions: WorkspaceViewActions = {
     searchReferences: vi.fn().mockResolvedValue([reference]), previewReference: vi.fn().mockResolvedValue(reference),
     addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined), selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  const view = mountWorkspaceView({ input, context, leading, settings: advanced }, actions);
+  const view = mountWorkspaceView({ input, context, leading }, actions);
   const state: WorkspaceViewState = { settings: structuredClone(settings), draft: { references: [], skillId: null, profileId: null } };
   view.update(state);
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
   const key = (key: string) => input.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   const button = (label: string) => [...pane.querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === label || node.textContent === label)!;
-  return { document, pane, context, input, leading, advanced, actions, view, state, type, key, button };
+  return { document, pane, context, input, leading, actions, view, state, type, key, button };
 }
 
 it('searches @ objects with a type filter and adds the selected snapshot without sending', async () => {
@@ -66,17 +66,19 @@ it('previews reference and skill chips as inert text and removes them through ca
 });
 
 it('renders no per-chat research-profile control in the composer and points at the native Preferences window', () => {
-  const { advanced, context, actions, pane } = setup();
+  const { context, actions, pane } = setup();
   // The profile select, its visible "Profile" label and its scope row are gone from the composer.
   expect(context.querySelector('[data-zcr-profile]')).toBeNull();
   expect(context.querySelector('[data-zcr-chat-scope]')).toBeNull();
   expect(context.querySelector('.zcr-chat-profile-label')).toBeNull();
   expect(pane.textContent).not.toContain('Global preferences');
   expect(actions.selectProfile).not.toHaveBeenCalled();
-  // The global controls moved to Zotero's own Preferences window, not the sidebar.
-  expect(advanced.querySelector('[name="background"]')).toBeNull();
-  expect(advanced.querySelector('[name="profile-name"]')).toBeNull();
-  expect(pane.querySelector('[data-zcr-global-hint]')?.textContent).toMatch(/Zotero's Preferences window/u);
+  // The global controls live in Zotero's own Preferences window, not the sidebar; the old
+  // in-pane hint at that window was redundant and is gone with the container it lived in.
+  expect(pane.querySelector('[name="background"]')).toBeNull();
+  expect(pane.querySelector('[name="profile-name"]')).toBeNull();
+  expect(pane.querySelector('[data-zcr-global-hint]')).toBeNull();
+  expect(pane.textContent).not.toMatch(/Zotero's Preferences window/u);
 });
 
 it('keeps the / workflow chooser and its installed-workflows heading after the profile control is removed', async () => {
@@ -91,26 +93,26 @@ it('keeps the / workflow chooser and its installed-workflows heading after the p
 });
 
 it('no longer offers any per-chat override controls in the sidebar', () => {
-  const { advanced, pane } = setup();
-  for (const name of ['override-language', 'override-detail', 'override-mathematics']) expect(advanced.querySelector(`[name="${name}"]`)).toBeNull();
+  const { pane } = setup();
+  for (const name of ['override-language', 'override-detail', 'override-mathematics']) expect(pane.querySelector(`[name="${name}"]`)).toBeNull();
   expect(pane.textContent).not.toMatch(/Chat overrides|Answer language for this chat|Clear chat overrides/u);
 });
 
 it('offers no workflow authoring, import or export in the sidebar', () => {
-  const { pane, advanced } = setup();
+  const { pane } = setup();
   for (const label of ['Create workflow', 'Import workflow', 'Save workflow', 'Cancel editing', 'Duplicate', 'Export', 'Try in draft', 'Edit', 'Delete']) {
     expect(pane.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`), label).toBeNull();
   }
   expect(pane.querySelector('[data-zcr-skill-id]')).toBeNull();
   expect(pane.querySelector('[data-zcr-skill-editor]')).toBeNull();
   expect(pane.textContent).not.toMatch(/Installed workflows|SKILL\.md content|No workflows installed/u);
-  expect(advanced.querySelector('[name="workflow"]')).toBeNull();
+  expect(pane.querySelector('[name="workflow"]')).toBeNull();
 });
 
 it('offers no global preference, research-profile or workflow-availability control in the sidebar', () => {
-  const { advanced, pane, button } = setup();
+  const { pane, button } = setup();
   for (const label of ['Save preferences', 'Export preferences', 'Save as new profile', 'Update selected profile', 'Delete selected profile']) expect(button(label), label).toBeUndefined();
-  expect(advanced.querySelector('[name="language"]')).toBeNull();
+  expect(pane.querySelector('[name="language"]')).toBeNull();
   expect(pane.querySelector('[data-zcr-skill-enabled="derive"]')).toBeNull();
   // Workflow availability is a native Preferences checkbox; the sidebar only selects one for the chat.
   expect(pane.querySelector('[data-zcr-skill-id="derive"]')).toBeNull();
@@ -118,13 +120,13 @@ it('offers no global preference, research-profile or workflow-availability contr
 });
 
 it('reports a refused removal beside the composer controls instead of inside More', async () => {
-  const { context, advanced, pane, view, state, button } = setup({ removeReference: vi.fn().mockRejectedValue(new Error('Reference unavailable')) });
+  const { context, pane, view, state, button } = setup({ removeReference: vi.fn().mockRejectedValue(new Error('Reference unavailable')) });
   view.update({ ...state, draft: { ...state.draft, references: [reference] } });
   button('Remove Shared title').click();
   await vi.waitFor(() => expect(pane.textContent).toContain('Reference unavailable'));
   const status = pane.querySelector<HTMLElement>('.zcr-workspace-status')!;
   expect(context.contains(status)).toBe(true);
-  expect(advanced.contains(status)).toBe(false);
+  expect(pane.querySelector('.zcr-workspace-settings')).toBeNull();
 });
 
 

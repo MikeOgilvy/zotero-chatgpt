@@ -16,15 +16,15 @@ const reference: ReaderReference = { id: 'paper-one', kind: 'article', label: 'S
 function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const document = new Window().document as unknown as Document;
   const pane = document.createElement('section'); pane.dataset.zcrSidebar = '';
-  const context = document.createElement('div'); const input = document.createElement('textarea'); const leading = document.createElement('div'); const advanced = document.createElement('div');
-  pane.append(context, input, leading, advanced); document.body.append(pane);
+  const context = document.createElement('div'); const input = document.createElement('textarea'); const leading = document.createElement('div');
+  pane.append(context, input, leading); document.body.append(pane);
   const actions: WorkspaceViewActions = {
     searchReferences: vi.fn().mockResolvedValue([reference]), previewReference: vi.fn().mockResolvedValue(reference),
     addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined),
     selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  const view = mountWorkspaceView({ input, context, leading, settings: advanced }, actions);
+  const view = mountWorkspaceView({ input, context, leading }, actions);
   const state: WorkspaceViewState = { settings: structuredClone(settings), draft: { references: [], skillId: null, profileId: null } };
   view.update(state);
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
@@ -34,7 +34,7 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const status = () => menu().querySelector<HTMLElement>('.zcr-command-status')!;
   const options = () => [...menu().querySelectorAll<HTMLElement>('[role="option"]')].map(node => node.textContent ?? '');
   const filterButton = (label: string) => toolbar().querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  return { document, pane, context, input, leading, advanced, actions, view, state, type, key, menu, toolbar, status, options, filterButton };
+  return { document, pane, context, input, leading, actions, view, state, type, key, menu, toolbar, status, options, filterButton };
 }
 
 it('keeps @ on context references so it cannot reach or filter workflows', async () => {

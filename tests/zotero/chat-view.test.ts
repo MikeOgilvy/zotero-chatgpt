@@ -59,6 +59,7 @@ async function mountReadyChat(options: {
   workspace?: ReaderWorkspace;
   closeDock?: () => void;
   contextBudget?: (input: SendInput, conversation: Conversation) => ContextBudget;
+  rateLimits?: RuntimeSnapshot['rateLimits'];
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -74,6 +75,7 @@ async function mountReadyChat(options: {
   const runtime: RuntimeSnapshot = {
     revision: 0, runtime: 'ready', account: { state: 'signedIn' }, login: null,
     models: [model], error: null,
+    ...(options.rateLimits ? { rateLimits: options.rateLimits } : {}),
   };
   const listed = options.conversations ?? [conversation];
   if (!listed.some(entry => entry.id === conversation.id)) listed.unshift(conversation);
@@ -895,23 +897,40 @@ it('leaves the automatic-PDF preference to Zotero Preferences and off the chat s
   const sent: SendInput[] = [];
   const prepare = vi.fn(() => Promise.resolve(documentA));
   const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
-  const settings = root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]');
-  const menu = root.querySelector<HTMLElement>('[data-zcr-settings-menu]');
-  expect(settings?.getAttribute('aria-label')).toBe('More');
-  expect(settings?.textContent?.trim()).toBe('');
-  settings?.click();
-  expect(menu?.hasAttribute('hidden')).toBe(false);
+  // The More menu is gone: the chrome carries no three-dot trigger, no menu node and no glyph.
+  expect(root.querySelector('[data-zcr-action="settings"]')).toBeNull();
+  expect(root.querySelector('[data-zcr-settings-menu]')).toBeNull();
+  expect(root.querySelector('.zcr-conversation-actions, .zcr-settings-content')).toBeNull();
+  expect([...root.querySelectorAll('.zcr-chrome button')].map(node => node.getAttribute('aria-label'))).not.toContain('More');
   // The sidebar owns no preference or appearance control: the pane writes the same pref.
   expect(root.querySelector('[data-zcr-automatic-pdf]')).toBeNull();
-  expect(menu?.querySelectorAll('[data-zcr-pref^="automatic-pdf"]')).toHaveLength(0);
-  expect(menu?.querySelectorAll('input[type="checkbox"], select')).toHaveLength(0);
-  expect(menu?.querySelector('[data-zcr-account-usage]')).not.toBeNull();
+  expect(root.querySelectorAll('[data-zcr-pref]')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zcr-picker-menu] input, [data-zcr-picker-menu] select')).toHaveLength(0);
   expect(sent).toHaveLength(0);
   // The reader still applies the stored opt-out to background preparation, with no panel to show it.
   await vi.waitFor(() => expect(prepare).toHaveBeenCalled());
   await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
   expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
   expect(sent).toHaveLength(0);
+});
+
+it('keeps account usage reachable in the model picker after the More menu is gone', async () => {
+  const rateLimits = [{ label: 'Codex', usedPercent: 42, resetsAt: 1893456000, windowMinutes: 300 }];
+  const { root } = await mountReadyChat({ messages: [], rateLimits });
+  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-action="picker"]')!;
+  picker.click();
+  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
+  expect(menu.hidden).toBe(false);
+  const account = menu.querySelector<HTMLElement>('[data-zcr-picker-section="account"]')!;
+  expect(account.querySelector('.zcr-picker-heading')?.textContent).toBe('Account usage');
+  // The figures are the runtime's own report and are rendered verbatim, never as a menu row.
+  expect(account.querySelector('[data-zcr-account-usage]')?.textContent).toContain('Codex: 42% used');
+  expect(account.querySelector('button')).toBeNull();
+  // The section is not a chat setting: closing and reopening the picker keeps it non-interactive.
+  picker.click();
+  expect(menu.hidden).toBe(true);
+  picker.click();
+  expect(menu.querySelector('[data-zcr-picker-section="account"]')).not.toBeNull();
 });
 
 it('keeps the whole PDF-context cluster off the chat surface while reading stays a background act', async () => {
@@ -1195,12 +1214,16 @@ it('closes the current chat from the title pill cross without confirming, deleti
   expect(close.getAttribute('aria-label')).toBe('Close chat');
   expect(close.textContent?.trim()).toBe('');
   expect(close.querySelector('svg path')?.getAttribute('d')).toBe('M4 4l8 8M12 4l-8 8');
-  // The destructive action is gone from the chrome and from More.
+  // The destructive action is gone from the chrome and there is no More menu to hide it in.
   expect(chrome.querySelector('[data-zcr-action="delete-current-conversation"]')).toBeNull();
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]')!.click();
-  const menu = root.querySelector<HTMLElement>('[data-zcr-settings-menu]')!;
-  expect(menu.querySelector('[data-zcr-action="delete-conversation"], [data-zcr-action="delete-current-conversation"]')).toBeNull();
-  expect(menu.querySelector('[data-zcr-action="rename-conversation"]')).not.toBeNull();
+  expect(root.querySelector('[data-zcr-settings-menu]')).toBeNull();
+  expect(chrome.querySelector('[data-zcr-action="delete-conversation"]')).toBeNull();
+  // Renaming moved onto the chat's own title: the title button is the rename control, and it is
+  // the only place that offers it now that the More menu is gone.
+  const rename = chrome.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!;
+  expect(rename.dataset.zcrAction).toBe('rename-conversation');
+  expect(rename.getAttribute('aria-label')).toContain('Synthetic Paper A');
+  expect(chrome.querySelector('[data-zcr-action="rename-conversation"]:not([data-zcr-current-title])')).toBeNull();
   // Switch to the second chat, then close it: no prompt, no delete, no data loss.
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
@@ -1686,24 +1709,49 @@ it('keeps history search filtering and keyboard navigation working in the single
   expect(rowOf('Alpha notes')?.hasAttribute('hidden')).toBe(false);
 });
 
-it('renames the open chat from the history actions and closes the form on success', async () => {
+it('renames the open chat from its own title chip and closes the form on success', async () => {
   const { root, presenter } = await mountReadyChat();
-  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!;
+  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!;
   const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
   expect(form.hidden).toBe(true);
+  expect(rename.getAttribute('aria-expanded')).toBe('false');
   rename.click();
   expect(form.hidden).toBe(false);
+  expect(rename.getAttribute('aria-expanded')).toBe('true');
+  // The field starts from the live title and owns the focus, so renaming is keyboard-reachable.
   const input = form.querySelector<HTMLInputElement>('input')!;
   expect(input.value).toBe('Synthetic Paper A');
+  expect(root.ownerDocument.activeElement).toBe(input);
   input.value = '  先验讨论  ';
   form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
   await vi.waitFor(() => expect(form.hidden).toBe(true));
   expect(presenter.snapshot().conversation?.title).toBe('先验讨论');
+  // Focus returns to the control that opened the popover instead of dropping to the document.
+  expect(root.ownerDocument.activeElement).toBe(rename);
+});
+
+it('closes the rename popover on Escape and on an outside click without renaming', async () => {
+  const { root, presenter } = await mountReadyChat();
+  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!;
+  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  rename.click();
+  const input = form.querySelector<HTMLInputElement>('input')!;
+  input.value = 'Discarded';
+  input.dispatchEvent(new root.ownerDocument.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(form.hidden).toBe(true);
+  expect(root.ownerDocument.activeElement).toBe(rename);
+  expect(presenter.snapshot().conversation?.title).toBe('Synthetic Paper A');
+  // An outside click closes it too; the draft textarea is outside the popover.
+  rename.click();
+  expect(form.hidden).toBe(false);
+  root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.click();
+  expect(form.hidden).toBe(true);
+  expect(presenter.snapshot().conversation?.title).toBe('Synthetic Paper A');
 });
 
 it('reports a failed rename in the view error slot and keeps the form open', async () => {
   const { root } = await mountReadyChat({ rename: () => Promise.reject(new Error('/Users/somebody/private/state.json missing')) });
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!.click();
   const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
   form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
   const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
@@ -1874,9 +1922,8 @@ it('surfaces the presenter’s own sentence for a coded view failure and keeps t
 it('shows the constant sentence when a failed view action has no coded message', async () => {
   const { root } = await mountReadyChat({ messages: [], rename: () => Promise.reject(new Error('raw host detail')) });
   const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="settings"]')!.click();
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="rename-conversation"]')!.click();
-  const name = root.querySelector<HTMLInputElement>('[data-zcr-settings-menu] input')!;
+  root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!.click();
+  const name = root.querySelector<HTMLInputElement>('.zcr-rename-form input')!;
   name.value = 'Renamed';
   root.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
   await vi.waitFor(() => expect(viewError.hidden).toBe(false));

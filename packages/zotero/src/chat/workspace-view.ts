@@ -12,7 +12,7 @@ export interface WorkspaceViewActions {
   selectProfile: (id: string | null) => Promise<void>;
   setReferenceRange?: (id: string, range: [number, number] | null) => Promise<void>;
 }
-export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement; settings: HTMLElement }
+export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement }
 
 function failure(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
 function referenceDetail(reference: ReaderReference): string {
@@ -28,7 +28,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
   const chips = create('div', '', 'zcr-workspace-chips'); chips.dataset.zcrWorkspaceChips = ''; mounts.context.append(chips);
-  const advanced = create('div', '', 'zcr-workspace-settings'); advanced.dataset.zcrWorkspaceSettings = ''; mounts.settings.append(advanced);
   const status = create('p', '', 'zcr-workspace-status'); status.setAttribute('role', 'status'); status.hidden = true;
   const preview = create('div', '', 'zcr-workspace-preview'); preview.setAttribute('role', 'dialog'); preview.setAttribute('aria-label', 'Reference preview'); preview.hidden = true; container.append(preview);
   let state: WorkspaceViewState | null = null; let disposed = false; let composing = false;
@@ -184,13 +183,8 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   // Preferences window, and a request uses those global preferences. A draft saved before this
   // removal still carries `profileId` and keeps applying at send time (see presenter.selectProfile),
   // so the field stays in the data model but has no control here.
-  /** The status slot reports refusals from the scoped controls (reference and workflow chips). */
+  /** The status slot reports refusals from the scoped controls (reference and skill chips). */
   mounts.context.append(status);
-  // Global answer preferences, research profiles and workflow availability live in Zotero's own
-  // Preferences window; this pane only chooses what applies to the current chat.
-  const globalHint = create('p', "Answer preferences, research profiles and workflow availability are in Zotero's Preferences window.", 'zcr-workspace-muted');
-  globalHint.dataset.zcrGlobalHint = '';
-  advanced.append(globalHint);
   let chipsKey = '';
   return { openCommands, openSkills, update: next => {
     if (disposed) return; state = next;
@@ -199,6 +193,6 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   }, dispose: () => {
     if (disposed) return; disposed = true; searchController?.abort(); previewController?.abort(); querySerial++;
     input.removeEventListener('input', onInput); input.removeEventListener('click', onInput); input.removeEventListener('keyup', onCaretKey); input.removeEventListener('compositionstart', onStart); input.removeEventListener('compositionend', onEnd);
-    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); status.remove(); advanced.remove();
+    doc.removeEventListener('pointerdown', outsidePreview); menu.dispose(); preview.remove(); chips.remove(); status.remove();
   } };
 }
