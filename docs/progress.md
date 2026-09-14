@@ -9,6 +9,7 @@
 - **工作树**：干净。本轮只改被跟踪的 `packages/zotero/assets/sidebar.css`（死代码）与本页/其它文档；`dist/`、`build/`、`.zcr-dev/` 的清理不产生提交。
 - **开发版本**：npm `0.4.0-alpha.1` / Zotero **`0.4.0a5`**（本轮提升，见 [`manifest.json`](../packages/zotero/manifest.json)）。
 - **门禁（2026-09-14 同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` PASS（**计数与条件见下『测试计数（唯一权威）』**）；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（**92,665,647 bytes**，SHA-256 `68529c36cfd422268a7f24fc05eaf350b057c1457923d1f8320a6bdc7129261b`）；`npm run verify:artifacts` **84 files PASS**，与 `dist/SHA256SUMS` 一致。均为代码 + 单元 + 产物证据。
+- **真实宿主 `--context`（2026-09-14，0.4.0a5，专用 `.zcr-dev/context` 树）**：**PASSED，`32 executed / 32 PASS / 0 FAIL`**，`recordedRequests = 0`，`build` 0.4.0a5 且 SHA-256 `68529c36…` 与产物一致；`automatic-whole-pdf-background-preparation-without-panel` 通过（`productGate` 2/2、10 次自动读取、`preparationObserved: true`）；三个 `pref-pane-copy-*` 检查通过，命中 `Appearance`/`外观` 图例（zh 切换时 skill id/名字逐字不变）；8 项 `notRun`（`real-model-answer`、`official-login`、`in-flight-model-stop`、`long-term-memory`、`image-understanding`、`acknowledge-context-resumes-the-pending-explain`、`pref-pane-visual-theme-and-keyboard`、`pref-pane-registrar-isolated-from-host-auto-unregister`）不得当作通过。报告原样归档 [host-context-0.4.0a5-PASS-32of32.json](../.zcr-dev/verification/scope-2026-09-14-a5/host-context-0.4.0a5-PASS-32of32.json)，SHA-256 `03c7a614f9bd388f6e05c4d2f8e19bbf96734a49aac4178c99bff5b5da18d187`。
 - **产物诚实边界**：见下 [产物边界（重要）](#产物边界重要)。
 - **本轮（2026-09-14 收尾轮）删除（忽略目录，不产生提交）**：删掉 stale 的 `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（92,661,386 B，SHA-256 `061f4680…`，**从未宿主验证、从未安装**）。删除前已确认宿主已验证的 `.zcr-dev/artifact-backup/zotero-codex-reader-0.4.0a4-dev.host-verified-5a6bb161.xpi` 仍在且 SHA-256 仍为 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`。现在 `dist/` 只保留 `zotero-codex-reader-0.4.0a5-dev.xpi` + `SHA256SUMS`。
 - **更早清理轮删除（忽略目录，不产生提交）**：`dist/` 旧包 `0.3.0a1`（102,969,823 B）/ `0.4.0a1`（92,643,635 B）/ `0.4.0a2`（92,643,635 B）/ `0.4.0a3`（92,668,286 B）、`build/`（215 MB）、`.zcr-dev/` 旧日志 37 份（11 MB）与旧报告/ `build-info-*.json` 6 份。保留 `.zcr-dev/{profile,data,context,live,verification,pin-bump,probes,fixtures,s6-virgin,s6-upgrade,runtime-cache}` 与 `artifact-backup/`。删除前已用 `ps` 确认无 Zotero 进程使用任何 `.zcr-dev/` profile，且逐文件 `rg` 确认无仓库引用。
@@ -18,11 +19,11 @@
 ### 产物边界（重要）
 
 - **canonical `dist` 产物 = `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（92,665,647 bytes，SHA-256 `68529c36cfd422268a7f24fc05eaf350b057c1457923d1f8320a6bdc7129261b`）**，由 `package:dev` 从当前 HEAD 的源码打出现，`verify:artifacts` **84 files PASS**。
-- **(a) 这份 a5 只有“代码 + 单元 + 产物”证据，未经过任何真实宿主验证。** 完成真实宿主 `--context` **32/32** 的是**上一份** a4 字节（92,661,563 bytes，SHA-256 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`，构建于 `96f8c2c`），**不是** a5。
+- **(a) 这份 a5 已完成真实宿主 `--context` 验证（2026-09-14，专用 `.zcr-dev/context` 树，32/32 PASS，`recordedRequests = 0`）。** 报告原样归档 [host-context-0.4.0a5-PASS-32of32.json](../.zcr-dev/verification/scope-2026-09-14-a5/host-context-0.4.0a5-PASS-32of32.json)（SHA-256 `03c7a614…`）。此前完成真实宿主 `--context` **32/32** 的是 a4 字节（92,661,563 bytes，SHA-256 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`，构建于 `96f8c2c`）。
 - **(b) 宿主已验证的 a4 字节已备份**在忽略路径 `.zcr-dev/artifact-backup/zotero-codex-reader-0.4.0a4-dev.host-verified-5a6bb161.xpi`（本轮重打包前已复核其 SHA-256 仍为 `5a6bb161…`），需要时可还原。
-- **(c) owner 正常 profile 当前装的仍是宿主已验证的 a4（`5a6bb161…`）**；a5 尚未安装、尚未宿主验证。
+- **(c) owner 正常 profile 当前装的仍是宿主已验证的 a4（`5a6bb161…`）**；a5 只在专用 `.zcr-dev/context` 树内安装并完成宿主验证，**owner 正常 profile 尚未安装 a5**。
 - **(d) a5 使用了新的版本串**（`0.4.0a4` → `0.4.0a5`），因此下一次侧载对 owner 可见——不再有“同版本重装 no-op”的脚枪。同版本脚枪的机制说明仍适用于所有同版本重装场景。
-- **验收门槛**：在 owner 于专用 profile 完成一次真实宿主 `--context`（或等价的人工复核）之前，**不得**把 a5 说成“宿主已验证”。a5 与 `5a6bb161` 的差异除版本字面量外，还有本轮补齐的 5 份第三方许可文件（不改运行行为，但会改变随包字节）。
+- **验收门槛**：a5 已在专用 `.zcr-dev/context` 树完成一次真实宿主 `--context`（2026-09-14，32/32 PASS），据此可称 a5 为**宿主已验证**；但该验证**不含**真实模型、图像生成或公开发行，见下节“未验证 / NOT RUN”。a5 与 `5a6bb161` 的差异除版本字面量外，还有本轮补齐的 5 份第三方许可文件（不改运行行为，但会改变随包字节）。
 
 ### 测试计数（唯一权威，2026-09-14 实测）
 
@@ -103,7 +104,7 @@ Apple M5 / 16 GB / macOS 26.6.2 (25G83)，Zotero 9.0.6，1000×600 CSS px，DPR 
 | 标注 / 获取整理 agent | 候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验已有代码与单元；真实库原生写入/撤销、网络预览与合法全文核对未在宿主验证 | D/E |
 | 设置/偏好设置窗口：preferences-*、workspace-store | 原生面板注册/清理、面板端口与快照写入、侧边栏去重已有代码与单元；**2026-09-13 已在真实宿主预检：注册身份正确、真实 Preferences 窗口能挂载面板（沙箱桥对片段可见）、禁用/启用不叠加、无错误日志**；**面板文案已随 store 的 `uiLanguage` 本地化，并在真实 Preferences 窗口实测双向切换（zh：图例 `对话`、store 读回 `zh`、六个内置 skill 的 id/名字逐字不变；切回 en：`Chat`、store 回 `en`）**。仍缺面板的中文**视觉**（字体回退、暗色/亮色、键盘 Tab）、打开窗口时的真实 store 并发，以及片段挂载前占位与“插件未运行”告警的英文（那时没有可读 store，无持久化语言可用） | F |
 | 论断溯源：reader/locate、reader/source-highlight、reader-policy | 冻结 revision 校验、逐字引用定位与临时高亮导航、诚实 miss、无库写入已有代码与单元；**2026-09-13 已在真实宿主用生产 `nativeSourceNavigator`+`openSourcePage` 以合成 quote 实跑：回到引用页 `highlighted`、缺失 quote 诚实 `unlocated`、无库写入**；仍缺真实 Gecko 高亮**视觉**、长引用真实定位质量、以及真实模型是否输出逐字引用（点击真实回答链接的完整路径未验） | F |
-| 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；第三方库/字体许可本轮已补齐（见上表许可行）。本轮实测 `package:dev`/`verify:artifacts` → a5（**84 files**），但 **a5 未宿主验证**，owner profile 仍是宿主已验证的 a4（`5a6bb161…`）。官方新登录、真实输出/停止/在途恢复、无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成；干净 checkout 重建历史上复现过一次、本轮未重跑 | F |
+| 安装/登录/发行/性能 | 项目已按 MIT 许可并在包内包含 `LICENSE`；第三方库/字体许可本轮已补齐（见上表许可行）。本轮实测 `package:dev`/`verify:artifacts` → a5（**84 files**），且 a5 已在专用 `.zcr-dev/context` 树完成真实宿主 `--context`（32/32 PASS，`recordedRequests = 0`）；owner profile 仍是宿主已验证的 a4（`5a6bb161…`）。官方新登录、真实输出/停止/在途恢复、无 Node/下载隔离、长时压力、完整原生视觉矩阵、公开签名发行均未完成；干净 checkout 重建历史上复现过一次、本轮未重跑 | F |
 | 草稿持久化：**已按代码判定（旧文档矛盾已更正）** | **未发送草稿会持久化到磁盘并在插件重启后恢复**，旧文档“仅寿命内保留、重启不会恢复”的表述为**错误**，已删除。代码链路（**代码 + 单元**证据，非宿主）：输入/设置/滚动变化在 `presenter.ts:260-268` 的 `stageDraft` 里经 150 ms debounce 进入 `flushDraft`（`:271-285`）→ `workspace.saveDraft`（`:280`）；插件关闭时 `index.ts:332` 的 `shutdown` 屏障对每个 presenter 强制 `flushDraft`。落盘由 `packages/core/src/workspace/store.ts:225-231` 的 `saveDraft` 写入 `workspace/drafts/<clientId>-<libraryId>-<attachmentKey>-<conversation>.json`（路径拼装在 `:191-193`），记录根目录由 `packages/zotero/src/runtime/local-services.ts:13-15` 的 `zotero-codex-reader/v1/records` 决定；`clientId` 来自 `index.ts:21` 的持久 pref `extensions.zcr.clientId`（`clientId()` 在 `:46-50`），跨重启/升级稳定。恢复在 `presenter.ts:243-251` 的 `loadLocal`（`:230`）里 `workspace.readDraft` 完成，`loadLocal` 由 `activate()`（`:613-614`）调用；只有持久化的 `pageRange` 被**故意**不恢复（`:246-249`，schema 保留但始终写 null）。**仍未做**：在专用 profile 重启后对“草稿实际恢复到输入框”做端到端宿主观察（本轮未运行宿主），故“重启后恢复”当前仅为代码/单元结论 | B |
 | 许可/第三方声明缺口（**本轮已补齐**） | 已补齐。用 esbuild metafile 实测 `content/zcr.js` 真正打包的逐包文件：`linkify-it@5.0.2`、`mdurl@2.1.0`、`uc.micro@2.1.0`、`punycode.js@2.3.1` 均为 MIT，`entities@4.5.0`（**markdown-it 的嵌套副本**）为 BSD-2-Clause。注意版本判定：`punycode.js` 不是同名 hoisted `punycode@2.3.1`（后者只在 eslint→ajv→uri-js 的 dev 链上、不打包），`entities` 也不是根目录 hoisted 的 `entities@7.0.1`（happy-dom 的 dev 依赖）。已在 `scripts/build.mjs` 的 `copyThirdPartyAssets` 随包 `content/assets/licenses/{linkify-it,mdurl,uc.micro,punycode.js,entities}.LICENSE`（源文件名分别为 `LICENSE`/`LICENSE`/`LICENSE.txt`/`LICENSE-MIT.txt`/`LICENSE`），`scripts/verify-artifacts.mjs` 的 `requiredLicenses` 已把这 5 个列为必需，`tests/build/build.test.ts` 与 `tests/build/verify-artifacts.test.ts` 已加“缺一即拒绝”的断言（仅加强）。以上为代码 + 单元 + 产物证据。`runtime/README.md` 第 7 行关于 Rust 侧 Codex runtime 的“complete release dependency/license audit remains an S6 task”是对固定运行资产的独立声明，本轮未动 | 已完成 |
 
@@ -135,7 +136,8 @@ Apple M5 / 16 GB / macOS 26.6.2 (25G83)，Zotero 9.0.6，1000×600 CSS px，DPR 
 - [x] 草稿持久化文档更正（代码+单元）：独立代码复核证实未发送草稿**会**持久化并在插件重启后恢复，删除旧的“仅寿命内保留”错误表述并补 `file:line`（`presenter.ts:230,243-251,260-268,271-285`、`index.ts:21,46-50,332`、`store.ts:191-193,225-231`、`local-services.ts:13-15`）。
 - [x] s6 测试去依赖已删产物（代码+单元）：`tests/build/prepare-s6-upgrade.test.ts` 不再引用已删除的 `dist/zotero-codex-reader-0.3.0a1-dev.xpi`，改用明确合成的本地缺失路径；文件存在性校验仍由“两版本不同”用例覆盖。
 - [x] 第三方许可补齐（代码+单元+产物）：5 个缺失声明（`linkify-it`/`mdurl`/`uc.micro`/`punycode.js`，均 MIT；`entities@4.5.0`，BSD-2-Clause）随包，`build.mjs` 拷入、`verify-artifacts.mjs` 必需、两条构建断言覆盖；`verify:artifacts` 由 79 files 升到 **84 files**。
-- [x] 0.4.0a5 版本提升、门禁、打包与产物校验（代码+单元+产物）：`typecheck`/`lint` PASS、`test:unit` PASS（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)）、`package:dev` → `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（**92,665,647 bytes**，SHA-256 `68529c36…`）、`verify:artifacts` **84 files PASS**。**a5 未经宿主验证**，owner profile 仍是宿主已验证的 a4（`5a6bb161…`）；stale 的 `061f4680` a4 已删（备份 `5a6bb161` 仍在）。见 [产物边界（重要）](#产物边界重要)。
+- [x] 0.4.0a5 版本提升、门禁、打包与产物校验（代码+单元+产物）：`typecheck`/`lint` PASS、`test:unit` PASS（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)）、`package:dev` → `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（**92,665,647 bytes**，SHA-256 `68529c36…`）、`verify:artifacts` **84 files PASS**。owner profile 仍是宿主已验证的 a4（`5a6bb161…`）；stale 的 `061f4680` a4 已删（备份 `5a6bb161` 仍在）。见 [产物边界（重要）](#产物边界重要)。
+- [x] 真实宿主 `--context`（2026-09-14 0.4.0a5，**取代 a4 的 32/32 结论**）：**32 executed / 32 PASS / 0 FAIL**，`recordedRequests = 0`，`build` 0.4.0a5 且 SHA-256 `68529c36…` 与产物一致；a3 曾失败的 `automatic-whole-pdf-background-preparation-without-panel` 通过（`productGate` 2/2、10 次自动读取、`preparationObserved: true`）；三个 `pref-pane-copy-*` 通过（命中 `Appearance`/`外观` 图例，zh 时段内 skill id/名字逐字不变）。8 项 `notRun` 与报告逐字一致，不得当作通过。报告原样归档 `.zcr-dev/verification/scope-2026-09-14-a5/host-context-0.4.0a5-PASS-32of32.json`（SHA-256 `03c7a614…`）；未修改任何驱动/断言/超时，未读到任何认证文件，未向真实库写入。
 - [ ] 收尾：干净 checkout 重建（历史上已在临时 worktree 复现过一次，本轮未重跑）；CI/release 工作流已按真实脚本与 `.nvmrc` 加固且保持无 upload/publish；产物/隐私/文档链接复查仍待执行，只留必要测试/运行资产。
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
@@ -183,12 +185,12 @@ UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是
 
 ## 未验证 / NOT RUN（不得当成通过）
 
-本轮（2026-09-14 收尾轮：草稿文档更正、s6 测试去依赖、补齐第三方许可、a5 版本提升）**只跑了 `typecheck`/`lint`/`test:unit`/`package:dev`/`verify:artifacts`，未运行任何真实宿主、真实模型、图像生成或公开发行检查**。当前仍未验证：
+本轮（2026-09-14 收尾轮：草稿文档更正、s6 测试去依赖、补齐第三方许可、a5 版本提升）跑了 `typecheck`/`lint`/`test:unit`/`package:dev`/`verify:artifacts`，并对 a5 在专用 `.zcr-dev/context` 树跑了真实宿主 `--context`（**32/32 PASS，`recordedRequests = 0`**）；**未运行任何真实模型、图像生成或公开发行检查**。当前仍未验证：
 
 - 真实模型输出/流式/停止/在途恢复（`--live` 与 `--live-model` 均 NOT RUN；`--live-model` 需 owner 本人在 `.zcr-dev/live/` 隔离树完成一次官方登录）；真实图像生成；真实文献库原生标注写入与撤销；`--context` 报告里的 8 项 `notRun`（`real-model-answer`、`official-login`、`in-flight-model-stop`、`long-term-memory`、`image-understanding`、`pref-pane-visual-theme-and-keyboard`、`pref-pane-registrar-isolated-from-host-auto-unregister`、`acknowledge-context-resumes-the-pending-explain`）。
 - 面板中/英文与暗色/亮色的**目视**、键盘 Tab、真实 **IME** 输入、真实 Gecko 临时高亮**视觉**、真实阅读锚点目视；真实文献库 PDF 是否与合成 fixture 行为一致。
 - 无 Node 环境安装、下载隔离、公开签名发行与升级验收；干净 checkout 重建（历史上已在临时 worktree 复现过一次，本轮未重跑）。
-- **a5 的宿主证据**：a5 XPI 只经 `package:dev` + `verify:artifacts` 校验，**未安装、未宿主执行**；要有宿主证据必须先对 a5 跑一次真实 `--context`（或等价人工复核）。
+- **a5 的宿主证据**：a5 已在专用 `.zcr-dev/context` 树完成真实宿主 `--context`（2026-09-14，**32/32 PASS，`recordedRequests = 0`**），报告原样归档 `.zcr-dev/verification/scope-2026-09-14-a5/host-context-0.4.0a5-PASS-32of32.json`（SHA-256 `03c7a614…`）。该运行**只**证明当前合成 PDF 的本地路径、原生 UI/会话/附件切换、偏好面板注册与中英文图例切换、以及合成性能样本；它**不**证明真实模型输出/流式/停止/在途恢复、图像生成、原生库写入、无 Node 安装或公开发行。`--live-model`（需 owner 登录）仍 NOT RUN。
 - a3 的 `--context` 失败（`automatic-background-preparation` 60s 超时）已被 a4 的 32/32 取代；a3 失败报告与过程原样保留在归档。
 
 
