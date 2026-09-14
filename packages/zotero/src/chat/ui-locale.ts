@@ -107,12 +107,6 @@ const COPY: Readonly<Record<string, string>> = {
   unknown: '未知', 'Text allowance': '文本配额', 'not asserted': '未断言',
   'Fit was not asserted: model capacity or retained history is unknown.': '未断言是否适配：模型容量或保留的历史记录未知。',
   'What was supplied and what was not': '已提供与未提供的内容',
-  // Paper card (chat/view.ts). The field labels are the shared `BIBLIOGRAPHY_LABELS`; the model's
-  // compact bibliographic block uses the same English strings, so one translation table covers both.
-  'About this paper': '关于这篇文章', Title: '标题', Authors: '作者', Shortened: '已缩短',
-  'Item type': '条目类型', Journal: '期刊', 'Journal abbrev.': '期刊缩写', Book: '图书', Conference: '会议',
-  Proceedings: '会议论文集', Publisher: '出版社', University: '大学', Institution: '机构', Year: '年份',
-  Volume: '卷', Issue: '期', Pages: '页码', Language: '语言', Editors: '编者', Tags: '标签', Abstract: '摘要',
 };
 
 // Content areas are never localized, including controls embedded in rendered Markdown.
@@ -135,8 +129,6 @@ const TEXT = [
   '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
   '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
   '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
-  // Paper card: labels only. The title, authors and every field value stay verbatim data.
-  '.zcr-bibliography-heading', '.zcr-bibliography-label', '.zcr-bibliography-shortened',
   // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
   '.zcr-document-status',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.

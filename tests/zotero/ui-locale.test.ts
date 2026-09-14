@@ -194,28 +194,6 @@ it('localizes the close-chat control without touching the destructive delete lab
   expect(close.title).toBe('Close chat'); locale.dispose();
 });
 
-it('translates the paper card labels while every bibliographic value stays verbatim', () => {
-  const { root, add } = setup();
-  const card = add('section', 'zcr-bibliography');
-  add('p', 'zcr-bibliography-heading', 'About this paper', card);
-  const list = add('dl', 'zcr-bibliography-list', '', card);
-  const row = add('div', 'zcr-bibliography-row', '', list);
-  add('dt', 'zcr-bibliography-label', 'Journal', row);
-  add('dd', 'zcr-bibliography-value', 'Nature', row);
-  const abstractRow = add('div', 'zcr-bibliography-row', '', list);
-  add('dt', 'zcr-bibliography-label', 'Abstract', abstractRow);
-  const abstract = add('dd', 'zcr-bibliography-value', 'A long abstract', abstractRow);
-  add('span', 'zcr-bibliography-shortened', 'Shortened', abstract);
-  const locale = mountUILocale(root); locale.update('zh');
-  expect(card.querySelector('.zcr-bibliography-heading')!.textContent).toBe('关于这篇文章');
-  expect([...card.querySelectorAll('.zcr-bibliography-label')].map(node => node.textContent)).toEqual(['期刊', '摘要']);
-  // The paper's own field values are data: 'Nature' and the abstract text are never translated.
-  expect(card.querySelector('.zcr-bibliography-value')!.textContent).toBe('Nature');
-  expect(abstract.textContent).toBe('A long abstract已缩短');
-  locale.update('en');
-  expect(abstract.textContent).toBe('A long abstractShortened'); locale.dispose();
-});
-
 it('translates the local reading status and re-emits every page count verbatim', () => {
   const { root, add } = setup();
   const all = add('p', 'zcr-document-status', 'Read all 12 pages locally');

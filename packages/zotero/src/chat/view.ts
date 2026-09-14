@@ -5,7 +5,6 @@ import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
 import { mountUILocale } from './ui-locale.ts';
 import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
-import { BIBLIOGRAPHY_LABELS } from '../../../core/src/context/bibliography.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
   applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
@@ -91,12 +90,6 @@ const COPY = {
   chooseImagesHint: 'From your computer',
   addReferenceHint: 'Saved chats and articles',
   addSkillHint: 'Installed skills for this chat',
-  // Paper card. The field labels come from the shared `BIBLIOGRAPHY_LABELS` used by the model
-  // context, so the sidebar and the request describe one paper with one vocabulary.
-  bibliographyHeading: 'About this paper',
-  bibliographyTitle: 'Title',
-  bibliographyAuthors: 'Authors',
-  bibliographyShortened: 'Shortened',
   // Local reading status. The sidebar used to render preparation state in a panel that was removed,
   // which made a successful whole-PDF read invisible: nothing on screen changed, so an owner could
   // not tell that their article had been read. These lines report the read that actually happened,
@@ -463,13 +456,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   context.append(currentTitle, closeCurrent);
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
-  // Paper-level context, below the chrome: what this PDF actually is, frozen when the reader opened
-  // it. It never describes the conversation, so it stays put while chats open and close.
-  const bibliography = el('section', 'zcr-bibliography');
-  bibliography.dataset.zcrBibliography = '';
-  bibliography.hidden = true;
-  // The local read of this PDF, next to the paper card. It is the only on-screen evidence that the
-  // article was read at all, so it reports counts from the prepared document rather than a spinner.
+  // The paper's declared metadata is still read in the background and frozen into every request
+  // (`presenter.paperIdentity()`), but it is deliberately not written out on screen: the owner asked
+  // for a silent read, not a card above the transcript.
+  // The local read of this PDF is the only on-screen evidence that the article was read at all, so it
+  // reports counts from the prepared document rather than a spinner.
   const documentStatus = el('p', 'zcr-document-status');
   documentStatus.dataset.zcrDocumentStatus = '';
   documentStatus.hidden = true;
@@ -623,7 +614,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, renameForm, contextSource, bibliography, documentStatus, scopeNotice, main); root.append(chat);
+  chat.append(chrome, renameForm, contextSource, documentStatus, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -986,37 +977,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const renderedMessages = new Map<string, { text: string; status: Message['status']; action: Message['action'] }>();
   let focusToken = 0; let contentKey = ''; let chromeKey = ''; let messageTimeKey = '';
   /**
-   * The paper card. It renders only fields the reader actually read: a host that left a field unset
-   * is never shown as "unknown", and a bare PDF with nothing beyond a title shows no card at all so
-   * the composer keeps its room. `truncated` marks a value the reader capped, so a shortened abstract
-   * is visibly shortened rather than presented as the whole thing.
-   */
-  let bibliographyKey: string | null = null;
-  const renderBibliography = (state: PresenterState) => {
-    const view = state.paperBibliography;
-    const known = view?.fields.filter(field => field.known) ?? [];
-    const key = JSON.stringify([view?.title ?? '', view?.authors ?? [], known]);
-    if (key === bibliographyKey) return;
-    bibliographyKey = key;
-    bibliography.hidden = known.length === 0;
-    if (!known.length || !view) { bibliography.replaceChildren(); return; }
-    const row = (label: string, value: string, fieldKey: string, truncated: boolean) => {
-      const item = el('div', 'zcr-bibliography-row');
-      item.dataset.zcrBibliographyKey = fieldKey;
-      item.append(el('dt', 'zcr-bibliography-label', label));
-      const detail = el('dd', 'zcr-bibliography-value');
-      detail.append(doc.createTextNode(value));
-      if (truncated) detail.append(el('span', 'zcr-bibliography-shortened', COPY.bibliographyShortened));
-      item.append(detail);
-      return item;
-    };
-    const list = el('dl', 'zcr-bibliography-list');
-    list.append(row(COPY.bibliographyTitle, view.title, 'title', false));
-    if (view.authors.length) list.append(row(COPY.bibliographyAuthors, view.authors.join('; '), 'authors', false));
-    for (const field of known) list.append(row(BIBLIOGRAPHY_LABELS[field.key], field.value ?? '', field.key, field.truncated === true));
-    bibliography.replaceChildren(el('p', 'zcr-bibliography-heading', COPY.bibliographyHeading), list);
-  };
-  /**
    * The local reading status. Counts come from the prepared pages, so "read all N pages" is only said
    * when every page really carried text: a scanned page reported as empty still counts against the
    * total. A failed read stays silent here because the composer already announces the coded error,
@@ -1065,7 +1025,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }
     }
     contextSource.hidden = !citation;
-    renderBibliography(state);
     renderDocumentStatus(state);
   };
   const historyRow = (source: HistoryRowSource) => {

@@ -273,34 +273,26 @@ it('keeps attachment identity on the root but puts paper context outside the mes
   expect(back?.textContent?.trim()).toBe('');
 });
 
-it('shows a paper card for the fields the reader read and omits every field the host left unset', async () => {
+it('reads the paper metadata in the background without writing a card on screen', async () => {
   const identity: PaperIdentity = {
     title: 'Synthetic Paper A', authors: ['Ada Lovelace', 'Alan Turing'], year: '2026', doi: '10.1000/xyz',
     itemType: 'journalArticle', publicationTitle: 'Nature', volume: '4', pages: '1-9',
     abstractNote: 'x'.repeat(2500),
   };
   const { root } = await mountReadyChat({ identity });
-  const card = root.querySelector<HTMLElement>('[data-zcr-bibliography]');
-  expect(card).not.toBeNull();
-  expect(card!.hidden).toBe(false);
-  const keys = [...card!.querySelectorAll('[data-zcr-bibliography-key]')].map(node => (node as HTMLElement).dataset.zcrBibliographyKey);
-  // Order follows the frozen field list; a field the host never declared is absent, not shown as unknown.
-  expect(keys).toEqual(['title', 'authors', 'itemType', 'publicationTitle', 'year', 'volume', 'pages', 'doi', 'abstractNote']);
-  expect(keys).not.toContain('issue');
-  expect(card!.textContent).toContain('Nature');
-  expect(card!.textContent).toContain('Ada Lovelace; Alan Turing');
-  expect(card!.textContent).not.toMatch(/unknown|n\/a|undefined|null/iu);
-  // The long abstract is visibly shortened instead of presented as the whole field.
-  const abstract = card!.querySelector('[data-zcr-bibliography-key="abstractNote"] .zcr-bibliography-value')!;
-  expect(abstract.textContent).toContain('Shortened');
-  expect((abstract.textContent ?? '').length).toBeLessThan(2100);
-});
+  // The owner asked for the metadata to be read in the background and not written out on screen, so
+  // neither the card, its heading nor any of its field labels are rendered for a richly described
+  // paper. What the reader read still travels with the request; that is asserted separately in
+  // "sends every field the reader read in the paper identity instead of a four-field subset".
+  expect(root.querySelector('[data-zcr-bibliography]')).toBeNull();
+  expect(root.querySelector('[data-zcr-bibliography-key]')).toBeNull();
+  expect(root.textContent).not.toMatch(/About this paper|Journal abbrev\.|Abstract/u);
+  expect(root.textContent).not.toContain('Nature');
 
-it('hides the paper card for a bare PDF that has nothing beyond a title', async () => {
-  const { root } = await mountReadyChat();
-  const card = root.querySelector<HTMLElement>('[data-zcr-bibliography]')!;
-  expect(card.hidden).toBe(true);
-  expect(card.querySelectorAll('[data-zcr-bibliography-key]')).toHaveLength(0);
+  // A bare PDF renders no such surface either: the removal is the element's, not the data's.
+  const bare = await mountReadyChat();
+  expect(bare.root.querySelector('[data-zcr-bibliography]')).toBeNull();
+  expect(bare.root.textContent).not.toContain('About this paper');
 });
 
 it('shows the local read of this PDF so a successful auto-read is not invisible', async () => {
