@@ -358,6 +358,36 @@ body.zcr-dock-open #split-view .primary-view,
   min-height: var(--zcr-toolbar-button-size, 28px);
   opacity: .75;
 }
+/* Paper card: what the reader actually read, above the transcript. It never scrolls on its own and
+   the one long field (a stored abstract) is clamped so a single paper cannot push the composer off
+   the dock. Labels are muted; values use the chat text scale and wrap instead of truncating. */
+.zcr-bibliography {
+  flex: 0 0 auto;
+  margin: 0 10px 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-panedivider, GrayText);
+  border-radius: 8px;
+  background: var(--material-background, Canvas);
+  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
+  overflow: hidden;
+}
+.zcr-bibliography[hidden] { display: none; }
+.zcr-bibliography-heading {
+  margin: 0 0 4px;
+  color: var(--fill-secondary, GrayText);
+  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+}
+.zcr-bibliography-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 8px; margin: 0; }
+.zcr-bibliography-row { display: contents; }
+.zcr-bibliography-label { color: var(--fill-secondary, GrayText); white-space: nowrap; }
+.zcr-bibliography-value { margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
+.zcr-bibliography-shortened { margin-inline-start: 4px; color: var(--fill-secondary, GrayText); font-size: calc(10px * var(--zcr-chat-text-scale, 1)); }
+.zcr-bibliography-row[data-zcr-bibliography-key="abstractNote"] .zcr-bibliography-value {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .zcr-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: calc(13px * var(--zcr-chat-text-scale, 1)); }
 .zcr-message-text.zcr-rendered { white-space: normal; }
 .zcr-message-text.zcr-rendered p { margin: 0 0 .55em; }

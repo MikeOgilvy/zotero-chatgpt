@@ -161,8 +161,28 @@ it('keeps the unknown context ring a solid neutral band instead of hiding the fi
   expect(shippedCss()).not.toMatch(/\[data-zcr-context-state="unknown"\][^{}]*\.zcr-context-ring-fill\s*\{[^}]*stroke:\s*transparent/u);
 });
 
-it('bounds the history list so the popover scrolls inside the dock', () => {
+it('bounds the paper card, mutes its labels and clamps the one long abstract field', () => {
   const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const card = el('section', 'zcr-bibliography');
+  const list = el('dl', 'zcr-bibliography-list');
+  const row = el('div', 'zcr-bibliography-row');
+  row.setAttribute('data-zcr-bibliography-key', 'abstractNote');
+  const label = el('dt', 'zcr-bibliography-label', 'Abstract');
+  const value = el('dd', 'zcr-bibliography-value', 'A very long abstract');
+  row.append(label, value); list.append(row); card.append(list); doc.body.append(card);
+  // The card is bounded and never grows its own scrollbar; a second scroll region inside the dock
+  // would fight the transcript for the wheel.
+  expect(cs(card).overflowY).not.toBe('auto');
+  expect(cs(card).overflow).toBe('hidden');
+  // Labels are muted palette copy, never a hardcoded color.
+  expect(shippedRule(doc, '.zcr-bibliography-label').color).toContain('var(--fill-secondary');
+  // The one long field is clamped so a single paper cannot push the composer off the dock.
+  expect(cs(value).overflow).toBe('hidden');
+  expect(shippedCss()).toMatch(/\[data-zcr-bibliography-key="abstractNote"\]\s+\.zcr-bibliography-value\s*\{[^}]*-webkit-line-clamp:\s*4/u);
+});
+
+it('bounds the history list so the popover scrolls inside the dock', () => {  const { doc, cs } = stylesheetDom();
   const el = make(doc);
   const panel = el('div', 'zcr-history-panel');
   const list = el('div', 'zcr-history-list');

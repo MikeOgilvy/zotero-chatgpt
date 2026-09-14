@@ -7,6 +7,7 @@ import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/s
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import { buildContextBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
+import { bibliographyView, type BibliographyView } from '../../../core/src/context/bibliography.ts';
 import { PAPER_THREAD_POLICY, readingInput } from '../../../core/src/codex/reader-policy.ts';
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/coordinator.ts';
@@ -55,6 +56,12 @@ export interface PresenterState {
   /** Incremented when the view should move focus into the question input. */
   focusToken: number;
   paperTitle: string;
+  /**
+   * The frozen bibliography of this attachment's paper, computed once from the identity the reader
+   * extracted. The view renders only the fields the reader actually read, so the sidebar can show
+   * what this paper is without inventing values for a field the host left unset.
+   */
+  paperBibliography: BibliographyView;
   workspace: WorkspaceSettings | null;
   /**
    * The one chat listing. It holds every stored chat for the query, including records that carry a
@@ -181,13 +188,18 @@ export class ConversationPresenter {
   private freshBlankId: string | null = null;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
+    this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title, paperBibliography: bibliographyView(this.identity),
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
   }
+  /**
+   * The identity sent with a request. It forwards every optional field the reader extracted instead
+   * of rebuilding a four-field subset, so the send path and a `hashVersion: 2` replay of the stored
+   * identity are the same object; dropping a field here would make the same question hash twice.
+   */
   private paperIdentity(): PaperIdentity {
     const title = this.identity.title.trim() || this.title.trim() || this.state.conversation?.title || '';
-    return { title, authors: this.identity.authors, ...(this.identity.year ? { year: this.identity.year } : {}), ...(this.identity.doi ? { doi: this.identity.doi } : {}) };
+    return { ...this.identity, title };
   }
   /** Ask in sidechat: the citation is already in the draft; the view should focus the question input. */
   focusInput(): void { this.update({ focusToken: this.state.focusToken + 1 }); }

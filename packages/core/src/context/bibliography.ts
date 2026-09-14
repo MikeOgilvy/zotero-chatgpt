@@ -84,6 +84,11 @@ const FIELD_LABELS: Record<BibliographyFieldKey, string> = {
   pages: 'Pages', doi: 'DOI', isbn: 'ISBN', issn: 'ISSN', language: 'Language', editors: 'Editors',
   tags: 'Tags', abstractNote: 'Abstract',
 };
+/**
+ * The English label of every bibliographic field, exported so the sidebar card and the model block
+ * cannot drift. `ui-locale.ts` translates these exact strings when it renders the card.
+ */
+export const BIBLIOGRAPHY_LABELS = FIELD_LABELS;
 const FIELD_LIMITS: Record<BibliographyFieldKey, number> = {
   ...Object.fromEntries(BIBLIOGRAPHY_KEYS.map(key => [key, METADATA_FIELD_LIMIT])) as Record<BibliographyFieldKey, number>,
   year: YEAR_LIMIT, doi: DOI_LIMIT, abstractNote: ABSTRACT_LIMIT,

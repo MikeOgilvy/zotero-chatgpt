@@ -5,6 +5,7 @@ import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
 import { mountUILocale } from './ui-locale.ts';
 import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
+import { BIBLIOGRAPHY_LABELS } from '../../../core/src/context/bibliography.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
   applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
@@ -90,6 +91,12 @@ const COPY = {
   chooseImagesHint: 'From your computer',
   addReferenceHint: 'Saved chats and articles',
   addSkillHint: 'Installed skills for this chat',
+  // Paper card. The field labels come from the shared `BIBLIOGRAPHY_LABELS` used by the model
+  // context, so the sidebar and the request describe one paper with one vocabulary.
+  bibliographyHeading: 'About this paper',
+  bibliographyTitle: 'Title',
+  bibliographyAuthors: 'Authors',
+  bibliographyShortened: 'Shortened',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
   imageDropFailed: 'The dropped image could not be attached.',
@@ -447,6 +454,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   context.append(currentTitle, closeCurrent);
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
+  // Paper-level context, below the chrome: what this PDF actually is, frozen when the reader opened
+  // it. It never describes the conversation, so it stays put while chats open and close.
+  const bibliography = el('section', 'zcr-bibliography');
+  bibliography.dataset.zcrBibliography = '';
+  bibliography.hidden = true;
   // The first outbound scope notice stays even though the PDF coverage panel is gone: it is the only
   // way to acknowledge the disclosure, and without it an explain that needs consent can never send.
   const scopeNotice = el('div', 'zcr-context-disclosure');
@@ -597,7 +609,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   draft.append(composer);
   const main = el('div', 'zcr-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
-  chat.append(chrome, renameForm, contextSource, scopeNotice, main); root.append(chat);
+  chat.append(chrome, renameForm, contextSource, bibliography, scopeNotice, main); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -959,6 +971,37 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const messageNodes = new Map<string, HTMLElement>();
   const renderedMessages = new Map<string, { text: string; status: Message['status']; action: Message['action'] }>();
   let focusToken = 0; let contentKey = ''; let chromeKey = ''; let messageTimeKey = '';
+  /**
+   * The paper card. It renders only fields the reader actually read: a host that left a field unset
+   * is never shown as "unknown", and a bare PDF with nothing beyond a title shows no card at all so
+   * the composer keeps its room. `truncated` marks a value the reader capped, so a shortened abstract
+   * is visibly shortened rather than presented as the whole thing.
+   */
+  let bibliographyKey: string | null = null;
+  const renderBibliography = (state: PresenterState) => {
+    const view = state.paperBibliography;
+    const known = view?.fields.filter(field => field.known) ?? [];
+    const key = JSON.stringify([view?.title ?? '', view?.authors ?? [], known]);
+    if (key === bibliographyKey) return;
+    bibliographyKey = key;
+    bibliography.hidden = known.length === 0;
+    if (!known.length || !view) { bibliography.replaceChildren(); return; }
+    const row = (label: string, value: string, fieldKey: string, truncated: boolean) => {
+      const item = el('div', 'zcr-bibliography-row');
+      item.dataset.zcrBibliographyKey = fieldKey;
+      item.append(el('dt', 'zcr-bibliography-label', label));
+      const detail = el('dd', 'zcr-bibliography-value');
+      detail.append(doc.createTextNode(value));
+      if (truncated) detail.append(el('span', 'zcr-bibliography-shortened', COPY.bibliographyShortened));
+      item.append(detail);
+      return item;
+    };
+    const list = el('dl', 'zcr-bibliography-list');
+    list.append(row(COPY.bibliographyTitle, view.title, 'title', false));
+    if (view.authors.length) list.append(row(COPY.bibliographyAuthors, view.authors.join('; '), 'authors', false));
+    for (const field of known) list.append(row(BIBLIOGRAPHY_LABELS[field.key], field.value ?? '', field.key, field.truncated === true));
+    bibliography.replaceChildren(el('p', 'zcr-bibliography-heading', COPY.bibliographyHeading), list);
+  };
   const updateContext = (state: PresenterState) => {
     const title = state.conversation ? conversationLabel(state.conversation, state.conversations) : state.paperTitle || COPY.untitled;
     if (currentTitle.textContent !== title) currentTitle.textContent = title;
@@ -987,6 +1030,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }
     }
     contextSource.hidden = !citation;
+    renderBibliography(state);
   };
   const historyRow = (source: HistoryRowSource) => {
     const row = el('div', 'zcr-history-row');

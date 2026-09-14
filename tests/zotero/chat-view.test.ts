@@ -10,7 +10,7 @@ import { messageTimeLabel } from '../../packages/zotero/src/chat/message-time.ts
 import { workspaceDraft } from '../../packages/zotero/src/chat/draft.ts';
 import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperScope, type ReaderEvent, type SendInput, type SendReceipt } from '../../packages/contracts/src/index.ts';
+import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput, type SendReceipt } from '../../packages/contracts/src/index.ts';
 import type { HistoryEntry, ReaderWorkspace } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import type { ContextBudget } from '../../packages/core/src/codex/model-capabilities.ts';
@@ -60,6 +60,7 @@ async function mountReadyChat(options: {
   contextBudget?: (input: SendInput, conversation: Conversation) => ContextBudget;
   rateLimits?: RuntimeSnapshot['rateLimits'];
   deleteConversation?: ReaderClient['deleteConversation'];
+  identity?: PaperIdentity;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -167,7 +168,7 @@ async function mountReadyChat(options: {
     ...(options.clipboardImages ? { readClipboardImage: options.clipboardImages } : {}),
     ...(options.workspace ? { getWorkspace: () => Promise.resolve(options.workspace!) } : {}),
     ...(options.contextBudget ? { contextBudget: options.contextBudget } : {}),
-  });
+  }, options.identity);
   if (options.draftCitations) {
     for (const citation of options.draftCitations) presenter.addCitation(citation);
   }
@@ -270,6 +271,54 @@ it('keeps attachment identity on the root but puts paper context outside the mes
   const back = root.querySelector('[data-zcr-action="open-citation"]');
   expect(back?.getAttribute('aria-label')).toBe('Return to source');
   expect(back?.textContent?.trim()).toBe('');
+});
+
+it('shows a paper card for the fields the reader read and omits every field the host left unset', async () => {
+  const identity: PaperIdentity = {
+    title: 'Synthetic Paper A', authors: ['Ada Lovelace', 'Alan Turing'], year: '2026', doi: '10.1000/xyz',
+    itemType: 'journalArticle', publicationTitle: 'Nature', volume: '4', pages: '1-9',
+    abstractNote: 'x'.repeat(2500),
+  };
+  const { root } = await mountReadyChat({ identity });
+  const card = root.querySelector<HTMLElement>('[data-zcr-bibliography]');
+  expect(card).not.toBeNull();
+  expect(card!.hidden).toBe(false);
+  const keys = [...card!.querySelectorAll('[data-zcr-bibliography-key]')].map(node => (node as HTMLElement).dataset.zcrBibliographyKey);
+  // Order follows the frozen field list; a field the host never declared is absent, not shown as unknown.
+  expect(keys).toEqual(['title', 'authors', 'itemType', 'publicationTitle', 'year', 'volume', 'pages', 'doi', 'abstractNote']);
+  expect(keys).not.toContain('issue');
+  expect(card!.textContent).toContain('Nature');
+  expect(card!.textContent).toContain('Ada Lovelace; Alan Turing');
+  expect(card!.textContent).not.toMatch(/unknown|n\/a|undefined|null/iu);
+  // The long abstract is visibly shortened instead of presented as the whole field.
+  const abstract = card!.querySelector('[data-zcr-bibliography-key="abstractNote"] .zcr-bibliography-value')!;
+  expect(abstract.textContent).toContain('Shortened');
+  expect((abstract.textContent ?? '').length).toBeLessThan(2100);
+});
+
+it('hides the paper card for a bare PDF that has nothing beyond a title', async () => {
+  const { root } = await mountReadyChat();
+  const card = root.querySelector<HTMLElement>('[data-zcr-bibliography]')!;
+  expect(card.hidden).toBe(true);
+  expect(card.querySelectorAll('[data-zcr-bibliography-key]')).toHaveLength(0);
+});
+
+it('sends every field the reader read in the paper identity instead of a four-field subset', async () => {
+  const sent: SendInput[] = [];
+  const identity: PaperIdentity = {
+    title: 'Synthetic Paper A', authors: ['Ada Lovelace'], year: '2026', doi: '10.1000/xyz',
+    itemType: 'journalArticle', publicationTitle: 'Nature', journalAbbreviation: 'Nat.', volume: '4', issue: '2',
+    pages: '1-9', publisher: 'Synthetic Press', language: 'en', tags: ['genomics'], editors: ['Grace Hopper'],
+  };
+  const { root } = await mountReadyChat({ messages: [], sent, identity });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  input.value = 'What does this mean?';
+  input.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')!.click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  // The identity the model sees is the same object the reader froze, so a `hashVersion: 2` replay of
+  // the stored copy hashes identically instead of silently dropping a field.
+  expect(sent[0]!.paper).toEqual(identity);
 });
 
 it('keeps pending citations in the composer, not in the transcript', async () => {

@@ -4,17 +4,30 @@ import { LIMITS, validateCitation, validateImageAttachment, validateOutputImage 
 import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
 import type { LibraryReferencePort, ReaderReference } from '../../../contracts/src/workspace.ts';
 import { SKILL_BYTES } from '../../../core/src/workspace/skills.ts';
+import { paperIdentityOf, type PaperMetadata } from './metadata.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from './document.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
 import { imageFromBytes } from '../chat/pick-images.ts';
 
 export interface LibraryItem {
   id: number; key: string; libraryID: number; parentID?: number | null; parentItemID?: number; deleted?: boolean;
+  /** Zotero exposes the item type as a property, not a `getField` field (`item.js:143-145`). */
+  itemType?: string;
   getField(name: string): string;
-  getCreators(): Array<{ firstName?: string; lastName?: string; name?: string }>;
+  getCreators(): Array<{ firstName?: string; lastName?: string; name?: string; creatorType?: string }>;
+  getTags?(): Array<{ tag: string }>;
   isRegularItem(): boolean; isPDFAttachment(): boolean; getAttachments(): number[];
   loadDataType?(type: 'itemData' | 'creators' | 'childItems'): Promise<void>;
   getFilePathAsync?: () => Promise<string | false>;
+}
+/**
+ * The single-line bibliographic fields `paperMetadata` reads from a reader (`reader/selection.ts`).
+ * Kept identical here so an `@`-reference candidate and the sidebar cannot drift.
+ */
+const METADATA_FIELDS = ['publicationTitle', 'journalAbbreviation', 'bookTitle', 'conferenceName', 'proceedingsTitle', 'university', 'institution', 'volume', 'issue', 'pages', 'publisher', 'language'] as const;
+/** `getField` can throw on an unloaded item or a field the item type does not declare; that is absent. */
+function readField(item: LibraryItem, name: string): string {
+  try { const value = item.getField(name); return typeof value === 'string' ? value.trim() : ''; } catch { return ''; }
 }
 export interface LibraryTabs {
   selectedID: string;
@@ -184,12 +197,33 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
   const metadata = async (item: LibraryItem, children = false) => {
     await item.loadDataType?.('itemData'); await item.loadDataType?.('creators'); if (children) await item.loadDataType?.('childItems');
   };
-  const identity = (item: LibraryItem, fallback: LibraryItem): PaperIdentity => {
-    const title = item.getField('title') || fallback.getField('title') || 'PDF attachment';
-    const authors = item.getCreators().map(creator => [creator.firstName, creator.lastName].filter(Boolean).join(' ') || creator.name || '').filter(Boolean).slice(0, 50);
-    const year = /(?:1[5-9]|2[0-9])\d{2}/u.exec(item.getField('date') || '')?.[0]; const doi = item.getField('DOI')?.trim();
-    return { title, authors, ...(year ? { year } : {}), ...(doi ? { doi } : {}) };
+  /**
+   * The same field list the reader's selection path reads, applied to an `@`-reference candidate.
+   * `paperIdentityOf` owns the caps and the "absent stays absent" rule, so a search result and the
+   * sidebar describe one paper the same way. `getField` can refuse a field on an item type; a
+   * refusal is an absent field, never a guessed value.
+   */
+  const metadataOf = (item: LibraryItem, fallback: LibraryItem): PaperMetadata => {
+    const name = (creator: { firstName?: string; lastName?: string; name?: string }) => [creator.firstName, creator.lastName].filter(Boolean).join(' ') || creator.name || '';
+    const creators = item.getCreators() ?? [];
+    const result: PaperMetadata = {
+      title: readField(item, 'title') || readField(fallback, 'title'),
+      authors: creators.filter(creator => !creator.creatorType || creator.creatorType === 'author').map(name).filter(Boolean),
+    };
+    const itemType = typeof item.itemType === 'string' ? item.itemType.trim() : '';
+    if (itemType && itemType !== 'attachment') result.itemType = itemType;
+    for (const field of METADATA_FIELDS) { const value = readField(item, field); if (value) result[field] = value; }
+    const year = /(?:1[5-9]|2[0-9])\d{2}/u.exec(readField(item, 'date'))?.[0]; if (year) result.year = year;
+    const doi = readField(item, 'DOI'); if (doi) result.doi = doi;
+    const isbn = readField(item, 'ISBN'); if (isbn) result.isbn = isbn;
+    const issn = readField(item, 'ISSN'); if (issn) result.issn = issn;
+    const abstractNote = readField(item, 'abstractNote'); if (abstractNote) result.abstractNote = abstractNote;
+    const editors = creators.filter(creator => creator.creatorType === 'editor').map(name).filter(Boolean); if (editors.length) result.editors = editors;
+    const tags = (item.getTags?.() ?? []).map(entry => entry.tag).filter(Boolean); if (tags.length) result.tags = tags;
+    return result;
   };
+  const identity = (item: LibraryItem, fallback: LibraryItem): PaperIdentity =>
+    paperIdentityOf(metadataOf(item, fallback), readField(item, 'title') || readField(fallback, 'title') || 'PDF attachment');
   const io = () => options.io ?? globals().IOUtils ?? fail('Native file access is unavailable.', 'UNSUPPORTED_INTERACTION');
   /** Every library an @-reference may point at. A feed has no PDF items; the fallback keeps the default search path. */
   const libraries = (): Array<{ libraryID?: number }> => {

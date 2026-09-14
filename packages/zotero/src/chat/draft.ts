@@ -32,7 +32,9 @@ function withContext(input: SendInput, context?: DraftContext): SendInput {
   return { ...input, ...(context?.workflow ? { workflow: clone(context.workflow) } : {}), ...(context?.references?.length ? { references: clone(context.references) } : {}) };
 }
 function withPaper(input: SendInput, paper?: PaperIdentity): SendInput {
-  return paper?.title.trim() ? { ...input, paper: { title: paper.title, authors: [...paper.authors], ...(paper.year ? { year: paper.year } : {}), ...(paper.doi ? { doi: paper.doi } : {}) } } : input;
+  // Forward every field the reader froze. Rebuilding a four-field subset here would make the
+  // identity that is hashed differ from the one the session stored, breaking `hashVersion: 2` replay.
+  return paper?.title.trim() ? { ...input, paper: { ...paper, authors: [...paper.authors] } } : input;
 }
 export function makeExplain(citation: Citation, conversationId: string, requestId: string, settings: GenerationSettings, paper?: PaperIdentity, context?: DraftContext): SendInput {
   return withContext(withPaper({ requestId, conversationId, action: 'explain', question: EXPLAIN_QUESTION, citations: [clone(citation)], settings: { ...settings } }, paper ?? { title: citation.title, authors: [...citation.authors], ...(citation.year ? { year: citation.year } : {}), ...(citation.doi ? { doi: citation.doi } : {}) }), context);

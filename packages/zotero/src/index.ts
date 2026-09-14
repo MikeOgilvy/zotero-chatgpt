@@ -7,13 +7,14 @@ import { injectReaderStyles } from './reader/dock.ts';
 import { NativeReaderPane, attachmentIdentity, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
+import { paperIdentityOf } from './reader/metadata.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { createPreferencesService } from './workspace/preferences-service.ts';
 import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './workspace/preferences-registration.ts';
-import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
+import { ReaderError, paperId, type Citation, type PaperIdentity, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
 export interface PluginContext { rootURI: string; pluginID: string; version?: string }
@@ -49,16 +50,21 @@ function clientId(): string {
   const fresh = crypto.randomUUID(); Zotero.Prefs.set(CLIENT_ID_PREF, fresh, true); return fresh;
 }
 export function paperOf(identity: AttachmentIdentity): PaperScope { return { clientId: clientId(), libraryId: identity.libraryID, attachmentKey: identity.key }; }
-function paperTitleFor(identity: AttachmentIdentity, reader?: HostReader): { title: string; authors: string[]; year?: string; doi?: string } {
+/**
+ * Freezes everything the reader read about this paper into the one identity the session and the
+ * model context carry. `paperIdentityOf` owns the field list, the caps and the "absent stays absent"
+ * rule, so the sidebar card, the `@`-reference listing and the reading JSON all describe the same
+ * paper the same way.
+ */
+function paperIdentityFor(identity: AttachmentIdentity, reader?: HostReader): PaperIdentity {
   const metadata = reader ? paperMetadata(Zotero, reader) : undefined;
-  const title = metadata?.title.trim() || identity.title || 'PDF attachment';
-  return { title, authors: metadata?.authors ?? [], ...(metadata?.year ? { year: metadata.year } : {}), ...(metadata?.doi ? { doi: metadata.doi } : {}) };
+  return paperIdentityOf(metadata ?? { title: '', authors: [] }, metadata?.title.trim() || identity.title || 'PDF attachment');
 }
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
   const paper = paperOf(identity); const key = paperId(paper);
   let presenter = presenters.get(key);
   if (!presenter) {
-    const identityMeta = paperTitleFor(identity, reader);
+    const identityMeta = paperIdentityFor(identity, reader);
     const source = nativeDocumentSource(Zotero, () => Zotero.Reader._readers.find(r => {
       const item = Zotero.Items.get(r.itemID); return item?.key === paper.attachmentKey && item.libraryID === paper.libraryId;
     }), paper);
