@@ -86,7 +86,6 @@ const COPY = {
   attachHeading: 'Attach',
   referenceHeading: 'Reference',
   chooseImagesHint: 'From your computer',
-  captureRegionHint: 'From the current PDF',
   addReferencesHint: 'Saved chats, articles and workflows',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
@@ -125,6 +124,9 @@ const ICONS = {
   send: 'M8 13V3M4.5 6.5 8 3l3.5 3.5',
   stop: 'M5 5h6v6H5z',
   plus: 'M8 3v10M3 8h10',
+  // A dashed marquee: the four corners with their sides, so it reads as "select an area" next to the
+  // plus rather than as another upload or image button.
+  region: 'M2.5 5.5V2.5h3M13.5 5.5V2.5h-3M2.5 10.5v3h3M13.5 10.5v3h-3M6.5 2.5h3M6.5 13.5h3M2.5 6.5v3M13.5 6.5v3',
   more: 'M3.25 8a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Zm3.9 0a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Zm3.9 0a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Z',
   clock: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM8 5.25V8.2l2.15 1.25',
   copy: 'M6 6h7v7H6zM3 3h7v2',
@@ -601,10 +603,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
   let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
   // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
-  // lives behind it; the reference/workflow chooser stays reachable by typing '@' or '/'.
+  // lives behind it; the reference/workflow chooser stays reachable by typing '@' or '/'. Capturing
+  // the selected region is the one route the owner asked to be a single visible click instead.
   const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
   plus.dataset.zcrPlus = '';
   plus.setAttribute('aria-haspopup', 'dialog'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
+  const captureRegion = button(COPY.captureRegion, 'capture-region', () => { void presenter.captureRegion().catch(reportViewError); }, 'region', 'zcr-icon-button zcr-capture-region');
   // A labelled, non-modal dialog rather than `role="menu"`: the popover holds plain action rows plus
   // the page-number field, and neither plain buttons nor an `<input>` are valid children of a menu.
   const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'dialog'); plusMenu.setAttribute('aria-label', COPY.attach);
@@ -624,7 +628,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   attachGroup.append(
     el('div', 'zcr-plus-heading', COPY.attachHeading),
     plusRow(COPY.chooseImages, COPY.chooseImagesHint, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
-    plusRow(COPY.captureRegion, COPY.captureRegionHint, 'capture-region', () => { togglePlus(false); void presenter.captureRegion().catch(reportViewError); }),
   );
   const referenceGroup = el('div', 'zcr-plus-group');
   referenceGroup.append(
@@ -633,7 +636,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   );
   plusMenu.append(attachGroup, referenceGroup);
   composer.append(plusMenu);
-  leading.append(plus);
+  leading.append(plus, captureRegion);
   const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;
   const collection = el('select'); collection.dataset.zcrCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
   collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });

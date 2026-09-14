@@ -2107,18 +2107,42 @@ it('closes the model popover on Escape and click outside', async () => {
   expect(menu.hidden).toBe(true);
 });
 
-it('keeps exactly one plus control at the composer start and removes the attach and @ buttons', async () => {
+it('keeps the plus and the capture-region shortcut at the composer start and removes the attach and @ buttons', async () => {
   const { root } = await mountReadyChat();
   const leading = root.querySelector<HTMLElement>('[data-zcr-composer-leading]')!;
-  const controls = [...leading.querySelectorAll<HTMLElement>('button, details, summary')];
-  expect(controls).toHaveLength(1);
-  const plus = controls[0] as HTMLButtonElement;
+  const controls = [...leading.querySelectorAll<HTMLButtonElement>('button')];
+  expect(controls.map(node => node.dataset.zcrAction)).toEqual(['composer-plus', 'capture-region']);
+  const plus = controls[0]!;
   expect(plus.dataset.zcrPlus).toBe('');
-  expect(plus.dataset.zcrAction).toBe('composer-plus');
   expect(plus.getAttribute('aria-label')).toBe('Add images or context');
+  // Capturing the selected region is a direct control of its own, not a row inside the popover.
+  const region = controls[1]!;
+  expect(region.getAttribute('aria-label')).toBe('Capture selected region');
+  expect(region.getAttribute('title')).toBe('Capture selected region');
+  expect(region.hidden).toBe(false);
   // The old Attach details and the literal '@' trigger are gone, not merely hidden.
   expect(root.querySelector('.zcr-attachment-menu, .zcr-input-actions')).toBeNull();
   expect([...root.querySelectorAll('button')].filter(node => node.textContent?.trim() === '@')).toHaveLength(0);
+});
+
+it('captures the selected region from the composer shortcut and reports its refusal beside the composer', async () => {
+  const { root, presenter } = await mountReadyChat({ messages: [] });
+  const region = root.querySelector<HTMLButtonElement>('[data-zcr-action="capture-region"]')!;
+  // The shortcut lives in the composer row, not behind the plus popover.
+  expect(region.closest('[data-zcr-plus-menu]')).toBeNull();
+  expect(region.closest('[data-zcr-composer-leading]')).not.toBeNull();
+  const capture = vi.spyOn(presenter, 'captureRegion').mockResolvedValue(undefined);
+  region.click();
+  await vi.waitFor(() => expect(capture).toHaveBeenCalledTimes(1));
+  const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  expect(slot.hidden).toBe(true);
+  capture.mockRejectedValueOnce(new Error('/Users/somebody/private/state.json missing'));
+  region.click();
+  await vi.waitFor(() => expect(slot.hidden).toBe(false));
+  // The failure is reported honestly but without leaking the host's private path.
+  expect(slot.textContent).not.toContain('/Users/somebody');
+  // A plain button has no popover state: clicking it must not open the attach dialog.
+  expect(root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!.hidden).toBe(true);
 });
 
 it('groups the plus popover into titled sections with title and description rows', async () => {
@@ -2130,7 +2154,7 @@ it('groups the plus popover into titled sections with title and description rows
   expect(groups[0]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Attach');
   expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
   const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
-  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'capture-region', 'composer-references']);
+  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'composer-references']);
   for (const row of rows) {
     expect(row.tagName).toBe('BUTTON');
     const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
@@ -2140,10 +2164,12 @@ it('groups the plus popover into titled sections with title and description rows
     // The accessible name is the title alone, never the concatenated row text.
     expect(row.getAttribute('aria-label')).toBe(title);
   }
-  // Capturing one PDF page is gone: the page-number field it needed is gone with it.
+  // Capturing one PDF page and capturing the selected region both left the popover: the page-number
+  // field is gone with the first, and the second is now a direct composer control.
   expect(menu.querySelector('input[type="number"]')).toBeNull();
   expect(menu.querySelector('[data-zcr-action="capture-page"]')).toBeNull();
-  expect(menu.textContent).not.toMatch(/Capture page/u);
+  expect(menu.querySelector('[data-zcr-action="capture-region"]')).toBeNull();
+  expect(menu.textContent).not.toMatch(/Capture page|Capture selected region/u);
 });
 
 it('labels the plus popover as a dialog that matches the field and rows it contains', async () => {
@@ -2182,9 +2208,9 @@ it('opens every attachment route from the plus menu and closes it after a choice
   expect(menu.hidden).toBe(true);
 
   plus.click();
-  const region = vi.spyOn(presenter, 'captureRegion').mockResolvedValue(undefined);
-  route('capture-region').click();
-  await vi.waitFor(() => expect(region).toHaveBeenCalledTimes(1));
+  // Capturing the selected region is no longer a route inside the popover: it is a direct composer
+  // control, so the popover has no such row left to open.
+  expect(route('capture-region')).toBeUndefined();
 
   plus.click();
   plus.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));

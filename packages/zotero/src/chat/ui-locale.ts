@@ -20,7 +20,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Review annotation suggestions': '审核标注建议',
   Attach: '添加附件', 'Add images or context': '添加图片或上下文', 'Choose images…': '选择图片…', 'Capture selected region': '截取所选区域',
   'Capture page': '截取页面', 'PDF page to capture': '要截取的 PDF 页码', 'Save literature to': '文献保存位置',
-  Reference: '引用', 'From your computer': '来自你的电脑', 'From the current PDF': '来自当前 PDF',
+  Reference: '引用', 'From your computer': '来自你的电脑',
   'Saved chats, articles and workflows': '已保存的对话、文章与工作流',
   'Target collection': '目标分类', 'Choose a collection…': '选择分类…', 'Preview image': '预览图片',
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',

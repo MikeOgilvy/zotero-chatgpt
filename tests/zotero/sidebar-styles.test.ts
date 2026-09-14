@@ -367,6 +367,24 @@ it('shapes the plus popover as a grouped, hairline-separated list with title and
   expect(shippedRule(doc, '.zcr-plus-row-description').cssText).toContain('var(--fill-secondary');
 });
 
+it('lays out the composer leading row so the plus and the capture-region shortcut share it', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const leading = el('div', 'zcr-composer-leading');
+  const plus = el('button', 'zcr-icon-button zcr-plus');
+  const region = el('button', 'zcr-icon-button zcr-capture-region');
+  leading.append(plus, region); doc.body.append(leading);
+  // One non-wrapping flex row: the second control must not wrap under the plus in a narrow dock.
+  expect(cs(leading).display).toBe('flex');
+  // `flex-wrap` is unset, whose initial value is `nowrap`; wrapping must never be opted into.
+  expect(cs(leading).flexWrap === '' || cs(leading).flexWrap === 'nowrap').toBe(true);
+  expect(shippedCss()).not.toMatch(/\.zcr-composer-leading\s*\{[^}]*flex-wrap:\s*wrap/u);
+  expect(Number.parseFloat(cs(leading).gap)).toBeGreaterThan(0);
+  // Both keep the same 28px toolbar box, so the shortcut cannot squeeze the primary control.
+  expect(cs(plus).width).toBe(cs(region).width);
+  expect(Number.parseFloat(cs(region).width)).toBeGreaterThanOrEqual(28);
+});
+
 it('reveals message actions with opacity alone so they stay keyboard reachable', () => {
   const { doc } = stylesheetDom();
   const css = shippedCss();
