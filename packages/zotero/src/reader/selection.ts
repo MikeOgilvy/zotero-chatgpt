@@ -1,7 +1,9 @@
 import { ReaderError, type Citation, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
 import { validateCitation } from '../../../contracts/src/validation.ts';
-import type { HostReader, ZoteroHost } from './host-types.ts';
+import type { HostItem, HostReader, ZoteroHost } from './host-types.ts';
 import { nativeDocumentSource } from './document.ts';
+import { ABSTRACT_LIMIT, MAX_PEOPLE, METADATA_FIELD_LIMIT, PERSON_LIMIT, TAG_LIMIT, TAGS_LIMIT, capList, capText, type PaperMetadata } from './metadata.ts';
+export type { PaperMetadata } from './metadata.ts';
 /** Zotero 9.0.6 `renderTextSelectionPopup` payload (reader.js:25427-25433, 70462-70484). */
 export interface SelectionAnnotation {
   type?: string; color?: string | undefined; sortIndex?: string; pageLabel?: string | undefined;
@@ -9,7 +11,6 @@ export interface SelectionAnnotation {
   text: string;
 }
 export interface SelectionPopupEvent { reader: HostReader; doc: Document; append(...nodes: Node[]): void; params: { annotation?: SelectionAnnotation } }
-export interface PaperMetadata { title: string; authors: string[]; year?: string; doi?: string }
 /**
  * Copies content-compartment arrays with index loops. Calling `map`/`every` on a content array with a
  * chrome callback makes content pass its array back to privileged code, which Gecko refuses.
@@ -75,15 +76,48 @@ export async function openCitation(zotero: ZoteroHost, citation: Citation, curre
   if (JSON.stringify(current.revision) !== JSON.stringify(citation.documentRevision)) throw new ReaderError('INVALID_REQUEST', 'The cited PDF version changed. Reopen and select the passage again.');
   await open.navigate({ position: { pageIndex: position.pageIndex, rects: position.rects.map(r => [...r]) } });
 }
+/**
+ * Zotero item fields read from the parent item (or the attachment when it stands alone). Every field
+ * below `title`/`authors` was verified to exist in Zotero 9.0.6's bundled global schema (see
+ * `metadata.ts`); `isbn`/`issn` map Zotero's `ISBN`/`ISSN`. A field that `getField` refuses on this
+ * item type returns `''` (`item.js:283-288`) and is omitted — never guessed.
+ */
+const METADATA_FIELDS = ['publicationTitle', 'journalAbbreviation', 'bookTitle', 'conferenceName', 'proceedingsTitle', 'university', 'institution', 'volume', 'issue', 'pages', 'publisher', 'language'] as const;
+/** `getField` can throw on an unloaded item or an unavailable field; a refusal is an absent field. */
+function readField(item: HostItem, name: string): string {
+  try { const value = item.getField(name); return typeof value === 'string' ? value.trim() : ''; } catch { return ''; }
+}
+function readCreators(item: HostItem): NonNullable<ReturnType<NonNullable<HostItem['getCreators']>>> {
+  try { const creators = item.getCreators?.(); return Array.isArray(creators) ? creators : []; } catch { return []; }
+}
+function readTags(item: HostItem): Array<{ tag: string }> {
+  try { const tags = item.getTags?.(); return Array.isArray(tags) ? tags : []; } catch { return []; }
+}
+function creatorName(creator: { firstName?: string; lastName?: string; name?: string }): string {
+  return [creator.firstName, creator.lastName].filter(Boolean).join(' ') || creator.name || '';
+}
 /** Declared metadata of the paper: the parent item when the PDF is attached to one, else the attachment itself. */
 export function paperMetadata(zotero: ZoteroHost, reader: HostReader): PaperMetadata | undefined {
   const attachment = zotero.Items.get(reader.itemID);
   if (!attachment) return undefined;
   const parent = attachment.parentItemID ? zotero.Items.get(attachment.parentItemID) : undefined;
   const source = parent ?? attachment;
-  const authors = (source.getCreators?.() ?? []).map(c => [c.firstName, c.lastName].filter(Boolean).join(' ') || c.name || '').filter(Boolean).slice(0, 50);
-  const result: PaperMetadata = { title: source.getField('title') || attachment.getField('title') || '', authors };
-  const year = /(?:1[5-9]|2[0-9])\d{2}/u.exec(source.getField('date') || '')?.[0]; if (year) result.year = year;
-  const doi = source.getField('DOI')?.trim(); if (doi) result.doi = doi;
+  const creators = readCreators(source);
+  const authors = capList(creators.filter(creator => !creator.creatorType || creator.creatorType === 'author').map(creatorName).filter(Boolean), MAX_PEOPLE, PERSON_LIMIT);
+  const result: PaperMetadata = { title: readField(source, 'title') || readField(attachment, 'title') || '', authors };
+  // `itemType` is a host property, not a `getField` field (`item.js:143-145`). The PDF's own type is
+  // 'attachment', which says nothing bibliographic, so it is never reported.
+  const itemType = typeof source.itemType === 'string' ? source.itemType.trim() : '';
+  if (itemType && itemType !== 'attachment') result.itemType = capText(itemType, METADATA_FIELD_LIMIT);
+  for (const field of METADATA_FIELDS) { const value = readField(source, field); if (value) result[field] = capText(value, METADATA_FIELD_LIMIT); }
+  const year = /(?:1[5-9]|2[0-9])\d{2}/u.exec(readField(source, 'date'))?.[0]; if (year) result.year = year;
+  const doi = readField(source, 'DOI'); if (doi) result.doi = capText(doi, 256);
+  const isbn = readField(source, 'ISBN'); if (isbn) result.isbn = capText(isbn, METADATA_FIELD_LIMIT);
+  const issn = readField(source, 'ISSN'); if (issn) result.issn = capText(issn, METADATA_FIELD_LIMIT);
+  const abstractNote = readField(source, 'abstractNote'); if (abstractNote) result.abstractNote = capText(abstractNote, ABSTRACT_LIMIT);
+  const editors = capList(creators.filter(creator => creator.creatorType === 'editor').map(creatorName).filter(Boolean), MAX_PEOPLE, PERSON_LIMIT);
+  if (editors.length) result.editors = editors;
+  const tags = capList(readTags(source).map(entry => entry.tag), TAGS_LIMIT, TAG_LIMIT);
+  if (tags.length) result.tags = tags;
   return result;
 }

@@ -91,6 +91,14 @@ function truncate(value: string, limit: number): { text: string; truncated: bool
 function asMetadata(value: PaperMetadata): PaperMetadata {
   return value && typeof value === 'object' ? value : ({} as PaperMetadata);
 }
+/** Normalizes and caps one already-read host value; the reader uses this before freezing metadata. */
+export function capText(value: unknown, limit: number): string {
+  return truncate(normalize(value), limit).text;
+}
+/** Normalizes and caps an already-read host list (authors, editors, tags). */
+export function capList(value: unknown, limit: number, itemLimit: number): string[] {
+  return normalizeList(value).slice(0, limit).map(item => truncate(item, itemLimit).text);
+}
 function fieldValue(metadata: PaperMetadata, key: BibliographyFieldKey): string {
   if (!metadata || typeof metadata !== 'object') return '';
   if (key === 'editors') return normalizeList(metadata.editors).join('; ');
