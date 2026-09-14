@@ -29,7 +29,6 @@ function mountPane(service: PreferencesService) {
     read: () => Promise.resolve(settings),
     save: vi.fn<PreferencesPaneHost['save']>(() => Promise.resolve()),
     setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
-    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: vi.fn(),
     readHistory: () => Promise.resolve(listing),

@@ -9,7 +9,7 @@ const copy = <T>(value: T): T => structuredClone(value);
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 
-function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error, liveModels?: () => Promise<string[] | null>) {
+function fixture(overrides: Partial<ReaderWorkspace> = {}, liveModels?: () => Promise<string[] | null>) {
   let settings: WorkspaceSettings = { ...defaultSettings(), skills: [...defaultSettings().skills, copy(userSkill)], profiles: [{ id: 'formal', name: 'Formal', preferences: { mathematics: 'formal' } }] };
   const workspace: ReaderWorkspace = {
     settings: vi.fn(() => Promise.resolve(copy(settings))),
@@ -17,16 +17,16 @@ function fixture(overrides: Partial<ReaderWorkspace> = {}, exportFailure?: Error
     saveSkill: vi.fn<ReaderWorkspace['saveSkill']>(value => { const next = { ...copy(value), revision: 'revision-two' }; settings.skills = [...settings.skills.filter(item => item.id !== value.id), next]; return Promise.resolve(next); }),
     ...overrides,
   } as ReaderWorkspace;
-  const exportText = vi.fn(() => exportFailure === undefined ? Promise.resolve() : Promise.reject(exportFailure));
   let automaticPdfText = true;
+  // No `exportText` port: the pane no longer offers an export, so the fixture proves the service
+  // builds against a host that has dropped it.
   const service = createPreferencesService({
     workspace: () => Promise.resolve(workspace),
-    exportText,
     readAutomaticPdfText: () => automaticPdfText,
     writeAutomaticPdfText: enabled => { automaticPdfText = enabled; },
     ...(liveModels ? { liveModels } : {}),
   });
-  return { service, workspace, exportText, current: () => copy(settings), automaticPdfText: () => automaticPdfText };
+  return { service, workspace, current: () => copy(settings), automaticPdfText: () => automaticPdfText };
 }
 
 it('carries the runtime live model ids as JSON text, and stays absent when the host has no runtime', async () => {
@@ -34,13 +34,13 @@ it('carries the runtime live model ids as JSON text, and stays absent when the h
   expect('readLiveModels' in fixture().service).toBe(false);
 
   const ids = ['gpt-6-astra', 'gpt-5.3-codex-spark'];
-  const present = fixture(undefined, undefined, () => Promise.resolve(ids));
+  const present = fixture(undefined, () => Promise.resolve(ids));
   expect(await present.service.readLiveModels!()).toBe(JSON.stringify(ids));
   // The service forwards the ids verbatim; the offerable-family filter is owned by core (and reused
   // by the pane), not re-implemented here.
   expect(await present.service.readLiveModels!()).toBe('["gpt-6-astra","gpt-5.3-codex-spark"]');
 
-  const none = fixture(undefined, undefined, () => Promise.resolve(null));
+  const none = fixture(undefined, () => Promise.resolve(null));
   expect(await none.service.readLiveModels!()).toBe('null');
   // Reading the live list never writes the store and never starts anything.
   expect(present.workspace.saveSettings).not.toHaveBeenCalled();
@@ -114,17 +114,9 @@ it('surfaces a conflict when the stored workflow revision changed underneath the
   await expect(service.setSkillEnabled('user-study', false)).rejects.toBe(conflict);
 });
 
-it('exports the same preference snapshot the sidebar exports, through the native export port', async () => {
-  const { service, exportText, current } = fixture();
-  await expect(service.exportPreferences()).resolves.toBeUndefined();
-  expect(exportText).toHaveBeenCalledWith(
-    'reading-preferences.json',
-    JSON.stringify({ preferences: current().preferences, profiles: current().profiles }, null, 2),
-  );
-});
-
-it('reports a failed export instead of pretending the file was written', async () => {
-  const failure = new ReaderError('UNSUPPORTED_INTERACTION', 'The selected export file could not be written.');
-  const { service } = fixture({}, failure);
-  await expect(service.exportPreferences()).rejects.toBe(failure);
+it('offers the pane no preferences export at all', () => {
+  // The native Preferences pane dropped its export button, so the port behind it went with it: the
+  // service exposes nothing that would write the stored snapshot to a file.
+  const { service } = fixture();
+  expect('exportPreferences' in service).toBe(false);
 });

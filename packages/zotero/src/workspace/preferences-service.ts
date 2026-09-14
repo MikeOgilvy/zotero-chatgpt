@@ -1,7 +1,6 @@
 import { ReaderError } from '../../../contracts/src/index.ts';
 import type { ReaderWorkspace, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { HistoryManager } from '../../../core/src/workspace/history.ts';
-import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/src/workspace/export.ts';
 
 /**
  * The only bridge the Preferences pane needs. Everything crossing the pane sandbox is JSON text,
@@ -11,8 +10,11 @@ import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/sr
  */
 export interface PreferencesServiceHost {
   workspace(): Promise<ReaderWorkspace>;
-  /** Native save dialog; the host owns the file picker and the exact bytes written. */
-  exportText(name: string, text: string): Promise<void>;
+  /**
+   * Native save dialog, retained only so a host that still publishes the sidebar's export port
+   * type-checks. The pane itself no longer offers an export, so nothing in this service calls it.
+   */
+  exportText?(name: string, text: string): Promise<void>;
   /** The plugin preference `extensions.zcr.automaticPdfText`; not part of the workspace store. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
@@ -27,7 +29,6 @@ export interface PreferencesService {
   readSettings(): Promise<string>;
   writeSettings(json: string): Promise<void>;
   setSkillEnabled(id: string, enabled: boolean): Promise<void>;
-  exportPreferences(): Promise<void>;
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /** History management is exposed as JSON text like everything else crossing the pane boundary. */
@@ -83,10 +84,6 @@ export function createPreferencesService(host: PreferencesServiceHost): Preferen
       if (!skill) throw new ReaderError('NOT_FOUND', 'The workflow is no longer installed.');
       // saveSkill enforces the skill revision conflict; saveSettings would silently keep a newer file.
       await workspace.saveSkill({ ...skill, enabled });
-    },
-    async exportPreferences(): Promise<void> {
-      // Same payload and same native file dialog as the sidebar export, from one definition.
-      await host.exportText(PREFERENCES_EXPORT_NAME, preferencesExportText(await (await host.workspace()).settings()));
     },
     readAutomaticPdfText(): boolean {
       return host.readAutomaticPdfText() !== false;

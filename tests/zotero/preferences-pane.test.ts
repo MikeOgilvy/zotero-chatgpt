@@ -20,12 +20,11 @@ function fixture(initial?: WorkspaceSettings, overrides: Partial<PreferencesPane
   const read = vi.fn(() => Promise.resolve(copy(state)));
   const save = vi.fn<PreferencesPaneHost['save']>(value => { state = copy(value); return Promise.resolve(); });
   const setSkillEnabled = vi.fn<PreferencesPaneHost['setSkillEnabled']>((id, enabled) => { state = { ...state, skills: state.skills.map(skill => (skill.id === id ? { ...skill, enabled } : skill)) }; return Promise.resolve(); });
-  const exportPreferences = vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve());
   const readAutomaticPdfText = vi.fn<PreferencesPaneHost['readAutomaticPdfText']>(() => pref.automaticPdfText);
   const writeAutomaticPdfText = vi.fn<PreferencesPaneHost['writeAutomaticPdfText']>(enabled => { pref.automaticPdfText = enabled; });
-  const base: PreferencesPaneHost = { read, save, setSkillEnabled, exportPreferences, readAutomaticPdfText, writeAutomaticPdfText };
+  const base: PreferencesPaneHost = { read, save, setSkillEnabled, readAutomaticPdfText, writeAutomaticPdfText };
   const host: PreferencesPaneHost = { ...base, ...overrides };
-  return { host, read, save, setSkillEnabled, exportPreferences, readAutomaticPdfText, writeAutomaticPdfText, pref, current: () => copy(state) };
+  return { host, read, save, setSkillEnabled, readAutomaticPdfText, writeAutomaticPdfText, pref, current: () => copy(state) };
 }
 
 /** The same fixture settings in a chosen UI language; profile and skill names stay data. */
@@ -74,6 +73,10 @@ it('renders the real stored settings into native, labelled controls and tracks a
   for (const control of find('[data-zcr-pref="form"]').querySelectorAll('input, select, textarea')) {
     expect(control.closest('label'), control.getAttribute('data-zcr-pref') ?? control.tagName).not.toBeNull();
   }
+  // The pane no longer offers a preferences export at all: no control, and no button that would ask
+  // for one. The `exportText` host port is gone from the pane's own interface too.
+  expect(root.querySelector('[data-zcr-pref="export-preferences"]')).toBeNull();
+  expect([...root.querySelectorAll<HTMLButtonElement>('button')].some(button => /export/iu.test(button.textContent ?? ''))).toBe(false);
   // The shipped fragment's "loading" placeholder is gone once the pane owns the root.
   expect(root.querySelector('[data-zcr-pref="loading"]')).toBeNull();
   const status = find('[data-zcr-pref="status"]');
@@ -385,24 +388,6 @@ it('keeps the bundled catalog list when the live read fails instead of half-rend
   expect(root.querySelector<HTMLElement>('[data-zcr-pref="error"]')?.hidden).toBe(true);
 });
 
-it('exports through the host and reports a failed export instead of claiming success', async () => {
-  const { host, exportPreferences } = fixture();
-  const { ready, find, settle } = mount(host);
-  await ready;
-  find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').click();
-  await vi.waitFor(() => expect(exportPreferences).toHaveBeenCalledTimes(1));
-  await settle();
-  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).toMatch(/exported/iu);
-
-  const failure = new ReaderError('UNSUPPORTED_INTERACTION', 'The selected export file could not be written.');
-  exportPreferences.mockRejectedValueOnce(failure);
-  find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').click();
-  await vi.waitFor(() => expect(find<HTMLElement>('[data-zcr-pref="error"]').textContent).toBe(failure.message));
-  await settle();
-  expect(find<HTMLElement>('[data-zcr-pref="status"]').textContent).not.toMatch(/exported/iu);
-  expect(find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').disabled).toBe(false);
-});
-
 it('reports an unreadable or malformed store without rendering a form', async () => {
   const failure = new ReaderError('HISTORY_UNAVAILABLE', 'Saved workspace data could not be read; it was left untouched.');
   const unreadable = fixture(undefined, { read: vi.fn<PreferencesPaneHost['read']>().mockRejectedValue(failure) });
@@ -450,7 +435,6 @@ it('renders the pane copy in the stored UI language and never translates identif
   expect(root.querySelector('[data-zcr-skill="builtin-derive"]')).toBeNull();
   expect(root.querySelector('[data-zcr-skill="builtin-annotate"]')).not.toBeNull();
   expect(find<HTMLButtonElement>('[data-zcr-pref="save-preferences"]').textContent).toBe('保存');
-  expect(find<HTMLButtonElement>('[data-zcr-pref="export-preferences"]').textContent).toBe('导出偏好');
   // Identifiers, ids and stored values are data, not copy.
   const skillRow = (id: string): Element => find(`[data-zcr-skill-enabled="${id}"]`).closest('.zcr-preferences-skill')!;
   expect([...find<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]').options].map(option => option.textContent)).toEqual(['English', '中文']);

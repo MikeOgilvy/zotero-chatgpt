@@ -45,7 +45,6 @@ function fixture(initialEntries: HistoryEntry[], overrides: Partial<PreferencesP
     read: () => Promise.resolve(copy(settings)),
     save: vi.fn<PreferencesPaneHost['save']>(value => { Object.assign(settings, copy(value)); return Promise.resolve(); }),
     setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
-    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: vi.fn(),
     readHistory, deleteHistory,
@@ -294,7 +293,6 @@ it('renders no history section at all when the host offers no history management
     read: () => Promise.resolve({ ...defaultSettings(), uiLanguage: 'en', textScale: 1 }),
     save: vi.fn<PreferencesPaneHost['save']>(() => Promise.resolve()),
     setSkillEnabled: vi.fn<PreferencesPaneHost['setSkillEnabled']>(() => Promise.resolve()),
-    exportPreferences: vi.fn<PreferencesPaneHost['exportPreferences']>(() => Promise.resolve()),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: vi.fn(),
   };
