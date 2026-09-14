@@ -485,6 +485,32 @@ describe('conversation presenter', () => {
     expect(f.last().conversation?.messages.map(message => message.text)).toEqual(['第一问', '第一答']);
     expect(f.last().openConversations.map(c => c.id)).toEqual([firstId, secondId]);
   });
+  it('remembers a previewed chat’s reading anchor without moving the chat being edited', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    await f.presenter.newConversation();
+    const secondId = f.last().conversation!.id;
+    // The chat being edited is scrolled where the owner left it.
+    f.presenter.setScrollTop(40);
+    // The read-only column is scrolled separately: its offset is recorded per chat and never written
+    // into the chat being edited.
+    f.presenter.setPaneScrollTop(firstId, 320);
+    expect(f.last().scrollTop).toBe(40);
+    expect(f.presenter.paneScrollTop(firstId)).toBe(320);
+    expect(f.presenter.paneScrollTop(secondId)).toBe(40);
+    // Activating the previewed chat lands on the anchor it was read at, and the chat that was being
+    // edited keeps its own anchor for when it comes back.
+    await f.presenter.openConversation(firstId);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().scrollTop).toBe(320);
+    expect(f.presenter.paneScrollTop(secondId)).toBe(40);
+    // A chat that was never measured reports no anchor rather than a fabricated zero.
+    expect(f.presenter.paneScrollTop('never-scrolled')).toBeNull();
+    // Nonsense offsets are ignored: a preview cannot corrupt a chat's stored position.
+    f.presenter.setPaneScrollTop(firstId, Number.NaN);
+    f.presenter.setPaneScrollTop(firstId, -5);
+    expect(f.presenter.paneScrollTop(firstId)).toBe(320);
+  });
   it('closing one open chat falls back to another open chat instead of blanking the reader', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
