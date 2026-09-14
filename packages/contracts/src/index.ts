@@ -145,11 +145,40 @@ export function advanceRequestTiming(current: readonly RequestTiming[] | undefin
   return entries;
 }
 
+/**
+ * Bibliographic identity of one paper. The four original fields stay required semantics: every
+ * field below them is optional and absent means "not declared by Zotero", never "empty string".
+ * Requests are hashed with this object verbatim (hashVersion 2), so a reader that rebuilds a request
+ * must preserve field absence instead of filling a default.
+ *
+ * The optional names mirror Zotero's own item field names (`publicationTitle`, `journalAbbreviation`,
+ * `bookTitle`, ...) so an extracted value stays traceable to the single field it came from. The
+ * reader only fills a field it actually read; see `packages/zotero/src/reader/metadata.ts`.
+ */
 export interface PaperIdentity {
   title: string;
   authors: string[];
   year?: string;
   doi?: string;
+  /** Zotero item type of the bibliographic parent, for example `journalArticle`; omitted for a bare PDF. */
+  itemType?: string;
+  publicationTitle?: string;
+  journalAbbreviation?: string;
+  bookTitle?: string;
+  conferenceName?: string;
+  proceedingsTitle?: string;
+  university?: string;
+  institution?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  publisher?: string;
+  isbn?: string;
+  issn?: string;
+  language?: string;
+  abstractNote?: string;
+  tags?: string[];
+  editors?: string[];
 }
 
 export interface DocumentRevision { fingerprint: string; size: number; modifiedAt: number; sha256?: string }

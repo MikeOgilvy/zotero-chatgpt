@@ -1,5 +1,6 @@
 import { RuntimeFailure, type ModelOption } from '../../../contracts/src/runtime.ts';
 import type { GenerationSettings, ImageAttachment, Message, PaperIdentity, SendInput } from '../../../contracts/src/index.ts';
+import { bibliographyBlock } from '../context/bibliography.ts';
 import { record } from './transport.ts';
 import { string } from './models.ts';
 // Audited against rust-v0.154.0 and a live isolated config/read probe of the pinned
@@ -110,20 +111,32 @@ export function turnParams(threadId: string, requestId: string, text: string, cw
   return { threadId, clientUserMessageId: requestId, input, cwd, approvalPolicy: 'never', approvalsReviewer: 'user', sandboxPolicy: { type: 'readOnly', networkAccess: false }, model: settings.model, serviceTier: settings.serviceTier, effort: settings.effort };
 }
 /** Structured reading request: fixed instruction plus JSON, so quoted text cannot break the framing. */
+/**
+ * Scalar bibliographic fields forwarded verbatim to the model. A field that was not provided stays
+ * absent: hashVersion 2 hashes `input.paper` as it was sent, so a rebuilt request must reproduce the
+ * same presence, and `validatePaperIdentity` keeps "absent" distinct from "empty string".
+ */
+const IDENTITY_FIELDS = ['year', 'doi', 'itemType', 'publicationTitle', 'journalAbbreviation', 'bookTitle', 'conferenceName', 'proceedingsTitle', 'university', 'institution', 'volume', 'issue', 'pages', 'publisher', 'isbn', 'issn', 'language', 'abstractNote'] as const;
+/** List fields are copied (not aliased) and an explicit empty array is preserved. */
+const IDENTITY_LISTS = ['tags', 'editors'] as const;
+function forwardedIdentity(source: PaperIdentity): PaperIdentity {
+  const result: PaperIdentity = { title: source.title, authors: [...source.authors] };
+  for (const key of IDENTITY_FIELDS) { const value = source[key]; if (value !== undefined) result[key] = value; }
+  for (const key of IDENTITY_LISTS) { const value = source[key]; if (value !== undefined) result[key] = [...value]; }
+  return result;
+}
 function paperIdentity(input: SendInput): PaperIdentity | null {
-  if (input.paper?.title.trim()) {
-    return {
-      title: input.paper.title,
-      authors: input.paper.authors,
-      ...(input.paper.year ? { year: input.paper.year } : {}),
-      ...(input.paper.doi ? { doi: input.paper.doi } : {}),
-    };
-  }
+  if (input.paper?.title.trim()) return forwardedIdentity(input.paper);
   const first = input.citations[0];
-  return first ? { title: first.title, authors: first.authors, ...(first.year ? { year: first.year } : {}), ...(first.doi ? { doi: first.doi } : {}) } : null;
+  return first ? forwardedIdentity({ title: first.title, authors: first.authors, ...(first.year ? { year: first.year } : {}), ...(first.doi ? { doi: first.doi } : {}) }) : null;
 }
 export function readingInput(input: SendInput, reuseDocument = false, history: readonly Message[] = []): string {
   const doc = input.document;
+  const identity = paperIdentity(input);
+  // The header is the human-readable form of the same identity. It travels inside the JSON, not the
+  // instruction half: the JSON is the single data block, so declared and untrusted fields cannot be
+  // mistaken for framing rules. The abstract is left out because `paper` already carries it in full.
+  const bibliography = identity ? bibliographyBlock(identity, { includeAbstract: false }) : '';
   const fullText = !!doc && doc.pages.length === doc.totalPages && doc.pages.every(p => p.status === 'text' && !p.partial);
   const document = doc ? { id: doc.id, revision: doc.revision, parserVersion: doc.parserVersion, totalPages: doc.totalPages,
     delivery: reuseDocument ? 'reuse' : 'text',
@@ -140,7 +153,7 @@ export function readingInput(input: SendInput, reuseDocument = false, history: r
     ? `Cite a supplied page only as a Markdown link to https://zcr.invalid/source/${doc.id}/{pageIndex}; ${doc.id} is the current document and {pageIndex} is its zero-based physical PDF page from the JSON. Put a short verbatim quote copied exactly from that page in the link title, for example [p. 4](https://zcr.invalid/source/${doc.id}/3 "the exact words from the page"); omit the title when you cannot quote the page exactly. Cite any other supplied document the same way with that document's id. Never use the reserved host for another target.`
     : '';
   const instruction = `${READING_INSTRUCTION}\n${workflowInstruction}${citationInstruction ? `\n${citationInstruction}` : ''}`;
-  return `${instruction}\n\n${JSON.stringify({ contextScope: doc ? fullText ? 'full-text' : 'partial-text' : input.batch?.phase === 'reduce' ? 'part-summaries' : 'selection', paper: paperIdentity(input), document, citations: input.citations.map(c => ({ pageLabel: c.pageLabel, text: c.text, ...(c.documentRevision ? { sourceRevision: c.documentRevision } : {}) })), references: input.references, workflow, batch: input.batch, contextReport: input.contextReport, ...(history.length ? { priorConversation: history.map(message => ({ role: message.role, text: message.text, citations: message.citations, paper: message.paper })) } : {}), question: input.question })}`;
+  return `${instruction}\n\n${JSON.stringify({ contextScope: doc ? fullText ? 'full-text' : 'partial-text' : input.batch?.phase === 'reduce' ? 'part-summaries' : 'selection', paper: identity, ...(bibliography ? { bibliography } : {}), document, citations: input.citations.map(c => ({ pageLabel: c.pageLabel, text: c.text, ...(c.documentRevision ? { sourceRevision: c.documentRevision } : {}) })), references: input.references, workflow, batch: input.batch, contextReport: input.contextReport, ...(history.length ? { priorConversation: history.map(message => ({ role: message.role, text: message.text, citations: message.citations, paper: message.paper })) } : {}), question: input.question })}`;
 }
 /** Checks a thread/start or thread/resume response against the frozen request; names the first field that differs. */
 export function validateThread(value: unknown, cwd: string, settings: ResolvedSettings, expectation: { ephemeral: boolean; emptyHistory: boolean }): string {

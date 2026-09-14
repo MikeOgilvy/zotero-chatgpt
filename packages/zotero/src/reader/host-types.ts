@@ -45,7 +45,17 @@ export interface ZoteroWindow extends Window {
   Zotero_Tabs?: { selectedID: string };
   ZoteroContextPane?: { collapsed: boolean; context: HTMLElement & { mode: 'item' | 'notes' } };
 }
-export interface HostItem { id?: number; key: string; libraryID: number; parentItemID?: number; getField(name: string): string; getCreators?(): Array<{ firstName?: string; lastName?: string; name?: string }>; getFilePathAsync?(): Promise<string | false> }
+/** Zotero item fields the reader may read; `getField` returns `''` for a valid field a type does not set. */
+export interface HostCreator { firstName?: string; lastName?: string; name?: string; creatorType?: string; fieldMode?: number }
+export interface HostItem {
+  id?: number; key: string; libraryID: number; parentItemID?: number;
+  /** Zotero item type name (`item.js:143-145`); `'attachment'` for the PDF itself. */
+  itemType?: string;
+  getField(name: string): string;
+  getCreators?(): HostCreator[];
+  getTags?(): Array<{ tag: string; type?: number }>;
+  getFilePathAsync?(): Promise<string | false>;
+}
 export interface ToolbarEvent { reader: HostReader; doc: Document; append(...elements: HTMLElement[]): void }
 export interface SectionEvent { doc: Document; body: HTMLElement; tabType: string; setEnabled(this: void, enabled: boolean): void }
 export interface ZoteroHost {

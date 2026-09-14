@@ -44,6 +44,53 @@ describe('captureSelection', () => {
     expect(paperMetadata(zotero, { itemID: 99 } as HostReader)).toBeUndefined();
   });
 });
+describe('paperMetadata bibliographic extraction', () => {
+  type MockItem = { key: string; libraryID: number; parentItemID?: number; itemType?: string; getField(name: string): string; getCreators?(): Array<{ firstName?: string; lastName?: string; name?: string; creatorType?: string }>; getTags?(): Array<{ tag: string }> };
+  function hostOf(items: MockItem[]) { const map = new Map(items.map((item, index) => [index + 1, item])); return { zotero: { Items: { get: (id: number) => map.get(id) } } as unknown as ZoteroHost, map }; }
+  const parent: MockItem = {
+    key: 'PARENT01', libraryID: 1, itemType: 'journalArticle',
+    getField: name => ({ title: 'A Synthetic Study', date: '2024-05-01', DOI: '10.1000/synthetic', publicationTitle: 'Journal of Synthetic Results', journalAbbreviation: 'J. Synth. Res.', volume: '12', issue: '3', pages: '45-67', publisher: 'Synthetic Press', language: 'en', abstractNote: 'We study nothing.', ISSN: '1234-5678' })[name] ?? '',
+    getCreators: () => [{ firstName: 'Ada', lastName: 'Lovelace', creatorType: 'author' }, { firstName: 'Grace', lastName: 'Hopper' }, { firstName: 'Ed', lastName: 'Editor', creatorType: 'editor' }, { firstName: 'Trans', lastName: 'Translator', creatorType: 'translator' }],
+    getTags: () => [{ tag: 'synthetic' }, { tag: 'test' }],
+  };
+  const pdf: MockItem = { key: 'PDFONE01', libraryID: 1, parentItemID: 1, itemType: 'attachment', getField: name => (name === 'title' ? 'attachment.pdf' : ''), getCreators: () => [] };
+  it('reads the verified Zotero fields from the parent, splitting authors from editors by creatorType', () => {
+    const { zotero } = hostOf([parent, pdf]);
+    expect(paperMetadata(zotero, { itemID: 2 } as HostReader)).toEqual({
+      title: 'A Synthetic Study', authors: ['Ada Lovelace', 'Grace Hopper'], editors: ['Ed Editor'], year: '2024', doi: '10.1000/synthetic',
+      itemType: 'journalArticle', publicationTitle: 'Journal of Synthetic Results', journalAbbreviation: 'J. Synth. Res.',
+      volume: '12', issue: '3', pages: '45-67', publisher: 'Synthetic Press', issn: '1234-5678', language: 'en',
+      abstractNote: 'We study nothing.', tags: ['synthetic', 'test'],
+    });
+  });
+  it('omits a field the host refuses or leaves empty instead of fabricating one', () => {
+    const defensive: MockItem = {
+      key: 'PARENT02', libraryID: 1, itemType: 'book',
+      getField: name => { if (name === 'volume') throw new Error('Unsupported field'); if (name === 'title') return 'A Book'; return ''; },
+      getCreators: () => { throw new Error('Creator data unavailable'); },
+      getTags: () => { throw new Error('Tag data unavailable'); },
+    };
+    const { zotero } = hostOf([defensive]);
+    expect(paperMetadata(zotero, { itemID: 1 } as HostReader)).toEqual({ title: 'A Book', authors: [], itemType: 'book' });
+  });
+  it('never reports the attachment item type or a value the host did not declare', () => {
+    const bare: MockItem = { key: 'PDFTWO02', libraryID: 1, itemType: 'attachment', getField: () => '' };
+    const { zotero } = hostOf([bare]);
+    expect(paperMetadata(zotero, { itemID: 1 } as HostReader)).toEqual({ title: '', authors: [] });
+  });
+  it('caps author, editor and tag lists to the contract limits', () => {
+    const crowded: MockItem = {
+      key: 'PARENT03', libraryID: 1, itemType: 'journalArticle', getField: name => (name === 'title' ? 'Crowded' : ''),
+      getCreators: () => [...Array.from({ length: 55 }, (_, i) => ({ firstName: `Author${i}`, lastName: 'X', creatorType: 'author' })), ...Array.from({ length: 55 }, (_, i) => ({ firstName: `Editor${i}`, lastName: 'X', creatorType: 'editor' }))],
+      getTags: () => Array.from({ length: 30 }, (_, i) => ({ tag: `tag-${i}-${'x'.repeat(200)}` })),
+    };
+    const { zotero } = hostOf([crowded]);
+    const metadata = paperMetadata(zotero, { itemID: 1 } as HostReader)!;
+    expect(metadata.authors).toHaveLength(50); expect(metadata.editors).toHaveLength(50);
+    expect(metadata.tags).toHaveLength(24);
+    expect(metadata.tags!.every(tag => [...tag].length <= 128)).toBe(true);
+  });
+});
 describe('selection geometry', () => {
   // PDF user space is y-up; the viewport transform flips it. Zotero normalizes min/max (reader.js:69376-69378).
   const geometry: PageGeometry = {

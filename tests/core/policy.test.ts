@@ -86,6 +86,59 @@ it('sends rust-v0.154.0 image input items after the reading text, never a remote
   expect(JSON.stringify(params.input)).not.toMatch(/application\/pdf|\.pdf/u);
   expect(JSON.stringify(params.input)).not.toMatch(/localImage/u);
 });
+it('sends the model every declared bibliographic field, in the structured paper and as a compact header', () => {
+  const paper = {
+    title: 'A Synthetic Study', authors: ['Ada Lovelace'], year: '2024', doi: '10.1000/synthetic',
+    itemType: 'journalArticle', publicationTitle: 'Journal of Synthetic Results', journalAbbreviation: 'J. Synth. Res.',
+    volume: '12', issue: '3', pages: '45-67', publisher: 'Synthetic Press', language: 'en',
+    abstractNote: 'We study nothing.', tags: ['synthetic'], editors: ['Ed Editor'],
+  };
+  const text = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: '这篇在讲什么方向？', citations: [], settings: { model: 'm', serviceTier: null, effort: null }, paper });
+  const parsed = JSON.parse(text.split('\n\n')[1]!) as { paper: Record<string, unknown>; bibliography: string };
+  // Nothing is stripped on the way to the model: the identity is forwarded field for field.
+  expect(parsed.paper).toEqual(paper);
+  expect(parsed.bibliography).toBe([
+    'Title: A Synthetic Study',
+    'Authors: Ada Lovelace',
+    'Item type: journalArticle',
+    'Journal: Journal of Synthetic Results',
+    'Journal abbrev.: J. Synth. Res.',
+    'Year: 2024',
+    'Volume: 12',
+    'Issue: 3',
+    'Pages: 45-67',
+    'Publisher: Synthetic Press',
+    'DOI: 10.1000/synthetic',
+    'Language: en',
+    'Editors: Ed Editor',
+    'Tags: synthetic',
+  ].join('\n'));
+  // The structured paper already carries the longest field, so the header does not pay for it twice.
+  expect(parsed.bibliography).not.toContain('Abstract:');
+  expect(parsed.paper.abstractNote).toBe('We study nothing.');
+});
+it('omits bibliographic fields and the whole header instead of sending placeholders', () => {
+  const settings = { model: 'm', serviceTier: null, effort: null };
+  const sparse = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings, paper: { title: 'Only a Title', authors: [] } });
+  const parsed = JSON.parse(sparse.split('\n\n')[1]!) as { paper: Record<string, unknown>; bibliography: string };
+  expect(parsed.paper).toEqual({ title: 'Only a Title', authors: [] });
+  expect(parsed.bibliography).toBe('Title: Only a Title');
+  expect(parsed.bibliography).not.toMatch(/unknown|n\/a|undefined|null|Journal|DOI|Volume/iu);
+  // No paper and no citation: no identity, and therefore no empty header shell.
+  const none = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings });
+  const bare = JSON.parse(none.split('\n\n')[1]!) as Record<string, unknown>;
+  expect(bare.paper).toBeNull();
+  expect('bibliography' in bare).toBe(false);
+  // A citation-only identity still gets its declared fields, and no field it does not have.
+  const fromCitation = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [citationA], settings });
+  const cited = JSON.parse(fromCitation.split('\n\n')[1]!) as { paper: Record<string, unknown>; bibliography: string };
+  expect(cited.paper).toEqual({ title: 'Synthetic Paper A', authors: ['Synthetic Author'], year: '2026' });
+  expect(cited.bibliography).toBe('Title: Synthetic Paper A\nAuthors: Synthetic Author\nYear: 2026');
+  // An explicitly empty list stays present, so the identity the model is shown matches what was sent.
+  const emptyTags = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings, paper: { title: 'T', authors: [], tags: [] } });
+  const kept = JSON.parse(emptyTags.split('\n\n')[1]!) as { paper: Record<string, unknown> };
+  expect(kept.paper).toEqual({ title: 'T', authors: [], tags: [] });
+});
 it('uses a short English More details question and does not default answers to that English', async () => {
   const { EXPLAIN_QUESTION, PAPER_THREAD_POLICY } = await import('../../packages/core/src/codex/reader-policy.ts');
   expect(EXPLAIN_QUESTION).toBe('tell me more about this');
