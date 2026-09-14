@@ -2,12 +2,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterState } from '../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ImageAttachment, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
+import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
 import { citationA, citationB, imageA, paperA, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
+import type { ClipboardImageRead } from '../../packages/zotero/src/chat/pick-images.ts';
 const model = { id: 'catalog-default', displayName: 'Catalog Default', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }], defaultServiceTier: 'priority' };
 const other = { id: 'other-model', displayName: 'Other Model', isDefault: false, supportedReasoningEfforts: [{ id: 'low', description: '' }], defaultReasoningEffort: 'low', serviceTiers: [] as Array<{ id: string; name: string; description: string }>, defaultServiceTier: null };
-function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<ImageAttachment[]> } = {}) {
+function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<ClipboardImageRead> } = {}) {
   let runtime: RuntimeSnapshot = { revision: 0, runtime: 'ready', account: { state: options.signedIn === false ? 'signedOut' : 'signedIn' }, login: null, models: options.signedIn === false ? [] : [model], error: null };
   const observers = new Set<(s: RuntimeSnapshot) => void>(); const listeners = new Set<(e: ReaderEvent) => void>();
   let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings, activeRequestId: null, messages: [], lastSeq: 0, createdAt: 'now', updatedAt: 'now' };
@@ -507,15 +508,24 @@ describe('conversation presenter', () => {
 
 describe('clipboard paste', () => {
   it('reads pasted images from the privileged clipboard when the host provides one', async () => {
-    const f = fixture({ clipboard: () => Promise.resolve([imageA]) });
+    const f = fixture({ clipboard: () => Promise.resolve({ images: [imageA] }) });
     await f.presenter.activate();
     expect(await f.presenter.clipboardImages()).toEqual([imageA]);
+    expect(await f.presenter.clipboardImage()).toEqual({ images: [imageA] });
     expect(f.presenter.snapshot().draft.images).toEqual([]);
   });
   it('answers with no image instead of inventing one when the reader realm has no pasteboard', async () => {
     const f = fixture();
     await f.presenter.activate();
     expect(await f.presenter.clipboardImages()).toEqual([]);
+    // No image and no refusal: an empty pasteboard must never raise a complaint of its own.
+    expect(await f.presenter.clipboardImage()).toEqual({ images: [] });
     expect(f.presenter.snapshot().draft.images).toEqual([]);
+  });
+  it('carries the reason an image the pasteboard really had was not attached', async () => {
+    const f = fixture({ clipboard: () => Promise.resolve({ images: [], refused: 'too-large' }) });
+    await f.presenter.activate();
+    expect(await f.presenter.clipboardImage()).toEqual({ images: [], refused: 'too-large' });
+    expect(await f.presenter.clipboardImages()).toEqual([]);
   });
 });

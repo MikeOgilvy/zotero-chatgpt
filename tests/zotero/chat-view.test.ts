@@ -9,8 +9,9 @@ import { UNLOCATED_SOURCE_TEXT } from '../../packages/zotero/src/chat/source-lin
 import { messageTimeLabel } from '../../packages/zotero/src/chat/message-time.ts';
 import { workspaceDraft } from '../../packages/zotero/src/chat/draft.ts';
 import type { SourceOpenOutcome } from '../../packages/zotero/src/reader/source-highlight.ts';
+import type { ClipboardImageRead } from '../../packages/zotero/src/chat/pick-images.ts';
 import type { ModelOption, ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type ImageAttachment, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput, type SendReceipt } from '../../packages/contracts/src/index.ts';
+import { SHAREABLE_STORAGE_LOCATION, ReaderError, type Citation, type Conversation, type DocumentRevision, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput, type SendReceipt } from '../../packages/contracts/src/index.ts';
 import type { HistoryEntry, ReaderWorkspace } from '../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import type { ContextBudget } from '../../packages/core/src/codex/model-capabilities.ts';
@@ -54,7 +55,7 @@ async function mountReadyChat(options: {
   rename?: (id: string, title: string) => Promise<Conversation>;
   archive?: (id: string, archived: boolean) => Promise<Conversation>;
   cancel?: (conversationId: string, requestId: string) => Promise<SendReceipt>;
-  clipboardImages?: () => Promise<ImageAttachment[]>;
+  clipboardImages?: () => Promise<ClipboardImageRead>;
   workspace?: ReaderWorkspace;
   closeDock?: () => void;
   contextBudget?: (input: SendInput, conversation: Conversation) => ContextBudget;
@@ -2056,7 +2057,7 @@ it('shows the constant sentence when a failed view action has no coded message',
 });
 
 it('attaches a Cmd+V screenshot from the plugin clipboard when the reader paste carries no image', async () => {
-  const reads = vi.fn(() => Promise.resolve([imageA]));
+  const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
   const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
   const view = root.ownerDocument.defaultView!;
@@ -2073,7 +2074,7 @@ it('attaches a Cmd+V screenshot from the plugin clipboard when the reader paste 
 });
 
 it('never attaches the same Cmd+V screenshot twice when both clipboard routes see it', async () => {
-  const reads = vi.fn(() => Promise.resolve([imageA]));
+  const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
   const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
   const view = root.ownerDocument.defaultView!;
@@ -2090,8 +2091,65 @@ it('never attaches the same Cmd+V screenshot twice when both clipboard routes se
   expect(reads).not.toHaveBeenCalled();
 });
 
+it('falls back to the plugin clipboard when the reader realm claims an image but yields no bytes', async () => {
+  // Zotero's reader window can answer `hasDataMatchingFlavors` for an image without being able to
+  // hand over usable bytes (a macOS screenshot pasteboard reports an image family the reader realm
+  // cannot read). Claiming the gesture and then attaching nothing is exactly the "Cmd+V does
+  // nothing" symptom, so the plugin realm must still be consulted.
+  const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
+  const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView! as unknown as { Cc: unknown; Ci: unknown; Services: unknown; Event: typeof Event };
+  const transferable = { flavors: [] as string[], init: () => undefined, addDataFlavor(flavor: string) { this.flavors.push(flavor); }, getTransferData() { throw new Error('flavor missing'); } };
+  view.Cc = { '@mozilla.org/widget/transferable;1': { createInstance: () => transferable } };
+  view.Ci = { nsITransferable: {}, nsIClipboard: {}, nsIInputStream: {}, nsIBinaryInputStream: {} };
+  view.Services = { clipboard: { kGlobalClipboard: 1, hasDataMatchingFlavors: () => true, getData: () => undefined } };
+  input.focus();
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: [] } });
+  try {
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
+  } finally {
+    delete view.Cc; delete view.Ci; delete view.Services;
+  }
+});
+
+it('says why a pasted image was refused instead of leaving the draft empty and silent', async () => {
+  // The pasteboard really carried an image this sidebar cannot attach. The owner must learn which
+  // rule refused it: a paste that appears to do nothing is indistinguishable from a broken paste.
+  const reads = vi.fn(() => Promise.resolve({ images: [], refused: 'too-large' as const }));
+  const { root } = await mountReadyChat({ messages: [], clipboardImages: reads });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView!;
+  input.focus();
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: [] } });
+  input.dispatchEvent(event);
+  const error = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(error.hidden).toBe(false));
+  expect(error.textContent).toBe('That image is larger than the 2 MB limit, so it was not attached.');
+  expect(root.querySelectorAll('[data-zcr-draft-image]')).toHaveLength(0);
+});
+
+it('names an unsupported pasted image format when the DOM paste carries bytes it cannot attach', async () => {
+  const { root } = await mountReadyChat({ messages: [] });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView!;
+  const file = new view.File([new TextEncoder().encode('%PDF-1.7')], 'screenshot.png', { type: 'image/png' });
+  input.focus();
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], files: [file] } });
+  input.dispatchEvent(event);
+  const error = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  await vi.waitFor(() => expect(error.hidden).toBe(false));
+  expect(error.textContent).toBe('That image format cannot be attached. Use PNG, JPEG, GIF or WebP.');
+  expect(root.querySelectorAll('[data-zcr-draft-image]')).toHaveLength(0);
+});
+
 it('leaves a plain-text paste to the textarea and never reads the pasteboard image', async () => {
-  const reads = vi.fn(() => Promise.resolve([imageA]));
+  const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
   const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
   const view = root.ownerDocument.defaultView!;

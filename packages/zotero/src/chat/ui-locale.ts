@@ -46,6 +46,8 @@ const COPY: Readonly<Record<string, string>> = {
   'The source could not be opened.': '无法打开原文。',
   'The image could not be saved.': '无法保存图片。',
   'The clipboard image could not be attached.': '无法附加剪贴板图片。',
+  'That image is larger than the 2 MB limit, so it was not attached.': '该图片超过 2 MB 上限，未附加。',
+  'That image format cannot be attached. Use PNG, JPEG, GIF or WebP.': '无法附加该图片格式。请使用 PNG、JPEG、GIF 或 WebP。',
   'The dropped image could not be attached.': '无法附加拖放的图片。',
   'Collections could not be loaded.': '无法加载分类列表。',
   Copied: '已复制',

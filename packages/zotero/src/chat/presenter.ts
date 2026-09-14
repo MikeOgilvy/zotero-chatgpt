@@ -12,7 +12,7 @@ import { planContext, type ContextPlan } from '../../../core/src/context/planner
 import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { parseAnnotationCandidates } from '../../../core/src/tasks/controller.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
-import { imagesFromGeckoClipboard, pluginClipboardAccess } from './pick-images.ts';
+import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
 const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available; global preferences apply.';
@@ -37,7 +37,7 @@ export interface PresenterServices {
    * Host seam for the privileged clipboard read the reader realm cannot do. Production leaves it
    * unset so the presenter uses its own plugin-realm pasteboard access; tests inject a double.
    */
-  readClipboardImage?: () => Promise<ImageAttachment[]>;
+  readClipboardImage?: () => Promise<ClipboardImageRead>;
 }
 export type PresenterDependencies = PresenterServices;
 export type PresenterSkillEdit = Pick<ReaderSkill, 'name' | 'description' | 'version' | 'workflow' | 'markdown' | 'enabled'> & { id: string | null; revision?: string };
@@ -478,14 +478,20 @@ export class ConversationPresenter {
     for (const reference of picked.references) await this.addReference(reference);
   }
   /**
-   * Clipboard images for the reader composer. A reader iframe sees only the DOM paste data it was
-   * given; macOS screenshots (TIFF on the pasteboard) and paste events routed to the reader chrome
-   * are readable only here, in the plugin realm, so the composer asks this instead of the iframe's
-   * own Cc. An empty pasteboard returns [] and never invents or repeats an attachment.
+   * Clipboard images for the reader composer, with the reason a gesture that carried image bytes
+   * attached nothing. The chat is mounted into the reader window, so the paste event and a reader
+   * window that answers `hasDataMatchingFlavors` both lie outside this realm; only here, in the
+   * plugin realm, is the privileged pasteboard readable (a macOS screenshot is TIFF there and is
+   * asked for as `image/png`). An empty pasteboard returns no images and no refusal, so a plain
+   * Cmd+V with nothing on the pasteboard never invents an attachment or a complaint.
    */
-  clipboardImages(): Promise<ImageAttachment[]> {
+  clipboardImage(): Promise<ClipboardImageRead> {
     if (this.services.readClipboardImage) return Promise.resolve(this.services.readClipboardImage());
-    return imagesFromGeckoClipboard(pluginClipboardAccess(), () => this.services.uuid());
+    return Promise.resolve(readGeckoClipboardImage(pluginClipboardAccess(), () => this.services.uuid()));
+  }
+  /** Images only: kept for callers that do not report a refusal. */
+  clipboardImages(): Promise<ImageAttachment[]> {
+    return this.clipboardImage().then(read => read.images);
   }
   /**
    * Captures a PDF region as an image attachment. The composer's capture button passes nothing: the

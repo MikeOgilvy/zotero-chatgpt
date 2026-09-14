@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import {
-  clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
-  imagesFromClipboardItems, imagesFromGeckoClipboard, pluginClipboardAccess, resolveGeckoClipboardAccess,
+  attachmentsFromClipboard, attachmentsFromItems, clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
+  imagesFromClipboardItems, imagesFromGeckoClipboard, pluginClipboardAccess, readGeckoClipboardImage, resolveGeckoClipboardAccess,
   type ClipboardImageItem,
 } from '../../packages/zotero/src/chat/pick-images.ts';
 import { TINY_PNG_DATA_URL } from '../contracts/factories.ts';
@@ -33,9 +33,10 @@ function fakeGeckoClipboard(flavors: Record<string, Uint8Array>) {
     getTransferData(flavor: string, data: { value?: unknown }) {
       const bytes = flavors[flavor];
       if (!bytes) throw new Error('flavor missing');
-      data.value = {
-        data: String.fromCharCode(...bytes),
-      };
+      // Chunked so a flavor above the argument-count limit (the 2 MiB cap tests) still encodes.
+      let text = '';
+      for (let index = 0; index < bytes.length; index += 4096) text += String.fromCharCode(...bytes.subarray(index, index + 4096));
+      data.value = { data: text };
     },
   };
   return {
@@ -164,4 +165,38 @@ it('has no privileged pasteboard in a content realm and returns nothing instead 
   // The reader iframe realm has no Cc/Services; only the plugin realm can read the pasteboard.
   expect(pluginClipboardAccess()).toBeNull();
   expect(await imagesFromGeckoClipboard(pluginClipboardAccess(), () => PNG_ID)).toEqual([]);
+});
+
+// A paste that carried an image and attached nothing used to look exactly like a paste that did
+// nothing at all: the owner's only evidence was a draft that stayed empty. These pin the honest
+// outcomes, and the caps and formats themselves are unchanged.
+const oversizePng = () => { const bytes = new Uint8Array(2 * 1024 * 1024 + 1); bytes.set([0x89, 0x50, 0x4e, 0x47]); return bytes; };
+const tiff = Uint8Array.from([0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00]);
+const pngBytes = () => PNG;
+
+it('names the reason a pasted DOM image was refused instead of dropping it silently', async () => {
+  const item = (bytes: Uint8Array<ArrayBuffer>) => [{ kind: 'file', type: 'image/png', getAsFile: () => new File([bytes], 'screenshot.png', { type: 'image/png' }) }];
+  expect(await attachmentsFromItems(item(oversizePng()), () => PNG_ID)).toEqual({ images: [], refused: 'too-large' });
+  expect(await attachmentsFromItems(item(new TextEncoder().encode('%PDF-1.7')), () => PNG_ID)).toEqual({ images: [], refused: 'unsupported' });
+  expect(await attachmentsFromItems(item(pngBytes()), () => PNG_ID)).toEqual({ images: [PNG_ATTACHMENT] });
+  // An empty pasteboard and a text-only pasteboard are not refusals: there is nothing to report.
+  expect(await attachmentsFromItems([], () => PNG_ID)).toEqual({ images: [] });
+  expect(await attachmentsFromClipboard({ items: [], files: [], types: ['text/plain'] }, () => PNG_ID)).toEqual({ images: [] });
+  // A good image beside a refused one still attaches, and the refusal is still reported.
+  const mixed = await attachmentsFromItems([...item(pngBytes()), ...item(oversizePng())], () => PNG_ID);
+  expect(mixed.images).toEqual([PNG_ATTACHMENT]);
+  expect(mixed.refused).toBe('too-large');
+});
+
+it('recognizes a screenshot the pasteboard only offers as TIFF and refuses it honestly', () => {
+  // macOS offers a TIFF family this sidebar cannot attach. Asking for it is what turns a silent
+  // no-op into "this format cannot be attached"; the bytes are never converted or guessed at.
+  const host = fakeGeckoClipboard({ 'image/tiff': tiff });
+  expect(geckoClipboardHasImage(host)).toBe(true);
+  expect(readGeckoClipboardImage(host, () => PNG_ID)).toEqual({ images: [], refused: 'unsupported' });
+  const large = fakeGeckoClipboard({ 'image/png': oversizePng() });
+  expect(readGeckoClipboardImage(large, () => PNG_ID)).toEqual({ images: [], refused: 'too-large' });
+  // A pasteboard with nothing image-like stays silent, and an attachable image still wins over TIFF.
+  expect(readGeckoClipboardImage(fakeGeckoClipboard({ 'text/unicode': Uint8Array.from([65]) }), () => PNG_ID)).toEqual({ images: [] });
+  expect(readGeckoClipboardImage(fakeGeckoClipboard({ 'image/tiff': tiff, 'image/png': PNG }), () => PNG_ID)).toEqual({ images: [PNG_ATTACHMENT] });
 });

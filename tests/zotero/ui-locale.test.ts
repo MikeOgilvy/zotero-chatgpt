@@ -252,7 +252,7 @@ it('translates the plus section headings and each row title and description', ()
 });
 
 it('translates the attach-file row and the file refusals while leaving the file name verbatim', () => {
-  const { add, root } = setup();
+  const { root, add } = setup();
   const row = add('button', 'zcr-plus-row', ''); row.dataset.zcrAction = 'pick-file';
   row.setAttribute('aria-label', 'Attach file…'); row.title = 'Attach file…';
   const title = add('span', 'zcr-plus-row-title', 'Attach file…', row);

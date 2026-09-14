@@ -10,6 +10,24 @@ export const CLIPBOARD_IMAGE_FLAVORS = [
   'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
   'public.png', 'public.jpeg', 'public.jpg', 'public.gif', 'public.webp',
 ] as const;
+/**
+ * macOS screenshots are offered as TIFF. The sidebar cannot attach TIFF (the image caps and formats
+ * are unchanged), but asking for it is what turns a silent no-op into an honest refusal: the bytes
+ * are recognized as an image this sidebar does not accept and are never converted or guessed at.
+ * These are requested *after* the attachable flavors so a pasteboard that also offers PNG or JPEG
+ * still attaches through the ordinary path.
+ */
+export const UNSUPPORTED_IMAGE_FLAVORS = ['image/tiff', 'public.tiff'] as const;
+/** Every flavor a native clipboard read may ask for, in preference order. */
+export const REQUESTED_IMAGE_FLAVORS = [...CLIPBOARD_IMAGE_FLAVORS, ...UNSUPPORTED_IMAGE_FLAVORS] as const;
+/** Why a gesture that really did carry image bytes attached nothing. Both answers keep the caps. */
+export type ClipboardImageRefusal = 'too-large' | 'unsupported';
+/**
+ * The outcome of one clipboard image read. `refused` is set only when image bytes were actually
+ * there and were not attachable, so a caller can report an honest reason instead of leaving the
+ * owner with a paste that appears to have done nothing. An empty pasteboard stays silent.
+ */
+export interface ClipboardImageRead { images: ImageAttachment[]; refused?: ClipboardImageRefusal }
 
 function startsWith(bytes: Uint8Array, magic: readonly number[]): boolean {
   return magic.length <= bytes.length && magic.every((value, index) => bytes[index] === value);
@@ -97,10 +115,10 @@ function itemFromUnknown(value: unknown, type: string): ClipboardImageItem | und
 }
 
 /** Clipboard `image/*` / PNG items → the same data-URL attachment used on send. */
-export async function imagesFromClipboardItems(
+export async function attachmentsFromItems(
   items: Iterable<ClipboardImageItem>,
   uuid: () => string,
-): Promise<ImageAttachment[]> {
+): Promise<ClipboardImageRead> {
   // Collect every File synchronously: Gecko invalidates a paste event's data store once the
   // handler returns, so a getAsFile() call after the first await yields null and the image is
   // silently lost (most visibly when several images are pasted or dropped together).
@@ -113,14 +131,28 @@ export async function imagesFromClipboardItems(
     const name = 'name' in file && typeof file.name === 'string' ? file.name : undefined;
     files.push({ file, type: item.type, ...(name ? { name } : {}) });
   }
-  const images: ImageAttachment[] = [];
+  const images: ImageAttachment[] = []; let refused: ClipboardImageRefusal | undefined;
   for (const entry of files) {
     const bytes = await bytesFromBlob(entry.file);
     const name = entry.name?.trim() || screenshotName(entry.type);
-    const image = imageFromBytes({ id: uuid(), name, bytes });
-    if (image) images.push(image);
+    const image = attachmentFromBytes({ id: uuid(), name, bytes });
+    if (image) { images.push(image); continue; }
+    // The bytes were read and refused: say which cap refused them, never silently drop the paste.
+    refused ??= bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES ? 'too-large' : 'unsupported';
   }
-  return images;
+  return { images, ...(refused ? { refused } : {}) };
+}
+
+export async function imagesFromClipboardItems(
+  items: Iterable<ClipboardImageItem>,
+  uuid: () => string,
+): Promise<ImageAttachment[]> {
+  return (await attachmentsFromItems(items, uuid)).images;
+}
+
+/** One attachment, or `undefined` with the reason kept by the caller's refusal bookkeeping. */
+function attachmentFromBytes(input: { id: string; name: string; bytes: Uint8Array }): ImageAttachment | undefined {
+  return input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_BYTES ? undefined : imageFromBytes(input);
 }
 
 function itemsFromClipboard(data: ClipboardLike | null | undefined): ClipboardImageItem[] {
@@ -160,7 +192,15 @@ export async function imagesFromClipboard(
   data: ClipboardLike | null | undefined,
   uuid: () => string,
 ): Promise<ImageAttachment[]> {
-  return imagesFromClipboardItems(itemsFromClipboard(data), uuid);
+  return (await attachmentsFromClipboard(data, uuid)).images;
+}
+
+/** The refusal-aware form of {@link imagesFromClipboard}, used by the composer's paste handling. */
+export function attachmentsFromClipboard(
+  data: ClipboardLike | null | undefined,
+  uuid: () => string,
+): Promise<ClipboardImageRead> {
+  return attachmentsFromItems(itemsFromClipboard(data), uuid);
 }
 
 export function imageFromBytes(input: { id: string; name: string; bytes: Uint8Array }): ImageAttachment | undefined {
@@ -281,7 +321,7 @@ function flavorsMatch(clipboard: GeckoClipboardService, flavors: string[]): bool
 export function geckoClipboardHasImage(access: GeckoClipboardAccess | null | undefined): boolean {
   const clipboard = clipboardService(access);
   if (!clipboard) return false;
-  return flavorsMatch(clipboard, [...CLIPBOARD_IMAGE_FLAVORS]);
+  return flavorsMatch(clipboard, [...REQUESTED_IMAGE_FLAVORS]);
 }
 
 /** Reader iframe first, then parent chrome / globalThis. Cc lives on privileged Zotero windows. */
@@ -373,23 +413,49 @@ function readGeckoClipboardBytes(access: GeckoClipboardAccess): Uint8Array | und
   const transferable = createTransferable(access);
   if (!clipboard || !transferable || typeof clipboard.getData !== 'function' || typeof transferable.getTransferData !== 'function') return undefined;
   transferable.init?.(null);
-  for (const flavor of CLIPBOARD_IMAGE_FLAVORS) transferable.addDataFlavor?.(flavor);
+  for (const flavor of REQUESTED_IMAGE_FLAVORS) transferable.addDataFlavor?.(flavor);
   try {
     clipboard.getData(transferable, clipboard.kGlobalClipboard ?? 1);
   } catch {
     return undefined;
   }
-  for (const flavor of CLIPBOARD_IMAGE_FLAVORS) {
+  const held = (flavor: string): Uint8Array | undefined => {
     const holder: { value?: unknown } = {};
+    if (typeof transferable.getTransferData !== 'function') return undefined;
     try {
       transferable.getTransferData(flavor, holder);
     } catch {
-      continue;
+      return undefined;
     }
-    const bytes = bytesFromTransferValue(holder.value, access);
+    return bytesFromTransferValue(holder.value, access);
+  };
+  // Attachable flavors first, exactly as before: an image the sidebar accepts is never passed over
+  // for one it does not.
+  for (const flavor of CLIPBOARD_IMAGE_FLAVORS) {
+    const bytes = held(flavor);
     if (bytes && sniffImageMime(bytes)) return bytes;
   }
+  // Then the flavors only used to name an honest refusal (a macOS screenshot's TIFF), so a refused
+  // paste can be explained instead of looking like a paste that did nothing.
+  for (const flavor of UNSUPPORTED_IMAGE_FLAVORS) {
+    const bytes = held(flavor);
+    if (bytes?.length) return bytes;
+  }
   return undefined;
+}
+
+/** Privileged Gecko/Zotero clipboard. Never logs flavor payloads. */
+export function readGeckoClipboardImage(
+  access: GeckoClipboardAccess | null | undefined,
+  uuid: () => string,
+): ClipboardImageRead {
+  if (!access) return { images: [] };
+  const bytes = readGeckoClipboardBytes(access);
+  if (!bytes) return { images: [] };
+  const image = imageFromBytes({ id: uuid(), name: 'screenshot.png', bytes });
+  if (image) return { images: [image] };
+  // The bytes were really on the pasteboard; the refusal names why they were not attached.
+  return { images: [], refused: bytes.byteLength > MAX_BYTES ? 'too-large' : 'unsupported' };
 }
 
 /** Privileged Gecko/Zotero clipboard. Never logs flavor payloads. */
@@ -397,9 +463,5 @@ export function imagesFromGeckoClipboard(
   access: GeckoClipboardAccess | null | undefined,
   uuid: () => string,
 ): Promise<ImageAttachment[]> {
-  if (!access) return Promise.resolve([]);
-  const bytes = readGeckoClipboardBytes(access);
-  if (!bytes) return Promise.resolve([]);
-  const image = imageFromBytes({ id: uuid(), name: 'screenshot.png', bytes });
-  return Promise.resolve(image ? [image] : []);
+  return Promise.resolve(readGeckoClipboardImage(access, uuid).images);
 }

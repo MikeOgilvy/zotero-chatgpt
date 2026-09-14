@@ -14,7 +14,7 @@ import { messageTimeLabel } from './message-time.ts';
 import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
 import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
-import { clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imagesFromClipboard, imagesFromGeckoClipboard, resolveGeckoClipboardAccess, type GeckoClipboardAccess } from './pick-images.ts';
+import { attachmentsFromClipboard, clipboardHasImage, clipboardHasText, geckoClipboardHasImage, readGeckoClipboardImage, resolveGeckoClipboardAccess, type ClipboardImageRead, type ClipboardImageRefusal, type ClipboardLike, type GeckoClipboardAccess } from './pick-images.ts';
 export interface AttachmentIdentity { title: string; key: string; libraryID: number }
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
@@ -105,6 +105,10 @@ const COPY = {
   documentReadNone: 'No text could be read from this PDF locally',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
+  // An image really was on the pasteboard or in the drop; these name why it was refused. They are
+  // deliberately about the image, not about the gesture, so the paste and drop routes share them.
+  imageTooLarge: 'That image is larger than the 2 MB limit, so it was not attached.',
+  imageUnsupported: 'That image format cannot be attached. Use PNG, JPEG, GIF or WebP.',
   imageDropFailed: 'The dropped image could not be attached.',
   collectionsFailed: 'Collections could not be loaded.',
   /** Shown when a live request has no readable timing: an honest unknown, never an invented duration. */
@@ -779,17 +783,53 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const nextImageId = () => hooks.uuid?.() ?? (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`);
   const geckoAccess = (): GeckoClipboardAccess | null => resolveGeckoClipboardAccess(doc.defaultView);
   /**
-   * One paste gesture can reach the composer through both the DOM paste event and the plugin-realm
-   * clipboard read (the reader iframe cannot see a macOS screenshot pasteboard). Identical bytes
-   * already in the draft are skipped so a single Cmd+V can never attach the same image twice.
+   * One paste gesture can reach the composer through more than one route: the DOM paste event, the
+   * reader window's own clipboard service (this chat is mounted into the reader window, not an
+   * iframe), and the plugin realm that owns the privileged pasteboard. Identical bytes already in
+   * the draft are skipped so a single Cmd+V can never attach the same image twice.
    */
   const attachClipboardImages = (images: ImageAttachment[]) => {
     const present = new Set(presenter.snapshot().draft.images.map(image => image.dataUrl));
     for (const image of images) { if (present.has(image.dataUrl)) continue; present.add(image.dataUrl); presenter.addImage(image); }
   };
-  const clipboardFromPlugin = () => presenter.clipboardImages().then(attachClipboardImages).catch(() => reportViewMessage(COPY.imageClipboardFailed));
+  /** The two refusals are named, so a paste or drop that carried an image is never a silent no-op. */
+  const IMAGE_REFUSAL: Record<ClipboardImageRefusal, string> = { 'too-large': COPY.imageTooLarge, unsupported: COPY.imageUnsupported };
+  /**
+   * Reads one route and moves on when it produced nothing. A route that claims the gesture but
+   * yields no bytes (the reader window can answer `hasDataMatchingFlavors` for an image family it
+   * cannot hand over) must not consume the paste, and a route that really found bytes it had to
+   * refuse must say so instead of leaving the owner with a Cmd+V that did nothing. Routes are
+   * tried in order of fidelity and the first refusal is reported once.
+   */
+  const readClipboardRoutes = async (clipboard: ClipboardLike | null | undefined, routes: Array<() => Promise<ClipboardImageRead>>): Promise<void> => {
+    let refusal: ClipboardImageRefusal | undefined;
+    for (const route of routes) {
+      let read: ClipboardImageRead;
+      try { read = await route(); } catch { reportViewMessage(COPY.imageClipboardFailed); return; }
+      attachClipboardImages(read.images);
+      refusal ??= read.refused;
+      if (read.images.length) break;
+    }
+    if (refusal) reportViewMessage(IMAGE_REFUSAL[refusal]);
+  };
+  const pluginClipboardRead = async (): Promise<ClipboardImageRead> => await presenter.clipboardImage();
+  /** The routes the current paste gesture can reach, most faithful first. */
+  const pasteRoutes = (clipboard: ClipboardLike | null | undefined): Array<() => Promise<ClipboardImageRead>> => {
+    const host = geckoAccess();
+    return [
+      ...(clipboardHasImage(clipboard) ? [() => attachmentsFromClipboard(clipboard, nextImageId)] : []),
+      ...(geckoClipboardHasImage(host) ? [() => Promise.resolve(readGeckoClipboardImage(host, nextImageId))] : []),
+      pluginClipboardRead,
+    ];
+  };
   const seenPaste = new WeakSet<Event>();
-  let clipboardServed = false;
+  /**
+   * True once this paste gesture produced a paste event anywhere in this window. The keydown
+   * fallback below only exists for the case where the reader routes Cmd+V to its own chrome and no
+   * paste event reaches this document at all; when one did, that event already tried every route
+   * (including the plugin realm), so reading the pasteboard a second time would be redundant.
+   */
+  let pasteEventSeen = false;
   const onPaste = (event: Event) => {
     const target = event.target as Node | null;
     const inComposer = !!target && 'nodeType' in target && composer.contains(target);
@@ -799,29 +839,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!inComposer && !(documentTarget && doc.hasFocus() && composer.contains(doc.activeElement))) return;
     if (seenPaste.has(event)) return;
     seenPaste.add(event);
+    pasteEventSeen = true;
     const clipboard = (event as ClipboardEvent).clipboardData;
-    const host = geckoAccess();
-    const hasDom = clipboardHasImage(clipboard);
-    const hasGecko = !hasDom && geckoClipboardHasImage(host);
-    if (hasDom || hasGecko) {
-      event.preventDefault();
-      const work = hasDom ? imagesFromClipboard(clipboard, nextImageId) : imagesFromGeckoClipboard(host, nextImageId);
-      clipboardServed = true;
-      void work.then(attachClipboardImages).catch(() => reportViewMessage(COPY.imageClipboardFailed));
-      return;
-    }
-    // No paste data the iframe can see and no text to insert: the pasteboard image may still be
-    // readable in the plugin realm, which owns the privileged clipboard.
-    if (clipboardHasText(clipboard)) return;
+    // A paste that carries text is left entirely to the textarea; only a gesture with no text and
+    // no image data of its own falls through to the privileged pasteboard.
+    if (!clipboardHasImage(clipboard) && clipboardHasText(clipboard)) return;
     event.preventDefault();
-    clipboardServed = true;
-    void clipboardFromPlugin();
+    void readClipboardRoutes(clipboard, pasteRoutes(clipboard));
   };
   composer.addEventListener('dragover', event => { if (clipboardHasImage(event.dataTransfer)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; } });
   composer.addEventListener('drop', event => {
     if (!clipboardHasImage(event.dataTransfer)) return;
     event.preventDefault();
-    void imagesFromClipboard(event.dataTransfer, nextImageId).then(images => { for (const image of images) presenter.addImage(image); }).catch(() => reportViewMessage(COPY.imageDropFailed));
+    // A drop is the same validated route as a paste: the dropped bytes are attached, and a drop
+    // that could not be attached names its reason (size or format) instead of doing nothing.
+    void attachmentsFromClipboard(event.dataTransfer, nextImageId).then(read => {
+      for (const image of read.images) presenter.addImage(image);
+      if (read.refused) reportViewMessage(IMAGE_REFUSAL[read.refused]);
+    }).catch(() => reportViewMessage(COPY.imageDropFailed));
   });
   composer.addEventListener('paste', onPaste);
   input.addEventListener('paste', onPaste);
@@ -844,14 +879,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   input.addEventListener('input', () => { presenter.setQuestion(input.value); resizeInput(); });
   const isComposing = (event: KeyboardEvent) => composing || event.isComposing || event.keyCode === 229;
   input.addEventListener('keydown', event => {
-    // Cmd/Ctrl+V: Zotero's reader may route the pasteboard to its own chrome, and a screenshot
-    // (TIFF on macOS) is invisible to this content realm. The privileged plugin clipboard is read
-    // as a fallback; the DOM paste event for the same keypress wins, and identical bytes never
-    // attach twice. Text pastes are untouched because nothing is prevented here.
+    // Cmd/Ctrl+V: Zotero's reader may route the pasteboard to its own chrome, and a macOS
+    // screenshot is TIFF there, which this realm cannot read. The privileged plugin clipboard is
+    // read only as a fallback for a keypress whose paste event never arrives here; a paste event
+    // that does arrive already tries every route itself, and identical bytes never attach twice.
+    // Text pastes are untouched because nothing is prevented here.
     if (!isComposing(event) && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'v') {
-      clipboardServed = false;
-      // The keypress default action and its paste event run before timers, so a DOM image paste wins.
-      setTimeout(() => { if (!clipboardServed) void clipboardFromPlugin(); }, 0);
+      pasteEventSeen = false;
+      // The keypress default action and its paste event run before timers, so a real paste wins.
+      setTimeout(() => { if (!pasteEventSeen) void readClipboardRoutes(null, pasteRoutes(null)); }, 0);
     }
   });
   input.addEventListener('keydown', event => {
