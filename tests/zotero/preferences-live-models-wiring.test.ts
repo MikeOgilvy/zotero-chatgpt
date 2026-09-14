@@ -14,7 +14,6 @@ import { createPreferencesService, type PreferencesService } from '../../package
 function serviceHost(liveModels?: () => Promise<string[] | null>) {
   return {
     workspace: () => Promise.reject(new Error('The workspace is not needed to read the live models.')),
-    exportText: () => Promise.resolve(),
     readAutomaticPdfText: () => true,
     writeAutomaticPdfText: () => undefined,
     ...(liveModels ? { liveModels } : {}),

@@ -258,13 +258,6 @@ export function startup(options: PluginContext): void {
       const client = runtime?.currentClient();
       return Promise.resolve(client ? client.snapshot().models.map(model => model.id) : null);
     },
-    exportText: async (name, text) => {
-      const services = localServices;
-      if (!services) throw new ReaderError('BUSY', 'Zotero Codex Reader is stopping.');
-      const exportText = services.library.exportText?.bind(services.library);
-      if (!exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Preference export is unavailable.');
-      await exportText(name, text);
-    },
   });
   preferencePanes = createPreferencePaneRegistrar({
     panes: Zotero.PreferencePanes, pluginID: options.pluginID, rootURI: options.rootURI,

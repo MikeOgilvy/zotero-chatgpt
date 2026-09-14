@@ -12,7 +12,6 @@ import { PAPER_THREAD_POLICY, readingInput } from '../../../core/src/codex/reade
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { parseAnnotationCandidates } from '../../../core/src/tasks/controller.ts';
-import { PREFERENCES_EXPORT_NAME, preferencesExportText } from '../../../core/src/workspace/export.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { imagesFromGeckoClipboard, pluginClipboardAccess } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
@@ -457,11 +456,6 @@ export class ConversationPresenter {
     if (!this.services.library?.exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Skill export is unavailable.');
     const skill = (await (await this.getWorkspace()).settings()).skills.find(skill => skill.id === id);
     if (!skill) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.'); await this.services.library.exportText(`${skill.name}.md`, skill.markdown);
-  }
-  async exportPreferences(): Promise<void> {
-    if (!this.services.library?.exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Preference export is unavailable.');
-    const settings = await (await this.getWorkspace()).settings();
-    await this.services.library.exportText(PREFERENCES_EXPORT_NAME, preferencesExportText(settings));
   }
   async pickImages(): Promise<void> {
     if (!this.services.library?.pickImages) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native image selection is unavailable.');

@@ -10,11 +10,6 @@ import { HistoryManager } from '../../../core/src/workspace/history.ts';
  */
 export interface PreferencesServiceHost {
   workspace(): Promise<ReaderWorkspace>;
-  /**
-   * Native save dialog, retained only so a host that still publishes the sidebar's export port
-   * type-checks. The pane itself no longer offers an export, so nothing in this service calls it.
-   */
-  exportText?(name: string, text: string): Promise<void>;
   /** The plugin preference `extensions.zcr.automaticPdfText`; not part of the workspace store. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
