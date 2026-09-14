@@ -19,7 +19,7 @@ Host checks use an ignored dedicated profile under `.zcr-dev/` and synthetic PDF
 
 ## Pull requests
 
-Default CI runs typecheck, lint, and unit tests without credentials. Packaging the macOS arm64 XPI needs the pinned Darwin Codex runtime and is not part of Ubuntu CI.
+Default CI (`.github/workflows/ci.yml`) runs typecheck, lint and unit tests without credentials, then packages the macOS arm64 development XPI on the Ubuntu runner (`runtime-prepare` → `package:dev` → `test:unit` → `verify:artifacts`). The pinned Darwin Codex runtime is downloaded and hashed there but never executed; host checks against a real Zotero stay local. See [docs/development.md](docs/development.md).
 
 Do not request GitHub Releases from CI. Local `npm run release:dry-run` writes a plan only.
 
