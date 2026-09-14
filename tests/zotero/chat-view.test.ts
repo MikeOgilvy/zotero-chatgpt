@@ -1509,7 +1509,7 @@ it('opens a second chat beside the one being edited as a read-only transcript wi
 });
 
 it('keeps the tab strip as the switcher and never lays out a squeezed column when the dock is narrow', async () => {
-  const { root, presenter, preview, widen, thirdId } = await mountTwoOpenChats({});
+  const { root, presenter, preview, widen, thirdId, columns } = await mountTwoOpenChats({});
   const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
   // Unmeasured is not room: the strip stays the UI and no second column is laid out at all.
   expect(preview.hidden).toBe(true);
@@ -1535,6 +1535,16 @@ it('keeps the tab strip as the switcher and never lays out a squeezed column whe
   expect(root.querySelectorAll('[data-zcr-pane-preview]')).toHaveLength(1);
   expect([...strip.querySelectorAll('[data-zcr-pane-tab]')]).toHaveLength(3);
   expect(preview.querySelector<HTMLElement>('.zcr-pane-preview-title')!.textContent).toBe('The other chat');
+  // A real dock is measured through its own box; when that box exists it is the measurement, and the
+  // client width is only the fallback for a dock that has not been laid out yet.
+  const box = (width: number) => Object.defineProperty(columns, 'getBoundingClientRect', { configurable: true, value: () => ({ width }) });
+  box(573);
+  widen(900);
+  expect(preview.hidden).toBe(true);
+  box(574);
+  widen(900);
+  expect(preview.hidden).toBe(false);
+  expect(root.querySelector<HTMLElement>('[data-zcr-columns]')!.dataset.zcrColumns).toBe('two');
 });
 
 it('refuses a second column when the chat text scale would squeeze two chats into it', async () => {
