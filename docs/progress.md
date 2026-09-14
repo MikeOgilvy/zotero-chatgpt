@@ -7,7 +7,7 @@
 
 - **Git**：`main` 已把 `codex/product-agent-v0.4` 快进合并（98 个提交逐字保留、历史未改写），随后删除已完成的本地分支与空目录 `.worktrees/`；`origin/codex/product-agent-v0.4` 保留不动，未 push、未打 tag。清理前 HEAD `a7800ce5de13d65d3fe90c5c0313f37db5db26f0` 存于本地安全 ref `refs/backup/pre-cleanup-20260914`。
 - **工作树**：本轮（侧栏/元数据/PDF 回合）在 `main` 上按功能分提交，最新提交见 `git log`；`dist/`、`build/`、`.zcr-dev/` 不在版本控制内，重建与清理不产生提交。
-- **开发版本**：npm `0.4.0-alpha.1` / Zotero **`0.4.0a5`**（未提升）。**注意**：本轮 `dist/` 重建出的 a5 与宿主已验证的 a5 版本串相同、字节不同，同版本脚枪已恢复，详见 [产物边界（重要）](#产物边界重要) (d)。
+- **开发版本**：npm `0.4.0-alpha.1` / Zotero **`0.4.0a6`**（**已从 a5 提升**，正是为了避开下面 (d) 的同版本脚枪）。
 - **上一轮（2026-09-14 收尾轮）门禁（同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` PASS（**计数与条件见下『测试计数（唯一权威）』**）；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（**92,665,647 bytes**，SHA-256 `68529c36cfd422268a7f24fc05eaf350b057c1457923d1f8320a6bdc7129261b`，即当前宿主已验证的那份）；`npm run verify:artifacts` **84 files PASS**。均为代码 + 单元 + 产物证据。
 - **真实宿主 `--context`（2026-09-14，0.4.0a5，专用 `.zcr-dev/context` 树）**：**PASSED，`32 executed / 32 PASS / 0 FAIL`**，`recordedRequests = 0`，`build` 0.4.0a5 且 SHA-256 `68529c36…` 与产物一致；`automatic-whole-pdf-background-preparation-without-panel` 通过（`productGate` 2/2、10 次自动读取、`preparationObserved: true`）；三个 `pref-pane-copy-*` 检查通过，命中 `Appearance`/`外观` 图例（zh 切换时 skill id/名字逐字不变）；8 项 `notRun`（`real-model-answer`、`official-login`、`in-flight-model-stop`、`long-term-memory`、`image-understanding`、`acknowledge-context-resumes-the-pending-explain`、`pref-pane-visual-theme-and-keyboard`、`pref-pane-registrar-isolated-from-host-auto-unregister`）不得当作通过。报告原样归档 [host-context-0.4.0a5-PASS-32of32.json](../.zcr-dev/verification/scope-2026-09-14-a5/host-context-0.4.0a5-PASS-32of32.json)，SHA-256 `03c7a614f9bd388f6e05c4d2f8e19bbf96734a49aac4178c99bff5b5da18d187`。
 - **产物诚实边界**：见下 [产物边界（重要）](#产物边界重要)。
@@ -25,7 +25,8 @@
 
 ### 产物边界（重要）
 
-- **canonical `dist` 产物当前 = `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（92,673,108 bytes，SHA-256 `426542c23fa1bd16ab30a3d51a6f042a4ecf722a95a2105e6ec591ad391ee87d`）**，由 `package:dev` 从**本轮 HEAD** 的源码打出现，`verify:artifacts` **84 files PASS**。**这份字节不是宿主已验证的那一份**（见下）。
+- **canonical `dist` 产物当前 = `dist/zotero-codex-reader-0.4.0a6-dev.xpi`（92,682,832 bytes，SHA-256 `bc9d13709d5ecd5c87a211894dac92d145a7e7b08dc8d5b0e8ce1bd4b7659480`）**，由 `package:dev` 从本回合 HEAD（两列只读转录）的源码打出现，`verify:artifacts` **84 files PASS**。**这份字节尚未经任何宿主验证**（见下），也从未安装进 owner 的正常 profile。产物内已核验：`manifest.json` 声明 `0.4.0a6`，`content/zcr.js` 含本回合新符号（`zcr-pane-preview`、`zcr-workspace-search`、`readableColumnCount`、`attach-file`）。**提升版本号的意义**：a5 已被同版本不同字节污染（下述 (d)），Zotero 可能因此拿到陈旧的 `jar:` 句柄而在升级 XPI 后仍显示旧界面；a6 是新的版本串，升级后不必依赖清理陈旧资源。
+- **(a5-canonical-历史)** 本回合之前，`dist/` 的 canonical 产物是 `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（92,673,108 bytes，SHA-256 `426542c23fa1bd16ab30a3d51a6f042a4ecf722a95a2105e6ec591ad391ee87d`）；该文件仍在磁盘上，但已不在 `SHA256SUMS` 内（`SHA256SUMS` 现在只列 a6）。宿主已验证的 a5 字节（`68529c36…`）不受影响，仍保留在 `.zcr-dev/artifact-backup/` 与 `.zcr-dev/context/profile/extensions/`。
 - **(a0) 宿主已验证的 a5 字节是另一份**：SHA-256 `68529c36cfd422268a7f24fc05eaf350b057c1457923d1f8320a6bdc7129261b`（92,665,647 bytes），来自 [收尾轮](#产物边界重要) 的源码树，已完成真实宿主 `--context` 32/32。本轮 `package:dev` 重建后它不再位于 `dist/`；已按既有约定复制到忽略路径 `.zcr-dev/artifact-backup/zotero-codex-reader-0.4.0a5-dev.host-verified-68529c36.xpi`（SHA-256 复制后复核同上），同样的字节仍存在于验证树 `.zcr-dev/context/profile/extensions/{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}.xpi`，未丢失、未修改。
 - **(a) 宿主已验证的 a5（`68529c36…`）已完成真实宿主 `--context` 验证（2026-09-14，专用 `.zcr-dev/context` 树，32/32 PASS，`recordedRequests = 0`）。** 报告原样归档 [host-context-0.4.0a5-PASS-32of32.json](../.zcr-dev/verification/scope-2026-09-14-a5/host-context-0.4.0a5-PASS-32of32.json)（SHA-256 `03c7a614…`）。此前完成真实宿主 `--context` **32/32** 的是 a4 字节（92,661,563 bytes，SHA-256 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`，构建于 `96f8c2c`）。
 - **(b) 宿主已验证的 a4 字节仍保留**在忽略路径 `.zcr-dev/artifact-backup/zotero-codex-reader-0.4.0a4-dev.host-verified-5a6bb161.xpi`（SHA-256 复核仍为 `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`）。**owner profile 侧的回退备份也已补上**（2026-09-14 09:03，执行时 `ps` 确认无 Zotero 进程）：`extensions/{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}.xpi.zcr-bak-20260914-090331-0.4.0a4`（92,661,563 B，SHA-256 复制后复核为 `5a6bb161…`，与上述忽略路径副本同字节）。这是 profile 文件，不是仓库提交。
@@ -37,7 +38,7 @@
 
 本页**只有这一处**声明当前测试计数；其它出现过的数字（699/60、746/67、970/76、968+2、629+2 等）都是更早迭代的历史值，已随迭代流水搬到 [归档](archive/progress-history-2026-09.md)，不再作为当前计数。
 
-- 本机（macOS，且 `dist/` 存在**当前 manifest 版本**即 a5 对应的 XPI）实测：**`npm run test:unit` → 1081 passed / 80 files / 0 skipped**（2026-09-14 两列只读转录回合实测）。
+- 本机（macOS，且 `dist/` 存在**当前 manifest 版本**即 a6 对应的 XPI）实测：**`npm run test:unit` → 1081 passed / 80 files / 0 skipped**（2026-09-14 两列只读转录回合的代码，在提升版本号为 `0.4.0a6` 并打出现 `dist/zotero-codex-reader-0.4.0a6-dev.xpi` 之后复测）。
 - 与上一版 1068 / 79 的差异来自本轮：两列布局的门槛与第二列选谁（新增 `tests/zotero/pane-layout.test.ts` 3 条）、只读转录列的激活/宽度/缩放/独立滚动/焦点与 IME 保持（`tests/zotero/chat-view.test.ts` 7 条）、预读锚点的 per-chat 记录（`tests/zotero/presenter.test.ts` 1 条）、两列布局与只读列样式（`tests/zotero/sidebar-styles.test.ts` 1 条）、只读列本地化（`tests/zotero/ui-locale.test.ts` 1 条），另有 1 条样式断言按 happy-dom 的长手属性解析改写（`min-width`/`overflow`）。更早 1044 / 79 的差异来自纸张书目卡片与本地读取状态视图用例、PDF 就绪上限回归（`document-version.test.ts`）、历史直删与偏好面板文案更新，删除死模块后的 `tests/core/workspace-export.test.ts` 一并移除。
 - **未重测**（本轮未执行，不得当成结果）：去掉上述 XPI 时的 skip 计数；上一版记录的 988 / 77 / 2 skipped 只描述当时的树。
 - 条件（这也是“0 skipped”只是本机属性的原因）：`tests/build/install-lifecycle.test.ts` 里有两条 `it.skipIf`：
