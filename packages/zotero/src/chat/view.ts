@@ -22,7 +22,6 @@ export interface ChatViewHooks {
   copyText?(text: string): void;
   exportImage?(image: ImageAttachment): Promise<void>;
   openLink?(url: string): void;
-  confirm?(message: string): boolean;
   readTextScale?(): number;
   writeTextScale?(scale: number): void;
   zoomTargets?: Array<Document | HTMLElement>;
@@ -51,7 +50,6 @@ const COPY = {
   searchChats: 'Search chats…',
   closeChat: 'Close chat',
   deleteChat: 'Delete chat',
-  deleteConfirm: 'Delete this chat? This only removes the local history for this PDF.',
   newContent: 'New content',
   askPlaceholder: 'Ask a question…',
   question: 'Question',
@@ -384,7 +382,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     node.addEventListener('click', onClick);
     return node;
   };
-  const confirmDelete = () => (hooks.confirm ?? ((message: string) => doc.defaultView?.confirm(message) ?? false))(COPY.deleteConfirm);
   // Clipboard writes go through the host hook when provided; a copy must always confirm visibly.
   const copyTimers = new WeakMap<HTMLButtonElement, number>();
   const confirmCopy = (trigger: HTMLButtonElement) => {
@@ -440,7 +437,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   currentTitle.addEventListener('click', () => { toggleRename(); });
   // The current chat title carries the reference's rounded neutral chip: the title truncates and a
   // small cross sits at its right edge. Closing leaves the chat on disk and in history and asks no
-  // confirmation; the destructive remove lives only on the fallback host-list row. When the close
+  // confirmation; the destructive remove lives on the history rows. When the close
   // leaves no chat at all for this attachment, the reader collapses its whole dock through the
   // reader's own close path instead of leaving an empty panel; otherwise the pane stays open in its
   // new-chat state and the `+` stays available.
@@ -1014,7 +1011,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     choice.addEventListener('click', () => { source.open(); toggleHistory(false); });
     row.append(choice);
     if (source.remove) {
-      const drop = button(COPY.deleteChat, 'delete-conversation', source.remove, 'remove');
+      const drop = button(`${COPY.deleteChat}: ${source.title}`, 'delete-conversation', source.remove, 'remove');
       drop.dataset.zcrConversationId = source.id;
       row.append(drop);
     }
@@ -1029,6 +1026,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     updatedAt: entry.updatedAt || entry.createdAt,
     current: entry.id === state.conversation?.id,
     open: () => { void presenter.openHistoryEntry(entry.id); },
+    remove: () => { void presenter.deleteConversation(entry.id); },
   });
   const conversationHistoryRow = (conversation: Conversation, state: PresenterState): HistoryRowSource => ({
     id: conversation.id,
@@ -1039,15 +1037,35 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     updatedAt: conversation.updatedAt || conversation.createdAt,
     current: conversation.id === state.conversation?.id,
     open: () => { void presenter.openConversation(conversation.id); },
-    // Delete stays a confirmed, separate hard delete on the host-list path only; the workspace
-    // listing has no delete port and must not gain an unconfirmed one.
-    remove: () => { if (confirmDelete()) void presenter.deleteConversation(conversation.id); },
+    remove: () => { void presenter.deleteConversation(conversation.id); },
   });
   /**
    * Both history paths render through the same row shape and differ only in their source. Neither
    * partitions any more: a stored `archivedAt` is not a scope, so every chat is an ordinary row.
    */
+  /**
+   * History rows are rebuilt wholesale, so removing the row that holds focus would otherwise drop
+   * the owner's keyboard position to the page body. Snapshot the focused row (and which control on
+   * it) before the rebuild, restore the scroll offset, then put focus on the same control of the row
+   * that now occupies its slot — or on the search field when the list is empty.
+   */
+  const historyFocusSnapshot = (): { index: number; action: string | null } | null => {
+    const active = doc.activeElement as HTMLElement | null;
+    if (!active || !historyList.contains(active)) return null;
+    const index = [...historyList.querySelectorAll<HTMLElement>('.zcr-history-row')].findIndex(row => row.contains(active));
+    return index < 0 ? null : { index, action: active.dataset.zcrAction ?? null };
+  };
+  const restoreHistoryFocus = (snapshot: { index: number; action: string | null }) => {
+    const rows = [...historyList.querySelectorAll<HTMLElement>('.zcr-history-row')];
+    const row = rows[Math.min(snapshot.index, rows.length - 1)];
+    const control = snapshot.action
+      ? row?.querySelector<HTMLElement>(`[data-zcr-action="${snapshot.action}"]`)
+      : row?.querySelector<HTMLElement>('.zcr-history-item');
+    (control ?? row ?? historySearch).focus();
+  };
   const renderHistory = (state: PresenterState) => {
+    const scrollTop = historyList.scrollTop;
+    const focus = historyFocusSnapshot();
     const rows = state.workspace
       ? newestFirst(state.history).map(entry => workspaceHistoryRow(entry, state))
       : newestFirst(state.conversations).map(conversation => conversationHistoryRow(conversation, state));
@@ -1064,6 +1082,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // The presenter already filtered a workspace search (it also matches message text), so the
     // local row-label filter only runs for the host-list fallback.
     if (!state.workspace) applyHistoryFilter();
+    historyList.scrollTop = scrollTop;
+    if (focus) restoreHistoryFocus(focus);
   };
   const renderPicker = (state: PresenterState, signedIn: boolean) => {
     const models = state.runtime?.models ?? [];

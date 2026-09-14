@@ -41,7 +41,6 @@ async function mountReadyChat(options: {
   textScale?: { value: number };
   readerZoom?: { factor: number; ins: number; outs: number; resets: number };
   sent?: SendInput[];
-  confirm?: (message: string) => boolean;
   uuid?: () => string;
   document?: DocumentServices;
   openDocumentPage?: (document: { paper: PaperScope; revision: DocumentRevision }, pageIndex: number, quote?: string | null) => Promise<SourceOpenOutcome | void>;
@@ -60,6 +59,7 @@ async function mountReadyChat(options: {
   closeDock?: () => void;
   contextBudget?: (input: SendInput, conversation: Conversation) => ContextBudget;
   rateLimits?: RuntimeSnapshot['rateLimits'];
+  deleteConversation?: ReaderClient['deleteConversation'];
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -132,7 +132,7 @@ async function mountReadyChat(options: {
       if (conversation.id === id) conversation = renamed;
       return Promise.resolve(structuredClone(renamed));
     }),
-    deleteConversation: (_paper, id) => {
+    deleteConversation: options.deleteConversation ?? ((_paper, id) => {
       const index = listed.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new Error('missing conversation'));
       listed.splice(index, 1);
@@ -143,7 +143,7 @@ async function mountReadyChat(options: {
         if (!listed.some(entry => entry.id === conversation.id)) listed.push(conversation);
       }
       return Promise.resolve(structuredClone(conversation));
-    },
+    }),
     archiveConversation: options.archive ?? ((id, archived) => {
       const index = listed.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new Error('missing conversation'));
@@ -186,7 +186,6 @@ async function mountReadyChat(options: {
     openCitation: options.openCitation ?? (() => Promise.resolve()),
     readTextScale: () => scale.value,
     writeTextScale: value => { scale.value = value; },
-    confirm: options.confirm ?? (() => true),
     uuid: options.uuid ?? (() => imageA.id),
     ...(options.copyText ? { copyText: options.copyText } : {}),
     ...(options.openDocumentPage ? { openDocumentPage: options.openDocumentPage } : {}),
@@ -1202,8 +1201,7 @@ it('closes the current chat from the title pill cross without confirming, deleti
     ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
-  const confirm = vi.fn(() => true);
-  const { root, presenter, client } = await mountReadyChat({ messages: [], conversations: [first, second], confirm });
+  const { root, presenter, client } = await mountReadyChat({ messages: [], conversations: [first, second] });
   const remove = vi.spyOn(client, 'deleteConversation');
   const chrome = root.querySelector('.zcr-chrome')!;
   // The current chat title owns the reference's rounded chip, with the cross inside it.
@@ -1229,7 +1227,6 @@ it('closes the current chat from the title pill cross without confirming, deleti
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   close.click();
-  expect(confirm).not.toHaveBeenCalled();
   expect(remove).not.toHaveBeenCalled();
   expect(presenter.snapshot().conversation).toBeNull();
   expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
@@ -1242,19 +1239,17 @@ it('closes the current chat from the title pill cross without confirming, deleti
   expect(row).not.toBeNull();
   row!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
-  expect(confirm).not.toHaveBeenCalled();
+  expect(remove).not.toHaveBeenCalled();
 });
 
 it('keeps the closed chat’s draft and starts a fresh chat from the empty state on the next send', async () => {
-  const confirm = vi.fn(() => true);
-  const { root, presenter } = await mountReadyChat({ messages: [], confirm });
+  const { root, presenter } = await mountReadyChat({ messages: [] });
   const closed = presenter.snapshot().conversation!.id;
   const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
   const type = (value: string) => { input.value = value; input.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true })); };
   type('Draft kept for the closed chat');
   root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
-  expect(confirm).not.toHaveBeenCalled();
   // The empty state still carries a working composer.
   expect(input.disabled).toBe(false);
   expect(root.querySelector('[data-zcr-action="send"]')).not.toBeNull();
@@ -1275,8 +1270,7 @@ it('keeps the closed chat’s draft and starts a fresh chat from the empty state
  * collapse it while any other chat for that attachment remains.
  */
 it('keeps the New chat control available in the empty state after closing the current chat', async () => {
-  const confirm = vi.fn(() => true);
-  const { root, presenter } = await mountReadyChat({ messages: [], confirm });
+  const { root, presenter } = await mountReadyChat({ messages: [] });
   const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
   expect(fresh.hidden).toBe(false);
   root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
@@ -1291,7 +1285,6 @@ it('keeps the New chat control available in the empty state after closing the cu
     expect(presenter.snapshot().conversation).not.toBeNull();
     expect(root.querySelector<HTMLElement>('[data-zcr-chat-pill]')).not.toBeNull();
   });
-  expect(confirm).not.toHaveBeenCalled();
 });
 
 it('collapses the dock when closing the last chat for the attachment', async () => {
@@ -1497,14 +1490,57 @@ it('groups workspace history entries single-line and keeps the PDF title and pre
     const done = items.find(item => item.querySelector('[data-zcr-history-status="done"]'))!;
     expect(done.getAttribute('aria-label')).toContain('Workspace Paper Title');
     expect(done.getAttribute('aria-label')).toContain('Workspace preview text');
-    // The workspace port owns no confirmed delete, so it keeps no delete cross. It also owns no
-    // archive mutation any more, so no row carries an archive/restore action and no Archived
-    // section node is ever invented.
-    expect(root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]')).toBeNull();
+    // The workspace port reaches the same delete path: every row carries a labelled cross, and no
+    // archive mutation surface is invented.
+    const drops = [...root.querySelectorAll<HTMLButtonElement>('[data-zcr-history] [data-zcr-action="delete-conversation"]')];
+    expect(drops).toHaveLength(history.length);
+    expect(drops.every(node => /Delete chat/u.test(node.getAttribute('aria-label') ?? '') && node.textContent?.trim() === '')).toBe(true);
     expect(root.querySelector('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zcr-history] [data-zcr-action="restore-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
   } finally { clock.mockRestore(); }
+});
+
+it('deletes a workspace history row directly without a prompt and keeps the open list, scroll and focus', async () => {
+  const entries = [historyEntry(0), historyEntry(1)];
+  const live: HistoryEntry[] = [...entries];
+  const conversationFor = (entry: HistoryEntry): Conversation => ({
+    id: entry.id, paper: entry.paper, title: entry.title, settings, activeRequestId: null,
+    messages: [], lastSeq: 0, createdAt: entry.createdAt, updatedAt: entry.updatedAt,
+  });
+  const workspace: ReaderWorkspace = {
+    ...historyWorkspace(live),
+    readConversation: id => {
+      const entry = live.find(candidate => candidate.id === id);
+      return entry ? Promise.resolve(conversationFor(entry)) : Promise.reject(new ReaderError('NOT_FOUND', 'Missing.'));
+    },
+  };
+  const remove: ReaderClient['deleteConversation'] = vi.fn((_paper, id) => {
+    const index = live.findIndex(entry => entry.id === id);
+    if (index < 0) return Promise.reject(new Error('missing workspace entry'));
+    const [removed] = live.splice(index, 1);
+    return Promise.resolve(conversationFor(removed!));
+  });
+  const { root } = await mountReadyChat({ workspace, deleteConversation: remove });
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
+  const list = panel.querySelector<HTMLElement>('.zcr-history-list')!;
+  const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  expect(listIds().sort()).toEqual([entries[0]!.id, entries[1]!.id].sort());
+  // The owner is scrolled down and has a row's cross focused when they delete it.
+  list.scrollTop = 48;
+  const drop = panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${entries[0]!.id}"]`)!;
+  expect(drop).not.toBeNull();
+  drop.focus();
+  drop.click();
+  await vi.waitFor(() => expect(listIds()).not.toContain(entries[0]!.id));
+  expect(remove).toHaveBeenCalledWith(expect.anything(), entries[0]!.id);
+  expect(listIds()).toEqual([entries[1]!.id]);
+  // Removing a row does not throw the reader back to the top of the list, and focus stays inside
+  // the panel instead of escaping to the page body.
+  expect(list.scrollTop).toBe(48);
+  expect(panel.contains(root.ownerDocument.activeElement)).toBe(true);
+  expect(root.ownerDocument.activeElement).not.toBe(root.ownerDocument.body);
 });
 
 it('buckets history into Today, Yesterday, Previous 7 days and Older without losing a timestamp', () => {
@@ -1613,11 +1649,10 @@ it('lists a workspace record carrying archivedAt as an ordinary chat in the one 
   } finally { clock.mockRestore(); }
 });
 
-it('shows a host-list record carrying archivedAt as an ordinary row while delete stays a separate confirmed removal', async () => {
+it('shows a host-list record carrying archivedAt as an ordinary row and deletes it directly, without a prompt', async () => {
   const first = agedConversation('aaaaaaaa-0000-4000-8000-000000000031', 'First chat', '2026-09-10T09:00:00.000Z');
   const second = agedConversation('aaaaaaaa-0000-4000-8000-000000000032', 'Second chat', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
-  const confirm = vi.fn(() => true);
-  const { root } = await mountReadyChat({ conversations: [first, second], confirm });
+  const { root } = await mountReadyChat({ conversations: [first, second] });
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
   const rowIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
@@ -1627,12 +1662,20 @@ it('shows a host-list record carrying archivedAt as an ordinary row while delete
   expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
   expect(panel.querySelector('[data-zcr-action="archive-conversation"]')).toBeNull();
   expect(panel.querySelector('[data-zcr-action="restore-conversation"]')).toBeNull();
-  expect(confirm).not.toHaveBeenCalled();
-  // Delete is the only removal path, and it stays behind the explicit confirmation.
-  panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${second.id}"]`)!.click();
-  await vi.waitFor(() => expect(confirm).toHaveBeenCalledWith('Delete this chat? This only removes the local history for this PDF.'));
+  // Delete is the only removal path and it happens on the click itself: no prompt stands between
+  // the owner and a row they asked to remove.
+  const drop = panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${second.id}"]`)!;
+  expect(drop).not.toBeNull();
+  expect(drop.textContent?.trim()).toBe('');
+  expect(drop.getAttribute('aria-label')).toMatch(/Delete chat/u);
+  drop.focus();
+  drop.click();
   await vi.waitFor(() => expect(rowIds()).not.toContain(second.id));
   expect(rowIds()).toContain(first.id);
+  // The row the owner acted on is gone, so focus falls back inside the still-open panel instead of
+  // escaping to the page body.
+  expect(panel.contains(root.ownerDocument.activeElement)).toBe(true);
+  expect(root.ownerDocument.activeElement).not.toBe(root.ownerDocument.body);
 });
 
 it('finds a chat that only the archived store scope holds, in the one listing', async () => {
