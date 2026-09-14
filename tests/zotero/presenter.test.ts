@@ -17,7 +17,7 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<ImageA
     snapshot: () => structuredClone(runtime), observe: l => { observers.add(l); l(structuredClone(runtime)); return () => { observers.delete(l); }; },
     refreshAccount: async () => {}, startLogin: vi.fn(() => Promise.resolve({ loginId: 'login-1', authorizationUrl: 'https://auth.openai.com/authorize?x=1' })), cancelLogin: async () => {},
     current: vi.fn(() => Promise.resolve(structuredClone(conversation))), newConversation: vi.fn(() => {
-      conversation = { ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], lastSeq: 0 };
+      conversation = { ...conversation, id: `aaaaaaaa-0000-4000-8000-${String(conversations.length + 1).padStart(12, '0')}`, messages: [], lastSeq: 0 };
       conversations.push(conversation);
       return Promise.resolve(structuredClone(conversation));
     }),
@@ -440,26 +440,45 @@ describe('conversation presenter', () => {
     f.presenter.setDocumentRange(1.7, 4.2);
     expect(f.last().document.range).toEqual([1, 4]);
   });
-  it('reuses an idle empty chat instead of stacking duplicate empty sessions', async () => {
+  it('opens a visible new chat and only reuses the blank chat it just opened', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
-    await f.presenter.newConversation();
-    expect(f.client.newConversation).not.toHaveBeenCalled();
-    expect(f.last().conversation?.id).toBe(firstId);
-    expect(f.last().conversations.map(c => c.id)).toEqual([firstId]);
-
-    f.presenter.setQuestion('新问题');
+    // The chat `activate` adopted is an older empty record, not one `New chat` opened: pressing the
+    // control must create a real, visibly different conversation.
     await f.presenter.newConversation();
     expect(f.client.newConversation).toHaveBeenCalledTimes(1);
     const secondId = f.last().conversation!.id;
     expect(secondId).not.toBe(firstId);
     expect(f.last().draft.question).toBe('');
-
-    await f.presenter.openConversation(firstId);
-    expect(f.last().draft.question).toBe('新问题');
+    // The one blank chat that press just opened is idle and reused, so repeated presses never stack
+    // duplicate empty sessions.
     await f.presenter.newConversation();
     expect(f.client.newConversation).toHaveBeenCalledTimes(1);
     expect(f.last().conversation?.id).toBe(secondId);
+
+    // A draft is content: the next press starts another conversation.
+    f.presenter.setQuestion('新问题');
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(2);
+    const thirdId = f.last().conversation!.id;
+    expect(thirdId).not.toBe(secondId);
+
+    await f.presenter.openConversation(firstId);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().draft.question).toBe('');
+    // Returning to an older chat ends the blank-chat reuse: the next press is a visible new chat.
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(3);
+    expect(f.last().conversation?.id).not.toBe(firstId);
+  });
+  it('starts a fresh chat instead of re-adopting the chat that was just closed', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const closedId = f.last().conversation!.id;
+    f.presenter.closeConversation();
+    expect(f.last().conversation).toBeNull();
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    expect(f.last().conversation?.id).not.toBe(closedId);
   });
   it('copyDiagnostics serializes whitelist fields and never includes citation text', async () => {
     const f = fixture();

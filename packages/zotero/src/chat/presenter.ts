@@ -173,6 +173,12 @@ export class ConversationPresenter {
    * chat. Cleared as soon as a conversation becomes active again.
    */
   private selectionCleared = false;
+  /**
+   * The one blank chat `New chat` opened and the user has not used yet. Repeated presses reuse it
+   * instead of stacking duplicate empty sessions; anything else (a restored chat, a draft, a sent
+   * message) makes the next press create a real new conversation.
+   */
+  private freshBlankId: string | null = null;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
     this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
@@ -1063,22 +1069,18 @@ export class ConversationPresenter {
       await this.loadLocal(); const navigation = ++this.navigation;
       // Deliberately starting a chat clears any pending Close state.
       this.selectionCleared = false;
-      const client = await this.connect();
-      this.stageDraft();
-      // Never stack duplicate empty chats: adopt the open one, or the most recent idle empty one.
-      // The cached list can lag the live conversation, so the open one always wins by id.
-      const byId = new Map([...this.state.conversations]
-        .sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt))
-        .map(entry => [entry.id, entry] as const));
-      if (this.state.conversation) byId.set(this.state.conversation.id, this.state.conversation);
-      const idle = [...byId.values()].find(entry => paperId(entry.paper) === paperId(this.paper) && !this.conversationHasContent(entry));
-      if (idle) {
-        if (idle.id !== this.state.conversation?.id) await this.openConversation(idle.id);
-        else this.update({ message: null, pendingExplain: null, contextReport: null });
+      // The only deliberate no-op: the current chat is the blank one `New chat` just opened and the
+      // user has not used it. Reusing it is what keeps repeated presses from stacking empty chats,
+      // and it never re-adopts a *closed* or *restored* chat (their ids are not `freshBlankId`).
+      if (this.state.conversation && this.state.conversation.id === this.freshBlankId && !this.conversationHasContent(this.state.conversation)) {
+        this.update({ message: null, pendingExplain: null, contextReport: null });
         return;
       }
+      const client = await this.connect();
+      this.stageDraft();
       const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
       if (navigation !== this.navigation) return;
+      this.freshBlankId = conversation.id;
       this.stageDraft(); this.draftVersion++;
       this.update({ conversation, draft: this.emptyDraft(conversation.settings), scrollTop: 0, message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [], acquisitionTarget: null, messageFocus: null, document: { ...this.state.document, range: null, prepared: null, phase: 'idle' } });
       this.stageDraft(); await this.sync(); await this.refreshList(); await this.refreshTaskState();
@@ -1114,6 +1116,7 @@ export class ConversationPresenter {
     const position = this.positions.get('unbound');
     const unbound = this.drafts.get('unbound');
     this.selectionCleared = true;
+    this.freshBlankId = null;
     this.draftVersion++;
     this.update({
       conversation: null,
@@ -1143,6 +1146,9 @@ export class ConversationPresenter {
       if (this.state.conversation?.id === id) await this.restoreConversation(conversation, false);
       await this.sync();
       await this.refreshList(); await this.refreshTaskState();
+      // The history listing is a store read of its own, so a deletion must also re-read it: a
+      // workspace row (another paper's chat) is not in `conversations` and would otherwise linger.
+      if (this.state.history.length || this.state.historyQuery) await this.searchHistory(this.state.historyQuery);
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   async openConversation(id: string): Promise<void> {
@@ -1160,6 +1166,9 @@ export class ConversationPresenter {
   private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft): Promise<void> {
     // A chat is active again, so a previous Close no longer governs adoption.
     this.selectionCleared = false;
+    // Any chat becoming active other than the blank one `New chat` just opened makes that blank one
+    // a normal chat: the next `New chat` must create a visible new conversation.
+    if (this.freshBlankId !== conversation.id) this.freshBlankId = null;
     let draft = override ?? this.drafts.get(conversation.id); let position = this.positions.get(conversation.id);
     if (!draft && this.services.getWorkspace) {
       const saved = await (await this.getWorkspace()).readDraft(this.paper, conversation.id);
