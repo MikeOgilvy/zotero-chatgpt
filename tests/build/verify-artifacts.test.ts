@@ -86,6 +86,22 @@ describe('shareable artifact verification', () => {
     await rm(path.join(copy, 'content/runtime/licenses/NOTICE'));
     await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /NOTICE/.test(failureMessage(error)));
   });
+
+  it('rejects a package missing any bundled third-party dependency license', async () => {
+    const root = await makeTemporaryDirectory();
+    for (const name of [
+      'linkify-it.LICENSE',
+      'mdurl.LICENSE',
+      'uc.micro.LICENSE',
+      'punycode.js.LICENSE',
+      'entities.LICENSE',
+    ]) {
+      const copy = path.join(root, name.replace(/\./gu, '-'));
+      await cp(builtExtension, copy, { recursive: true });
+      await rm(path.join(copy, 'content/assets/licenses', name));
+      await expect(verify(copy), name).rejects.toSatisfy((error: unknown) => failureMessage(error).includes(name));
+    }
+  });
 });
 
 describe('sibling SHA256SUMS for packaged XPI', () => {

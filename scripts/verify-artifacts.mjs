@@ -11,6 +11,13 @@ const requiredLicenses = [
   'content/assets/licenses/katex.LICENSE',
   'content/assets/licenses/markdown-it.LICENSE',
   'content/assets/licenses/dompurify.LICENSE',
+  // Notices for the remaining libraries bundled into content/zcr.js (transitive deps of
+  // markdown-it/linkify-it). Requiring them keeps the shipped license set in step with the bundle.
+  'content/assets/licenses/linkify-it.LICENSE',
+  'content/assets/licenses/mdurl.LICENSE',
+  'content/assets/licenses/uc.micro.LICENSE',
+  'content/assets/licenses/punycode.js.LICENSE',
+  'content/assets/licenses/entities.LICENSE',
 ];
 const requiredPanes = ['content/preferences/preferences.xhtml', 'content/preferences/pane.js'];
 const requiredFiles = ['bootstrap.js', 'content/zcr.js', 'manifest.json', 'LICENSE', ...requiredLicenses, ...requiredPanes];

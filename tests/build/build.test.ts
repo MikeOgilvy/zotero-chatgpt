@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -79,5 +79,32 @@ describe("development build", () => {
     expect(katexCss).toContain("@font-face");
     expect(katexCss).not.toMatch(/https?:\/\//u);
     expect(bundle).not.toMatch(/cdn\.jsdelivr|cdnjs\.cloudflare|katex\.org\/css/u);
+  });
+
+  it("ships a license notice for every third-party package bundled into the extension", async () => {
+    const outputDirectory = await makeTemporaryDirectory();
+
+    await execFileAsync(
+      process.execPath,
+      ["tests/runtime/package-fixture.mjs", "build", "--outdir", outputDirectory],
+      { cwd: repositoryRoot },
+    );
+
+    const licensesDirectory = path.join(outputDirectory, "content/assets/licenses");
+    const names = (await readdir(licensesDirectory)).sort();
+    expect(names).toEqual([
+      "dompurify.LICENSE",
+      "entities.LICENSE",
+      "katex.LICENSE",
+      "linkify-it.LICENSE",
+      "markdown-it.LICENSE",
+      "mdurl.LICENSE",
+      "punycode.js.LICENSE",
+      "uc.micro.LICENSE",
+    ]);
+    for (const name of names) {
+      const text = await readFile(path.join(licensesDirectory, name), "utf8");
+      expect(text.trim().length, name).toBeGreaterThan(0);
+    }
   });
 });
