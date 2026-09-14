@@ -1,6 +1,6 @@
 # 当前进度与验收
 
-本页只保留**当前状态、验证边界、剩余差距/下一任务与执行计划**。逐日迭代流水、原样失败记录与旧版证据已搬到 [docs/archive/progress-history-2026-09.md](archive/progress-history-2026-09.md)。代码、单元测试、真实宿主、真实模型与发行物是不同层次的证据，不得互相冒充；未运行项一律保留为 NOT RUN，不补写原因。
+本页只保留**当前状态、验证边界、剩余差距/下一任务与执行计划**。逐日迭代流水、原样失败记录与旧版证据不再单独维护文件，只保留在 Git 历史里（见文末 [历史](#历史)）。代码、单元测试、真实宿主、真实模型与发行物是不同层次的证据，不得互相冒充；未运行项一律保留为 NOT RUN，不补写原因。
 
 
 ## 当前状态（2026-09-14 仓库清理后）
@@ -36,7 +36,7 @@
 
 ### 测试计数（唯一权威，2026-09-14 实测）
 
-本页**只有这一处**声明当前测试计数；其它出现过的数字（699/60、746/67、970/76、968+2、629+2 等）都是更早迭代的历史值，已随迭代流水搬到 [归档](archive/progress-history-2026-09.md)，不再作为当前计数。
+本页**只有这一处**声明当前测试计数；其它出现过的数字（699/60、746/67、970/76、968+2、629+2 等）都是更早迭代的历史值，只保留在 Git 历史中（见 [历史](#历史)），不再作为当前计数。
 
 - 本机（macOS，且 `dist/` 存在**当前 manifest 版本**即 a6 对应的 XPI）实测：**`npm run test:unit` → 1081 passed / 80 files / 0 skipped**（2026-09-14 两列只读转录回合的代码，在提升版本号为 `0.4.0a6` 并打出现 `dist/zotero-codex-reader-0.4.0a6-dev.xpi` 之后复测）。
 - 与上一版 1068 / 79 的差异来自本轮：两列布局的门槛与第二列选谁（新增 `tests/zotero/pane-layout.test.ts` 3 条）、只读转录列的激活/宽度/缩放/独立滚动/焦点与 IME 保持（`tests/zotero/chat-view.test.ts` 7 条）、预读锚点的 per-chat 记录（`tests/zotero/presenter.test.ts` 1 条）、两列布局与只读列样式（`tests/zotero/sidebar-styles.test.ts` 1 条）、只读列本地化（`tests/zotero/ui-locale.test.ts` 1 条），另有 1 条样式断言按 happy-dom 的长手属性解析改写（`min-width`/`overflow`）。更早 1044 / 79 的差异来自纸张书目卡片与本地读取状态视图用例、PDF 就绪上限回归（`document-version.test.ts`）、历史直删与偏好面板文案更新，删除死模块后的 `tests/core/workspace-export.test.ts` 一并移除。
@@ -61,7 +61,7 @@
 | 检查 | 本轮开始 | 当前结果与边界 |
 | --- | --- | --- |
 | `npm run typecheck` / `npm run lint` | PASS | PASS |
-| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **见 [测试计数（唯一权威）](#测试计数唯一权威2026-09-14-实测)**；早期 699 PASS / 60 files 等历史数字见归档 |
+| `npm run test:unit` | 305 PASS / 1 FAIL，39 files | **见 [测试计数（唯一权威）](#测试计数唯一权威2026-09-14-实测)**；早期 699 PASS / 60 files 等历史数字见 Git 历史（[历史](#历史)） |
 | `npm run package:dev` | 0.3.0a1，sha 196f0dc… | PASS，`dist/zotero-codex-reader-0.4.0a1-dev.xpi`（含固定 runtime 与项目 MIT LICENSE）；本轮重建 digest 仍为 `d33ab244…`（与提交前一致，字节可复现） |
 | `npm run verify:artifacts` | 76 files PASS | **77 files PASS**，hash/白名单/许可/无私有记录与 Node 导入；digest 读 `dist/SHA256SUMS` |
 | 临时 `git worktree` + `npm ci` 的 clean HEAD 重建 | 未执行 | **PASS**：typecheck PASS；`test:unit` 见 [测试计数（唯一权威）](#测试计数唯一权威2026-09-14-实测)（无 `dist/` 时 2 条 skip）；`package:dev` → 0.4.0a1 XPI；`verify:artifacts` 77 files，digest 与主树一致；复用本地固定 runtime 缓存，未重新下载 |
@@ -136,9 +136,9 @@ Apple M5 / 16 GB / macOS 26.6.2 (25G83)，Zotero 9.0.6，1000×600 CSS px，DPR 
 - [x] 阅读锚点竞态（代码+单元+**2026-09-13 宿主复核**）：`close-preserves-current-page` 的间歇失败定位为 pdf.js “跳页已提交、`_location` 尚未刷新”的真实竞态；`capturePosition` 改以已提交页为准、`setZoom` 先对齐恢复目标，失败优先单测先在未修复代码上失败；最终包连续 5 次 `--context` 23/23 PASS（另 `--context --native` 13/13），并新增 `reopen-keeps-current-page`。未复现失败的统计局限已在文中写明。
 - [x] 论断溯源（代码+单元+**2026-09-13 宿主预检**）：点击引文先校验冻结 revision，再按链接 title 的逐字引用在冻结页面字符盒上定位，命中才做临时高亮，未命中诚实提示；点击路径无任何库写入。**真实宿主已用生产 `nativeSourceNavigator`+`openSourcePage` 与合成 quote 确认回到引用页的临时高亮导航、诚实 miss 与无库写入**；真实 Gecko 高亮**视觉**与真实模型是否遵守逐字引用指令仍未测。
 - [x] CI 计时（代码+单元，2026-09-13）：`check` 作业在全量并行下超时的一类根因是**多兆字节 base64 往返叠加 vitest 对多 MiB `Uint8Array` 的通用深比较**（3 MiB 单次深比较实测 **~2.4s**，而 base64 编解码本身仅 ~110ms）。`reader-library.test.ts` 的导出上限用例改为精确的 **2 MiB+1** 边界（隔离 2.7s→**1.8s**，全量并行 **~3.5-4.3s**），`generated-image.test.ts` 的 16 MiB 边界用例补上与既有先例一致的 **15000ms** 显式预算（隔离 **~1.7s**，全量并行 **~3.0-4.5s**）；工作、边界与断言均未删改，也未全局抬高 `testTimeout` 或降低 worker 并发。本机连续 3 次全量通过（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)）；另用 12 与 30 个 CPU 占用进程施压仍全绿（两个重测分别 ~7.3s 与 ~12.8s，均在预算内），未施压时最坏 ~4.5s。以上为单元/打包证据，不是宿主或真实模型结论。
-- [x] 0.4.0a3 版本提升、门禁、打包与产物校验（代码+单元+产物）：提交 `8828c15`；`typecheck`/`lint` PASS、`test:unit` PASS（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)；该轮历史数字见归档）、`package:dev` → `dist/zotero-codex-reader-0.4.0a3-dev.xpi`（92,668,286 bytes，SHA-256 `3abeb8c2…`）、`verify:artifacts` 79 files PASS；owner profile 已装入 a3 供验收（profile 变更，非仓库提交）。**但真实宿主不等同通过**：见下条。
+- [x] 0.4.0a3 版本提升、门禁、打包与产物校验（代码+单元+产物）：提交 `8828c15`；`typecheck`/`lint` PASS、`test:unit` PASS（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)；该轮历史数字见 Git 历史）、`package:dev` → `dist/zotero-codex-reader-0.4.0a3-dev.xpi`（92,668,286 bytes，SHA-256 `3abeb8c2…`）、`verify:artifacts` 79 files PASS；owner profile 已装入 a3 供验收（profile 变更，非仓库提交）。**但真实宿主不等同通过**：见下条。
 - [ ] 真实宿主 `--context`（2026-09-13 0.4.0a3）：**FAILED**。新阶段（`b9165c1`）首次真机运行，在 `automatic-background-preparation` 处 60s 超时（5 项已通过；两次运行同一处未满足），报告原样归档于 `.zcr-dev/verification/scope-2026-09-13-a3/`；未修改驱动、未重试到通过。产品侧根因未定位，后续检查因此都未跑到。`--live-model`（需 owner 登录）仍 NOT RUN。
-- [x] 0.4.0a4 版本提升、门禁、打包与产物校验（代码+单元+产物）：提交 `96f8c2c`；`typecheck`/`lint` PASS、`test:unit` PASS（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)；该轮历史数字见归档）、`package:dev` → `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（92,661,563 bytes，SHA-256 `5a6bb161…`）、`verify:artifacts` 79 files PASS；owner profile 已装入 a4 供验收（profile 变更，非仓库提交）。
+- [x] 0.4.0a4 版本提升、门禁、打包与产物校验（代码+单元+产物）：提交 `96f8c2c`；`typecheck`/`lint` PASS、`test:unit` PASS（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)；该轮历史数字见 Git 历史）、`package:dev` → `dist/zotero-codex-reader-0.4.0a4-dev.xpi`（92,661,563 bytes，SHA-256 `5a6bb161…`）、`verify:artifacts` 79 files PASS；owner profile 已装入 a4 供验收（profile 变更，非仓库提交）。
 - [x] 真实宿主 `--context`（2026-09-13 0.4.0a4，**取代 a3 的 FAILED 结论**）：**32 executed / 32 PASS / 0 FAIL**，`recordedRequests = 0`，`build` 0.4.0a4 且 SHA-256 与产物一致；首次命中 `Appearance`/`外观` 图例 canary；a3 曾失败的 `automatic-whole-pdf-background-preparation-without-panel` 通过（`productGate` 2/2、10 次自动读取、`preparationObserved: true`）。报告归档 `.zcr-dev/verification/scope-2026-09-13-a4/`。8 项 `notRun`（含 `--live-model` 需 owner 登录）不得当作通过。
 - [x] 死代码清理（代码+单元，2026-09-13）：移除 `sidebar.css` 中已无引用的 `.zcr-history-archived-label` 规则，并删掉 `sidebar-styles.test.ts` fixture 中同 class 的无断言 span；提交 `f1e8044`，清理后全量通过（计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)）。
 - [x] 开发 XPI 安装流自校验（代码+单元+只读真实 profile，2026-09-13）：新增 `npm run install:dev`（`plan`/`install`/`check`/`revert`/`rollback`）与 18 条单元/临时树回归（`test:unit` 计数见 [测试计数](#测试计数唯一权威2026-09-14-实测)），脚枪与命令见 development；真机 `check` 仍需一次目标 profile 重启才能证明，owner 当前实例按决定未重启。
@@ -210,6 +210,9 @@ UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是
 
 ## 历史
 
-- 逐日迭代流水、原样失败报告、旧版证据与历次清理记录：见 [docs/archive/progress-history-2026-09.md](archive/progress-history-2026-09.md)（2026-09-14 从本页搬出，内容未改写，仅调整相对链接）。
-- 被删除的旧文档与旧代码的原文可从归档中记录的基线提交查看。
+- 2026-09 的逐日迭代流水、原样失败报告与历次清理记录曾以 `docs/archive/progress-history-2026-09.md` 归档，2026-09-15 仓库整理时按“先迁移有效信息再按文件删除”移除；原文在提交 `f48f337`（整理前基线）及 `git log -- docs/archive/progress-history-2026-09.md` 中逐字保留，Git 历史未改写。
+- 更早被删除的旧文档/旧代码原文可从这些基线查看：`38b047c`（首轮 12 份旧文档清理前）、`1fdd3dc`（2026-09-11 验证基线）、`a7800ce`（2026-09-14 分支合并清理前，本地安全 ref `refs/backup/pre-cleanup-20260914`）。
+- 已归档报告的磁盘位置（忽略目录，不入库）：a3 `--context` 失败报告 `.zcr-dev/verification/scope-2026-09-13-a3/`（`automatic-background-preparation` 60s 超时，5 项通过后中止；未重试到通过、未改驱动）、a4 32/32 `.zcr-dev/verification/scope-2026-09-13-a4/`、a5 32/32 `.zcr-dev/verification/scope-2026-09-14-a5/`、0.4.0a1 三份（`--context` 16/16、`--native` 12/12、s6 22/22）`.zcr-dev/verification/scope-2026-09-12/`、0.3.0a1 `.zcr-dev/verification/scope-2026-09-11/`。
+- 0.4 之前的宿主证据（旧外壳、旧包，不继承到当前 dock/样式/发行；只说明当时验证过什么）：S1 外壳/启停 27/27（2026-09-08 早期 shell 包）；S2 原生 runtime 12/12 executed、3 NOT RUN（2026-09-09，真实 turn 被 typed quota 拒绝）；S3 选区 23/23、2 NOT RUN；S4 交互 40/40、5 NOT RUN（包 `c1b898ac…`）；S5 恢复 17/17、1 NOT RUN（同包）；S6 virgin 15/15、a1→a2→a1 19/19（a2 `445f4724…`）。
+- 历史限额“约 2026-09-15”只是旧报告，当前账户可用性未读取，不作为当前结果。
 
