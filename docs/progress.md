@@ -134,6 +134,47 @@ Apple M5 / 16 GB / macOS 26.6.2 (25G83)，Zotero 9.0.6，1000×600 CSS px，DPR 
 
 UI 参考已只读核验本机官方扩展 26.908.31748 的样式资产；不是复制源码/品牌。使用 28px 桌面控件、宿主字体/主题、4/8/12/16px 间距、13px 正文和克制边框。原生宿主视觉还须在改动后实际检查。
 
+## 下一阶段计划（2026-09-14）
+
+以下五个 epic 各自独立可交付；每项写明**目标**、**能真正证明它的证据类别**与**阻塞**。总体拆分见本节末。
+
+### Epic A — 真实模型行为（隔离合成数据）
+
+- 目标：一次补齐整个 **real model** 证据类：回答/流式/停止/在途恢复、无选区提问、跨页定义、More details、会话中途切换模型设置、图表/公式读取、引用链接点击路径、图像生成、配额/用量诚实。
+- 证据类别：**真实模型**（隔离合成数据 + 真实请求记录与报告）。
+- 阻塞：owner 本人须在 `.zcr-dev/live/` 隔离树完成**一次**官方登录并授权配额；agent 不登录、不代替走 OAuth。
+- 文件：`tests/host/live-model-driver.js`、`tests/host/context-driver.js`。
+
+### Epic B — 长文档与多模态读取覆盖（autonomous）
+
+- 目标：把扫描页从"记录 `status:'empty'/'error'` 后停止"（`packages/zotero/src/reader/document.ts:90-113`）升级为可选、需显式授权的 OCR 端口；把 `packages/core/src/context/planner.ts:113-122` 的纯词重叠页打分升级为章节/段落切分 + 问题检索；在图像预算内把图/公式页**自动**附加为页图（`packages/core/src/codex/model-capabilities.ts:103-128`）——今天只有 `packages/zotero/src/reader/library.ts` 的手动 `captureRegion`/`capturePage`。
+- 证据类别：**代码 + 单元**（自主）；真实识别/读取质量仍需 Epic A 的真实模型与宿主材料。
+- 阻塞：无（自主可做）；真实宿主/模型结论依赖 Epic A。
+
+### Epic C — 工作区作者能力与统一范围对象（autonomous）
+
+- 目标：(1) skill 创建/编辑/复制/导入/导出/试跑 UI —— presenter 的 CRUD 已存在（`packages/zotero/src/chat/presenter.ts:410-440`）但**没有任何 view 调用**，`packages/zotero/src/workspace/preferences-pane.ts` 只切 `enabled`（`:469`）；(2) research-topic profile 与 per-chat override —— 数据层在 `packages/contracts/src/workspace.ts`，UI 曾被移除，需重建；(3) 固定来源 + 从选中来源新建会话；(4) `@collection`/`@note`/`@annotation` —— kind 已在 `packages/contracts/src/workspace.ts:42` 声明，但 `packages/zotero/src/reader/library.ts:306` 的 `search()` 只返回 `article`；(5) 参考文件拖拽（今天只有图片）。
+- 证据类别：**代码 + 单元**；UI 目视与真实库接线归 Epic D。
+- 阻塞：无（自主可做）。
+
+### Epic D — 视觉/交互/长时验收（mostly OWNER-gated）
+
+- 目标：偏好设置面板中/英 + 暗色/亮色 + 键盘 Tab 视觉；真实 Gecko 高亮视觉；阅读锚点视觉；真实 IME；多窗口一致性；窄窗/多显示器/主题溢出；reduced-motion 契约。
+- 证据类别：**真实宿主视觉**（截图/录屏 + 人工对照）。
+- 阻塞：需 owner 在场的真实 GUI 与目视判定；部分项（overflow/reduced-motion 等契约级检查）可自主做，但"目视"结论不能由 agent 代签。
+
+### Epic E — 发行与安装生命周期（OWNER-gated）
+
+- 目标：无 Node 安装、下载隔离、干净 checkout 重建、升级/回退、**签名**公开发行，全部在**真实产物**上验证。
+- 证据类别：**真实产物 + 签名发行**。
+- 阻塞：签名与公开发行需 owner **明确授权**（当前会话授权不含 push/publish/付费服务）。
+
+### 拆分：谁能证明什么
+
+- **没有 owner 就不能证明**：Epic A 全部（需官方登录 + 配额授权）；Epic D 的目视/IME/多窗口结论；Epic E 的签名公开发行与"真实产物上的升级验收"。
+- **自主 agent 可证明（代码 + 单元）**：Epic B 的 OCR 端口/章节检索/自动页图接线；Epic C 的全部技能作者 UI、研究 profile、固定来源、`@` 扩展与拖拽；Epic D 中契约级的 overflow/reduced-motion/主题类检查（仅代码层，非目视）；Epic E 的干净 checkout 重建、无 Node 安装脚本路径与下载隔离（**不含**签名发行）。
+- 关键：Epic A 的阻塞是**账号授权，不是代码**；在 owner 完成一次官方登录前，任何"真实模型行为已通过"的说法都不成立。Epic E 的签名/公开发行在本会话授权之外，必须另行批准。
+
 ## 未验证 / NOT RUN（不得当成通过）
 
 本轮 2026-09-14 清理**未运行任何真实宿主、真实模型、图像生成或公开发行检查**。当前仍未验证：
