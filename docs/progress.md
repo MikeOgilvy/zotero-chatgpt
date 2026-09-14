@@ -38,7 +38,7 @@
 本页**只有这一处**声明当前测试计数；其它出现过的数字（699/60、746/67、970/76、968+2、629+2 等）都是更早迭代的历史值，已随迭代流水搬到 [归档](archive/progress-history-2026-09.md)，不再作为当前计数。
 
 - 本机（macOS，且 `dist/` 存在**当前 manifest 版本**即 a5 对应的 XPI）实测：**`npm run test:unit` → 1081 passed / 80 files / 0 skipped**（2026-09-14 两列只读转录回合实测）。
-- 与上一版 1068 / 79 的差异来自本轮：两列布局的门槛与第二列选谁（新增 `tests/zotero/pane-layout.test.ts` 3 条）、只读转录列的激活/宽度/缩放/独立滚动/焦点与 IME 保持（`tests/zotero/chat-view.test.ts` 6 条）、预读锚点的 per-chat 记录（`tests/zotero/presenter.test.ts` 1 条）、两列布局与只读列样式（`tests/zotero/sidebar-styles.test.ts` 1 条）、只读列本地化（`tests/zotero/ui-locale.test.ts` 1 条），另有 1 条样式断言按 happy-dom 的长手属性解析改写（`min-width`/`overflow`）。更早 1044 / 79 的差异来自纸张书目卡片与本地读取状态视图用例、PDF 就绪上限回归（`document-version.test.ts`）、历史直删与偏好面板文案更新，删除死模块后的 `tests/core/workspace-export.test.ts` 一并移除。
+- 与上一版 1068 / 79 的差异来自本轮：两列布局的门槛与第二列选谁（新增 `tests/zotero/pane-layout.test.ts` 3 条）、只读转录列的激活/宽度/缩放/独立滚动/焦点与 IME 保持（`tests/zotero/chat-view.test.ts` 7 条）、预读锚点的 per-chat 记录（`tests/zotero/presenter.test.ts` 1 条）、两列布局与只读列样式（`tests/zotero/sidebar-styles.test.ts` 1 条）、只读列本地化（`tests/zotero/ui-locale.test.ts` 1 条），另有 1 条样式断言按 happy-dom 的长手属性解析改写（`min-width`/`overflow`）。更早 1044 / 79 的差异来自纸张书目卡片与本地读取状态视图用例、PDF 就绪上限回归（`document-version.test.ts`）、历史直删与偏好面板文案更新，删除死模块后的 `tests/core/workspace-export.test.ts` 一并移除。
 - **未重测**（本轮未执行，不得当成结果）：去掉上述 XPI 时的 skip 计数；上一版记录的 988 / 77 / 2 skipped 只描述当时的树。
 - 条件（这也是“0 skipped”只是本机属性的原因）：`tests/build/install-lifecycle.test.ts` 里有两条 `it.skipIf`：
   1. `copies the existing packaged XPI into a virgin isolated tree` —— 只有在 `dist/` 存在**当前 manifest 版本**的 XPI 时才复制该包并核对其 SHA-256；
