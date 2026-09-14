@@ -46,6 +46,14 @@ export interface PresenterState {
   connection: 'idle' | 'starting' | 'ready' | 'error';
   runtime: RuntimeSnapshot | null;
   conversation: Conversation | null;
+  /**
+   * Every chat the reader currently has open in the dock, oldest first, including the active one.
+   * The reader can keep several chats open at once: `conversation` stays the *active* chat — the one
+   * the composer edits, the one the persisted `current` pointer names — and each entry here keeps its
+   * own transcript, draft and scroll position. Starting a chat adds a pane instead of replacing what
+   * is on screen, and a background event for an open but inactive chat is applied to that entry.
+   */
+  openConversations: Conversation[];
   conversations: Conversation[];
   draft: WorkspaceDraft;
   pendingExplain: Citation | null;
@@ -180,7 +188,7 @@ export class ConversationPresenter {
   private freshBlankId: string | null = null;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
+    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
   }
@@ -210,6 +218,9 @@ export class ConversationPresenter {
   }
   private update(patch: Partial<PresenterState>): void {
     this.state = { ...this.state, ...patch };
+    // The chat on screen is one of the open chats, so its pane entry is always the same object as
+    // `conversation`: a pane list, a transcript and a composer can never disagree about one chat.
+    if (this.state.conversation) this.state.openConversations = this.withOpen(this.state.conversation);
     this.state.generating = !!this.state.conversation && (this.submissions.has(this.state.conversation.id) || !!this.state.conversation.activeRequestId || this.state.readingJobs.some(activeReading));
     this.notify();
   }
@@ -248,7 +259,7 @@ export class ConversationPresenter {
       this.update({ workspace: settings });
       // A cleared selection is new-chat state: the persisted pointer to the just-closed chat must
       // not silently restore it while the reader is composing the next question.
-      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) this.update({ conversation: current, conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
+      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) this.update({ conversation: current, openConversations: this.withOpen(current), conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
       const id = this.state.conversation?.id ?? null;
       const saved = await workspace.readDraft(this.paper, id) ?? (id ? await workspace.readDraft(this.paper, null) : null);
       if (this.disposed) return;
@@ -720,13 +731,16 @@ export class ConversationPresenter {
     try { return await waitPreparation(prepared, signal); }
     finally { if (job) { job.consumers--; if (signal.aborted && job.consumers === 0) job.controller.abort(); } }
   }
-  async retry(): Promise<void> { this.client = null; this.unobserve?.(); this.unobserve = null; if (this.state.persistence === 'error') this.localFlight = null; await this.activate(); }
+  async retry(): Promise<void> { this.client = null; this.unobserve?.(); this.unobserve = null; if (this.state.persistence === 'error') this.localFlight = null; this.reopenActiveOnly(); await this.activate(); }
   private connect(): Promise<ReaderClient> {
     if (this.client && this.client.snapshot().runtime === 'ready') return Promise.resolve(this.client);
     if (this.connecting) return this.connecting;
     this.update({ connection: 'starting', message: null });
+    const previous = this.client;
     this.connecting = this.services.ensureStarted().then(client => {
       this.client = client;
+      // A different client is a restarted runtime: its open panes would render stale transcripts.
+      if (previous && previous !== client) this.reopenActiveOnly();
       this.unobserve?.(); this.unobserve = client.observe(snapshot => this.onRuntime(snapshot));
       return client;
     }).finally(() => { this.connecting = null; });
@@ -766,7 +780,7 @@ export class ConversationPresenter {
       ? await client.newConversation(this.paper, this.title, settings)
       : await client.current(this.paper, this.title, settings);
     this.selectionCleared = false;
-    this.update({ conversation, draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
+    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
     await this.sync();
     await this.refreshList();
     return conversation;
@@ -791,6 +805,38 @@ export class ConversationPresenter {
     const id = this.draftKey(); this.drafts.set(id, clone(this.state.draft));
     this.positions.set(id, { scrollTop: this.state.scrollTop, range: clone(this.state.document.range) });
   }
+  /**
+   * After a runtime reconnect every chat is re-read from the store, so panes that would render a
+   * transcript from the previous runtime are dropped rather than shown stale. The chat on screen
+   * re-syncs, and any other chat is still reachable from history.
+   */
+  private reopenActiveOnly(): void {
+    if (this.state.openConversations.length > 1) this.update({ openConversations: this.state.conversation ? [this.state.conversation] : [] });
+  }
+  /** The open-pane list with `conversation` replacing its entry, or appended as the newest pane. */
+  private withOpen(conversation: Conversation, open: Conversation[] = this.state.openConversations): Conversation[] {
+    return open.some(entry => entry.id === conversation.id)
+      ? open.map(entry => entry.id === conversation.id ? conversation : entry)
+      : [...open, conversation];
+  }
+  /**
+   * The state patch that makes `conversation` the active pane. Every per-pane field the panel renders
+   * is reset together so a pane never shows the previous pane's tasks, coverage or message focus;
+   * `open` lets a caller that just dropped a pane (close, delete) pass the list it computed instead of
+   * briefly rendering an open list that still holds the removed chat.
+   */
+  private panePatch(conversation: Conversation, draft: WorkspaceDraft | null, position: { scrollTop: number } | undefined, open: Conversation[] = this.state.openConversations): Partial<PresenterState> {
+    return {
+      conversation,
+      openConversations: this.withOpen(conversation, open),
+      draft: draft ? workspaceDraft(draft) : this.emptyDraft(conversation.settings),
+      scrollTop: position?.scrollTop ?? 0,
+      message: null, pendingExplain: null, tasks: [], readingJobs: [],
+      contextReport: conversation.messages.filter(message => message.role === 'user').at(-1)?.contextReport ?? null,
+      messageFocus: null, acquisitionTarget: null,
+      document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null },
+    };
+  }
   private async refreshList(): Promise<void> {
     if (!this.client) return;
     this.update({ conversations: await this.client.list(this.paper) });
@@ -803,15 +849,10 @@ export class ConversationPresenter {
     this.unsubscribe?.(); this.unsubscribe = null;
     this.unsubscribeClient = client;
     this.unsubscribe = client.subscribe(event => {
-      if (!this.state.conversation || event.conversationId !== this.state.conversation.id) {
-        const known = this.state.conversations.some(conversation => conversation.id === event.conversationId) || this.drafts.has(event.conversationId);
-        if (known && event.type === 'completed' && this.services.getTasks) void client.get(event.conversationId).then(conversation => {
-          if (this.disposed || conversation.id !== event.conversationId || paperId(conversation.paper) !== paperId(this.paper)) return;
-          return this.planReturnedAnnotations(event.requestId, conversation);
-        }).catch(error => { if (this.state.conversation?.id === event.conversationId) this.reportError(this.errorText(error)); });
-        return;
-      }
-      if (this.syncing) { this.buffered.push(event); return; }
+      // Buffering exists to close the gap between subscribing and reading the snapshot of the one
+      // chat `sync()` is reading. Events for any other chat are applied straight to that chat's own
+      // copy, which carries its own `lastSeq` and cannot be confused with the chat on screen.
+      if (this.state.conversation?.id === event.conversationId && this.syncing) { this.buffered.push(event); return; }
       this.apply(event);
     });
   }
@@ -832,14 +873,58 @@ export class ConversationPresenter {
       await this.recoverAnnotationPlans(conversation);
     } catch (error) { if (generation !== this.syncGeneration) return; this.syncing = false; this.buffered = []; this.update({ message: this.errorText(error) }); }
   }
+  /**
+   * Apply one event to the chat it belongs to. The chat on screen is advanced in place; an open but
+   * inactive chat is advanced in the open list, so its answer is kept ready rather than dropped or
+   * written onto the wrong transcript. A chat the reader does not have open never reaches the view;
+   * the one thing still read from it is a completed annotate turn, whose task plan is host-side.
+   */
   private apply(event: ReaderEvent): void {
-    const conversation = this.state.conversation;
-    if (!conversation || event.seq <= conversation.lastSeq) return;
-    // Spread alone keeps the stale timing, which would let a settled request keep ticking: every
-    // event advances the honest accept/first-text/settle stamps the view renders.
+    const active = this.state.conversation;
+    if (active && event.conversationId === active.id) {
+      if (event.seq <= active.lastSeq) return;
+      const { conversation, message } = this.advance(active, event);
+      // An alert raised by an event only reaches the panel when the chat it belongs to is on screen.
+      this.update(message === undefined ? { conversation } : { conversation, message });
+      if (event.type === 'completed') void this.planReturnedAnnotations(event.requestId).catch(error => this.reportError(this.errorText(error)));
+      return;
+    }
+    const open = this.state.openConversations.find(entry => entry.id === event.conversationId);
+    if (open) {
+      if (event.seq <= open.lastSeq) return;
+      const { conversation } = this.advance(open, event);
+      this.update({ openConversations: this.state.openConversations.map(entry => entry.id === conversation.id ? conversation : entry) });
+      if (event.type === 'completed') void this.planStoredCompletion(event.requestId, conversation).catch(error => this.reportError(this.errorText(error)));
+      return;
+    }
+    if (event.type !== 'completed' || !this.services.getTasks) return;
+    const known = this.state.conversations.some(conversation => conversation.id === event.conversationId) || this.drafts.has(event.conversationId);
+    if (!known) return;
+    void this.client?.get(event.conversationId).then(conversation => {
+      if (this.disposed || conversation.id !== event.conversationId || paperId(conversation.paper) !== paperId(this.paper)) return;
+      return this.planReturnedAnnotations(event.requestId, conversation);
+    }).catch(error => { if (this.state.conversation?.id === event.conversationId) this.reportError(this.errorText(error)); });
+  }
+  /**
+   * Plan the annotations of a completed turn in a chat the reader is not looking at. The pane's own
+   * copy is advanced from the events, but planning reads the store's copy of that chat: it is the
+   * authority a restart or another view has already written to, exactly like the old path for a chat
+   * that was not open at all.
+   */
+  private async planStoredCompletion(requestId: string, conversation: Conversation): Promise<void> {
+    const stored = this.client ? await this.client.get(conversation.id).catch(() => null) : null;
+    await this.planReturnedAnnotations(requestId, stored ?? conversation);
+  }
+  /**
+   * Fold one event into a copy of `conversation`. Spread alone keeps the stale timing, which would
+   * let a settled request keep ticking: every event advances the honest accept/first-text/settle
+   * stamps the view renders. The optional `message` is the alert the event raises, and is only ever
+   * shown for the chat on screen.
+   */
+  private advance(conversation: Conversation, event: ReaderEvent): { conversation: Conversation; message?: string | null } {
     const next: Conversation = { ...conversation, messages: conversation.messages.map(m => ({ ...m })), lastSeq: event.seq, requestTiming: advanceRequestTiming(conversation.requestTiming, event) };
     const settleMessages = (status: Message['status']) => { for (const m of next.messages) if (m.requestId === event.requestId && m.role === 'assistant' && (m.status === 'streaming' || m.status === 'pending')) m.status = status; };
-    let message = this.state.message;
+    let message: string | null | undefined;
     switch (event.type) {
       case 'accepted': next.activeRequestId = event.requestId; break;
       case 'delta': {
@@ -865,8 +950,7 @@ export class ConversationPresenter {
         break;
       }
     }
-    this.update({ conversation: next, message });
-    if (event.type === 'completed') void this.planReturnedAnnotations(event.requestId).catch(error => this.reportError(this.errorText(error)));
+    return message === undefined ? { conversation: next } : { conversation: next, message };
   }
   // ---- draft ------------------------------------------------------------------------------------
   addCitation(citation: Citation): void { this.changeDraft(addCitation(this.state.draft, citation)); }
@@ -1116,7 +1200,9 @@ export class ConversationPresenter {
       if (navigation !== this.navigation) return;
       this.freshBlankId = conversation.id;
       this.stageDraft(); this.draftVersion++;
-      this.update({ conversation, draft: this.emptyDraft(conversation.settings), scrollTop: 0, message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [], acquisitionTarget: null, messageFocus: null, document: { ...this.state.document, range: null, prepared: null, phase: 'idle' } });
+      // The new chat becomes an additional open pane: the chat that was on screen stays open with its
+      // own transcript, and this one is active.
+      this.update({ conversation, openConversations: this.withOpen(conversation), draft: this.emptyDraft(conversation.settings), scrollTop: 0, message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [], acquisitionTarget: null, messageFocus: null, document: { ...this.state.document, range: null, prepared: null, phase: 'idle' } });
       this.stageDraft(); await this.sync(); await this.refreshList(); await this.refreshTaskState();
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
@@ -1135,25 +1221,48 @@ export class ConversationPresenter {
     return this.state.history.some(entry => entry.id !== closingId && paperId(entry.paper) === paper);
   }
   /**
-   * Leave the current conversation without deleting or rewriting anything. The chat stays on disk
-   * and in history; the pane returns to its new-conversation state with the unbound draft. The
-   * stored "current" pointer is left alone, so an explicit close must stop the adoption paths from
-   * silently restoring the closed chat: the next request starts a fresh one instead.
+   * Close the chat on screen. Kept as the single-pane entry point: the reader cancels the panel or
+   * closes the chat's own title chip through it.
+   */
+  closeConversation(): boolean { return this.closePane(this.state.conversation?.id ?? null); }
+  /**
+   * Leave one open chat without deleting or rewriting anything. The chat stays on disk and in
+   * history. When another pane is still open the reader stays on that pane with its own draft and
+   * scroll position; only closing the last pane returns the reader to its new-conversation state with
+   * the unbound draft. The stored "current" pointer is left alone either way, so an explicit close
+   * must stop the adoption paths from silently restoring the closed chat: the next request starts a
+   * fresh one instead.
    *
    * Returns true when nothing is left to list for this attachment, i.e. the caller should collapse
    * the reader dock through its own close path rather than leave an empty panel.
    */
-  closeConversation(): boolean {
-    if (this.disposed || !this.state.conversation) return false;
-    const closingId = this.state.conversation.id;
+  closePane(id: string | null): boolean {
+    if (this.disposed || !id) return false;
+    const closing = this.state.openConversations.find(entry => entry.id === id);
+    if (!closing) return false;
     this.stageDraft();
+    const remaining = this.state.openConversations.filter(entry => entry.id !== id);
+    if (this.freshBlankId === id) this.freshBlankId = null;
+    // Closing a background pane leaves the chat on screen untouched, including its prepared PDF.
+    if (this.state.conversation?.id !== id) {
+      this.update({ openConversations: remaining });
+      return !this.hasChatForPaper(id);
+    }
+    this.draftVersion++;
+    const next = remaining.at(-1);
+    if (next) {
+      // Another pane is open: closing one chat keeps the reader on a chat, not on an empty pane.
+      this.selectionCleared = false;
+      this.update(this.panePatch(next, this.drafts.get(next.id) ?? null, this.positions.get(next.id), remaining));
+      this.stageDraft();
+      return !this.hasChatForPaper(id);
+    }
     const position = this.positions.get('unbound');
     const unbound = this.drafts.get('unbound');
     this.selectionCleared = true;
-    this.freshBlankId = null;
-    this.draftVersion++;
     this.update({
       conversation: null,
+      openConversations: remaining,
       draft: unbound ? workspaceDraft(unbound) : this.emptyDraft(),
       scrollTop: position?.scrollTop ?? 0,
       message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [],
@@ -1161,7 +1270,7 @@ export class ConversationPresenter {
       document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null },
     });
     this.stageDraft();
-    return !this.hasChatForPaper(closingId);
+    return !this.hasChatForPaper(id);
   }
   async deleteConversation(id: string): Promise<void> {
     try {
@@ -1177,7 +1286,15 @@ export class ConversationPresenter {
       const conversation = await client.deleteConversation(target.paper, id);
       this.drafts.delete(id); this.positions.delete(id); this.pendingSaves.delete(id);
       if (this.services.getWorkspace) await (await this.getWorkspace()).deleteDraft(target.paper, id);
-      if (this.state.conversation?.id === id) await this.restoreConversation(conversation, false);
+      const remaining = this.state.openConversations.filter(entry => entry.id !== id);
+      if (this.freshBlankId === id) this.freshBlankId = null;
+      if (this.state.conversation?.id === id) {
+        // Prefer a chat the reader still has open to the store's own fallback pointer, so deleting one
+        // pane does not silently jump to an unrelated chat.
+        const next = remaining.at(-1);
+        if (next) { this.draftVersion++; this.update(this.panePatch(next, this.drafts.get(next.id) ?? null, this.positions.get(next.id), remaining)); this.stageDraft(); }
+        else await this.restoreConversation(conversation, false);
+      } else this.update({ openConversations: remaining });
       await this.sync();
       await this.refreshList(); await this.refreshTaskState();
       // The history listing is a store read of its own, so a deletion must also re-read it: a
@@ -1209,8 +1326,7 @@ export class ConversationPresenter {
       if (saved) { draft = saved.draft; position = { scrollTop: saved.scrollTop, range: null }; }
     }
     if (stash) this.stageDraft(); this.draftVersion++;
-    this.update({ conversation, draft: draft ? workspaceDraft(draft) : this.emptyDraft(conversation.settings), scrollTop: position?.scrollTop ?? 0, message: null, pendingExplain: null, tasks: [], readingJobs: [], contextReport: conversation.messages.filter(message => message.role === 'user').at(-1)?.contextReport ?? null, messageFocus: null, acquisitionTarget: null,
-      document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null } });
+    this.update(this.panePatch(conversation, draft ?? null, position));
     if (this.client) this.update({ message: await this.isolationNote(this.client, conversation) });
     this.stageDraft();
   }

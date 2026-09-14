@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterState } from '../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../packages/contracts/src/runtime.ts';
-import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
+import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type MessageStatus, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../packages/contracts/src/index.ts';
 import { citationA, citationB, imageA, paperA, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 import type { ClipboardImageRead } from '../../packages/zotero/src/chat/pick-images.ts';
@@ -12,14 +12,24 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
   let runtime: RuntimeSnapshot = { revision: 0, runtime: 'ready', account: { state: options.signedIn === false ? 'signedOut' : 'signedIn' }, login: null, models: options.signedIn === false ? [] : [model], error: null };
   const observers = new Set<(s: RuntimeSnapshot) => void>(); const listeners = new Set<(e: ReaderEvent) => void>();
   let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings, activeRequestId: null, messages: [], lastSeq: 0, createdAt: 'now', updatedAt: 'now' };
-  const conversations = [conversation];
+  const conversations: Conversation[] = [];
+  /**
+   * One authoritative object per chat id, the way the real service keeps them: a chat the presenter
+   * re-reads after an event must be the chat the event changed, not an earlier copy of it.
+   */
+  const remember = (next: Conversation): Conversation => {
+    const index = conversations.findIndex(entry => entry.id === next.id);
+    if (index >= 0) conversations[index] = next; else conversations.push(next);
+    if (conversation.id === next.id) conversation = next;
+    return next;
+  };
+  remember(conversation);
   const sent: SendInput[] = []; const cancelled: string[] = []; let seq = 0;
   const client: ReaderClient = {
     snapshot: () => structuredClone(runtime), observe: l => { observers.add(l); l(structuredClone(runtime)); return () => { observers.delete(l); }; },
     refreshAccount: async () => {}, startLogin: vi.fn(() => Promise.resolve({ loginId: 'login-1', authorizationUrl: 'https://auth.openai.com/authorize?x=1' })), cancelLogin: async () => {},
     current: vi.fn(() => Promise.resolve(structuredClone(conversation))), newConversation: vi.fn(() => {
-      conversation = { ...conversation, id: `aaaaaaaa-0000-4000-8000-${String(conversations.length + 1).padStart(12, '0')}`, messages: [], lastSeq: 0 };
-      conversations.push(conversation);
+      conversation = remember({ ...conversation, id: `aaaaaaaa-0000-4000-8000-${String(conversations.length + 1).padStart(12, '0')}`, messages: [], lastSeq: 0 });
       return Promise.resolve(structuredClone(conversation));
     }),
     list: () => Promise.resolve(conversations.map(c => structuredClone(c))),
@@ -30,7 +40,7 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
       return Promise.resolve(structuredClone(found));
     }),
     get: vi.fn(() => Promise.resolve(structuredClone(conversation))),
-    send: vi.fn((input: SendInput) => { sent.push(input); conversation = { ...conversation, settings: input.settings, activeRequestId: input.requestId, messages: [...conversation.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' }], lastSeq: ++seq }; return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
+    send: vi.fn((input: SendInput) => { sent.push(input); conversation = remember({ ...conversation, settings: input.settings, activeRequestId: input.requestId, messages: [...conversation.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' }], lastSeq: ++seq }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
     request: (_c, requestId) => {
       const message = conversation.messages.find(entry => entry.requestId === requestId);
       const state = message?.status === 'uncertain' ? 'uncertain' as const : message?.status === 'completed' ? 'completed' as const : 'running' as const;
@@ -40,10 +50,7 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
       const index = conversations.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new ReaderError('NOT_FOUND', 'Unknown conversation'));
       conversations.splice(index, 1);
-      if (conversation.id === id) {
-        conversation = conversations[0] ?? { ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', title: 'Synthetic Paper A', messages: [], lastSeq: 0, activeRequestId: null };
-        if (!conversations.some(entry => entry.id === conversation.id)) conversations.push(conversation);
-      }
+      if (conversation.id === id) conversation = conversations[0] ?? remember({ ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', title: 'Synthetic Paper A', messages: [], lastSeq: 0, activeRequestId: null });
       return Promise.resolve(structuredClone(conversation));
     }),
     diagnostics: vi.fn((): Promise<ShareableDiagnostics> => Promise.resolve({
@@ -57,13 +64,36 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
   const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
-  const emit = (event: Pending) => { const full: ReaderEvent = { ...event, seq: ++seq, conversationId: conversation.id, at: 'now' }; conversation = { ...conversation, lastSeq: seq, ...(['completed', 'cancelled', 'failed', 'uncertain'].includes(event.type) ? { activeRequestId: null } : {}) }; for (const l of listeners) l(full); };
+  // `forId` targets a specific chat: a background answer belongs to the chat that asked for it, even
+  // when another chat is the one on screen. The fixture keeps one authoritative object per id so a
+  // later `select`/`get` of that chat returns what the event changed.
+  const emit = (event: Pending, forId?: string) => {
+    const id = forId ?? conversation.id;
+    const full: ReaderEvent = { ...event, seq: ++seq, conversationId: id, at: 'now' };
+    const patch = { lastSeq: seq, ...(['completed', 'cancelled', 'failed', 'uncertain'].includes(event.type) ? { activeRequestId: null } : {}) };
+    const target = conversation.id === id ? conversation : conversations.find(entry => entry.id === id);
+    if (target) { Object.assign(target, patch); store(target, event); }
+    for (const l of listeners) l(full);
+  };
+  /**
+   * The service stores what it announces: a chat read back after an event — because the owner switched
+   * to it — comes back holding that event's text and status. Mirroring that here keeps the fixture
+   * honest about what `select`/`get` answer once a chat has been in the background.
+   */
+  const store = (target: Conversation, event: Pending): void => {
+    const messageId = 'messageId' in event && typeof event.messageId === 'string' ? event.messageId : null;
+    if (event.type === 'delta' || event.type === 'messageCompleted') {
+      let message = messageId ? target.messages.find(entry => entry.id === messageId) : undefined;
+      if (!message) { message = { id: messageId ?? `m-${seq}`, requestId: event.requestId, role: 'assistant', phase: null, settings: target.settings, text: '', citations: [], status: 'streaming' }; target.messages.push(message); }
+      if (event.type === 'delta') message.text += event.text;
+      else { message.text = event.finalText; message.phase = event.phase; message.status = 'completed'; }
+      return;
+    }
+    const settled: MessageStatus | null = event.type === 'completed' ? 'completed' : event.type === 'cancelled' || event.type === 'failed' || event.type === 'uncertain' ? event.type : null;
+    if (settled) for (const entry of target.messages) if (entry.requestId === event.requestId && entry.role === 'assistant' && (entry.status === 'streaming' || entry.status === 'pending')) entry.status = settled;
+  };
   const setRuntime = (patch: Partial<RuntimeSnapshot>) => { runtime = { ...runtime, ...patch, revision: runtime.revision + 1 }; for (const o of observers) o(structuredClone(runtime)); };
-  return { presenter, states, sent, cancelled, client, services, emit, setRuntime, listeners, unbind, last: () => states.at(-1)!, conversation: () => conversation, setConversation: (c: Conversation) => {
-    conversation = c;
-    const index = conversations.findIndex(entry => entry.id === c.id);
-    if (index >= 0) conversations[index] = c; else conversations.push(c);
-  } };
+  return { presenter, states, sent, cancelled, client, services, emit, setRuntime, listeners, unbind, last: () => states.at(-1)!, conversation: () => conversation, setConversation: (c: Conversation) => { remember(c); } };
 }
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 5));
 describe('conversation presenter', () => {
@@ -297,7 +327,7 @@ describe('conversation presenter', () => {
     f.emit({ type: 'delta', requestId, messageId: 'a1', text: '第一段' });
     f.unbind();
     // While no view is bound the service keeps generating and its snapshot advances.
-    f.setConversation({ ...f.conversation(), messages: [...f.conversation().messages, { id: 'a1', requestId, role: 'assistant', phase: null, settings, text: '第一段第二段', citations: [], status: 'streaming' }] });
+    f.setConversation({ ...f.conversation(), messages: f.conversation().messages.map(m => m.id === 'a1' ? { ...m, text: '第一段第二段' } : m) });
     const states: PresenterState[] = []; f.presenter.bind(s => states.push(s)); await settle();
     f.emit({ type: 'delta', requestId, messageId: 'a1', text: '第三段' });
     expect(states.at(-1)?.conversation?.messages.at(-1)?.text).toBe('第一段第二段第三段');
@@ -428,6 +458,63 @@ describe('conversation presenter', () => {
     expect(f.last().conversation?.id).toBe(secondId);
     expect(f.last().draft.question).toBe('新对话的问题');
     expect(f.last().draft.citations).toEqual([]);
+  });
+  it('keeps the chat on screen open when a new chat starts and applies a background answer to the chat that asked', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    f.presenter.setQuestion('第一问'); await f.presenter.send();
+    const requestId = f.sent[0]!.requestId;
+    await f.presenter.newConversation();
+    const secondId = f.last().conversation!.id;
+    expect(secondId).not.toBe(firstId);
+    // Starting a chat no longer replaces what is on screen: both chats are open, the new one active.
+    expect(f.last().openConversations.map(c => c.id)).toEqual([firstId, secondId]);
+    expect(f.last().conversation?.id).toBe(secondId);
+    expect(f.last().openConversations.find(c => c.id === firstId)?.messages.map(message => message.text)).toEqual(['第一问']);
+    // The first chat's answer arrives while the second chat is on screen. It must reach the chat that
+    // asked for it, and must never be appended to the transcript on screen.
+    f.emit({ type: 'messageCompleted', requestId, messageId: 'reply-one', finalText: '第一答', phase: 'final' }, firstId);
+    f.emit({ type: 'completed', requestId, messageId: 'reply-one', finalText: '第一答' }, firstId);
+    expect(f.last().conversation?.id).toBe(secondId);
+    expect(f.last().conversation?.messages).toEqual([]);
+    expect(f.last().openConversations.find(c => c.id === firstId)?.messages.map(message => message.text)).toEqual(['第一问', '第一答']);
+    // Switching to it shows the answer that arrived in the background, and the streamed text is gone
+    // from the chat that was on screen.
+    await f.presenter.openConversation(firstId);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().conversation?.messages.map(message => message.text)).toEqual(['第一问', '第一答']);
+    expect(f.last().openConversations.map(c => c.id)).toEqual([firstId, secondId]);
+  });
+  it('closing one open chat falls back to another open chat instead of blanking the reader', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    f.presenter.setQuestion('保留的草稿'); f.presenter.addCitation(citationA);
+    await f.presenter.newConversation();
+    const secondId = f.last().conversation!.id;
+    f.presenter.setQuestion('第二个对话');
+    // Closing the active chat leaves the reader on the other open chat, with that chat's own draft.
+    expect(f.presenter.closePane(secondId)).toBe(false);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().openConversations.map(c => c.id)).toEqual([firstId]);
+    expect(f.last().draft.question).toBe('保留的草稿');
+    expect(f.last().draft.citations).toEqual([citationA]);
+    // Switching back restores the closed chat's draft: closing a pane neither deleted nor rewrote it.
+    await f.presenter.openConversation(secondId);
+    expect(f.last().draft.question).toBe('第二个对话');
+    expect(f.client.deleteConversation).not.toHaveBeenCalled();
+  });
+  it('closing the last open chat keeps the reader in its new-chat state', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const firstId = f.last().conversation!.id;
+    await f.presenter.newConversation();
+    const secondId = f.last().conversation!.id;
+    expect(f.presenter.closePane(secondId)).toBe(false);
+    expect(f.presenter.closeConversation()).toBe(false);
+    expect(f.last().conversation).toBeNull();
+    expect(f.last().openConversations).toEqual([]);
+    expect(f.last().draft.question).toBe('');
+    // The stored pointer is not re-adopted; the chats stay listed and openable.
+    expect(f.last().conversations.map(c => c.id)).toEqual([firstId, secondId]);
   });
   it('normalizes a blank or reversed page range instead of preparing an impossible slice', async () => {
     const f = fixture(); await f.presenter.activate();

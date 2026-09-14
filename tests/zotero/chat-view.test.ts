@@ -1311,11 +1311,14 @@ it('closes the current chat from the title pill cross without confirming, deleti
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   close.click();
   expect(remove).not.toHaveBeenCalled();
-  expect(presenter.snapshot().conversation).toBeNull();
+  // The chat that was already open stays open, so closing this pane lands the reader on that chat —
+  // not on an empty pane — and the closed chat is only closed: still listed, never deleted.
+  expect(presenter.snapshot().conversation?.id).toBe(first.id);
+  expect(presenter.snapshot().openConversations.map(entry => entry.id)).toEqual([first.id]);
   expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
-  // The pane is back to its empty state: no chip, no close cross.
-  expect(chrome.querySelector('[data-zcr-chat-pill]')).toBeNull();
-  expect(close.hidden).toBe(true);
+  // The pane still belongs to a chat: the title chip and its cross are both back on screen.
+  expect(chrome.querySelector('[data-zcr-chat-pill]')).not.toBeNull();
+  expect(chrome.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.hidden).toBe(false);
   // The chat is still listed in history and re-opening it restores it.
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   const row = root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`);
@@ -1401,11 +1404,13 @@ it('does not collapse the dock while other chats for the attachment remain', asy
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   closeCurrent();
-  expect(presenter.snapshot().conversation).toBeNull();
+  // Closing a chat that is not the last open one leaves the reader on the other open chat.
+  expect(presenter.snapshot().conversation?.id).toBe(first.id);
+  expect(presenter.snapshot().openConversations.map(entry => entry.id)).toEqual([first.id]);
   expect(closeDock).not.toHaveBeenCalled();
   expect(fresh.hidden).toBe(false);
-  // Closing the first chat is not the "last" one either: the chat closed above is still a history
-  // entry for this attachment, so the dock must stay open.
+  // Closing the first chat now is closing the last open pane: the reader returns to its empty state,
+  // and the dock still must not collapse because the chat closed above is a history entry here.
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${first.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first.id));
