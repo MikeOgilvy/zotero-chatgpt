@@ -2,7 +2,7 @@ import { ReaderError, type Citation, type GenerationSettings, type ImageAttachme
 import { validateDocument, validateRevision } from './document.ts';
 import { validateBatch, validateContextReport, validateReferenceInput, validateWorkflow } from './workspace-validation.ts';
 // Limits are first-version engineering choices from the contracts appendix.
-export const LIMITS = { payloadBytes: 256 * 1024, citationCodePoints: 8000, citationsPerRequest: 4, questionCodePoints: 4000, titleChars: 1024, authors: 50, authorChars: 256, rectsPerPage: 512, imagesPerRequest: 4, imageBytes: 2 * 1024 * 1024 } as const;
+export const LIMITS = { payloadBytes: 256 * 1024, citationCodePoints: 8000, citationsPerRequest: 4, questionCodePoints: 4000, titleChars: 1024, authors: 50, authorChars: 256, rectsPerPage: 512, imagesPerRequest: 4, imageBytes: 2 * 1024 * 1024, metadataFieldChars: 512, abstractChars: 2048, metadataTags: 24, metadataTagChars: 128 } as const;
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 const DATA_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,[A-Za-z0-9+/]+={0,2}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -142,8 +142,13 @@ export function validateSendInput(value: unknown): SendInput {
   }
   return result;
 }
+/**
+ * Checked copy of a paper identity. Optional bibliographic fields are only copied when the caller
+ * provided them; a missing field stays missing so a rebuilt request hashes byte for byte the same
+ * object. `tags: []` is preserved as an explicit empty array for the same reason.
+ */
 export function validatePaperIdentity(value: unknown): PaperIdentity {
-  const paper = record(value, ['title', 'authors', 'year', 'doi'], 'request.paper');
+  const paper = record(value, ['title', 'authors', 'year', 'doi', 'itemType', 'publicationTitle', 'journalAbbreviation', 'bookTitle', 'conferenceName', 'proceedingsTitle', 'university', 'institution', 'volume', 'issue', 'pages', 'publisher', 'isbn', 'issn', 'language', 'abstractNote', 'tags', 'editors'], 'request.paper');
   if (!Array.isArray(paper.authors) || paper.authors.length > LIMITS.authors) invalid('request.paper.authors is out of range');
   const result: PaperIdentity = {
     title: text(paper.title, 'request.paper.title', LIMITS.titleChars, 1),
@@ -151,5 +156,18 @@ export function validatePaperIdentity(value: unknown): PaperIdentity {
   };
   const year = optionalText(paper.year, 'request.paper.year', 16); if (year !== undefined) result.year = year;
   const doi = optionalText(paper.doi, 'request.paper.doi', 256); if (doi !== undefined) result.doi = doi;
+  // Zotero declared fields read from the host; all restricted to the metadata field limit (512).
+  for (const key of ['itemType', 'publicationTitle', 'journalAbbreviation', 'bookTitle', 'conferenceName', 'proceedingsTitle', 'university', 'institution', 'volume', 'issue', 'pages', 'publisher', 'isbn', 'issn', 'language'] as const) {
+    const field = optionalText(paper[key], `request.paper.${key}`, LIMITS.metadataFieldChars); if (field !== undefined) result[key] = field;
+  }
+  const abstractNote = optionalText(paper.abstractNote, 'request.paper.abstractNote', LIMITS.abstractChars); if (abstractNote !== undefined) result.abstractNote = abstractNote;
+  if (paper.tags !== undefined) {
+    if (!Array.isArray(paper.tags) || paper.tags.length > LIMITS.metadataTags) invalid('request.paper.tags is out of range');
+    result.tags = paper.tags.map(tag => text(tag, 'request.paper.tags[]', LIMITS.metadataTagChars, 1));
+  }
+  if (paper.editors !== undefined) {
+    if (!Array.isArray(paper.editors) || paper.editors.length > LIMITS.authors) invalid('request.paper.editors is out of range');
+    result.editors = paper.editors.map(editor => text(editor, 'request.paper.editors[]', LIMITS.authorChars, 1));
+  }
   return result;
 }
