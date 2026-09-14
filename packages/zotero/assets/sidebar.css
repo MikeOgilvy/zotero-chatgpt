@@ -175,6 +175,10 @@ body.zcr-dock-open #split-view .primary-view,
   align-items: center;
   gap: 0;
   flex: 0 0 auto;
+  /* The title chip stops growing once a chat is open (`.zcr-chrome-main[data-zcr-chat-pill]`), so the
+     auto margin is what keeps the new-chat and history controls pinned to the row's trailing edge
+     instead of letting them sit next to the title. */
+  margin-inline-start: auto;
 }
 .zcr-chrome .zcr-icon-button {
   width: var(--zcr-toolbar-button-size, 28px);

@@ -367,6 +367,19 @@ it('shapes the plus popover as a grouped, hairline-separated list with title and
   expect(shippedRule(doc, '.zcr-plus-row-description').cssText).toContain('var(--fill-secondary');
 });
 
+it('pushes the chrome actions to the row end even when the open chat makes the title hug its chip', () => {
+  const { doc } = stylesheetDom();
+  // A `+` that sits next to the title instead of the row's right edge is the reported defect: with a
+  // chat open the title chip stops growing, so it no longer absorbs the free space and the actions
+  // would otherwise be laid out immediately after the chip.
+  expect(shippedRule(doc, '.zcr-chrome-main[data-zcr-chat-pill]').flexGrow).toBe('0');
+  const actions = shippedRule(doc, '.zcr-chrome-actions');
+  expect(actions.marginInlineStart).toBe('auto');
+  // The action group keeps its intrinsic size; the auto margin is what moves it, not a stretch.
+  expect(actions.flexGrow).toBe('0');
+  expect(actions.flexShrink).toBe('0');
+});
+
 it('lays out the composer leading row so the plus and the capture-region shortcut share it', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
