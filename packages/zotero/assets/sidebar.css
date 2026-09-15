@@ -892,37 +892,6 @@ body.zcr-dock-open #split-view .primary-view,
   outline-offset: -2px;
 }
 .zcr-history-row .zcr-icon-button { opacity: .7; }
-/* Archived chats leave the grouped list: a hairline row pinned below it, collapsed by default and
-   absent from the DOM entirely at zero archived chats. Sizes follow the chat text scale. */
-.zcr-history-archived { flex: 0 0 auto; border-top-width: 1px; border-top-style: solid; border-top-color: var(--zcr-border); }
-.zcr-history-archived-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 12px;
-  font: inherit;
-  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
-  color: var(--fill-secondary, GrayText);
-  background: transparent;
-  border: 0;
-  text-align: start;
-  cursor: pointer;
-}
-.zcr-history-archived-toggle:hover { background: var(--fill-quinary, ButtonFace); }
-/* The same neutral ring as the live rows, never the accent outline. */
-.zcr-history-archived-toggle:focus-visible {
-  outline-width: 2px;
-  outline-style: solid;
-  outline-color: var(--fill-secondary, GrayText);
-  outline-offset: -2px;
-}
-.zcr-history-chevron { display: inline-flex; flex: 0 0 auto; }
-.zcr-history-chevron svg { display: block; width: 12px; height: 12px; }
-.zcr-history-archived-toggle[aria-expanded="true"] .zcr-history-chevron { transform: rotate(90deg); }
-.zcr-history-archived-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-/* Expanded archived rows scroll on their own so a long archive cannot push the row off screen. */
-.zcr-history-archived-list { max-height: 45%; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 6px; }
 
 /* The first outbound scope notice. Compact and inline: it is a consent state above the transcript,
    not a permanent banner, and it follows the same native spacing and colors as the chrome. */

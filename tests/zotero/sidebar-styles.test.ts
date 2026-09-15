@@ -242,41 +242,9 @@ it('keeps history copy and rows on the chat text scale', () => {
   sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
   const item = el('button', 'zcr-history-item');
   const heading = el('div', 'zcr-history-heading', 'Today');
-  const archivedToggle = el('button', 'zcr-history-archived-toggle');
-  sidebar.append(item, heading, archivedToggle); doc.body.append(sidebar);
+  sidebar.append(item, heading); doc.body.append(sidebar);
   expect(cs(item).fontSize).toBe('calc(13px * 1.5)');
   expect(cs(heading).fontSize).toBe('calc(11px * 1.5)');
-  expect(cs(archivedToggle).fontSize).toBe('calc(12px * 1.5)');
-});
-
-it('pins the archived section below the grouped list as a hairlined, rotational, focus-ringed row', () => {
-  const { doc, cs } = stylesheetDom();
-  const el = make(doc);
-  const panel = el('div', 'zcr-history-panel');
-  const section = el('section', 'zcr-history-archived');
-  const toggle = el('button', 'zcr-history-archived-toggle');
-  const chevron = el('span', 'zcr-history-chevron');
-  const count = el('span', 'zcr-history-archived-count', '2');
-  const list = el('div', 'zcr-history-archived-list');
-  toggle.append(chevron, count);
-  section.append(toggle, list); panel.append(section); doc.body.append(panel);
-  // A hairline separates the section from the list and it takes no share of the popover height.
-  expect(cs(section).borderTopWidth).toBe('1px');
-  expect(cs(section).flexGrow).toBe('0');
-  // The chevron rotates only while the toggle reports the expanded state.
-  expect(cs(chevron).display).toBe('inline-flex');
-  expect(shippedCss()).toMatch(/\.zcr-history-archived-toggle\[aria-expanded="true"\]\s+\.zcr-history-chevron\s*\{[^}]*transform:\s*rotate\(90deg\)/u);
-  // The same neutral ring as the live rows, never the accent outline the owner rejected.
-  const focused = shippedRule(doc, '.zcr-history-archived-toggle:focus-visible');
-  expect(focused.outlineWidth).toBe('2px');
-  expect(focused.outlineColor).not.toContain('AccentColor');
-  expect(shippedCss()).not.toMatch(/\.zcr-history-archived-toggle:focus-visible\s*\{[^}]*AccentColor/u);
-  // Muted copy from the palette and a count that lines up column-wise.
-  expect(shippedRule(doc, '.zcr-history-archived-toggle').color).toContain('var(--fill-secondary');
-  expect(shippedRule(doc, '.zcr-history-archived-count').fontVariantNumeric).toBe('tabular-nums');
-  // Expanded rows own their scroll so a long archive cannot push the row off screen.
-  expect(cs(list).overflowY).toBe('auto');
-  expect(cs(list).maxHeight).not.toBe('');
 });
 
 it('keeps a visible keyboard ring on the composer context controls that remain', () => {
