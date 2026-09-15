@@ -6,13 +6,14 @@
 
 - **Git**：`main` 基线 `59c21f3`。本轮工作在 `cursor/cursor-style-chat-tabs-272e`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。`dist/`、`build/`、`.zcr-dev/` 不在版本控制内。
 - **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a7`（侧载新 chrome/附件字节必须升版本；a6 的 `64568ebf…` 是上一整理轮产物，从未宿主安装）。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
-- **本轮门禁（0.4.0a7，打包前）**：typecheck / lint / test:unit / package:dev / verify:artifacts **尚未在本树记录**。上一整理轮（a6）门禁见下表，不得冒充本轮。**真实宿主、真实模型 NOT RUN**。
+- **本轮门禁（0.4.0a7，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **1076 passed / 80 files / 0 skipped**；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a7-dev.xpi`（92,679,071 bytes，SHA-256 `fcdcbc519977af2df05e6bbfb77131315a0675f7c08d583a99f2334c23993f68`）；`npm run verify:artifacts` **84 files PASS**；打包后复跑 `test:unit` 同为 1076 / 80 / 0 skipped。以上均为代码 + 单元 + 产物证据；**真实宿主、真实模型 NOT RUN**。
 
 ### 产物边界
 
 | 字节（SHA-256） | 版本 | 位置 | 证据层次 |
 | --- | --- | --- | --- |
-| `64568ebf91afea2c5695b92051302d27ee6d5776d6f70790ac28ce84cae7911a`（92,680,039 B） | 0.4.0a6 | `dist/`（`SHA256SUMS` 唯一条目） | 代码 + 单元 + 产物；**无宿主证据，从未安装** |
+| `fcdcbc519977af2df05e6bbfb77131315a0675f7c08d583a99f2334c23993f68`（92,679,071 B） | 0.4.0a7 | `dist/`（`SHA256SUMS` 唯一条目） | 代码 + 单元 + 产物；**无宿主证据，从未安装** |
+| `64568ebf91afea2c5695b92051302d27ee6d5776d6f70790ac28ce84cae7911a`（92,680,039 B） | 0.4.0a6 | 上一整理轮 `dist/` 产物，已被 a7 覆盖 | 代码 + 单元 + 产物；**无宿主证据，从未安装** |
 | `68529c36cfd422268a7f24fc05eaf350b057c1457923d1f8320a6bdc7129261b`（92,665,647 B） | 0.4.0a5 | `.zcr-dev/artifact-backup/…host-verified-68529c36.xpi`；`.zcr-dev/context/profile/extensions/`；owner 正常 profile 当前安装 | **真实宿主 `--context` 32/32 PASS**（2026-09-14，专用 `.zcr-dev/context` 树） |
 | `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`（92,661,563 B） | 0.4.0a4 | `.zcr-dev/artifact-backup/…host-verified-5a6bb161.xpi`；owner profile 侧 `.zcr-bak-20260914-090331-0.4.0a4` | 真实宿主 `--context` 32/32（2026-09-13，已被 a5 取代） |
 
@@ -24,7 +25,8 @@
 
 本页**只有这一处**声明当前测试计数；其它出现过的数字都是历史值，只在 Git 历史中。
 
-- 本机计数以本轮打包后复跑为准；上表 1075 / 80 是 **0.4.0a6 整理树** 的历史值，不是 a7。差额来自 `tests/build/install-lifecycle.test.ts` 的两条 `it.skipIf`：(1) `copies the existing packaged XPI into a virgin isolated tree` 要求 `dist/` 有当前版本 XPI；(2) `verifies the Apple signature of the Codex binary inside the existing XPI` 还要求 `darwin` 与 `/usr/bin/codesign`。
+- 本机（macOS，`dist/` 存在当前 manifest 版本的 XPI）：**1076 passed / 80 files / 0 skipped**（2026-09-15 a7 树，打包后复跑）；打包前同树为 1074 passed / 2 skipped，差额即 `install-lifecycle.test.ts` 的两条 `it.skipIf`。a6 整理树曾为 1075；本轮净 +1 来自 Cursor 标签/多选文件/剪贴板/偏好用例减去已删除的区域截图用例。
+- 差额来自 `tests/build/install-lifecycle.test.ts` 的两条 `it.skipIf`：(1) `copies the existing packaged XPI into a virgin isolated tree` 要求 `dist/` 有当前版本 XPI；(2) `verifies the Apple signature of the Codex binary inside the existing XPI` 还要求 `darwin` 与 `/usr/bin/codesign`。
 - CI：`ci.yml` 的 `package` 作业在 `package:dev` **之后**再跑一次 `test:unit`，故 (1) 执行、(2) 在 linux runner 上始终 skip，预期为"本机计数 − 1 passed / 1 skipped"。CI 打出的 XPI 是 darwin/arm64 产物、在 linux 上构建、从不宿主执行。
 
 ## 已交付路径（代码 + 单元；宿主/模型证据另见下节）
