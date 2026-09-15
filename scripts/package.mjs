@@ -62,8 +62,7 @@ function isRuntimeFile(filePath, runtimeManifest) {
     filePath === "manifest.json" ||
     filePath === "LICENSE" ||
     filePath.startsWith("content/") ||
-    filePath.startsWith("locale/") ||
-    filePath.startsWith("locales/")
+    filePath.startsWith("locale/")
   );
 }
 

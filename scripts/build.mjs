@@ -58,7 +58,6 @@ export async function copyStaticFiles(outputDirectory) {
       path.join(outputDirectory, "content/preferences"),
     ),
     copyIfPresent(path.join(zoteroPackage, "locale"), path.join(outputDirectory, "locale")),
-    copyIfPresent(path.join(zoteroPackage, "locales"), path.join(outputDirectory, "locales")),
   ]);
   await copyThirdPartyAssets(outputDirectory);
 }
