@@ -39,7 +39,6 @@ export interface PresenterServices {
    */
   readClipboardImage?: () => Promise<ClipboardImageRead>;
 }
-export type PresenterDependencies = PresenterServices;
 export type PresenterSkillEdit = Pick<ReaderSkill, 'name' | 'description' | 'version' | 'workflow' | 'markdown' | 'enabled'> & { id: string | null; revision?: string };
 type RequestContext = { enabled: boolean; range: [number, number] | null; acquisitionTarget?: NativeCollectionTarget | null };
 export interface PresenterState {

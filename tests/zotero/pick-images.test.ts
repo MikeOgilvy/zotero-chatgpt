@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import {
   attachmentsFromClipboard, attachmentsFromItems, clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
-  imagesFromClipboardItems, imagesFromGeckoClipboard, pluginClipboardAccess, readGeckoClipboardImage, resolveGeckoClipboardAccess,
+  imagesFromClipboardItems, pluginClipboardAccess, readGeckoClipboardImage, resolveGeckoClipboardAccess,
   type ClipboardImageItem,
 } from '../../packages/zotero/src/chat/pick-images.ts';
 import { TINY_PNG_DATA_URL } from '../contracts/factories.ts';
@@ -139,12 +139,11 @@ it('renders the shipped item-pane icon with valid paint values and a visible mar
   const subpaths = [...svg.matchAll(/[MZ]/gu)].length;
   expect(subpaths).toBeGreaterThanOrEqual(8);
 });
-it('reads an nsIClipboard transferable image when DOM items are empty', async () => {
+it('reads an nsIClipboard transferable image when DOM items are empty', () => {
   const host = fakeGeckoClipboard({ 'image/png': PNG, 'public.png': PNG });
   expect(geckoClipboardHasImage(host)).toBe(true);
   expect(geckoClipboardHasImage(fakeGeckoClipboard({ 'text/unicode': new Uint8Array([65]) }))).toBe(false);
-  const images = await imagesFromGeckoClipboard(host, () => PNG_ID);
-  expect(images).toEqual([PNG_ATTACHMENT]);
+  expect(readGeckoClipboardImage(host, () => PNG_ID).images).toEqual([PNG_ATTACHMENT]);
 });
 
 it('resolves Gecko clipboard access from a parent chrome window', () => {
@@ -161,10 +160,10 @@ it('treats only text flavors as an insertable text paste', () => {
   expect(clipboardHasText(null)).toBe(false);
 });
 
-it('has no privileged pasteboard in a content realm and returns nothing instead of guessing', async () => {
+it('has no privileged pasteboard in a content realm and returns nothing instead of guessing', () => {
   // The reader iframe realm has no Cc/Services; only the plugin realm can read the pasteboard.
   expect(pluginClipboardAccess()).toBeNull();
-  expect(await imagesFromGeckoClipboard(pluginClipboardAccess(), () => PNG_ID)).toEqual([]);
+  expect(readGeckoClipboardImage(pluginClipboardAccess(), () => PNG_ID).images).toEqual([]);
 });
 
 // A paste that carried an image and attached nothing used to look exactly like a paste that did

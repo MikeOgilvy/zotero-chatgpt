@@ -1,4 +1,3 @@
-export const CHAT_TEXT_SCALE_PREF = 'extensions.zcr.chatTextScale';
 export const CHAT_TEXT_SCALE_MIN = 0.5;
 export const CHAT_TEXT_SCALE_MAX = 3;
 export const CHAT_TEXT_SCALE_DEFAULT = 1;

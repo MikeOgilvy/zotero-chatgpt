@@ -2,7 +2,6 @@ import { Window } from 'happy-dom';
 import { expect, it } from 'vitest';
 import {
   CHAT_TEXT_SCALE_DEFAULT,
-  CHAT_TEXT_SCALE_PREF,
   applyChatTextScale,
   bindUnifiedReaderZoom,
   clampChatTextScale,
@@ -12,8 +11,7 @@ function documentOf(): Document {
   return new Window({ url: 'https://zcr.test/' }).document as unknown as Document;
 }
 
-it('keeps the dock type pref at 1 and never treats reader zoom as chat scale', () => {
-  expect(CHAT_TEXT_SCALE_PREF).toBe('extensions.zcr.chatTextScale');
+it('defaults the dock type scale to 1 and never treats reader zoom as chat scale', () => {
   expect(CHAT_TEXT_SCALE_DEFAULT).toBe(1);
   const doc = documentOf();
   const sidebar = doc.createElement('section');

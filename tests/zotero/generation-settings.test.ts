@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { ModelOption } from '../../packages/contracts/src/runtime.ts';
 import { enforcedAllowedModelIds } from '../../packages/core/src/workspace/allowed-models.ts';
 import { settings } from '../contracts/factories.ts';
-import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, offeredModels, pickerSummary, resolveFastTier, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
+import { alignSettings, applyComposerChoice, catalogDefaultSettings, composerControls, effortLabel, modelChipLabel, offeredModels, resolveFastTier, settingsCaption } from '../../packages/zotero/src/chat/generation-settings.ts';
 
 const catalog: ModelOption[] = [
   {
@@ -300,11 +300,10 @@ it('aligns a model choice against the allowlist while the speed/effort paths sti
   expect(applyComposerChoice(liveModels, settings, 'effort', 'high', allowed)).toEqual({ ...settings, effort: 'high' });
 });
 
-it('labels the chip and picker summary against the allowlist', () => {
+it('labels the chip against the allowlist', () => {
   const pinned = { model: 'gpt-5.5', serviceTier: null, effort: 'medium' };
   expect(modelChipLabel(pinned, liveModels, ['gpt-5.6-luna'])).toBe('GPT-5.6-Luna Medium');
-  expect(pickerSummary(pinned, liveModels, ['gpt-5.6-luna'])).toBe('GPT-5.6-Luna Medium');
-  expect(pickerSummary(null, liveModels, ['gpt-5.6-luna'])).toBe('Model');
+  expect(modelChipLabel(null, liveModels, ['gpt-5.6-luna'])).toBe('Model');
 });
 
 it('keeps captions looking excluded models up in the full list', () => {

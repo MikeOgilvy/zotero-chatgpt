@@ -179,7 +179,3 @@ export function modelChipLabel(settings: GenerationSettings | null, models: read
   if (fast && current.serviceTier === fast.id) parts.push('Fast');
   return parts.join(' ');
 }
-
-export function pickerSummary(settings: GenerationSettings | null, models: readonly ModelOption[], allowedIds?: readonly string[]): string {
-  return modelChipLabel(settings, models, allowedIds);
-}

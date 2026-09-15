@@ -399,11 +399,3 @@ export function readGeckoClipboardImage(
   // The bytes were really on the pasteboard; the refusal names why they were not attached.
   return { images: [], refused: bytes.byteLength > MAX_BYTES ? 'too-large' : 'unsupported' };
 }
-
-/** Privileged Gecko/Zotero clipboard. Never logs flavor payloads. */
-export function imagesFromGeckoClipboard(
-  access: GeckoClipboardAccess | null | undefined,
-  uuid: () => string,
-): Promise<ImageAttachment[]> {
-  return Promise.resolve(readGeckoClipboardImage(access, uuid).images);
-}
