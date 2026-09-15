@@ -467,21 +467,24 @@ async function runHostSmoke(config) {
     shell().dispatchEvent(new (reader()._iframeWindow.KeyboardEvent)('keydown', { key: '=', code: 'Equal', metaKey: true, bubbles: true, cancelable: true }));
     await until(() => pdfViewer().currentScale > scaleBefore + 0.01, 'reader-zoom-from-meta-plus', 10000);
     await check('reader-zoom-keeps-chat-text-scale-independent', contextScale() === scaleBeforeVariable && pdfViewer().currentScale > scaleBefore, { scaleBefore, scaleAfter: pdfViewer().currentScale, chatScaleBefore: scaleBeforeVariable, chatScaleAfter: contextScale() });
-    // Measure input-ready reopen and a state-changing local control, not an animation.
+    // Measure input-ready reopen and a state-changing local control, not an animation. The
+    // three-dot settings menu is gone; history is the remaining chrome popover that works whether
+    // or not the account is signed in.
     const warm = []; const local = [];
     const warmReady = () => input() && !input().disabled && (!conversationA || panel()?.dataset.zcrConversation === conversationA);
     for (let n = 0; n < 30; n++) {
       toggle().click(); await until(() => !panel(), 'perf-close');
       const start = win.performance.now(); toggle().click();
       await until(warmReady, 'perf-input-ready'); warm.push(win.performance.now() - start);
-      const settings = panel().querySelector('[data-zcr-action="settings"]');
-      const menu = panel().querySelector('[data-zcr-settings-menu]');
-      const feedback = win.performance.now(); settings.click();
-      await until(() => menu && !menu.hidden, 'perf-state-feedback'); local.push(win.performance.now() - feedback);
-      settings.click(); await until(() => menu.hidden, 'perf-menu-closed');
+      const history = panel().querySelector('[data-zcr-action="history"]');
+      const historyPanel = panel().querySelector('[data-zcr-history]');
+      step = 'perf-local-feedback';
+      const feedback = win.performance.now(); history.click();
+      await until(() => historyPanel && !historyPanel.hidden, 'perf-state-feedback'); local.push(win.performance.now() - feedback);
+      history.click(); await until(() => historyPanel.hidden, 'perf-menu-closed');
     }
     const metrics = values => ({ n: values.length, p95: [...values].sort((a, b) => a - b)[Math.ceil(values.length * .95) - 1], max: Math.max(...values), samplesMs: values });
-    report.performance = { cachedOpen: metrics(warm), localInteraction: metrics(local), method: 'performance.now; poll 10ms until enabled input (and restored conversation when one is bound) or the settings menu opens; same synthetic 2-page PDF; 30 cycles; runtime warmed; no model' };
+    report.performance = { cachedOpen: metrics(warm), localInteraction: metrics(local), method: 'performance.now; poll 10ms until enabled input (and restored conversation when one is bound) or the history panel opens; same synthetic 2-page PDF; 30 cycles; runtime warmed; no model' };
     await check('warm-open-p95-under-250ms', report.performance.cachedOpen.p95 <= 250, { p95: report.performance.cachedOpen.p95 });
     await check('local-feedback-p95-under-100ms', report.performance.localInteraction.p95 <= 100, { p95: report.performance.localInteraction.p95 });
     await check('single-dock-and-toggle-after-cycles', rdoc().querySelectorAll('[data-zcr-dock]').length === 1 && rdoc().querySelectorAll('[data-zcr-toggle]').length === 1);
