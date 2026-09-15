@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- **Git**：`main` 基线 `f48f337`（已快进合并 `codex/product-agent-v0.4`，历史未改写；合并前 HEAD 存于本地 ref `refs/backup/pre-cleanup-20260914`）。2026-09-15 的仓库整理在分支 `cursor/repo-cleanup-becf` 上按可验证变更逐个本地提交（`18d43c5`…`9ccc87f`），随后快进合并进 `main`；未 push、未打 tag、未发布。`dist/`、`build/`、`.zcr-dev/` 不在版本控制内。
+- **Git**：`main` 基线 `f48f337`（已快进合并 `codex/product-agent-v0.4`，历史未改写；合并前 HEAD 存于本地 ref `refs/backup/pre-cleanup-20260914`）。2026-09-15 的仓库整理在分支 `cursor/repo-cleanup-becf` 上按可验证变更逐个本地提交（`18d43c5`…`9ccc87f`），随后快进合并进 `main` 并按 owner 授权 push 到 `origin/main`（`f48f337..6a39c1a`）；未打 tag、未发布。`dist/`、`build/`、`.zcr-dev/` 不在版本控制内。
 - **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a6`（a5 已被"同版本不同字节"污染，见下）。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
 - **本轮门禁（2026-09-15 整理分支 HEAD，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **1075 passed / 80 files / 0 skipped**；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a6-dev.xpi`（92,680,039 bytes，SHA-256 `64568ebf91afea2c5695b92051302d27ee6d5776d6f70790ac28ce84cae7911a`）；`npm run verify:artifacts` **84 files PASS**；打包后复跑 `test:unit` 同为 1075 / 80 / 0 skipped。最后一个提交（删除四个无调用的别名/包装）前后打出的 XPI 字节相同（esbuild 已将其摇掉），门禁在该提交后完整复跑仍为同一结果。以上均为代码 + 单元 + 产物证据；**真实宿主、真实模型 NOT RUN**。
 
