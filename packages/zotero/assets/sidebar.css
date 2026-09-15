@@ -261,9 +261,7 @@ body.zcr-dock-open #split-view .primary-view,
 }
 .zcr-pane-tab:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 
-/* The chat columns: the one being edited, plus — when the measured dock has room for two readable
-   chats — a read-only transcript of another open chat. The threshold is applied in JS (pane-layout.ts)
-   so this file only describes the two shapes; `data-zcr-columns` carries the decision. */
+/* One transcript fills remaining dock height. Tabs switch chats; there is never a second column. */
 .zcr-columns {
   display: flex;
   flex-direction: column;
@@ -271,53 +269,6 @@ body.zcr-dock-open #split-view .primary-view,
   min-height: 0;
   min-width: 0;
 }
-/* Both columns take an equal share of the measured width, so neither side is a squeezed leftover. */
-.zcr-columns[data-zcr-columns="two"] {
-  flex-direction: row;
-  gap: 12px;
-}
-.zcr-columns[data-zcr-columns="two"] > * { flex: 1 1 0; }
-/* The hairline is the only thing that says the two columns are two chats; it never draws in the
-   single-column shape, where the preview is not laid out at all. */
-.zcr-columns[data-zcr-columns="two"] .zcr-pane-preview {
-  border-inline-start: 1px solid var(--zcr-border);
-}
-.zcr-pane-preview {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  /* A read-only transcript is not a surface to fill: no composer, no task panel, no new-content
-     pill, so it stays visually quieter than the chat being edited. */
-  background: none;
-}
-.zcr-pane-preview-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-height: 32px;
-  padding-block: 0;
-}
-.zcr-pane-preview-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
-  font-weight: 500;
-  color: var(--fill-secondary, GrayText);
-}
-.zcr-pane-preview-note {
-  flex: 0 0 auto;
-  white-space: nowrap;
-  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
-  color: var(--fill-secondary, GrayText);
-}
-.zcr-pane-preview-messages { padding-block: 12px; padding-inline: 10px; }
-.zcr-pane-preview-open { margin-inline-start: auto; cursor: pointer; }
-.zcr-pane-preview-open:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; border-radius: 5px; }
 
 .zcr-button {
   font: inherit;

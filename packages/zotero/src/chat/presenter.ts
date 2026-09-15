@@ -317,31 +317,6 @@ export class ConversationPresenter {
     if (!Number.isFinite(scrollTop) || scrollTop < 0 || this.state.scrollTop === scrollTop) return;
     this.update({ scrollTop }); this.stageDraft();
   }
-  /**
-   * The reading anchor of a chat shown beside the one being edited. It is the same map that already
-   * backs each chat's own anchor, so a chat has one position however it is displayed; a chat that was
-   * never measured reports null rather than a fabricated zero.
-   */
-  paneScrollTop(conversationId: string): number | null {
-    return this.positions.get(conversationId)?.scrollTop ?? null;
-  }
-  /**
-   * Record where the owner scrolled a chat that is on screen but not being edited. The chat being
-   * edited owns `state.scrollTop`, so this never writes into it: the read-only column cannot move the
-   * composer's chat. Nothing is persisted here — that happens when the chat is next stashed or its
-   * draft is saved — so scrolling a read-only column does not schedule writes of the chat being
-   * edited.
-   */
-  setPaneScrollTop(conversationId: string, scrollTop: number): void {
-    if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
-    const id = this.state.conversation?.id;
-    if (!id || conversationId === id) return;
-    const current = this.positions.get(conversationId);
-    if (current?.scrollTop === scrollTop) return;
-    // A chat that was never edited has no stored document range; the anchor is recorded without
-    // inventing one, exactly like a draft read back from the workspace.
-    this.positions.set(conversationId, { scrollTop, range: current?.range ?? null });
-  }
   reportError(message: string): void { this.update({ message }); }
   private changeDraft(draft: WorkspaceDraft): void {
     if (draft === this.state.draft) return;

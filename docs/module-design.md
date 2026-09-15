@@ -1,6 +1,6 @@
 # 架构与契约
 
-本文描述 **0.4.0a7 工作树实现**。产品行为由[产品规格](zotero-codex-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a8 工作树实现**。产品行为由[产品规格](zotero-codex-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
@@ -16,7 +16,7 @@
 | `core/tasks` | 原生任务候选、任务级审批、写入意图、结果账本、对账与撤销 |
 | `zotero/reader` | 当前附件、原生 dock/缩放/选区、文本及版本校验、原文定位、页面图像、显式文章引用；`selection.ts` 从 Zotero 条目抽取书目字段，`metadata.ts` 只是 `core/context/bibliography.ts` 的再导出以保留原有导入路径 |
 | `zotero/agent` | 无状态 NativeAgentPort：定位引文、标注、元数据/查重、集合成员关系及 OA 附件 |
-| `zotero/chat` | Presenter 与视图投影、统一输入、历史/任务/上下文、净化 Markdown 和 KaTeX |
+| `zotero/chat` | Presenter 与视图投影、统一输入、历史/任务/上下文、净化 Markdown 和 KaTeX。dock 是 Cursor 式标签条加**一列**转录；没有第二列只读聊天。 |
 | `zotero/runtime` | 本地服务、GeckoStorage、发行资产校验、生成图像加载、自有进程监督器 |
 
 core 只依赖 contracts，不依赖 DOM、Zotero 或 Node。bootstrap/index 负责组装；视图借用服务端口，不持有原始管道或账户目录。关闭 sidebar 或卸载某个视图不结束任务。原生任务、阅读批次和模型请求各自保存状态；它们不以一个仍然打开的阅读器窗口作为存续条件。

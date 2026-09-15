@@ -61,8 +61,6 @@ async function mountReadyChat(options: {
   rateLimits?: RuntimeSnapshot['rateLimits'];
   deleteConversation?: ReaderClient['deleteConversation'];
   identity?: PaperIdentity;
-  /** Records the container the view observes, so a dock resize can be simulated through the DOM. */
-  resizeCallbacks?: Array<() => void>;
 } = {}) {
   let conversation: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
@@ -175,17 +173,6 @@ async function mountReadyChat(options: {
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   const scale = options.textScale ?? { value: 1 };
   const timers = options.captureTimers ? captureIntervalTimers(doc.defaultView as unknown as ViewWindow) : null;
-  // The real view measures the dock through a ResizeObserver; the seam replaces it before mount so a
-  // test can widen or narrow the container the way a native splitter drag does.
-  if (options.resizeCallbacks) {
-    const observer = options.resizeCallbacks;
-    (doc.defaultView as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      constructor(callback: () => void) { observer.push(callback); }
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
   const teardown = mountChatView(root, presenter, {
     ...(options.closeDock ? { closeDock: options.closeDock } : {}),
     openCitation: options.openCitation ?? (() => Promise.resolve()),
@@ -1344,41 +1331,25 @@ function chatWith(id: string, title: string, messages: Conversation['messages'])
 }
 
 /**
- * The dock with two chats open and the second one being edited, so the first is the read-only column.
- * `width` stubs the container the view measures and re-runs its layout through the observer it really
- * uses; without it the dock reports happy-dom's zero width, which is the "not measured" case.
+ * Two chats open, the second being edited. Other open chats stay as tabs; the dock never splits.
  */
-async function mountTwoOpenChats(options: { width?: number; textScale?: { value: number } } = {}) {
+async function mountTwoOpenChats() {
   const other = chatWith('aaaaaaaa-0000-4000-8000-00000000000f', 'The other chat', [
     { id: 'o1', requestId: 'r9', role: 'user', phase: null, settings, text: '第二个问题', citations: [], status: 'completed' },
     { id: 'o2', requestId: 'r9', role: 'assistant', phase: 'final', settings, text: '第二个回答', citations: [], status: 'completed' },
   ]);
-  const third = chatWith('bbbbbbbb-0000-4000-8000-00000000000e', 'Third chat', [
-    { id: 't1', requestId: 'rt', role: 'user', phase: null, settings, text: '第三问', citations: [], status: 'completed' },
-  ]);
-  const resizeCallbacks: Array<() => void> = [];
   const mounted = await mountReadyChat({
-    resizeCallbacks,
-    ...(options.textScale ? { textScale: options.textScale } : {}),
     messages: [
       { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What is defined?', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
         text: `Definition [page](https://zcr.invalid/source/${documentA.id}/1) and [external](https://example.com/paper).` },
     ],
-    conversations: [other, third],
+    conversations: [other],
   });
   const firstId = mounted.presenter.snapshot().openConversations[0]!.id;
   await mounted.presenter.openConversation(other.id);
-  const columns = mounted.root.querySelector<HTMLElement>('[data-zcr-columns]')!;
-  const widen = (width: number) => {
-    Object.defineProperty(columns, 'clientWidth', { configurable: true, get: () => width });
-    for (const callback of resizeCallbacks) callback();
-  };
-  if (options.width !== undefined) widen(options.width);
   return {
-    ...mounted, firstId, otherId: other.id, thirdId: third.id, columns, widen,
-    preview: mounted.root.querySelector<HTMLElement>('[data-zcr-pane-preview]')!,
-    previewMessages: mounted.root.querySelector<HTMLElement>('[data-zcr-preview-messages]')!,
+    ...mounted, firstId, otherId: other.id,
     activeMessages: mounted.root.querySelector<HTMLElement>('[data-zcr-messages]')!,
   };
 }
@@ -1456,198 +1427,45 @@ it('drops the chip of a closed chat and keeps the remaining tab on screen', asyn
 });
 
 /**
- * Option B, seen from the dock: while the container really has room for two readable columns, the
- * chat being edited keeps the composer and a second, read-only transcript of another open chat sits
- * beside it. The read-only column runs the same answer renderer with a genuine read-only mode — the
- * answer that carries copy, branch and source-opening controls in the editable pane carries none of
- * them here, and nothing in it is a tab stop that could offer one.
+ * Cursor Agent is tabs, not two transcripts. A wide dock still shows one chat; the others stay tabs.
  */
-it('opens a second chat beside the one being edited as a read-only transcript with no actions', async () => {
-  const { root, presenter, preview, previewMessages, firstId, otherId } = await mountTwoOpenChats({ width: 600 });
-  const win = root.ownerDocument.defaultView!;
-  // The chat being edited is still the one on screen: the second column did not replace it.
+it('never lays out a second transcript beside the chat being edited', async () => {
+  const { root, presenter, firstId, otherId, activeMessages } = await mountTwoOpenChats();
   expect(presenter.snapshot().conversation?.id).toBe(otherId);
   expect(presenter.snapshot().openConversations.map(chat => chat.id)).toEqual([firstId, otherId]);
-  expect(preview.hidden).toBe(false);
-  expect(preview.getAttribute('role')).toBe('region');
-  const title = preview.querySelector<HTMLElement>('.zcr-pane-preview-title')!;
-  const note = preview.querySelector<HTMLElement>('.zcr-pane-preview-note')!;
-  expect(title.textContent).toBe('Synthetic Paper A');
-  expect(note.textContent).toBe('Read-only');
-  expect(preview.getAttribute('aria-labelledby')).toBe(`${title.id} ${note.id}`);
-  // The other chat's answer really is there, rendered from its own messages.
-  expect(previewMessages.textContent).toContain('Definition');
-  expect(previewMessages.textContent).not.toContain('第二个回答');
-  // Every mutation affordance is absent, not hidden by CSS or squeezed out of view.
-  for (const action of ['copy-answer', 'branch-message', 'open-citation', 'review-annotations', 'cancel-queued', 'copy-code']) {
-    expect(preview.querySelector(`[data-zcr-action="${action}"]`), action).toBeNull();
-  }
-  // The citation is neutralized in the DOM: the reserved href is gone and there is no wiring to open
-  // a source from the read-only column.
-  const citation = preview.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
-  // The page label of the cited page survives; the reserved link behind it does not. The source id is
-  // left as a plain marker, but nothing in the column can act on it.
-  expect(citation.textContent).toBe('p. ii');
-  expect(citation.dataset.zcrSource).toBe(documentA.id);
-  expect(citation.getAttribute('href')).toBeNull();
-  // A plain external link stays the answer's own content, but following it is reading, not asking for
-  // the column to become editable: the click must not also swap the two panes.
-  const external = [...preview.querySelectorAll<HTMLAnchorElement>('[data-zcr-text] a')].find(link => link.textContent === 'external')!;
-  external.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
-  await Promise.resolve();
-  expect(presenter.snapshot().conversation?.id).toBe(otherId);
-  // One control, one tab stop: the column contributes only the affordance that activates it.
-  expect([...preview.querySelectorAll('button')].map(node => node.dataset.zcrAction)).toEqual(['activate-pane']);
-  expect(preview.querySelectorAll('[tabindex]')).toHaveLength(0);
-  // Exactly one composer, and it stays in the editable pane.
+  expect(root.querySelector('[data-zcr-pane-preview]')).toBeNull();
+  expect(root.querySelectorAll('[data-zcr-messages]')).toHaveLength(1);
   expect(root.querySelectorAll('[data-zcr-composer]')).toHaveLength(1);
-  expect(preview.querySelector('[data-zcr-input]')).toBeNull();
-  expect(root.querySelector('.zcr-chat-main')!.contains(root.querySelector('[data-zcr-composer]'))).toBe(true);
-});
-
-it('keeps the tab strip as the switcher and never lays out a squeezed column when the dock is narrow', async () => {
-  const { root, presenter, preview, widen, thirdId, columns } = await mountTwoOpenChats({});
-  const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  // Unmeasured is not room: the strip stays the UI and no second column is laid out at all.
-  expect(preview.hidden).toBe(true);
-  expect(strip.hidden).toBe(false);
-  expect(root.querySelector<HTMLElement>('[data-zcr-columns]')!.dataset.zcrColumns).toBe('one');
-  // One pixel short of two readable columns is still one column, never two squeezed ones.
-  widen(573);
-  expect(preview.hidden).toBe(true);
-  expect(root.querySelector<HTMLElement>('[data-zcr-columns]')!.dataset.zcrColumns).toBe('one');
-  widen(574);
-  expect(preview.hidden).toBe(false);
-  expect(root.querySelector<HTMLElement>('[data-zcr-columns]')!.dataset.zcrColumns).toBe('two');
-  expect(strip.hidden).toBe(false);
-  // Narrowing the dock again takes the second column away instead of squeezing it.
-  widen(400);
-  expect(preview.hidden).toBe(true);
-  expect(root.querySelector<HTMLElement>('[data-zcr-columns]')!.dataset.zcrColumns).toBe('one');
-  expect(strip.hidden).toBe(false);
-  // Three open chats still show exactly one read-only column: the cap is two, and the strip (a tab
-  // stop again, since the chats are not all on screen) reaches the rest.
-  widen(600);
-  await presenter.openConversation(thirdId);
-  expect(root.querySelectorAll('[data-zcr-pane-preview]')).toHaveLength(1);
-  expect([...strip.querySelectorAll('[data-zcr-pane-tab]')]).toHaveLength(3);
-  expect(preview.querySelector<HTMLElement>('.zcr-pane-preview-title')!.textContent).toBe('The other chat');
-  // A real dock is measured through its own box; when that box exists it is the measurement, and the
-  // client width is only the fallback for a dock that has not been laid out yet.
-  const box = (width: number) => Object.defineProperty(columns, 'getBoundingClientRect', { configurable: true, value: () => ({ width }) });
-  box(573);
-  widen(900);
-  expect(preview.hidden).toBe(true);
-  box(574);
-  widen(900);
-  expect(preview.hidden).toBe(false);
-  expect(root.querySelector<HTMLElement>('[data-zcr-columns]')!.dataset.zcrColumns).toBe('two');
-});
-
-it('refuses a second column when the chat text scale would squeeze two chats into it', async () => {
-  const { preview, widen } = await mountTwoOpenChats({ textScale: { value: 1.5 } });
-  // Enough room for two columns at 100% is not enough at 150%: the minimum is a text measure.
-  widen(600);
-  expect(preview.hidden).toBe(true);
-  widen(900);
-  expect(preview.hidden).toBe(false);
-});
-
-it('activates the read-only chat from a click and from Enter, leaving one composer behind', async () => {
-  const { root, presenter, preview, previewMessages, firstId, otherId } = await mountTwoOpenChats({ width: 600 });
-  const win = root.ownerDocument.defaultView!;
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
-  // A click on the read-only transcript makes that chat the one being edited.
-  previewMessages.querySelector('[data-zcr-message="a1"]')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  const tabs = [...root.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
+  expect(tabs.map(tab => tab.dataset.zcrConversationId)).toEqual([firstId, otherId]);
+  expect(root.querySelector<HTMLElement>('[data-zcr-panes]')!.hidden).toBe(false);
+  expect(activeMessages.textContent).toContain('第二个回答');
+  expect(activeMessages.textContent).not.toContain('Definition');
+  tabs[0]!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(firstId));
-  await vi.waitFor(() => expect(preview.querySelector('.zcr-pane-preview-title')?.textContent).toBe('The other chat'));
-  // The two columns swapped roles, and there is still exactly one composer, in the editable pane.
-  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('Synthetic Paper A');
   expect(root.querySelectorAll('[data-zcr-composer]')).toHaveLength(1);
-  // The answer is editable now, so its citation is live again and its actions are back: the read-only
-  // column was inert because it is read-only, not because this answer cannot offer those controls.
-  const cited = root.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
-  expect(cited.dataset.zcrSource).toBe(documentA.id);
-  expect(root.querySelector('[data-zcr-message="a1"] [data-zcr-action="copy-answer"]')).not.toBeNull();
-  // Focus lands in the single composer instead of being dropped to the page body when the activated
-  // column is replaced; it never moves into the read-only column.
-  await vi.waitFor(() => expect(root.ownerDocument.activeElement).toBe(input));
-  // Enter reaches the read-only column's one control, which activates it again.
-  preview.querySelector<HTMLButtonElement>('[data-zcr-action="activate-pane"]')!.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(otherId));
-  expect(preview.querySelector('.zcr-pane-preview-title')!.textContent).toBe('Synthetic Paper A');
-  expect(root.querySelectorAll('[data-zcr-composer]')).toHaveLength(1);
-});
-
-it('keeps each column’s own reading anchor and scrolls the two independently', async () => {
-  const { root, presenter, firstId, otherId, previewMessages, activeMessages, widen } = await mountTwoOpenChats({ width: 600 });
-  const win = root.ownerDocument.defaultView!;
-  const pin = (node: HTMLElement, scrollHeight: number, clientHeight: number) => Object.defineProperties(node, {
-    scrollHeight: { configurable: true, get: () => scrollHeight },
-    clientHeight: { configurable: true, get: () => clientHeight },
-  });
-  pin(activeMessages, 900, 300);
-  pin(previewMessages, 900, 300);
-  // The owner scrolls the chat being edited, then reads part way down the read-only one.
-  activeMessages.scrollTop = 40;
-  activeMessages.dispatchEvent(new win.Event('scroll'));
-  previewMessages.scrollTop = 320;
-  previewMessages.dispatchEvent(new win.Event('scroll'));
-  // The read-only column's scroll never moves the chat being edited, and its own anchor is recorded.
-  expect(presenter.snapshot().scrollTop).toBe(40);
-  expect(presenter.paneScrollTop(firstId)).toBe(320);
-  // The two containers hold different offsets at the same moment.
-  expect(activeMessages.scrollTop).toBe(40);
-  expect(previewMessages.scrollTop).toBe(320);
-  // Activating the read-only chat restores the anchor it was read at...
-  widen(700);
-  previewMessages.querySelector('[data-zcr-message="a1"]')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(firstId));
-  expect(activeMessages.scrollTop).toBe(320);
-  // ...and the chat that was being edited keeps its own anchor in the read-only column.
-  expect(presenter.paneScrollTop(otherId)).toBe(40);
-  expect(presenter.snapshot().scrollTop).toBe(320);
-});
-
-it('lets the owner select the read-only text without that click switching chats', async () => {
-  const { root, presenter, previewMessages, otherId } = await mountTwoOpenChats({ width: 600 });
-  const win = root.ownerDocument.defaultView!;
-  const selection = win.getSelection()!;
-  const range = root.ownerDocument.createRange();
-  range.selectNodeContents(previewMessages.querySelector('[data-zcr-message="a1"] [data-zcr-text]')!);
-  selection.addRange(range);
-  previewMessages.querySelector('[data-zcr-message="a1"]')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-  await Promise.resolve();
-  // Selecting a passage is reading, not activating: the chat being edited does not change under it.
-  expect(presenter.snapshot().conversation?.id).toBe(otherId);
-  expect(selection.isCollapsed).toBe(false);
-  // A plain click, with no selection to protect, still activates the column.
-  selection.removeAllRanges();
-  previewMessages.querySelector('[data-zcr-message="a1"]')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-  await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).not.toBe(otherId));
+  expect(root.querySelector('[data-zcr-messages]')!.textContent).toContain('Definition');
+  expect(root.querySelector('[data-zcr-messages]')!.textContent).not.toContain('第二个回答');
 });
 
 it('never moves focus out of the composer while the owner is typing, even when the other chat answers', async () => {
-  const { root, presenter, firstId, emit } = await mountTwoOpenChats({ width: 600 });
+  const { root, presenter, firstId, emit, activeMessages } = await mountTwoOpenChats();
   const win = root.ownerDocument.defaultView!;
   const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
   input.focus();
   input.value = '正在输入';
   input.dispatchEvent(new win.Event('input', { bubbles: true }));
-  // The chat in the read-only column streams an answer while the owner types in the composer: the
-  // event belongs to that chat, which is open but not the one being edited.
   const event = { conversationId: firstId, requestId: 'r1', at: '2026-09-12T00:00:00.000Z' };
-  const previewMessages = root.querySelector<HTMLElement>('[data-zcr-preview-messages]')!;
   emit({ ...event, seq: 1, type: 'delta', messageId: 'a2', text: '背景回答' });
-  expect(previewMessages.textContent).toContain('背景回答');
+  expect(presenter.snapshot().openConversations.find(chat => chat.id === firstId)?.messages.some(message => message.text.includes('背景回答'))).toBe(true);
+  expect(activeMessages.textContent).not.toContain('背景回答');
   expect(root.ownerDocument.activeElement).toBe(input);
   expect(input.value).toBe('正在输入');
   expect(presenter.snapshot().conversation?.id).not.toBe(firstId);
-  // An IME composition in progress owns the box: another background update must not overwrite it.
   input.dispatchEvent(new win.Event('compositionstart', { bubbles: true }));
   input.value = '正在输入し';
   emit({ ...event, seq: 2, type: 'delta', messageId: 'a2', text: '继续' });
-  expect(previewMessages.textContent).toContain('继续');
+  expect(presenter.snapshot().openConversations.find(chat => chat.id === firstId)?.messages.some(message => message.text.includes('继续'))).toBe(true);
   expect(input.value).toBe('正在输入し');
   expect(root.ownerDocument.activeElement).toBe(input);
 });

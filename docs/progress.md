@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **Git**：`main` 基线 `59c21f3`。本轮工作在 `cursor/cursor-style-chat-tabs-272e`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。`dist/`、`build/`、`.zcr-dev/` 不在版本控制内。
-- **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a7`（侧载新 chrome/附件字节必须升版本；a6 的 `64568ebf…` 是上一整理轮产物，从未宿主安装）。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
+- **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a8`（侧载新 chrome 字节必须升版本；a7 的 `fcdcbc51…` 从未宿主安装）。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
 - **本轮门禁（0.4.0a7，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **1076 passed / 80 files / 0 skipped**；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a7-dev.xpi`（92,679,071 bytes，SHA-256 `fcdcbc519977af2df05e6bbfb77131315a0675f7c08d583a99f2334c23993f68`）；`npm run verify:artifacts` **84 files PASS**；打包后复跑 `test:unit` 同为 1076 / 80 / 0 skipped。以上均为代码 + 单元 + 产物证据；**真实宿主、真实模型 NOT RUN**。
 
 ### 产物边界
@@ -18,7 +18,7 @@
 | `5a6bb1616bfe0d54eb2bb6ef5230beb5825c8c1be6e7d5ba29c75b0cb94014cf`（92,661,563 B） | 0.4.0a4 | `.zcr-dev/artifact-backup/…host-verified-5a6bb161.xpi`；owner profile 侧 `.zcr-bak-20260914-090331-0.4.0a4` | 真实宿主 `--context` 32/32（2026-09-13，已被 a5 取代） |
 
 - owner 正常 profile 装的是宿主已验证的 a5 字节；那是 profile 变更，**不是**宿主验证证据，也没有任何版本在 owner 真实文献库被目视/使用的证据。
-- **同版本脚枪**：a5 曾出现"版本串相同、字节不同"（`dist/` 的 `426542c2…` 与已验证的 `68529c36…`），`about:addons` 无法区分，且 development 记录的"换包后报告版本停在旧值"同样适用。规则：**侧载新字节前先提升版本号**；a6 已为此提升，本轮 chrome/附件改动再升到 a7。`426542c2…` 从未宿主验证，已于 2026-09-15 从 `dist/` 删除（忽略目录，不产生提交）。
+- **同版本脚枪**：a5 曾出现"版本串相同、字节不同"（`dist/` 的 `426542c2…` 与已验证的 `68529c36…`），`about:addons` 无法区分，且 development 记录的"换包后报告版本停在旧值"同样适用。规则：**侧载新字节前先提升版本号**；a6/a7 已为此提升，本轮去掉两列后再升到 a8。`426542c2…` 从未宿主验证，已于 2026-09-15 从 `dist/` 删除（忽略目录，不产生提交）。
 - 更早的两份 a6 字节均未宿主验证、已被重建覆盖：整理前的 `bc9d1370…`（92,682,832 B，两列只读转录回合打出）只残留在 `.zcr-dev/profile/extensions/`（见 [仓库整理](#仓库整理2026-09-15) 的误操作记录）；整理中途的 `61225f4e…`（92,682,070 B）已不在磁盘上。`0.3.0a1` XPI 字节已不在磁盘上，只能从 tag `v0.3.0a1`（`2b5b310`）重打包；历史上用它跑过的 s6 升级/回退因此无法逐字重跑。
 
 ### 测试计数（唯一权威）
@@ -36,7 +36,7 @@
 - 首次外发范围说明；真实设置可关闭自动全文；发送边界复核全局关闭设置；问题、选区、图片、模型设置与请求附件冻结。解析失败/取消不发送书目替代回答，准备期间新输入不被旧请求清掉。
 - 本地文本缓存最多 3 份、每份 16 MiB；来源 ID 由文献身份/版本/解析器/页范围/文本摘要确定性生成；加载字节与磁盘 SHA-256 比较可发现 size/mtime 不变的替换。预算取 runtime 窗口、否则固定 catalog；聚焦/多轮计划。全文存为独立不可变 source 文件，逐轮消息只存摘要。
 - 会话：同附件并发打开不重复建会话；同名正文与补充附件隔离；新建对话独立草稿；离线历史、改名/分支/排队；schema 3 读写与旧 schema 1/2 安全拒绝；删除活动/不确定聊天被拒绝。**`+` 只打开未持久化的 New chat 标签，第一次发送才建记录**；store 按给定标题写入，不加 “讨论 N”。**未发送草稿会持久化并在插件重启后恢复**（`presenter.ts` `stageDraft`/`flushDraft` → `workspace.saveDraft`；`index.ts` `shutdown` 屏障强制 flush；恢复在 `loadLocal`；只有 `pageRange` 故意不恢复）——代码/单元结论，重启后端到端宿主观察未做。
-- 多会话：dock 可同时打开多个会话面板（Cursor 式标签条始终可见，方向键只移焦点）；宽度 ≥ 574px 且随独立聊天字号缩放时显示第二列**只读转录**（`chat/pane-layout.ts`），只读列无 composer、无操作控件，点击正文/Enter 激活并把焦点送回唯一 composer；同名会话只在标签条上显示 `标题 · 2`，已有存储标题永不重写。
+- 多会话：dock 可同时打开多个会话面板（Cursor 式标签条始终可见，方向键只移焦点）；**只有当前会话一列转录**，其它打开的会话只在标签条上，不随宽度并排第二列。同名会话只在标签条上显示 `标题 · 2`，已有存储标题永不重写。
 - 侧栏：无三点菜单（重命名在选中标签、账户用量在模型选择器）；已打开会话在左，New chat 切走后仍留在条上，选中标签才有关闭 X，`+`/历史靠右；附件弹层只有 Attach file（多选文本或图片）；reference 与 skill 分入口；面向用户一律称 "skill"，存储 schema/id/名称逐字不变；历史行直删。
 - 全局设置在 Zotero 原生偏好设置面板（`startup()` 注册 `defaultXUL: true`、`shutdown()` 清理，JSON 文本函数桥，一次一个校验快照/skill 修订，拒绝写入即重读；pane `mount` 抛错不能中断切面板）；面板文案随 store 的 `uiLanguage`。侧栏只保留每对话内容。
 - 论断溯源：点击 `zcr.invalid/source/<id>/<page>` 引文先校验冻结 revision，再按链接 title 的逐字引用在该页字符盒定位，命中临时高亮、未命中诚实提示；点击路径无库写入。
@@ -70,7 +70,7 @@
 - **删除的死代码**（零生产调用、零测试）：`pick-images.ts` 的 Gecko FilePicker 路径；`text-scale.ts` `chatScaleFromReaderZoom`；`bibliography.ts` `BIBLIOGRAPHY_LABELS`；`history.ts` `parseHistoryListing`/`parseHistoryReport`；presenter 的 `duplicateSkill`/`setSkillEnabled`/`deleteSkill`/`importSkill`/`exportSkill`/`clipboardImages`/`capturePage`/`exportImage`/`planAnnotations`/`planAcquisition` 包装（实际路径为 `planReturnedAnnotations`、`submit()` 与宿主端口直连）及随之无用的 `LibraryReferencePort.pickSkill`/`exportText` 与 `reader/library.ts` 实现；`sidebar.css` 的 `.zcr-history-archived*`/`.zcr-history-chevron` 规则；`ui-locale.ts` 中 16 条无任何界面发出的 zh 文案；无引用的别名/包装 `PresenterDependencies`、`pickerSummary`（= `modelChipLabel`）、`imagesFromGeckoClipboard`（= `readGeckoClipboardImage(...).images`）与从未被读取的 `CHAT_TEXT_SCALE_PREF`（聊天字号存于 workspace store，不是 Zotero pref）；`build.mjs`/`package.mjs` 对不存在的 `locales/` 目录的拷贝与白名单。
 - **删除的遗留写路径**：archive/restore（侧栏与偏好面板早已不提供）。移除 `archiveConversation`/`setConversationArchived`/`HistoryManager.setArchived*`，`HistoryAction` 收窄为 `'delete'`。**读路径不变**：旧记录的 `archivedAt` 仍被校验、列出并当作普通会话显示，任何记录不被重写。
 - **文档/配置更正**：development/module-design 版本 a5 → a6；CONTRIBUTING 的 CI 陈述与 `ci.yml` 对齐；`.cursor/install.sh` 注释 0.144.1 → 0.154.0；本页泄露的 owner 真实 profile 目录名按 `18e2770` 的隐私约定替换。
-- **保留并记录**：`runtime/README.md` 末句 "license audit remains an S6 task"（固定运行资产的独立声明）；`contracts/src/index.ts` 两处 `rust-v0.144.1` 注释（协议形状出处）；`reader/metadata.ts`（有意的分层入口，有生产导入）；一批只被单元测试引用的纯函数导出（`bibliographyView`、`resolveAllowedModels`、`historyCounts`、`imagesFromClipboardItems`、`MIN_TWO_COLUMN_WIDTH`、`contextUsageLabel` 等）；`LibraryReferencePort.capturePage` 端口（`native-agent-driver.ts` 与 `reader-library.test.ts` 使用）；`WorkspaceStore.saveSkill/importSkill/deleteSkill`（Epic C 的数据层）；`s5-driver.js` 的 leftover 注入只认 schema 1（功能仍成立、覆盖减弱，未改）；`.github/` 模板与 `.cursor/` 环境配置。
+- **保留并记录**：`runtime/README.md` 末句 "license audit remains an S6 task"（固定运行资产的独立声明）；`contracts/src/index.ts` 两处 `rust-v0.144.1` 注释（协议形状出处）；`reader/metadata.ts`（有意的分层入口，有生产导入）；一批只被单元测试引用的纯函数导出（`bibliographyView`、`resolveAllowedModels`、`historyCounts`、`imagesFromClipboardItems`、`contextUsageLabel` 等）；`LibraryReferencePort.capturePage` 端口（`native-agent-driver.ts` 与 `reader-library.test.ts` 使用）；`WorkspaceStore.saveSkill/importSkill/deleteSkill`（Epic C 的数据层）；`s5-driver.js` 的 leftover 注入只认 schema 1（功能仍成立、覆盖减弱，未改）；`.github/` 模板与 `.cursor/` 环境配置。
 - **忽略目录清理（不产生提交）**：删除 `dist/zotero-codex-reader-0.4.0a5-dev.xpi`（`426542c2…`，从未宿主验证、从未安装、已不在 `SHA256SUMS`）；删除前复核 `.zcr-dev/artifact-backup/` 的 `68529c36…` 仍在且 hash 一致。更早轮次已删 `dist/` 的 `0.3.0a1`/`0.4.0a1`–`a4` 旧包、`build/`、`.zcr-dev/` 旧日志与旧报告；保留 `.zcr-dev/{profile,data,context,live,verification,pin-bump,probes,fixtures,s6-virgin,s6-upgrade,runtime-cache,artifact-backup}`。
 - **一次误操作（如实记录）**：为观察"无阶段即拒绝"的失败回归，在实现前直接执行了无参数的 `node scripts/prepare-host-test.mjs`。旧行为默认 S1 阶段，于是它在 `.zcr-dev/profile`（已登录开发 profile）上重写了 `user.js`、把 `extensions/{8a5f5bde-…}.xpi` 从 `0.3.0a1` 替换为当时的 a6（`bc9d1370…`）、写入 S1 驱动 XPI、重写 `fixtures/reading.pdf`。执行前脚本已确认无 Zotero 实例在用该 profile。补救：立即删除驱动 XPI；被替换的 `0.3.0a1` 字节无备份、不可恢复（可从 tag 重打包）；`records/`、`account/` 未触碰、未读取。此事件是把默认阶段改为显式拒绝的直接理由；此后失败回归改用纯模块 `selectHostStage([])` 观察。
 
@@ -83,7 +83,7 @@
 | **A 真实模型行为** | 回答/流式/停止/在途恢复、无选区提问、跨页定义、More details、中途切换模型设置、图表/公式读取、引用链接点击路径、图像生成、配额/用量诚实 | 真实模型（隔离合成数据 + 请求记录） | owner 须在 `.zcr-dev/live/` 隔离树完成**一次**官方登录并授权配额；agent 不登录、不代走 OAuth。驱动：`tests/host/live-model-driver.js`、`context-driver.js` |
 | **B 长文档/多模态读取** | 扫描页从记录 `status:'empty'/'error'` 升级为可选、需显式授权的 OCR 端口（`reader/document.ts`）；`core/context/planner.ts` 的词重叠打分升级为章节/段落切分 + 问题检索；在图像预算内自动附加图/公式页图（今天只有手动 `capturePage` 端口与文件/剪贴板附图） | 代码 + 单元（自主） | 无；真实识别质量依赖 A |
 | **C 工作区作者能力** | skill 创建/编辑/复制/导入/导出/试跑 UI —— 2026-09-15 已删除 presenter 里无 view 调用的 CRUD 包装，数据层 `WorkspaceStore.saveSkill/importSkill/deleteSkill` 与 presenter `selectSkill`/`saveSkill` 保留，UI 需在其上重建；research-topic profile 与 per-chat override 的 UI（数据层在 `contracts/src/workspace.ts`）；固定来源 + 从选中来源新建会话；`@collection`/`@note`/`@annotation`（kind 已声明，`reader/library.ts` `search()` 只返回 `article`）；参考文件拖拽（今天只有图片） | 代码 + 单元（自主） | 无；UI 目视与真实库接线归 D |
-| **D 视觉/交互/长时** | 偏好面板 zh/en + 暗色/亮色 + 键盘 Tab；真实 Gecko 高亮与阅读锚点视觉；真实 IME；多窗口一致性；窄窗/多显示器/主题溢出；reduced-motion；多会话标题条与两列只读转录在真实 dock 宽度/主题下的表现 | 真实宿主视觉（截图/录屏 + 人工） | 需 owner 在场目视；契约级检查可自主做 |
+| **D 视觉/交互/长时** | 偏好面板 zh/en + 暗色/亮色 + 键盘 Tab；真实 Gecko 高亮与阅读锚点视觉；真实 IME；多窗口一致性；窄窗/多显示器/主题溢出；reduced-motion；Cursor 式标签条在真实 dock 宽度/主题下的表现 | 真实宿主视觉（截图/录屏 + 人工） | 需 owner 在场目视；契约级检查可自主做 |
 | **E 发行与安装生命周期** | 无 Node 安装、下载隔离、干净 checkout 重建（历史上在临时 worktree 复现过一次，未重跑）、升级/回退、**签名**公开发行，全部在真实产物上 | 真实产物 + 签名发行 | 签名与公开发行需 owner 明确授权（当前授权不含 push/publish/付费服务） |
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
@@ -92,7 +92,7 @@
 
 - 真实模型输出/流式/停止/在途恢复、真实图像生成、真实档位/用量；`--live` 与 `--live-model` 均 NOT RUN。
 - a5 `--context` 报告的 8 项 `notRun`（见上）。
-- 2026-09-15 之后所有未打包/未宿主运行的 UI 改动的真实宿主行为：Cursor 式标签条（New chat 切走后仍在、选中才有 X）、剪贴板粘贴（含 macOS TIFF）、Attach file 多选、偏好面板从其它插件切到本面板、书目卡片与本地读取状态在真实大论文上的呈现（含 12 秒就绪等待）、历史直删后的焦点/滚动、attach 弹层键盘操作、workflow→skill 文案在原生偏好面板的渲染、两列只读转录在 574px 门槛附近的切换与真实 `ResizeObserver` 时机、只读列 `region` 播报、IME 组合期间的激活、后台会话流式回答的到达顺序。
+- 2026-09-15 之后所有未打包/未宿主运行的 UI 改动的真实宿主行为：Cursor 式标签条（New chat 切走后仍在、选中才有 X、永不并排第二列）、剪贴板粘贴（含 macOS TIFF）、Attach file 多选、偏好面板从其它插件切到本面板、书目卡片与本地读取状态在真实大论文上的呈现（含 12 秒就绪等待）、历史直删后的焦点/滚动、attach 弹层键盘操作、workflow→skill 文案在原生偏好面板的渲染、IME 组合期间后台会话流式回答不抢焦点、后台会话流式回答的到达顺序。
 - 面板中/英文与暗色/亮色**目视**、键盘 Tab、真实 IME、真实 Gecko 临时高亮**视觉**、阅读锚点目视；真实文献库 PDF 是否与合成 fixture 一致；真实库原生标注写入/撤销、网络预览与 OA 全文核对。
 - 草稿"重启后恢复到输入框"的端到端宿主观察；`install:dev check` 的真机重启证明。
 - 无 Node 环境安装、下载隔离、公开签名发行与升级验收；干净 checkout 重建本轮未重跑。

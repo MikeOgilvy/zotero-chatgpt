@@ -45,28 +45,6 @@ it('translates the open-chat strip name while a chat named like a control stays 
   locale.dispose();
 });
 
-it('translates the read-only column’s own copy while the chat it shows stays verbatim', () => {
-  const { root, add } = setup();
-  const pane = add('section', 'zcr-pane-preview');
-  pane.setAttribute('role', 'region');
-  const title = add('span', 'zcr-pane-preview-title', 'Send', pane);
-  const note = add('span', 'zcr-pane-preview-note', 'Read-only', pane);
-  pane.setAttribute('aria-labelledby', `${title.id} ${note.id}`);
-  const open = add('button', 'zcr-icon-button', 'Edit this chat', pane);
-  open.dataset.zcrAction = 'activate-pane'; open.setAttribute('aria-label', 'Edit this chat'); open.title = 'Edit this chat';
-  const locale = mountUILocale(root); locale.update('zh');
-  expect(note.textContent).toBe('只读');
-  expect(open.textContent).toBe('编辑此对话');
-  expect(open.getAttribute('aria-label')).toBe('编辑此对话');
-  expect(open.title).toBe('编辑此对话');
-  // The column shows the chat's own name: a chat called "Send" keeps that name on screen and for AT.
-  expect(title.textContent).toBe('Send');
-  locale.update('en');
-  expect(note.textContent).toBe('Read-only');
-  expect(open.textContent).toBe('Edit this chat');
-  locale.dispose();
-});
-
 it('never translates source, chat, history, candidate, profile or workflow content even when it matches a control', () => {
   const { root, add } = setup(); const protectedNodes: HTMLElement[] = [];
   for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-pane-tab-label', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
