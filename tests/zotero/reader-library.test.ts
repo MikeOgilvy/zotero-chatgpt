@@ -164,17 +164,6 @@ it('validates picked image bytes and rejects oversized input before reading it',
   await expect(f.port.pickImages!()).rejects.toThrow(/image/iu);
 });
 
-it('imports bounded UTF8 Markdown and exports only through accepted native save selections', async () => {
-  const f = setup(); f.io.read.mockResolvedValueOnce(new TextEncoder().encode('# Workflow\n')); f.io.stat.mockResolvedValueOnce({ size: 11 });
-  expect(await f.port.pickSkill!()).toBe('# Workflow\n');
-  f.io.read.mockResolvedValueOnce(new Uint8Array([0xc0, 0x80]));
-  await expect(f.port.pickSkill!()).rejects.toThrow(/UTF|text/iu);
-  vi.mocked(f.picker.show).mockResolvedValueOnce(1);
-  await f.port.exportText!('SKILL.md', 'text'); expect(f.io.write).not.toHaveBeenCalled();
-  vi.mocked(f.picker.show).mockResolvedValueOnce(f.picker.returnReplace);
-  await f.port.exportText!('SKILL.md', 'text'); expect(f.io.write).toHaveBeenCalledWith('/synthetic/SKILL.md', new TextEncoder().encode('text'));
-});
-
 it('captures frozen PDF coordinates and whole pages with real paper provenance, then exports image bytes', async () => {
   const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
   const f = setup({ rasterize });

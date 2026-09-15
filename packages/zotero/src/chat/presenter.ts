@@ -2,7 +2,7 @@ import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runti
 import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import type { AgentTaskChoices, AgentTaskRecord, AgentTasks, AnnotationProposal } from '../../../contracts/src/tasks.ts';
+import type { AgentTaskChoices, AgentTaskRecord, AgentTasks } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/agent.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
@@ -469,29 +469,6 @@ export class ConversationPresenter {
     const saved = await workspace.saveSkill({ ...(prior ?? { id, revision: '', origin: 'user' as const, permissions: [], unsupportedDependencies: [] }), ...edit, id, description: edit.description.trim() || edit.name });
     this.update({ workspace: await workspace.settings() }); return saved;
   }
-  async duplicateSkill(id: string): Promise<ReaderSkill> {
-    const workspace = await this.getWorkspace(); const settings = await workspace.settings(); const prior = settings.skills.find(skill => skill.id === id);
-    if (!prior) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.');
-    const saved = await workspace.saveSkill({ ...clone(prior), id: `user-${this.services.uuid()}`, name: `${prior.name} copy`, origin: 'user', revision: '' });
-    this.update({ workspace: await workspace.settings() }); return saved;
-  }
-  async setSkillEnabled(id: string, enabled: boolean): Promise<void> {
-    const workspace = await this.getWorkspace(); const settings = await workspace.settings(); const skill = settings.skills.find(skill => skill.id === id);
-    if (!skill) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.');
-    await workspace.saveSkill({ ...skill, enabled }); this.update({ workspace: await workspace.settings() });
-    if (!enabled && this.state.draft.skillId === id) await this.selectSkill(null);
-  }
-  async deleteSkill(id: string): Promise<void> { const workspace = await this.getWorkspace(); await workspace.deleteSkill(id); this.update({ workspace: await workspace.settings() }); if (this.state.draft.skillId === id) await this.selectSkill(null); }
-  async importSkill(): Promise<ReaderSkill | null> {
-    if (!this.services.library?.pickSkill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Skill import is unavailable.');
-    const text = await this.services.library.pickSkill(); if (text === null) return null;
-    const workspace = await this.getWorkspace(); const skill = await workspace.importSkill(text); this.update({ workspace: await workspace.settings() }); return skill;
-  }
-  async exportSkill(id: string): Promise<void> {
-    if (!this.services.library?.exportText) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Skill export is unavailable.');
-    const skill = (await (await this.getWorkspace()).settings()).skills.find(skill => skill.id === id);
-    if (!skill) throw new ReaderError('NOT_FOUND', 'The skill is no longer installed.'); await this.services.library.exportText(`${skill.name}.md`, skill.markdown);
-  }
   async pickImages(): Promise<void> {
     if (!this.services.library?.pickImages) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native image selection is unavailable.');
     const key = this.draftKey(); const images = await this.services.library.pickImages();
@@ -525,10 +502,6 @@ export class ConversationPresenter {
     if (this.services.readClipboardImage) return Promise.resolve(this.services.readClipboardImage());
     return Promise.resolve(readGeckoClipboardImage(pluginClipboardAccess(), () => this.services.uuid()));
   }
-  /** Images only: kept for callers that do not report a refusal. */
-  clipboardImages(): Promise<ImageAttachment[]> {
-    return this.clipboardImage().then(read => read.images);
-  }
   /**
    * Captures a PDF region as an image attachment. The composer's capture button passes nothing: the
    * host then uses the region the owner last selected in this paper (`reader/current-selection.ts`).
@@ -543,16 +516,6 @@ export class ConversationPresenter {
     const key = this.draftKey(); const image = await this.services.library.captureRegion(clone(this.paper), target ? clone(target) : undefined);
     if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while capturing the PDF. Capture it again.');
     if (image) this.addImage(image);
-  }
-  async capturePage(pageIndex: number): Promise<void> {
-    if (!this.services.library?.capturePage) throw new ReaderError('UNSUPPORTED_INTERACTION', 'PDF page capture is unavailable.');
-    const key = this.draftKey(); const image = await this.services.library.capturePage(clone(this.paper), pageIndex);
-    if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while capturing the PDF. Capture it again.');
-    if (image) this.addImage(image);
-  }
-  async exportImage(image: ImageAttachment): Promise<void> {
-    if (!this.services.library?.exportImage) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native image export is unavailable.');
-    await this.services.library.exportImage(clone(image));
   }
   async collections(): Promise<Array<NativeCollectionTarget & { name: string }>> {
     if (!this.services.library?.collections) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native collection selection is unavailable.');
@@ -593,17 +556,6 @@ export class ConversationPresenter {
   async cancelTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).cancel(id)); }
   async reconcileTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).reconcile(id)); }
   async undoTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).undo(id)); }
-  async planAnnotations(candidates: AnnotationProposal[], question = this.state.draft.question, revision = this.state.document.prepared?.revision, modelRequestId?: string): Promise<AgentTaskRecord> {
-    const conversation = this.state.conversation ?? await this.ensureConversation();
-    if (!revision) throw new ReaderError('INVALID_REQUEST', 'Prepare the selected PDF before planning annotations.');
-    const task = await (await this.getTasks()).planAnnotations({ conversationId: conversation.id, paper: clone(this.paper), revision: clone(revision), question, candidates: clone(candidates), ...(modelRequestId ? { modelRequestId } : {}) });
-    this.acceptTask(task); return task;
-  }
-  async planAcquisition(identifiers: string[], question = this.state.draft.question, target = this.state.acquisitionTarget): Promise<AgentTaskRecord> {
-    if (!target) throw new ReaderError('INVALID_REQUEST', 'Choose a target collection before acquiring articles.');
-    const conversation = this.state.conversation ?? await this.ensureConversation();
-    const task = await (await this.getTasks()).planAcquisition({ conversationId: conversation.id, target: clone(target), question, identifiers: [...identifiers] }); this.acceptTask(task); return task;
-  }
   private async planReturnedAnnotations(requestId: string, conversation = this.state.conversation): Promise<void> {
     if (!conversation || paperId(conversation.paper) !== paperId(this.paper)) return;
     const key = `${conversation.id}:${requestId}`;

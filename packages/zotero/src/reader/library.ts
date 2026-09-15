@@ -3,7 +3,6 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { LIMITS, validateCitation, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
 import type { LibraryReferencePort, PickedFile, ReaderReference } from '../../../contracts/src/workspace.ts';
-import { SKILL_BYTES } from '../../../core/src/workspace/skills.ts';
 import { paperIdentityOf, type PaperMetadata } from './metadata.ts';
 import { currentSelection } from './current-selection.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from './document.ts';
@@ -85,7 +84,6 @@ export interface NativeLibraryReferencePort extends LibraryReferencePort {
 const KEY = /^[A-Z0-9]{8}$/u;
 const MAX_RESULTS = 50;
 const MAX_RASTER_PIXELS = 8_000_000;
-const MAX_EXPORT_BYTES = 1024 * 1024;
 /**
  * The file routes this port can honestly take. The **extension decides the route** and the **bytes
  * then have to prove it**: a text-extension file must decode as UTF-8 without control bytes, and an
@@ -281,7 +279,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     }
     return results;
   };
-  const filePicker = (title: string, kind: 'images' | 'skill' | 'save' | 'file', name = '') => {
+  const filePicker = (title: string, kind: 'images' | 'save' | 'file', name = '') => {
     const picker = options.createFilePicker?.() ?? (() => {
       const FilePicker = globals().ChromeUtils?.importESModule('chrome://zotero/content/modules/filePicker.mjs').FilePicker;
       return FilePicker ? new FilePicker() : fail('The native file picker is unavailable.', 'UNSUPPORTED_INTERACTION');
@@ -413,14 +411,6 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       for (const path of paths) images.push(await image(await readFile(path, LIMITS.imageBytes), path));
       return images;
     }, 'The selected image file could not be read or decoded.'),
-    pickSkill: () => boundary(async () => {
-      const picker = filePicker('Import SKILL.md', 'skill'); picker.appendFilter('Markdown', '*.md');
-      if (await picker.show() !== picker.returnOK) return null;
-      const path = picker.file; if (!path || !/\.md$/iu.test(path)) fail('Choose a Markdown SKILL.md file.');
-      const bytes = await readFile(path, SKILL_BYTES);
-      try { const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (text.includes('\0')) fail('SKILL.md must contain UTF-8 text.'); return text; }
-      catch { fail('SKILL.md must contain valid UTF-8 text.'); }
-    }, 'The selected skill file could not be read.'),
     // One explicitly chosen file, attached as real content rather than as a reference to a file the
     // model would have to open itself. The extension chooses the route and the bytes then have to
     // prove it, and the chosen path is dropped here: what leaves this port is a bare file name plus
@@ -444,12 +434,6 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(body)) fail('This file looks like binary data, so it cannot become text context.');
       return { references: [{ id: `file-${options.clientId}-${contentFingerprint(bytes)}`, kind: 'file', label: name, text: body, capturedAt: now() }], images: [] };
     }, 'The selected file could not be read.'),
-    exportText: (name, text) => boundary(async () => {
-      const bytes = new TextEncoder().encode(text); if (bytes.length > MAX_EXPORT_BYTES) fail('This text exceeds the native export size limit.', 'PAYLOAD_TOO_LARGE');
-      const picker = filePicker('Export text', 'save', name); picker.appendFilter('Text', '*.md; *.txt; *.json');
-      const result = await picker.show(); if (result !== picker.returnOK && result !== picker.returnReplace) return;
-      if (!picker.file) fail('No export file was selected.'); await io().write(picker.file, bytes);
-    }, 'The selected export file could not be written.'),
     // The region comes from an explicit frozen selection (a citation the owner pushed into the draft)
     // or, failing that, from the selection the popup last recorded for this paper. Anything is
     // rendered through the same source-audited path as a whole page, so a capture is always an image

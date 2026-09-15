@@ -623,14 +623,12 @@ describe('clipboard paste', () => {
   it('reads pasted images from the privileged clipboard when the host provides one', async () => {
     const f = fixture({ clipboard: () => Promise.resolve({ images: [imageA] }) });
     await f.presenter.activate();
-    expect(await f.presenter.clipboardImages()).toEqual([imageA]);
     expect(await f.presenter.clipboardImage()).toEqual({ images: [imageA] });
     expect(f.presenter.snapshot().draft.images).toEqual([]);
   });
   it('answers with no image instead of inventing one when the reader realm has no pasteboard', async () => {
     const f = fixture();
     await f.presenter.activate();
-    expect(await f.presenter.clipboardImages()).toEqual([]);
     // No image and no refusal: an empty pasteboard must never raise a complaint of its own.
     expect(await f.presenter.clipboardImage()).toEqual({ images: [] });
     expect(f.presenter.snapshot().draft.images).toEqual([]);
@@ -639,6 +637,5 @@ describe('clipboard paste', () => {
     const f = fixture({ clipboard: () => Promise.resolve({ images: [], refused: 'too-large' }) });
     await f.presenter.activate();
     expect(await f.presenter.clipboardImage()).toEqual({ images: [], refused: 'too-large' });
-    expect(await f.presenter.clipboardImages()).toEqual([]);
   });
 });

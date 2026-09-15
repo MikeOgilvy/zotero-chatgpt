@@ -157,14 +157,12 @@ export interface LibraryReferencePort {
   read(reference: ReaderReference, signal: AbortSignal): Promise<ReferenceInput>;
   open(paper: PaperScope): Promise<void>;
   pickImages?(): Promise<ImageAttachment[]>;
-  pickSkill?(): Promise<string | null>;
   /**
    * One explicitly chosen local file, read through the host's own file port. Text-like files become
    * reference text and image files become image input; an unsupported or oversized file is refused
    * with a message instead of being truncated or guessed at.
    */
   pickFile?(): Promise<PickedFile>;
-  exportText?(name: string, text: string): Promise<void>;
   /**
    * Rasterizes a PDF region as an image attachment. `citation` is a frozen selection of the same
    * paper; without it the host uses the region the owner last selected in that paper. The paper is
