@@ -441,7 +441,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const chrome = el('div', 'zcr-chrome');
   /**
    * Cursor-style agent tabs live in the chrome: every open chat is a named tab, the unbound composer
-   * is the New chat tab, and the selected tab carries the close cross. `+` and history stay on the
+   * is a tab, and the selected tab carries the close cross. On first open — no named tab yet — that
+   * unbound tab shows the article title immediately, before a conversation is restored or created.
+   * Pressing `+` beside an already-open named chat is the New chat copy. `+` and history stay on the
    * trailing edge. Closing leaves the chat on disk and in history and asks no confirmation; the
    * destructive remove lives on the history rows. When the close leaves no chat at all for this
    * attachment, the reader collapses its whole dock through the reader's own close path.
@@ -1155,18 +1157,26 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   /**
    * Reconcile the Cursor-style tab strip. A chip is kept by id instead of rebuilt, so a click or an
    * arrow key lands on a node that is still in the document: switching chats never steals the focus
-   * the reader put on the strip. The strip is always visible: a single open chat is still a tab, and
-   * the unbound composer is the New chat tab.
+   * the reader put on the strip. The strip is always visible: a single open chat is still a tab.
+   * With no named chat on screen the unbound tab carries the article title from the first paint —
+   * before `activate()` restores or creates anything — so the dock is named as soon as the input
+   * exists. `+` beside a named chat is the New chat copy; that tab is still not a record.
    */
   const renderPanes = (state: PresenterState) => {
     panes.hidden = false;
-    const models: Array<{ id: string; label: string; title: string; conversation: Conversation | null }> = state.openConversations.map(conversation => ({
+    const paperTitle = state.paperTitle.trim();
+    const firstOpenTitle = state.openConversations.length === 0 ? paperTitle : '';
+    const models: Array<{ id: string; label: string; title: string; conversation: Conversation | null; localize: boolean }> = state.openConversations.map(conversation => ({
       id: conversation.id,
       label: conversationLabel(conversation, state.conversations),
       title: conversation.title || conversationLabel(conversation, state.conversations),
       conversation,
+      localize: false,
     }));
-    if (state.newChatOpen || !state.conversation) models.push({ id: NEW_CHAT_TAB_ID, label: COPY.newChat, title: COPY.newChat, conversation: null });
+    if (state.newChatOpen || !state.conversation) {
+      const unboundLabel = firstOpenTitle || COPY.newChat;
+      models.push({ id: NEW_CHAT_TAB_ID, label: unboundLabel, title: unboundLabel, conversation: null, localize: !firstOpenTitle });
+    }
     const ids = new Set(models.map(entry => entry.id));
     for (const [id, node] of paneNodes) if (!ids.has(id)) { node.remove(); paneNodes.delete(id); }
     let cursor = panes.firstElementChild;
@@ -1179,7 +1189,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         tab.dataset.zcrPaneTab = '';
         tab.dataset.zcrConversationId = model.id;
         tab.id = `${viewId}-pane-${model.id}`;
-        const label = el('span', model.id === NEW_CHAT_TAB_ID ? 'zcr-pane-tab-new' : 'zcr-pane-tab-label');
+        const label = el('span', model.localize ? 'zcr-pane-tab-new' : 'zcr-pane-tab-label');
         label.dataset.zcrPaneLabel = '';
         const close = button(COPY.closeChat, 'close-conversation', () => {
           if (presenter.closeConversation()) hooks.closeDock?.();
@@ -1202,9 +1212,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       const active = model.id === (state.conversation?.id ?? NEW_CHAT_TAB_ID);
       const label = tab.querySelector<HTMLElement>('[data-zcr-pane-label]')!;
       const close = tab.querySelector<HTMLButtonElement>('[data-zcr-pane-close]')!;
-      if (model.id === NEW_CHAT_TAB_ID) {
-        if (!label.dataset.zcrUiCopy) { label.dataset.zcrUiCopy = COPY.newChat; label.textContent = COPY.newChat; }
-      } else if (label.textContent !== model.label) label.textContent = model.label;
+      label.className = model.localize ? 'zcr-pane-tab-new' : 'zcr-pane-tab-label';
+      label.dataset.zcrPaneLabel = '';
+      if (model.localize) {
+        if (label.dataset.zcrUiCopy !== COPY.newChat) { label.dataset.zcrUiCopy = COPY.newChat; label.textContent = COPY.newChat; }
+      } else {
+        delete label.dataset.zcrUiCopy;
+        if (label.textContent !== model.label) label.textContent = model.label;
+      }
       if (tab.title !== model.title) tab.title = model.title;
       const selectedAttr = String(active);
       if (tab.getAttribute('aria-selected') !== selectedAttr) tab.setAttribute('aria-selected', selectedAttr);
@@ -1225,7 +1240,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
           tab.removeAttribute('aria-haspopup');
           tab.removeAttribute('aria-expanded');
           tab.removeAttribute('aria-controls');
-          tab.setAttribute('aria-label', COPY.newChat);
+          tab.setAttribute('aria-label', model.label);
           selected = tab;
         }
       } else {

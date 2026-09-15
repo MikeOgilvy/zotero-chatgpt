@@ -918,6 +918,51 @@ it('keeps an attachment fallback title available in compact chrome without a her
   expect(root.querySelector('h1, h2')).toBeNull();
 });
 
+it('shows the article title on the unbound tab at first paint without creating a chat', async () => {
+  const title = 'ZCR current-PDF synthetic context and native interaction test';
+  const runtime: RuntimeSnapshot = {
+    revision: 0, runtime: 'ready', account: { state: 'signedOut' }, login: null, models: [model], error: null,
+  };
+  const created: string[] = [];
+  const client: ReaderClient = {
+    snapshot: () => structuredClone(runtime), observe: l => { l(structuredClone(runtime)); return () => undefined; },
+    refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
+    current: () => Promise.reject(new Error('must not persist on open')),
+    peekCurrent: () => Promise.resolve(null),
+    newConversation: () => { created.push('new'); return Promise.reject(new Error('must not persist on open')); },
+    list: () => Promise.resolve([]), select: () => Promise.reject(new Error()),
+    get: () => Promise.reject(new Error()), send: () => Promise.reject(new Error()),
+    request: () => Promise.resolve({ requestId: 'r1', state: 'completed', replay: false }),
+    cancel: () => Promise.reject(new Error()),
+    deleteConversation: () => Promise.resolve(null),
+    diagnostics: vi.fn(() => Promise.resolve({
+      pluginVersion: '0.3.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {},
+      storageLocation: SHAREABLE_STORAGE_LOCATION,
+    })),
+    subscribe: () => () => undefined, close: async () => {},
+  };
+  const presenter = new ConversationPresenter(paperA, title, {
+    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
+  });
+  const doc = documentOf();
+  const body = doc.createElement('div');
+  const root = renderReaderShell(body, { title, key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
+  mountChatView(root, presenter);
+  // Host `title-before-or-with-connection` fires as soon as the composer exists, before restore.
+  expect(root.querySelector('[data-zcr-input]')).toBeTruthy();
+  expect(presenter.snapshot().conversation).toBeNull();
+  expect(root.querySelector('[data-zcr-chat]')?.textContent).toContain(title);
+  const tab = root.querySelector<HTMLElement>('[data-zcr-current-title]');
+  expect(tab?.dataset.zcrConversationId).toBe('new-chat');
+  expect(tab?.textContent).toBe(title);
+  expect(tab?.getAttribute('title')).toBe(title);
+  expect(tab?.querySelector('[data-zcr-pane-label]')?.classList.contains('zcr-pane-tab-label')).toBe(true);
+  await presenter.activate();
+  expect(presenter.snapshot().conversation).toBeNull();
+  expect(created).toEqual([]);
+  expect(root.querySelector('[data-zcr-current-title]')?.textContent).toBe(title);
+});
+
 it('keeps title, New chat, and history inside the sidebar pane below the native toolbar', async () => {
   const { root } = await mountReadyChat({ messages: [] });
   const chrome = root.querySelector('.zcr-chrome');
