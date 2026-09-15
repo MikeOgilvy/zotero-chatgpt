@@ -53,7 +53,6 @@ async function mountReadyChat(options: {
   activeRequestId?: string | null;
   captureTimers?: boolean;
   rename?: (id: string, title: string) => Promise<Conversation>;
-  archive?: (id: string, archived: boolean) => Promise<Conversation>;
   cancel?: (conversationId: string, requestId: string) => Promise<SendReceipt>;
   clipboardImages?: () => Promise<ClipboardImageRead>;
   workspace?: ReaderWorkspace;
@@ -147,16 +146,6 @@ async function mountReadyChat(options: {
         if (!listed.some(entry => entry.id === conversation.id)) listed.push(conversation);
       }
       return Promise.resolve(structuredClone(conversation));
-    }),
-    archiveConversation: options.archive ?? ((id, archived) => {
-      const index = listed.findIndex(entry => entry.id === id);
-      if (index < 0) return Promise.reject(new Error('missing conversation'));
-      const target = listed[index]!;
-      const stamped: Conversation = { ...target, ...(archived ? { archivedAt: '2026-09-13T00:00:00.000Z' } : {}) };
-      if (!archived) delete stamped.archivedAt;
-      listed[index] = stamped;
-      if (conversation.id === id) conversation = stamped;
-      return Promise.resolve(structuredClone(stamped));
     }),
     diagnostics: vi.fn(() => Promise.resolve({
       pluginVersion: '0.3.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {},

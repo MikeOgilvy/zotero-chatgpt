@@ -47,12 +47,6 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     deleteConversation: () => Promise.resolve(copy(conversation)),
     renameConversation: vi.fn<NonNullable<ReaderClient['renameConversation']>>((id, title) => { const target = conversations.get(id)!; const renamed = { ...target, title, titleCustomized: true }; conversations.set(id, renamed); if (conversation.id === id) conversation = renamed; return Promise.resolve(copy(renamed)); }),
     branchConversation: vi.fn<NonNullable<ReaderClient['branchConversation']>>((_id, messageId) => { saveConversation({ ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', activeRequestId: null, parentConversationId: conversation.id, forkMessageId: messageId, messages: [] }); return Promise.resolve(copy(conversation)); }),
-    archiveConversation: vi.fn<NonNullable<ReaderClient['archiveConversation']>>((id, archived) => {
-      const target = conversations.get(id)!;
-      const next: Conversation = { ...target, ...(archived ? { archivedAt: '2026-09-12T00:00:00Z' } : {}) };
-      if (!archived) delete next.archivedAt;
-      persistConversation(next); return Promise.resolve(copy(next));
-    }),
     diagnostics: () => Promise.resolve({ pluginVersion: 'test', runtimeVersion: 'test', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }), subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, close: () => Promise.resolve(),
   };
   const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickImages: vi.fn(() => Promise.resolve([copy(imageA)])), pickSkill: vi.fn(() => Promise.resolve(userSkill.markdown)), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportText: vi.fn(() => Promise.resolve()), exportImage: vi.fn(() => Promise.resolve()) };
@@ -185,8 +179,6 @@ it('lists a record carrying archivedAt as an ordinary chat in the one listing an
   expect(f.presenter.snapshot().conversation?.id).toBe(archivedId);
   expect(f.presenter.snapshot().conversation?.archivedAt).toBe('2026-09-12T00:00:00Z');
   expect(f.conversations.get(archivedId)?.archivedAt).toBe('2026-09-12T00:00:00Z');
-  // The sidebar owns no archive mutation: the client primitive stays available but is never called.
-  expect(f.client.archiveConversation).not.toHaveBeenCalled();
   // The other chat-search surface agrees with the one listing: '@' reaches the legacy record too, so
   // it is not hidden from mentions while the sidebar shows it as an ordinary chat.
   const mentioned = await f.presenter.searchReferences('Old discussion', 'chat');

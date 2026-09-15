@@ -113,7 +113,7 @@ export interface HistoryFailed { id: string; message: string }
  * narrows the list and the counts together instead of reporting a total the list does not show.
  */
 export interface HistoryListing { entries: HistoryEntry[]; activeCount: number; archivedCount: number }
-export type HistoryAction = 'archive' | 'restore' | 'delete';
+export type HistoryAction = 'delete';
 /**
  * The honest outcome of a History mutation. `changed` lists exactly the chats the store confirmed;
  * `failed` names every chat that was not changed and why; `warnings` records non-fatal surprises
@@ -125,12 +125,11 @@ export interface HistoryMutationReport {
 }
 /**
  * The subset of the workspace the History management logic needs. `ReaderWorkspace` satisfies it.
- * The two mutators are optional: a build whose store cannot change stored chats omits them and the
- * Preferences pane degrades to listing, filtering and archiving nothing.
+ * The mutator is optional: a build whose store cannot change stored chats omits it and the
+ * Preferences pane degrades to listing and filtering only.
  */
 export interface HistorySource {
   history(query?: string, scope?: HistoryScope): Promise<HistoryEntry[]>;
-  setConversationArchived?(id: string, archived: boolean): Promise<void>;
   removeConversation?(paper: PaperScope, id: string): Promise<void>;
 }
 export interface ReaderWorkspace {
@@ -147,13 +146,8 @@ export interface ReaderWorkspace {
   currentConversation(paper: PaperScope): Promise<import('./index.ts').Conversation | null>;
   snapshotChat(conversationId: string, messageIds?: string[]): Promise<ReaderReference>;
   /**
-   * Reversible archive/restore of one stored chat. The record keeps its identity and content; only
-   * the scope it appears in changes. Optional so older stores stay source-compatible.
-   */
-  setConversationArchived?(id: string, archived: boolean): Promise<void>;
-  /**
    * Explicit removal of one stored chat and its bound draft, leaving shared assets and native task
-   * ledgers in place. Optional for the same reason; never invoked implicitly.
+   * ledgers in place. Optional so older stores stay source-compatible; never invoked implicitly.
    */
   removeConversation?(paper: PaperScope, id: string): Promise<void>;
 }

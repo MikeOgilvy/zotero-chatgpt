@@ -4,14 +4,13 @@ import { validateHistoryEntry } from '../../../contracts/src/workspace-validatio
 
 /**
  * History management for the native Preferences pane. All of it is headless: listing, filtering,
- * counting, reversible archiving and explicit removal work against the same `HistoryScope.archived`
- * the sidebar already uses, so there is no second storage model and no second definition of
- * "archived". Nothing here prunes, expires or garbage-collects anything: every removal is driven by
- * an explicit selection.
+ * counting and explicit removal work against the same store the sidebar uses, so there is no
+ * second storage model. A legacy `archivedAt` written by an older build is only read (it decides
+ * which `HistoryScope` lists the chat); no code path writes it any more. Nothing here prunes,
+ * expires or garbage-collects anything: every removal is driven by an explicit selection.
  */
 
 const HISTORY_LIMIT = 10_000;
-const confirmation = 'The change could not be confirmed.';
 function reason(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
 function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Saved chat history could not be read; it was left untouched.'); }
 function requireIds(ids: readonly string[]): void {
@@ -50,7 +49,7 @@ export function isHistoryReport(value: unknown): value is HistoryMutationReport 
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const source = value as Record<string, unknown>;
   if (Object.keys(source).some(key => !['action', 'requested', 'changed', 'failed', 'warnings', 'partial'].includes(key))) return false;
-  if (!['archive', 'restore', 'delete'].includes(source.action as string)) return false;
+  if (source.action !== 'delete') return false;
   if (!Array.isArray(source.changed) || !source.changed.every(id => typeof id === 'string')) return false;
   if (!Array.isArray(source.failed) || !source.failed.every(validFailed)) return false;
   if (!Array.isArray(source.warnings) || !source.warnings.every(text => typeof text === 'string')) return false;
@@ -109,14 +108,6 @@ export class HistoryManager {
     return { entries, missing };
   }
 
-  private async confirmScope(id: string, archived: boolean, report: HistoryMutationReport): Promise<boolean> {
-    try { return (await this.scope('', archived)).some(entry => entry.id === id); }
-    catch (error) {
-      report.warnings.push(`The ${archived ? 'archive' : 'restore'} of ${id} could not be re-verified: ${reason(error)}`);
-      return false;
-    }
-  }
-
   private async confirmGone(id: string, report: HistoryMutationReport): Promise<boolean> {
     try { return !(await this.scope('', false)).some(entry => entry.id === id) && !(await this.scope('', true)).some(entry => entry.id === id); }
     catch (error) {
@@ -129,31 +120,6 @@ export class HistoryManager {
     report.warnings.push('This build cannot change stored chats from the Preferences pane.');
     for (const entry of entries) report.failed.push({ id: entry.id, message: 'Changing stored chats is unavailable.' });
     report.partial = report.requested > 0;
-    return report;
-  }
-
-  /**
-   * Archive or restore each entry through the reversible `archivedAt` path. A mutation is only
-   * reported as changed after the target scope is re-read and contains the chat; if the write failed
-   * but the chat did move, it is still a change and the failure is kept as a warning instead of
-   * being reported as a failed action.
-   */
-  async setArchived(entries: readonly HistoryEntry[], archived: boolean): Promise<HistoryMutationReport> {
-    const report: HistoryMutationReport = { action: archived ? 'archive' : 'restore', requested: entries.length, changed: [], failed: [], warnings: [], partial: false };
-    if (!entries.length) return report;
-    const source = this.source;
-    if (!source.setConversationArchived) return this.refuse(entries, report);
-    for (const entry of entries) {
-      let error: unknown = null;
-      try { await source.setConversationArchived(entry.id, archived); } catch (caught) { error = caught; }
-      if (await this.confirmScope(entry.id, archived, report)) {
-        report.changed.push(entry.id);
-        if (error) report.warnings.push(`The ${report.action} of ${entry.id} reported an error after it took effect: ${reason(error)}`);
-      } else {
-        report.failed.push({ id: entry.id, message: error ? reason(error) : confirmation });
-      }
-    }
-    report.partial = report.changed.length < report.requested;
     return report;
   }
 
@@ -181,17 +147,6 @@ export class HistoryManager {
         report.failed.push({ id: entry.id, message: error ? reason(error) : 'The chat is still stored; deletion was not confirmed.' });
       }
     }
-    report.partial = report.changed.length < report.requested;
-    return report;
-  }
-
-  /** Id-addressed archive/restore, which is all the pane sends across the compartment boundary. */
-  async setArchivedByIds(ids: readonly string[], archived: boolean): Promise<HistoryMutationReport> {
-    requireIds(ids);
-    const { entries, missing } = await this.resolve(ids);
-    const report = await this.setArchived(entries, archived);
-    report.requested = ids.length;
-    for (const id of missing) report.failed.push({ id, message: 'The chat is no longer stored.' });
     report.partial = report.changed.length < report.requested;
     return report;
   }

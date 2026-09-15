@@ -352,22 +352,6 @@ export class WorkspaceStore implements ReaderWorkspace {
     });
   }
   /**
-   * Reversible archive toggle through the same conversation store the sidebar uses: nothing is
-   * removed, an open request keeps running, and a record already in the requested state is not
-   * rewritten. Archiving is refused for a chat this profile does not own.
-   */
-  setConversationArchived(id: string, archived: boolean): Promise<void> {
-    return this.serial(async () => {
-      uuid(id);
-      const store = new ConversationStore(this.storage, this.clock);
-      const conversation = await store.get(id);
-      this.ownedPaper(conversation.paper);
-      if (archived === !!conversation.archivedAt) return;
-      if (archived) conversation.archivedAt = this.clock.now(); else delete conversation.archivedAt;
-      await store.save(conversation);
-    });
-  }
-  /**
    * Explicit removal of one stored chat and its bound draft. Shared image assets and native task
    * ledgers are deliberately left in place; nothing else is pruned, and the paper index's current
    * pointer falls back to the previous chat (or none) inside the conversation store.

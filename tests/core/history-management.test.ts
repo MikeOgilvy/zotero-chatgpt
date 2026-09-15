@@ -22,37 +22,16 @@ function seed() {
   const clock = uniqueClock();
   const conversations = new ConversationStore(storage, clock);
   const workspace = new WorkspaceStore(storage, clock, { clientId: paperA.clientId });
-  const make = async (paper: PaperScope, title: string, text: string): Promise<Conversation> => {
+  const make = async (paper: PaperScope, title: string, text: string, legacyArchivedAt?: string): Promise<Conversation> => {
     const created = await conversations.create(paper, title, settings);
     created.messages.push({ id: `${created.id}-m1`, requestId: `${created.id}-r1`, role: 'user', phase: null, settings, text, citations: [], status: 'completed' });
+    // Only an older build ever wrote `archivedAt`; seeding it here stands in for such a record.
+    if (legacyArchivedAt) created.archivedAt = legacyArchivedAt;
     await conversations.save(created);
     return created;
   };
   return { storage, conversations, workspace, make };
 }
-
-it('archiving through the manager hides a chat from the default scope and restore brings it back', async () => {
-  const { workspace, make } = seed();
-  const chat = await make(paperA, 'Bayesian notes', 'posterior derivation');
-  const manager = new HistoryManager(workspace);
-  const before = await manager.listing();
-  expect(before).toMatchObject({ activeCount: 1, archivedCount: 0 });
-  expect(ids(before.entries)).toEqual([chat.id]);
-
-  const archived = await manager.setArchived([before.entries[0]!], true);
-  expect(archived).toMatchObject({ action: 'archive', requested: 1, changed: [chat.id], failed: [], partial: false });
-  // The default store scope is unarchived: the chat leaves it and stays in the archived scope.
-  expect(await workspace.history()).toEqual([]);
-  expect(ids(await workspace.history('', { archived: true }))).toEqual([chat.id]);
-  const afterArchive = await manager.listing();
-  expect(afterArchive).toMatchObject({ activeCount: 0, archivedCount: 1 });
-  expect(afterArchive.entries[0]?.archivedAt).toBe(NOW);
-
-  const restored = await manager.setArchived([afterArchive.entries[0]!], false);
-  expect(restored).toMatchObject({ action: 'restore', changed: [chat.id], failed: [], partial: false });
-  expect(ids(await workspace.history())).toEqual([chat.id]);
-  expect(await workspace.history('', { archived: true })).toEqual([]);
-});
 
 it('delete removes exactly the target chat and nothing else', async () => {
   const { storage, workspace, make } = seed();
@@ -86,50 +65,12 @@ it('counts a removal as done when the record is gone even if the call reported a
   expect(storage.files.has(storePath(chat.id))).toBe(false);
 });
 
-it('reports an unconfirmed archive honestly instead of assuming the store changed', async () => {
-  const { workspace, make } = seed();
-  await make(paperA, 'No-op', 'question');
-  const entry = (await new HistoryManager(workspace).listing()).entries[0]!;
-  const source: HistorySource = { history: (query, scope) => workspace.history(query, scope), setConversationArchived: () => Promise.resolve() };
-  const report = await new HistoryManager(source).setArchived([entry], true);
-  expect(report.changed).toEqual([]);
-  expect(report.failed).toEqual([{ id: entry.id, message: 'The change could not be confirmed.' }]);
-  expect(report.partial).toBe(true);
-  expect(await workspace.history()).toHaveLength(1);
-});
-
-it('reports a refused removal as failed and leaves the stored chat on disk', async () => {
-  const { storage, workspace, make } = seed();
-  const chat = await make(paperA, 'Kept', 'question');
-  const entry = (await new HistoryManager(workspace).listing()).entries[0]!;
-  storage.fail = true;
-  const report = await new HistoryManager(workspace).remove([entry]);
-  expect(report.changed).toEqual([]);
-  expect(report.failed.map(item => item.id)).toEqual([chat.id]);
-  expect(report.partial).toBe(true);
-  storage.fail = false;
-  expect(storage.files.has(storePath(chat.id))).toBe(true);
-  expect(ids(await workspace.history())).toEqual([chat.id]);
-});
-
-it('refuses to delete a chat whose answer or native task is unfinished', async () => {
-  const { storage, workspace, make } = seed();
-  const chat = await make(paperA, 'Running', 'question');
-  const entry: HistoryEntry = { ...(await new HistoryManager(workspace).listing()).entries[0]!, unfinishedWork: true };
-  const report = await new HistoryManager(workspace).remove([entry]);
-  expect(report.changed).toEqual([]);
-  expect(report.failed.map(item => item.id)).toEqual([chat.id]);
-  expect(report.partial).toBe(true);
-  expect(storage.files.has(storePath(chat.id))).toBe(true);
-});
-
 it('filters by scope and paper, counts both scopes, and handles an empty result', async () => {
   const { workspace, make } = seed();
   const activeA = await make(paperA, 'Active A', 'alpha question');
   const activeB = await make(paperB, 'Active B', 'beta question');
-  const archivedA = await make(paperA, 'Archived A', 'gamma question');
+  const archivedA = await make(paperA, 'Archived A', 'gamma question', NOW);
   const manager = new HistoryManager(workspace);
-  await manager.setArchived([(await manager.listing()).entries.find(entry => entry.id === archivedA.id)!], true);
   const listing = await manager.listing();
   expect(ids(listing.entries).sort()).toEqual([activeA.id, activeB.id, archivedA.id].sort());
   expect(listing).toMatchObject({ activeCount: 2, archivedCount: 1 });

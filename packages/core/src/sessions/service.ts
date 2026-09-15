@@ -165,15 +165,6 @@ export class ReaderService {
     await this.mutate(conversationId, c => { c.title = title.trim(); c.titleCustomized = true; });
     return toPublic(await this.load(conversationId));
   }
-  /**
-   * Archive/unarchive is a metadata toggle through the same single-writer queue as rename. Nothing
-   * is removed from disk, so a restore returns the chat to the default listing unchanged. An open
-   * request is left running; archiving never cancels work or becomes a disguised delete.
-   */
-  async archiveConversation(conversationId: string, archived: boolean): Promise<Conversation> {
-    await this.mutate(conversationId, c => { if (archived) c.archivedAt = this.options.now(); else delete c.archivedAt; });
-    return toPublic(await this.load(conversationId));
-  }
   async branchConversation(conversationId: string, messageId: string): Promise<Conversation> {
     const source = await this.load(conversationId);
     const position = source.messages.findIndex(message => message.id === messageId);

@@ -89,36 +89,6 @@ it('renames without losing the original title and branches before an old questio
   expect(branch.id).not.toBe(conversation.id); expect(branch.messages).toEqual([]); expect(branch.parentConversationId).toBe(conversation.id);
   expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(1);
 });
-it('archives a chat without deleting anything, restores it, and reads a pre-archive record as unarchived', async () => {
-  const { c, storage, conversation, explain } = await signedIn();
-  await c.send(explain(790)); await flush();
-  const path = `conversations/${conversation.id}.json`;
-  const messagesBefore = (JSON.parse(new TextDecoder().decode(storage.files.get(path))) as { messages: unknown[] }).messages.length;
-  expect(messagesBefore).toBe(1);
-  const archived = await c.archiveConversation!(conversation.id, true);
-  expect(archived.archivedAt).toBe('2026-09-09T08:00:00.000Z');
-  // Archiving is an additive field on the same schema-3 record; the message data stays on disk.
-  const saved = JSON.parse(new TextDecoder().decode(storage.files.get(path))) as { archivedAt?: string; schemaVersion: number; messages: unknown[] };
-  expect(saved.schemaVersion).toBe(3);
-  expect(saved.archivedAt).toBe('2026-09-09T08:00:00.000Z');
-  expect(saved.messages).toHaveLength(messagesBefore);
-  expect((await c.get(conversation.id)).messages).toHaveLength(messagesBefore);
-  // The per-attachment listing still reports it: the view owns the archived partition, not the store.
-  expect((await c.list(paperA)).map(entry => entry.id)).toContain(conversation.id);
-  // A record written before the field existed (or by an older build) loads as unarchived. Close the
-  // live client first so a shutdown flush cannot rewrite the legacy bytes before the reload.
-  await c.close();
-  const legacy = JSON.parse(new TextDecoder().decode(storage.files.get(path))) as Record<string, unknown>;
-  delete legacy.archivedAt;
-  storage.files.set(path, new TextEncoder().encode(JSON.stringify(legacy)));
-  const reopened = await signedIn(undefined, storage);
-  const replayed = await reopened.c.get(conversation.id);
-  expect(replayed.archivedAt).toBeUndefined();
-  expect(replayed.messages).toHaveLength(messagesBefore);
-  const restored = await reopened.c.archiveConversation!(conversation.id, false);
-  expect(restored.archivedAt).toBeUndefined();
-  expect(JSON.parse(new TextDecoder().decode(storage.files.get(path)))).not.toHaveProperty('archivedAt');
-});
 it('sends referenced sources and frozen workflow instructions, then preserves them on disk', async () => {
   const { c, p, storage, conversation, explain } = await signedIn();
   const workflow = { skill: builtinSkills().find(s => s.id === 'builtin-derive')!, preferences: { ...DEFAULT_PREFERENCES, language: 'zh' }, profileId: null };
