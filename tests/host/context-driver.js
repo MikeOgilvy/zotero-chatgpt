@@ -493,7 +493,12 @@ async function runHostSmoke(config) {
     let requests = 0;
     for (const file of await IOUtils.getChildren(records)) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
     report.recordedRequests = requests;
-    if (!config.live && conversationA) await check('no-model-request-in-this-conversation', JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`))).requests.length === 0);
+    if (!config.live) {
+      const currentRequests = conversationA
+        ? JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`))).requests.length
+        : requests;
+      await check('no-model-request-in-this-conversation', currentRequests === 0, { recordedRequests: requests, conversation: conversationA || null });
+    }
     // --- With no readable text the request boundary must refuse out loud, never send an empty context ---
     step = 'not-ready-refusal';
     let blankReady = false; let blankSetupError = null;
