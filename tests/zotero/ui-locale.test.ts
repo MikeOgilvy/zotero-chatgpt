@@ -103,11 +103,13 @@ it('translates only fixed task progress templates while preserving identifiers',
   locale.update('en'); expect(summary.textContent).toBe('Annotations · Review · 2/3 selected'); expect(progress.textContent).toBe('Reading · running · 1/3 passes'); locale.dispose();
 });
 
-it('translates workflow and reference action labels without translating dynamic names', () => {
-  const { root, add } = setup(); const button = add('button', 'zcr-workspace-control', 'Try in draft'); button.setAttribute('aria-label', 'Try Send in draft'); button.title = 'Try Send in draft';
+it('translates skill chip action labels without translating the skill name', () => {
+  const { root, add } = setup();
+  const preview = add('button', 'zcr-workspace-control', '/Send'); preview.setAttribute('aria-label', 'Preview skill Send'); preview.title = 'Preview skill Send';
   const remove = add('button', 'zcr-workspace-control', '×'); remove.setAttribute('aria-label', 'Remove skill Stop');
-  const locale = mountUILocale(root); locale.update('zh'); expect(button.textContent).toBe('在草稿中试用'); expect(button.title).toBe('在草稿中试用 Send'); expect(remove.getAttribute('aria-label')).toBe('移除 skill Stop');
-  locale.update('en'); expect(button.title).toBe('Try Send in draft'); locale.dispose();
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(preview.textContent).toBe('/Send'); expect(preview.title).toBe('预览 skill Send'); expect(remove.getAttribute('aria-label')).toBe('移除 skill Stop');
+  locale.update('en'); expect(preview.title).toBe('Preview skill Send'); expect(remove.getAttribute('aria-label')).toBe('Remove skill Stop'); locale.dispose();
 });
 
 it('localizes task-scope, workflow-source and profile-delete templates while keeping identifiers verbatim', () => {
