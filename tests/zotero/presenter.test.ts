@@ -28,8 +28,8 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
   const client: ReaderClient = {
     snapshot: () => structuredClone(runtime), observe: l => { observers.add(l); l(structuredClone(runtime)); return () => { observers.delete(l); }; },
     refreshAccount: async () => {}, startLogin: vi.fn(() => Promise.resolve({ loginId: 'login-1', authorizationUrl: 'https://auth.openai.com/authorize?x=1' })), cancelLogin: async () => {},
-    current: vi.fn(() => Promise.resolve(structuredClone(conversation))), newConversation: vi.fn(() => {
-      conversation = remember({ ...conversation, id: `aaaaaaaa-0000-4000-8000-${String(conversations.length + 1).padStart(12, '0')}`, messages: [], lastSeq: 0 });
+    current: vi.fn(() => Promise.resolve(structuredClone(conversation))), peekCurrent: vi.fn(() => Promise.resolve(structuredClone(conversation))), newConversation: vi.fn(() => {
+      conversation = remember({ ...conversation, id: `aaaaaaaa-0000-4000-8000-${String(conversations.length + 1).padStart(12, '0')}`, messages: [], lastSeq: 0, activeRequestId: null, queuedRequestIds: [] });
       return Promise.resolve(structuredClone(conversation));
     }),
     list: () => Promise.resolve(conversations.map(c => structuredClone(c))),
@@ -39,8 +39,17 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
       conversation = found;
       return Promise.resolve(structuredClone(found));
     }),
-    get: vi.fn(() => Promise.resolve(structuredClone(conversation))),
-    send: vi.fn((input: SendInput) => { sent.push(input); conversation = remember({ ...conversation, settings: input.settings, activeRequestId: input.requestId, messages: [...conversation.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' }], lastSeq: ++seq }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
+    get: vi.fn((id: string) => {
+      const found = conversations.find(entry => entry.id === id);
+      if (!found) return Promise.reject(new ReaderError('NOT_FOUND', 'Unknown conversation'));
+      return Promise.resolve(structuredClone(found));
+    }),
+    send: vi.fn((input: SendInput) => {
+      sent.push(input);
+      const target = conversations.find(entry => entry.id === input.conversationId) ?? conversation;
+      conversation = remember({ ...target, settings: input.settings, activeRequestId: input.requestId, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' }], lastSeq: ++seq });
+      return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false });
+    }),
     request: (_c, requestId) => {
       const message = conversation.messages.find(entry => entry.requestId === requestId);
       const state = message?.status === 'uncertain' ? 'uncertain' as const : message?.status === 'completed' ? 'completed' as const : 'running' as const;
@@ -50,8 +59,11 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
       const index = conversations.findIndex(entry => entry.id === id);
       if (index < 0) return Promise.reject(new ReaderError('NOT_FOUND', 'Unknown conversation'));
       conversations.splice(index, 1);
-      if (conversation.id === id) conversation = conversations[0] ?? remember({ ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', title: 'Synthetic Paper A', messages: [], lastSeq: 0, activeRequestId: null });
-      return Promise.resolve(structuredClone(conversation));
+      if (conversation.id !== id) return Promise.resolve(structuredClone(conversation));
+      // Like the real service: the remaining current chat, or null when the attachment has none left.
+      const next = conversations[0];
+      if (next) conversation = next;
+      return Promise.resolve(next ? structuredClone(next) : null);
     }),
     diagnostics: vi.fn((): Promise<ShareableDiagnostics> => Promise.resolve({
       pluginVersion: '0.3.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {},
@@ -96,6 +108,13 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
   return { presenter, states, sent, cancelled, client, services, emit, setRuntime, listeners, unbind, last: () => states.at(-1)!, conversation: () => conversation, setConversation: (c: Conversation) => { remember(c); } };
 }
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 5));
+/** New chat is only a tab until its first question is sent: this opens the tab and creates the record. */
+async function startChat(f: ReturnType<typeof fixture>, question: string): Promise<string> {
+  await f.presenter.newConversation();
+  expect(f.last().conversation).toBeNull();
+  f.presenter.setQuestion(question); await f.presenter.send();
+  return f.last().conversation!.id;
+}
 describe('conversation presenter', () => {
   it('keeps two views of the same attachment consistent when either view closes', async () => {
     const f = fixture(); await f.presenter.activate();
@@ -244,7 +263,9 @@ describe('conversation presenter', () => {
   it('activates the attachment conversation and renders history without sending anything', async () => {
     const f = fixture(); f.setConversation({ ...f.conversation(), messages: [{ id: 'm1', requestId: 'r0', role: 'assistant', phase: 'final', settings, text: '旧回答', citations: [], status: 'completed' }], lastSeq: 4 });
     await f.presenter.activate();
-    expect(f.last().conversation?.messages[0]?.text).toBe('旧回答'); expect(f.sent).toHaveLength(0); expect(f.client.current).toHaveBeenCalledTimes(1);
+    expect(f.last().conversation?.messages[0]?.text).toBe('旧回答'); expect(f.sent).toHaveLength(0); expect(f.client.peekCurrent).toHaveBeenCalledTimes(1);
+    // Opening the dock adopts the stored chat but never creates one.
+    expect(f.client.current).not.toHaveBeenCalled(); expect(f.client.newConversation).not.toHaveBeenCalled();
     expect(f.last().draft.settings).toEqual(settings);
   });
   it('Ask only adds a deduplicated removable citation to the draft; sending creates one ask request and clears the draft', async () => {
@@ -299,8 +320,11 @@ describe('conversation presenter', () => {
     f.emit({ type: 'messageCompleted', requestId: f.sent[0]!.requestId, messageId: 'reply-one', finalText: 'done', phase: 'final' });
     f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'reply-one', finalText: 'done' });
     await f.presenter.newConversation();
-    const secondId = f.last().conversation!.id;
+    // The New chat tab is not a record yet; the first question creates it.
+    expect(f.last().conversation).toBeNull(); expect(f.client.newConversation).not.toHaveBeenCalled();
     f.presenter.setQuestion('第二问'); await f.presenter.send();
+    const secondId = f.last().conversation!.id;
+    expect(secondId).not.toBe(firstId); expect(f.client.newConversation).toHaveBeenCalledTimes(1);
     expect(f.last().generating).toBe(true);
     f.emit({ type: 'completed', requestId: f.sent[1]!.requestId, messageId: 'reply', finalText: 'done' });
     await f.presenter.deleteConversation(secondId);
@@ -380,7 +404,9 @@ describe('conversation presenter', () => {
     f.presenter.addCitation(citationA); f.presenter.setQuestion('问题'); await f.presenter.send();
     expect(f.last().message).toContain('new conversation'); expect(f.last().draft.question).toBe('问题'); expect(f.last().draft.citations).toEqual([citationA]);
     const original = f.last().conversation!.id;
-    await f.presenter.newConversation(); expect(f.client.newConversation).toHaveBeenCalledTimes(1); expect(f.last().conversation?.id).toBe('aaaaaaaa-0000-4000-8000-000000000002'); expect(f.last().draft.citations).toEqual([]);
+    await f.presenter.newConversation(); expect(f.client.newConversation).not.toHaveBeenCalled(); expect(f.last().conversation).toBeNull(); expect(f.last().draft.citations).toEqual([]);
+    f.presenter.setQuestion('新问题'); await f.presenter.send();
+    expect(f.client.newConversation).toHaveBeenCalledTimes(1); expect(f.last().conversation?.id).toBe('aaaaaaaa-0000-4000-8000-000000000002');
     await f.presenter.openConversation(original); expect(f.last().draft.citations).toEqual([citationA]); expect(f.last().draft.question).toBe('问题');
   });
   it('reports a runtime start failure and allows a deliberate retry', async () => {
@@ -433,8 +459,11 @@ describe('conversation presenter', () => {
     expect(f.last().generating).toBe(false);
     expect(f.last().conversation?.id).toBe(originalId);
     await f.presenter.newConversation();
-    expect(f.last().conversation?.id).not.toBe(originalId);
+    expect(f.last().conversation).toBeNull();
     expect(f.last().message).toBeNull();
+    // The isolated chat is left behind by sending from the New chat tab, which creates the new record.
+    f.presenter.setQuestion('新问题'); await f.presenter.send();
+    expect(f.last().conversation?.id).not.toBe(originalId);
     expect(f.client.newConversation).toHaveBeenCalledTimes(1);
     await f.presenter.openConversation(originalId);
     expect(f.last().conversation?.id).toBe(originalId);
@@ -445,9 +474,12 @@ describe('conversation presenter', () => {
     const firstId = f.last().conversation!.id;
     f.presenter.addCitation(citationA); f.presenter.setQuestion('关于先验');
     await f.presenter.newConversation();
+    expect(f.last().conversation).toBeNull();
+    expect(f.last().draft.question).toBe('');
+    expect(f.last().conversations.map(c => c.id)).toEqual([firstId]);
+    f.presenter.setQuestion('第二个对话'); await f.presenter.send();
     const secondId = f.last().conversation!.id;
     expect(secondId).not.toBe(firstId);
-    expect(f.last().draft.question).toBe('');
     expect(f.last().conversations.map(c => c.id)).toEqual([firstId, secondId]);
     f.presenter.setQuestion('新对话的问题'); f.presenter.removeCitation(citationA.id);
     await f.presenter.openConversation(firstId);
@@ -465,6 +497,10 @@ describe('conversation presenter', () => {
     f.presenter.setQuestion('第一问'); await f.presenter.send();
     const requestId = f.sent[0]!.requestId;
     await f.presenter.newConversation();
+    // The New chat tab keeps the first chat open beside it while it is still only a tab.
+    expect(f.last().conversation).toBeNull();
+    expect(f.last().openConversations.map(c => c.id)).toEqual([firstId]);
+    f.presenter.setQuestion('第二问'); await f.presenter.send();
     const secondId = f.last().conversation!.id;
     expect(secondId).not.toBe(firstId);
     // Starting a chat no longer replaces what is on screen: both chats are open, the new one active.
@@ -476,7 +512,7 @@ describe('conversation presenter', () => {
     f.emit({ type: 'messageCompleted', requestId, messageId: 'reply-one', finalText: '第一答', phase: 'final' }, firstId);
     f.emit({ type: 'completed', requestId, messageId: 'reply-one', finalText: '第一答' }, firstId);
     expect(f.last().conversation?.id).toBe(secondId);
-    expect(f.last().conversation?.messages).toEqual([]);
+    expect(f.last().conversation?.messages.map(message => message.text)).toEqual(['第二问']);
     expect(f.last().openConversations.find(c => c.id === firstId)?.messages.map(message => message.text)).toEqual(['第一问', '第一答']);
     // Switching to it shows the answer that arrived in the background, and the streamed text is gone
     // from the chat that was on screen.
@@ -488,8 +524,7 @@ describe('conversation presenter', () => {
   it('remembers a previewed chat’s reading anchor without moving the chat being edited', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
-    await f.presenter.newConversation();
-    const secondId = f.last().conversation!.id;
+    const secondId = await startChat(f, '第二问');
     // The chat being edited is scrolled where the owner left it.
     f.presenter.setScrollTop(40);
     // The read-only column is scrolled separately: its offset is recorded per chat and never written
@@ -515,8 +550,7 @@ describe('conversation presenter', () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
     f.presenter.setQuestion('保留的草稿'); f.presenter.addCitation(citationA);
-    await f.presenter.newConversation();
-    const secondId = f.last().conversation!.id;
+    const secondId = await startChat(f, '第二问');
     f.presenter.setQuestion('第二个对话');
     // Closing the active chat leaves the reader on the other open chat, with that chat's own draft.
     expect(f.presenter.closePane(secondId)).toBe(false);
@@ -532,8 +566,7 @@ describe('conversation presenter', () => {
   it('closing the last open chat keeps the reader in its new-chat state', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
-    await f.presenter.newConversation();
-    const secondId = f.last().conversation!.id;
+    const secondId = await startChat(f, '第二问');
     expect(f.presenter.closePane(secondId)).toBe(false);
     expect(f.presenter.closeConversation()).toBe(false);
     expect(f.last().conversation).toBeNull();
@@ -541,6 +574,14 @@ describe('conversation presenter', () => {
     expect(f.last().draft.question).toBe('');
     // The stored pointer is not re-adopted; the chats stay listed and openable.
     expect(f.last().conversations.map(c => c.id)).toEqual([firstId, secondId]);
+    // Closing the New chat tab with nothing else open is a no-op; with another tab open it returns there.
+    expect(f.presenter.closeConversation()).toBe(false);
+    await f.presenter.openConversation(firstId);
+    await f.presenter.newConversation();
+    expect(f.last().conversation).toBeNull(); expect(f.last().openConversations.map(c => c.id)).toEqual([firstId]);
+    expect(f.presenter.closeConversation()).toBe(false);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().newChatOpen).toBe(false);
   });
   it('normalizes a blank or reversed page range instead of preparing an impossible slice', async () => {
     const f = fixture(); await f.presenter.activate();
@@ -554,44 +595,59 @@ describe('conversation presenter', () => {
     f.presenter.setDocumentRange(1.7, 4.2);
     expect(f.last().document.range).toEqual([1, 4]);
   });
-  it('opens a visible new chat and only reuses the blank chat it just opened', async () => {
+  it('New chat is a tab, not a record: nothing is created until the first question is sent', async () => {
     const f = fixture(); await f.presenter.activate();
     const firstId = f.last().conversation!.id;
-    // The chat `activate` adopted is an older empty record, not one `New chat` opened: pressing the
-    // control must create a real, visibly different conversation.
+    f.presenter.setQuestion('第一个草稿');
     await f.presenter.newConversation();
+    // Pressing `+` opens the New chat tab with the unbound draft; the first chat stays open beside it.
+    expect(f.client.newConversation).not.toHaveBeenCalled();
+    expect(f.last().conversation).toBeNull();
+    expect(f.last().newChatOpen).toBe(true);
+    expect(f.last().openConversations.map(c => c.id)).toEqual([firstId]);
+    expect(f.last().draft.question).toBe('');
+    // Repeated presses are a no-op, and typing in the tab still creates nothing.
+    f.presenter.setQuestion('新问题');
+    await f.presenter.newConversation();
+    expect(f.client.newConversation).not.toHaveBeenCalled();
+    expect(f.last().draft.question).toBe('新问题');
+    // Leaving the tab keeps it in the strip and keeps its draft as the unbound draft.
+    await f.presenter.openConversation(firstId);
+    expect(f.last().conversation?.id).toBe(firstId);
+    expect(f.last().newChatOpen).toBe(true);
+    expect(f.last().draft.question).toBe('第一个草稿');
+    await f.presenter.newConversation();
+    expect(f.last().draft.question).toBe('新问题');
+    // Sending is what creates the record, and the chat that asked becomes the active tab.
+    await f.presenter.send();
     expect(f.client.newConversation).toHaveBeenCalledTimes(1);
     const secondId = f.last().conversation!.id;
     expect(secondId).not.toBe(firstId);
-    expect(f.last().draft.question).toBe('');
-    // The one blank chat that press just opened is idle and reused, so repeated presses never stack
-    // duplicate empty sessions.
-    await f.presenter.newConversation();
-    expect(f.client.newConversation).toHaveBeenCalledTimes(1);
-    expect(f.last().conversation?.id).toBe(secondId);
-
-    // A draft is content: the next press starts another conversation.
-    f.presenter.setQuestion('新问题');
-    await f.presenter.newConversation();
-    expect(f.client.newConversation).toHaveBeenCalledTimes(2);
-    const thirdId = f.last().conversation!.id;
-    expect(thirdId).not.toBe(secondId);
-
-    await f.presenter.openConversation(firstId);
-    expect(f.last().conversation?.id).toBe(firstId);
-    expect(f.last().draft.question).toBe('');
-    // Returning to an older chat ends the blank-chat reuse: the next press is a visible new chat.
-    await f.presenter.newConversation();
-    expect(f.client.newConversation).toHaveBeenCalledTimes(3);
-    expect(f.last().conversation?.id).not.toBe(firstId);
+    expect(f.sent[0]?.conversationId).toBe(secondId);
+    expect(f.last().openConversations.map(c => c.id)).toEqual([firstId, secondId]);
+    expect(f.last().conversations.map(c => c.id)).toEqual([firstId, secondId]);
+    expect(f.last().newChatOpen).toBe(false);
+  });
+  it('removes leftover empty records on open so history only counts chats the owner can see', async () => {
+    const f = fixture();
+    // Two stored records with nothing in them beside the adopted one: an older build created them on open.
+    f.setConversation({ ...f.conversation(), id: 'cccccccc-0000-4000-8000-000000000001', title: 'Synthetic Paper A', messages: [] });
+    f.setConversation({ ...f.conversation(), id: 'cccccccc-0000-4000-8000-000000000002', title: 'Synthetic Paper A', messages: [{ id: 'm1', requestId: 'r0', role: 'user', phase: null, settings, text: '有内容', citations: [], status: 'completed' }] });
+    await f.presenter.activate();
+    const adopted = f.last().conversation!.id;
+    // The empty record that is not on screen is gone; the chat with a message and the adopted chat stay.
+    expect(f.client.deleteConversation).toHaveBeenCalledTimes(1);
+    expect(f.client.deleteConversation).toHaveBeenCalledWith(paperA, 'cccccccc-0000-4000-8000-000000000001');
+    expect(f.last().conversations.map(c => c.id).sort()).toEqual([adopted, 'cccccccc-0000-4000-8000-000000000002'].sort());
   });
   it('starts a fresh chat instead of re-adopting the chat that was just closed', async () => {
     const f = fixture(); await f.presenter.activate();
     const closedId = f.last().conversation!.id;
     f.presenter.closeConversation();
     expect(f.last().conversation).toBeNull();
-    await f.presenter.newConversation();
+    f.presenter.setQuestion('新问题'); await f.presenter.send();
     expect(f.client.newConversation).toHaveBeenCalledTimes(1);
+    expect(f.client.current).not.toHaveBeenCalled();
     expect(f.last().conversation?.id).not.toBe(closedId);
   });
   it('copyDiagnostics serializes whitelist fields and never includes citation text', async () => {

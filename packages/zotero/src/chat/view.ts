@@ -15,7 +15,7 @@ import { messageTimeLabel } from './message-time.ts';
 import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageTarget } from './source-links.ts';
 import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
-import { attachmentsFromClipboard, clipboardHasImage, clipboardHasText, geckoClipboardHasImage, readGeckoClipboardImage, resolveGeckoClipboardAccess, type ClipboardImageRead, type ClipboardImageRefusal, type ClipboardLike, type GeckoClipboardAccess } from './pick-images.ts';
+import { attachmentsFromClipboard, clipboardHasImage, clipboardHasText, readGeckoClipboardImage, resolveGeckoClipboardAccess, type ClipboardImageRead, type ClipboardImageRefusal, type ClipboardLike, type GeckoClipboardAccess } from './pick-images.ts';
 export interface AttachmentIdentity { title: string; key: string; libraryID: number }
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
@@ -87,18 +87,15 @@ const COPY = {
   actionFailed: 'This action could not be completed.',
   sourceOpenFailed: 'The source could not be opened.',
   attach: 'Add images or context',
-  chooseImages: 'Choose images…',
-  // One local file the owner picks explicitly. Text files arrive as text context for the model and
-  // image files as image input; the copy says so instead of promising a general file upload.
+  // One or more local files the owner picks explicitly. Text files arrive as text context for the
+  // model and image files as image input; the copy says so instead of promising a general file upload.
   attachFile: 'Attach file…',
   attachFileHint: 'Text or image from your computer',
-  captureRegion: 'Capture selected region',
   addReference: 'Add references',
   addSkill: 'Add a skill',
   attachHeading: 'Attach',
   referenceHeading: 'Reference',
   skillHeading: 'Skill',
-  chooseImagesHint: 'From your computer',
   addReferenceHint: 'Saved chats and articles',
   addSkillHint: 'Installed skills for this chat',
   // Local reading status. The sidebar used to render preparation state in a panel that was removed,
@@ -151,11 +148,6 @@ const ICONS = {
   send: 'M8 13V3M4.5 6.5 8 3l3.5 3.5',
   stop: 'M5 5h6v6H5z',
   plus: 'M8 3v10M3 8h10',
-  // Four corner brackets: "select an area" next to the plus rather than another upload or image
-  // button. On its own a closed marquee rendered as a bare empty square at 20px — which is exactly how
-  // the owner read the control — so the corners are open and a filled centre mark is drawn on top
-  // (ICON_MARKS below).
-  region: 'M2.5 6V3.5A1 1 0 0 1 3.5 2.5H6M10 2.5h2.5A1 1 0 0 1 13.5 3.5V6M13.5 10v2.5A1 1 0 0 1 12.5 13.5H10M6 13.5H3.5A1 1 0 0 1 2.5 12.5V10',
   more: 'M3.25 8a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Zm3.9 0a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Zm3.9 0a.85.85 0 1 1 1.7 0 .85.85 0 0 1-1.7 0Z',
   clock: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM8 5.25V8.2l2.15 1.25',
   copy: 'M6 6h7v7H6zM3 3h7v2',
@@ -165,11 +157,8 @@ const ICONS = {
   historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
   historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
 } as const;
-/**
- * A second, filled mark drawn inside the same 16px box. The region glyph's corner brackets read as an
- * empty frame on their own, so the centre square is what makes it read as "capture this area".
- */
-const ICON_MARKS: Partial<Record<keyof typeof ICONS, string>> = { region: 'M6.3 6.3h3.4v3.4H6.3z' };
+/** The unbound composer tab. It is not a stored conversation id; the first send creates the record. */
+const NEW_CHAT_TAB_ID = 'new-chat';
 const STATUS_LINE = {
   idle: 'Open the Codex sidebar to connect.',
   starting: 'Starting Codex…',
@@ -403,14 +392,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('stroke-linejoin', 'round');
     svg.append(path);
-    const mark = ICON_MARKS[name];
-    if (mark) {
-      const inner = doc.createElementNS(SVG, 'path');
-      inner.setAttribute('d', mark);
-      inner.setAttribute('fill', 'currentColor'); inner.setAttribute('stroke', 'none');
-      inner.dataset.zcrIconMark = '';
-      svg.append(inner);
-    }
     return svg;
   };
   const button = (label: string, action: string, onClick: () => void, glyph?: keyof typeof ICONS, className = 'zcr-icon-button') => {
@@ -467,39 +448,20 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   root.querySelector('[data-zcr-chat]')?.remove();
   const chat = el('section', 'zcr-chat'); chat.dataset.zcrChat = '';
   const chrome = el('div', 'zcr-chrome');
-  const context = el('div', 'zcr-chrome-main');
-  context.dataset.zcrContext = '';
-  const currentTitle = el('button', 'zcr-current-title');
-  currentTitle.type = 'button';
-  currentTitle.dataset.zcrCurrentTitle = '';
-  currentTitle.dataset.zcrAction = 'rename-conversation';
-  currentTitle.setAttribute('aria-haspopup', 'dialog');
-  currentTitle.setAttribute('aria-expanded', 'false');
-  currentTitle.setAttribute('aria-controls', `${viewId}-rename`);
-  currentTitle.addEventListener('click', () => { toggleRename(); });
-  // The current chat title carries the reference's rounded neutral chip: the title truncates and a
-  // small cross sits at its right edge. Closing leaves the chat on disk and in history and asks no
-  // confirmation; the destructive remove lives on the history rows. When the close
-  // leaves no chat at all for this attachment, the reader collapses its whole dock through the
-  // reader's own close path instead of leaving an empty panel; otherwise the pane stays open in its
-  // new-chat state and the `+` stays available.
-  const closeCurrent = button(COPY.closeChat, 'close-conversation', () => {
-    if (presenter.closeConversation()) hooks.closeDock?.();
-  }, 'remove', 'zcr-current-close');
-  context.append(currentTitle, closeCurrent);
   /**
-   * The open chats, in the order they were opened. The dock is one attachment pane, so the chats the
-   * reader has side by side cannot all be shown at once: the strip names every open chat, marks the
-   * chat on screen, and switches to another one. It exists only while a second chat is open — with a
-   * single chat the title chip above already says everything — and scrolls inside itself rather than
-   * squeezing a chip past the dock edge.
+   * Cursor-style agent tabs live in the chrome: every open chat is a named tab, the unbound composer
+   * is the New chat tab, and the selected tab carries the close cross. `+` and history stay on the
+   * trailing edge. Closing leaves the chat on disk and in history and asks no confirmation; the
+   * destructive remove lives on the history rows. When the close leaves no chat at all for this
+   * attachment, the reader collapses its whole dock through the reader's own close path.
    */
   const panes = el('div', 'zcr-panes');
   panes.dataset.zcrPanes = '';
-  panes.hidden = true;
   panes.setAttribute('role', 'tablist');
   panes.setAttribute('aria-label', COPY.openChats);
-  const paneNodes = new Map<string, HTMLButtonElement>();
+  const paneNodes = new Map<string, HTMLElement>();
+  /** The selected tab's title control; the rename popover hangs off it. */
+  let renameTrigger: HTMLElement | null = null;
   const contextSource = el('div', 'zcr-chrome-source');
   contextSource.dataset.zcrContextSource = '';
   // The paper's declared metadata is still read in the background and frozen into every request
@@ -525,10 +487,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historyBtn.setAttribute('aria-expanded', 'false');
   historyBtn.setAttribute('aria-controls', `${viewId}-history`);
   actions.append(fresh, historyBtn);
-  chrome.append(context, actions);
-  // Renaming the open chat moved out of a More menu when that menu went away: the chat's own title
-  // in the chip is the control, so the rename is where the owner already looks for the chat's name
-  // and no second three-dot surface is reintroduced. The form is a small popover under the chrome.
+  chrome.append(panes, actions);
+  // Renaming hangs off the selected tab's title, the same place the owner already looks for the
+  // chat's name. The form is a small popover under the chrome.
   const renameForm = el('div', 'zcr-rename-form'); renameForm.dataset.zcrRenameForm = ''; renameForm.hidden = true;
   renameForm.id = `${viewId}-rename`;
   renameForm.setAttribute('role', 'dialog');
@@ -538,8 +499,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const saveName = button(COPY.saveName, 'save-conversation-name', () => {
     const id = presenter.snapshot().conversation?.id;
     if (!id) return;
-    void presenter.renameConversation(id, renameInput.value).then(() => { toggleRename(false); currentTitle.focus(); }).catch(reportViewError);
+    void presenter.renameConversation(id, renameInput.value).then(() => { toggleRename(false); renameTrigger?.focus(); }).catch(reportViewError);
   });
+  renameForm.append(renameInput, saveName);
   renameForm.append(renameInput, saveName);
   const historyPanel = el('div', 'zcr-history-panel');
   historyPanel.id = `${viewId}-history`;
@@ -734,7 +696,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (previewPaneId) presenter.setPaneScrollTop(previewPaneId, previewMessages.scrollTop);
   });
   columns.append(main, previewPane);
-  chat.append(chrome, panes, renameForm, contextSource, documentStatus, scopeNotice, columns); root.append(chat);
+  chat.append(chrome, renameForm, contextSource, documentStatus, scopeNotice, columns); root.append(chat);
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -742,14 +704,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let workspaceView: ReturnType<typeof mountWorkspaceView> | null = null;
   let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
   // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
-  // lives behind it; the reference/skill chooser stays reachable by typing '@' or '/'. Capturing
-  // the selected region is the one route the owner asked to be a single visible click instead.
+  // lives behind it; the reference/skill chooser stays reachable by typing '@' or '/'.
   const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
   plus.dataset.zcrPlus = '';
   plus.setAttribute('aria-haspopup', 'dialog'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
-  const captureRegion = button(COPY.captureRegion, 'capture-region', () => { void presenter.captureRegion().catch(reportViewError); }, 'region', 'zcr-icon-button zcr-capture-region');
-  // A labelled, non-modal dialog rather than `role="menu"`: the popover holds plain action rows plus
-  // the page-number field, and neither plain buttons nor an `<input>` are valid children of a menu.
+  // A labelled, non-modal dialog rather than `role="menu"`: the popover holds plain action rows, and
+  // neither plain buttons nor an `<input>` are valid children of a menu.
   const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'dialog'); plusMenu.setAttribute('aria-label', COPY.attach);
   // Codex-style grouped rows: a small heading, a title and a supporting description. The accessible
   // name stays the title, never the description.
@@ -766,7 +726,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const attachGroup = el('div', 'zcr-plus-group');
   attachGroup.append(
     el('div', 'zcr-plus-heading', COPY.attachHeading),
-    plusRow(COPY.chooseImages, COPY.chooseImagesHint, 'pick-images', () => { togglePlus(false); void presenter.pickImages().catch(reportViewError); }),
     plusRow(COPY.attachFile, COPY.attachFileHint, 'pick-file', () => { togglePlus(false); void presenter.pickFile().catch(reportViewError); }),
   );
   const referenceGroup = el('div', 'zcr-plus-group');
@@ -783,7 +742,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   );
   plusMenu.append(attachGroup, referenceGroup, skillGroup);
   composer.append(plusMenu);
-  leading.append(plus, captureRegion);
+  leading.append(plus);
   const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;
   const collection = el('select'); collection.dataset.zcrCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
   collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });
@@ -845,14 +804,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); toggleRename(false); togglePlus(false); }
   };
   /**
-   * The rename popover hangs off the chat's own title. Opening it fills the field from the live
-   * conversation and selects the text; closing it returns focus to the title button, so the
-   * affordance is keyboard-reachable without a menu trigger.
+   * The rename popover hangs off the selected tab's title. Opening it fills the field from the live
+   * conversation and selects the text; closing it returns focus to that title, so the affordance is
+   * keyboard-reachable without a menu trigger.
    */
   const toggleRename = (open?: boolean) => {
+    if ((open ?? renameForm.hidden) && !presenter.snapshot().conversation) return;
     const next = open ?? renameForm.hidden;
     renameForm.hidden = !next;
-    currentTitle.setAttribute('aria-expanded', String(next));
+    renameTrigger?.setAttribute('aria-expanded', String(next));
     if (next) {
       historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
       menu.hidden = true; picker.setAttribute('aria-expanded', 'false'); togglePlus(false);
@@ -898,30 +858,38 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   /** The two refusals are named, so a paste or drop that carried an image is never a silent no-op. */
   const IMAGE_REFUSAL: Record<ClipboardImageRefusal, string> = { 'too-large': COPY.imageTooLarge, unsupported: COPY.imageUnsupported };
   /**
-   * Reads one route and moves on when it produced nothing. A route that claims the gesture but
-   * yields no bytes (the reader window can answer `hasDataMatchingFlavors` for an image family it
-   * cannot hand over) must not consume the paste, and a route that really found bytes it had to
-   * refuse must say so instead of leaving the owner with a Cmd+V that did nothing. Routes are
-   * tried in order of fidelity and the first refusal is reported once.
+   * Reads one route and moves on when it produced nothing. A route that throws (the reader window's
+   * nsIClipboard can claim an image family it cannot hand over) must not consume the paste: later
+   * routes, including the privileged plugin realm, still run. A route that really found bytes it had
+   * to refuse is remembered, but a later route that attaches those bytes wins and the refusal is not
+   * shown. Routes are tried in order of fidelity.
    */
   const readClipboardRoutes = async (clipboard: ClipboardLike | null | undefined, routes: Array<() => Promise<ClipboardImageRead>>): Promise<void> => {
     let refusal: ClipboardImageRefusal | undefined;
+    let attached = false;
+    let throws = 0;
     for (const route of routes) {
       let read: ClipboardImageRead;
-      try { read = await route(); } catch { reportViewMessage(COPY.imageClipboardFailed); return; }
+      try { read = await route(); } catch { throws += 1; continue; }
       attachClipboardImages(read.images);
+      if (read.images.length) { attached = true; break; }
       refusal ??= read.refused;
-      if (read.images.length) break;
     }
+    if (attached) return;
     if (refusal) reportViewMessage(IMAGE_REFUSAL[refusal]);
+    else if (routes.length > 0 && throws === routes.length) reportViewMessage(COPY.imageClipboardFailed);
   };
   const pluginClipboardRead = async (): Promise<ClipboardImageRead> => await presenter.clipboardImage();
   /** The routes the current paste gesture can reach, most faithful first. */
   const pasteRoutes = (clipboard: ClipboardLike | null | undefined): Array<() => Promise<ClipboardImageRead>> => {
     const host = geckoAccess();
+    const geckoRead = (): Promise<ClipboardImageRead> => {
+      try { return Promise.resolve(readGeckoClipboardImage(host, nextImageId)); }
+      catch { return Promise.resolve({ images: [] }); }
+    };
     return [
       ...(clipboardHasImage(clipboard) ? [() => attachmentsFromClipboard(clipboard, nextImageId)] : []),
-      ...(geckoClipboardHasImage(host) ? [() => Promise.resolve(readGeckoClipboardImage(host, nextImageId))] : []),
+      ...(host ? [geckoRead] : []),
       pluginClipboardRead,
     ];
   };
@@ -1042,15 +1010,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   });
   // The open-chat strip is a tablist with one tab stop, so the arrows and Home/End move the focus
   // between the open chats without activating one: browsing the strip must never change what the
-  // composer is editing. Enter or Space activates the focused chip through its own click.
+  // composer is editing. Enter or Space activates the focused chip through the same path as a click.
   panes.addEventListener('keydown', event => {
-    if (isComposing(event) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const items = [...panes.querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+    if (isComposing(event)) return;
+    const items = [...panes.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
     if (!items.length) return;
-    const current = items.indexOf(doc.activeElement as HTMLButtonElement);
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
-      : (Math.max(current, 0) + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
-    event.preventDefault(); items[next]?.focus();
+    const current = items.findIndex(tab => tab === doc.activeElement || tab.contains(doc.activeElement));
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (Math.max(current, 0) + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+      event.preventDefault(); items[next]?.focus();
+      return;
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if ((event.target as Element | null)?.closest?.('[data-zcr-pane-close]')) return;
+    const tab = items[Math.max(current, 0)];
+    if (!tab) return;
+    event.preventDefault();
+    tab.click();
   });
   historySearch.addEventListener('input', () => {
     if (presenter.snapshot().workspace) void presenter.searchHistory(historySearch.value).catch(reportViewError); else applyHistoryFilter();
@@ -1062,14 +1039,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!target || !target.isConnected) return;
     if (!menu.hidden && !menu.contains(target) && !picker.contains(target)) togglePicker(false);
     if (!historyPanel.hidden && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
-    if (!renameForm.hidden && !renameForm.contains(target) && !currentTitle.contains(target)) toggleRename(false);
+    if (!renameForm.hidden && !renameForm.contains(target) && !renameTrigger?.contains(target)) toggleRename(false);
     if (!plusMenu.hidden && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
     if (!plusMenu.hidden) { event.preventDefault(); togglePlus(false); plus.focus(); }
     else if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
-    else if (!renameForm.hidden) { event.preventDefault(); toggleRename(false); currentTitle.focus(); }
+    else if (!renameForm.hidden) { event.preventDefault(); toggleRename(false); renameTrigger?.focus(); }
     else if (!historyPanel.hidden) { event.preventDefault(); toggleHistory(false); historyBtn.focus(); }
   };
   doc.addEventListener('click', onDocumentClick);
@@ -1262,20 +1239,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (text) documentStatus.textContent = text; else documentStatus.replaceChildren();
   };
   const updateContext = (state: PresenterState) => {
-    const title = state.conversation ? conversationLabel(state.conversation, state.conversations) : state.paperTitle || COPY.untitled;
-    if (currentTitle.textContent !== title) currentTitle.textContent = title;
-    currentTitle.title = state.conversation?.title || state.paperTitle || COPY.untitled;
-    // The title is only a rename control while a chat is open; with no chat it is plain text and the
-    // popover cannot be opened on it.
-    if (state.conversation) currentTitle.dataset.zcrAction = 'rename-conversation';
-    else delete currentTitle.dataset.zcrAction;
-    currentTitle.setAttribute('aria-label', state.conversation ? `${COPY.renameChat}: ${title}` : title);
     if (!state.conversation && !renameForm.hidden) toggleRename(false);
-    // The chip and its close cross exist only while a chat is open; the empty state keeps the
-    // paper title plain, with no close affordance and no destructive control.
-    if (state.conversation) context.setAttribute('data-zcr-chat-pill', '');
-    else context.removeAttribute('data-zcr-chat-pill');
-    closeCurrent.hidden = !state.conversation;
     const citation = latestCitation(state);
     const sourceKey = citation ? `${citation.id}:${pageLabel(citation)}` : '';
     if (contextSource.dataset.rendered !== sourceKey) {
@@ -1292,48 +1256,94 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     renderDocumentStatus(state);
   };
   /**
-   * Reconcile the open-chat strip. A chip is kept by conversation id instead of rebuilt, so a click
-   * or an arrow key lands on a node that is still in the document: switching chats never steals the
-   * focus the reader put on the strip.
+   * Reconcile the Cursor-style tab strip. A chip is kept by id instead of rebuilt, so a click or an
+   * arrow key lands on a node that is still in the document: switching chats never steals the focus
+   * the reader put on the strip. The strip is always visible: a single open chat is still a tab, and
+   * the unbound composer is the New chat tab.
    */
   const renderPanes = (state: PresenterState) => {
-    const open = state.openConversations;
-    const visible = open.length > 1;
-    panes.hidden = !visible;
-    const ids = new Set(open.map(entry => entry.id));
+    panes.hidden = false;
+    const models: Array<{ id: string; label: string; title: string; conversation: Conversation | null }> = state.openConversations.map(conversation => ({
+      id: conversation.id,
+      label: conversationLabel(conversation, state.conversations),
+      title: conversation.title || conversationLabel(conversation, state.conversations),
+      conversation,
+    }));
+    if (state.newChatOpen || !state.conversation) models.push({ id: NEW_CHAT_TAB_ID, label: COPY.newChat, title: COPY.newChat, conversation: null });
+    const ids = new Set(models.map(entry => entry.id));
     for (const [id, node] of paneNodes) if (!ids.has(id)) { node.remove(); paneNodes.delete(id); }
     let cursor = panes.firstElementChild;
-    for (const conversation of open) {
-      let tab = paneNodes.get(conversation.id);
+    let selected: HTMLElement | null = null;
+    for (const model of models) {
+      let tab = paneNodes.get(model.id);
       if (!tab) {
-        tab = el('button', 'zcr-pane-tab');
-        tab.type = 'button';
+        tab = el('div', 'zcr-pane-tab');
+        tab.setAttribute('role', 'tab');
         tab.dataset.zcrPaneTab = '';
-        tab.dataset.zcrAction = 'select-pane';
-        tab.dataset.zcrConversationId = conversation.id;
-        tab.id = `${viewId}-pane-${conversation.id}`;
-        tab.addEventListener('click', () => { void presenter.openConversation(conversation.id).catch(reportViewError); });
-        paneNodes.set(conversation.id, tab);
+        tab.dataset.zcrConversationId = model.id;
+        tab.id = `${viewId}-pane-${model.id}`;
+        const label = el('span', model.id === NEW_CHAT_TAB_ID ? 'zcr-pane-tab-new' : 'zcr-pane-tab-label');
+        label.dataset.zcrPaneLabel = '';
+        const close = button(COPY.closeChat, 'close-conversation', () => {
+          if (presenter.closeConversation()) hooks.closeDock?.();
+        }, 'remove', 'zcr-current-close');
+        close.dataset.zcrPaneClose = '';
+        tab.append(label, close);
+        tab.addEventListener('click', event => {
+          if ((event.target as Element | null)?.closest?.('[data-zcr-pane-close]')) return;
+          const id = tab!.dataset.zcrConversationId ?? '';
+          const active = tab!.getAttribute('aria-selected') === 'true';
+          if (id === NEW_CHAT_TAB_ID) {
+            if (!active) void presenter.newConversation();
+            return;
+          }
+          if (active) toggleRename();
+          else void presenter.openConversation(id).catch(reportViewError);
+        });
+        paneNodes.set(model.id, tab);
       }
-      const active = conversation.id === state.conversation?.id;
-      // Same-name chats are told apart exactly as the history list tells them apart, and the title is
-      // the chip's own text: it is the reader's data, not copy that needs translating. Writes are
-      // guarded because this runs on every streamed delta, not only when the pane set changes.
-      const label = conversationLabel(conversation, state.conversations);
-      if (tab.textContent !== label) tab.textContent = label;
-      if (tab.title !== label) tab.title = label;
-      const selected = String(active);
-      if (tab.getAttribute('aria-selected') !== selected) tab.setAttribute('aria-selected', selected);
-      // One tab stop for the whole strip, the canonical tablist pattern: Tab reaches the chat on
-      // screen (or the strip's single entry), and the arrow keys reach the rest.
+      const active = model.id === (state.conversation?.id ?? NEW_CHAT_TAB_ID);
+      const label = tab.querySelector<HTMLElement>('[data-zcr-pane-label]')!;
+      const close = tab.querySelector<HTMLButtonElement>('[data-zcr-pane-close]')!;
+      if (model.id === NEW_CHAT_TAB_ID) {
+        if (!label.dataset.zcrUiCopy) { label.dataset.zcrUiCopy = COPY.newChat; label.textContent = COPY.newChat; }
+      } else if (label.textContent !== model.label) label.textContent = model.label;
+      if (tab.title !== model.title) tab.title = model.title;
+      const selectedAttr = String(active);
+      if (tab.getAttribute('aria-selected') !== selectedAttr) tab.setAttribute('aria-selected', selectedAttr);
       const stop = active ? 0 : -1;
       if (tab.tabIndex !== stop) tab.tabIndex = stop;
+      close.hidden = !active;
+      if (active) {
+        tab.dataset.zcrCurrentTitle = '';
+        if (model.conversation) {
+          tab.dataset.zcrAction = 'rename-conversation';
+          tab.setAttribute('aria-haspopup', 'dialog');
+          tab.setAttribute('aria-expanded', renameForm.hidden ? 'false' : 'true');
+          tab.setAttribute('aria-controls', `${viewId}-rename`);
+          tab.setAttribute('aria-label', `${COPY.renameChat}: ${model.label}`);
+          selected = tab;
+        } else {
+          delete tab.dataset.zcrAction;
+          tab.removeAttribute('aria-haspopup');
+          tab.removeAttribute('aria-expanded');
+          tab.removeAttribute('aria-controls');
+          tab.setAttribute('aria-label', COPY.newChat);
+          selected = tab;
+        }
+      } else {
+        delete tab.dataset.zcrCurrentTitle;
+        tab.dataset.zcrAction = 'select-pane';
+        tab.removeAttribute('aria-haspopup');
+        tab.removeAttribute('aria-expanded');
+        tab.removeAttribute('aria-controls');
+        tab.setAttribute('aria-label', model.label);
+      }
       if (tab !== cursor) panes.insertBefore(tab, cursor);
       cursor = tab.nextElementSibling;
     }
-    // The chat on screen is the panel the marked chip names. With a single open chat there is no
-    // tablist, so the transcript is not a tab panel either.
-    const activeTab = visible && state.conversation ? paneNodes.get(state.conversation.id) : undefined;
+    renameTrigger = selected;
+    const activeTab = paneNodes.get(state.conversation?.id ?? NEW_CHAT_TAB_ID);
     if (activeTab) { transcript.setAttribute('role', 'tabpanel'); transcript.setAttribute('aria-labelledby', activeTab.id); }
     else { transcript.removeAttribute('role'); transcript.removeAttribute('aria-labelledby'); }
   };

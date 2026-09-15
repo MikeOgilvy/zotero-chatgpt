@@ -53,6 +53,12 @@ export interface PresenterState {
    * is on screen, and a background event for an open but inactive chat is applied to that entry.
    */
   openConversations: Conversation[];
+  /**
+   * True while the unbound New chat tab is in the strip. Cursor keeps that tab after the reader
+   * switches to a named chat: `+` opens it, the first send turns it into a record, and close
+   * removes it. `conversation === null` means the tab is the one on screen.
+   */
+  newChatOpen: boolean;
   conversations: Conversation[];
   draft: WorkspaceDraft;
   pendingExplain: Citation | null;
@@ -99,6 +105,11 @@ function gapDisclosure(document: DocumentContext): string {
   return ` Recorded source gaps: ${shown.join(', ')}${gaps.length > 12 ? `, and ${gaps.length - 12} more` : ''}.`;
 }
 function unfinishedReading(job: ReadingJob): boolean { return !['completed', 'cancelled', 'failed'].includes(job.status); }
+/** A saved draft with anything the owner put in it; an empty record with only settings is not content. */
+function draftHasContent(draft: WorkspaceDraft): boolean {
+  return draft.question.trim().length > 0 || draft.citations.length > 0 || draft.images.length > 0
+    || draft.references.length > 0 || !!draft.skillId || !!draft.profileId || Object.keys(draft.overrides ?? {}).length > 0;
+}
 /** Newest first with a stable tiebreak, so the merged single listing keeps one deterministic order. */
 function newestFirst<T extends { id: string; updatedAt: string; createdAt: string }>(items: readonly T[]): T[] {
   return [...items].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt) || a.id.localeCompare(b.id));
@@ -174,20 +185,18 @@ export class ConversationPresenter {
   private planningAnnotations = new Set<string>();
   private disposed = false;
   /**
-   * Set by an explicit close. The persisted paper index still points at the closed chat, so the
-   * adoption paths must not treat it as the active conversation: the next request starts a fresh
-   * chat. Cleared as soon as a conversation becomes active again.
+   * Set by an explicit close or by `New chat`. The persisted paper index still points at the last
+   * chat, so the adoption paths must not treat it as the active conversation: the next request
+   * starts a fresh chat. Cleared as soon as a conversation becomes active again.
+   *
+   * A new chat is not stored until its first question is sent (`ensureConversation`), the way an
+   * agent tab exists only on screen until it is used: opening the dock, pressing `+`, or closing the
+   * last tab never leaves an empty record behind, so nothing invisible is ever counted or named.
    */
   private selectionCleared = false;
-  /**
-   * The one blank chat `New chat` opened and the user has not used yet. Repeated presses reuse it
-   * instead of stacking duplicate empty sessions; anything else (a restored chat, a draft, a sent
-   * message) makes the next press create a real new conversation.
-   */
-  private freshBlankId: string | null = null;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
+    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
   }
@@ -468,18 +477,11 @@ export class ConversationPresenter {
     const saved = await workspace.saveSkill({ ...(prior ?? { id, revision: '', origin: 'user' as const, permissions: [], unsupportedDependencies: [] }), ...edit, id, description: edit.description.trim() || edit.name });
     this.update({ workspace: await workspace.settings() }); return saved;
   }
-  async pickImages(): Promise<void> {
-    if (!this.services.library?.pickImages) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native image selection is unavailable.');
-    const key = this.draftKey(); const images = await this.services.library.pickImages();
-    if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while choosing images. Choose them again.');
-    if (this.state.draft.images.length + images.length > LIMITS.imagesPerRequest) throw new ReaderError('PAYLOAD_TOO_LARGE', `Attach at most ${LIMITS.imagesPerRequest} images per message.`);
-    for (const image of images) this.addImage(image);
-  }
   /**
-   * One explicitly chosen local file, already routed and bounded by the host port: text-like files
-   * arrive as reference text and image files arrive as validated image attachments. Nothing else is
-   * done here, so the picker's caps are the only caps, and a file that arrives attached is a file the
-   * owner chose — the composer never asks the host for a path of its own.
+   * One or more explicitly chosen local files, already routed and bounded by the host port: text-like
+   * files arrive as reference text and image files arrive as validated image attachments. Nothing
+   * else is done here, so the picker's caps are the only caps, and a file that arrives attached is a
+   * file the owner chose — the composer never asks the host for a path of its own.
    */
   async pickFile(): Promise<void> {
     if (!this.services.library?.pickFile) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Attaching a file is unavailable.');
@@ -500,21 +502,6 @@ export class ConversationPresenter {
   clipboardImage(): Promise<ClipboardImageRead> {
     if (this.services.readClipboardImage) return Promise.resolve(this.services.readClipboardImage());
     return Promise.resolve(readGeckoClipboardImage(pluginClipboardAccess(), () => this.services.uuid()));
-  }
-  /**
-   * Captures a PDF region as an image attachment. The composer's capture button passes nothing: the
-   * host then uses the region the owner last selected in this paper (`reader/current-selection.ts`).
-   * The last draft citation is only a fallback for the "Ask in sidechat" flow, and only when it is a
-   * selection of this same paper — a reference to another article must never be rasterized instead of
-   * the PDF on screen.
-   */
-  async captureRegion(citation?: Citation): Promise<void> {
-    if (!this.services.library?.captureRegion) throw new ReaderError('UNSUPPORTED_INTERACTION', 'PDF region capture is unavailable.');
-    const fallback = this.state.draft.citations.filter(candidate => paperId(candidate.paper) === paperId(this.paper)).at(-1);
-    const target = citation ?? fallback;
-    const key = this.draftKey(); const image = await this.services.library.captureRegion(clone(this.paper), target ? clone(target) : undefined);
-    if (key !== this.draftKey()) throw new ReaderError('INVALID_REQUEST', 'The chat changed while capturing the PDF. Capture it again.');
-    if (image) this.addImage(image);
   }
   async collections(): Promise<Array<NativeCollectionTarget & { name: string }>> {
     if (!this.services.library?.collections) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native collection selection is unavailable.');
@@ -640,7 +627,7 @@ export class ConversationPresenter {
   async activate(): Promise<void> {
     try { await this.loadLocal(); } catch { /* Preserve unreadable records and report the local failure. */ }
     if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
-    try { await this.connect(); if (this.state.runtime?.models.length) { await this.ensureConversation(); await this.sync(); await this.refreshList(); } }
+    try { await this.connect(); if (this.state.runtime?.models.length) { await this.adoptCurrent(); await this.sync(); await this.refreshList(); await this.pruneEmptyConversations(); } }
     catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
     await this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
     // Adopting the saved chat clears `message`. If local preparation already failed, that would erase
@@ -737,29 +724,66 @@ export class ConversationPresenter {
   /** After a login the conversation is loaded; a single pending More details resumes exactly once. */
   private async continueAfterLogin(): Promise<void> {
     try {
-      const conversation = await this.ensureConversation();
+      await this.adoptCurrent();
       const pending = this.state.pendingExplain;
       if (pending && !this.state.document.disclosure) {
+        // Only a resumed explain needs a chat; a plain login opens no chat of its own.
+        const conversation = await this.ensureConversation();
         this.update({ pendingExplain: null });
         await this.submit(conversation, makeExplain(pending, conversation.id, this.services.uuid(), this.currentSettings() ?? conversation.settings, this.paperIdentity()), this.contextOptions(), { ...clone(this.state.draft), skillId: null, references: [] }, await this.captureWorkspace());
       }
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
+  /**
+   * Show the attachment's stored current chat, if there is one. Nothing is created: with no stored
+   * chat the reader stays in its new-chat state and the first question creates the record.
+   */
+  private async adoptCurrent(): Promise<Conversation | null> {
+    const client = await this.connect();
+    if (this.state.conversation) return this.state.conversation;
+    if (this.selectionCleared) return null;
+    const conversation = await client.peekCurrent(this.paper);
+    if (!conversation || this.state.conversation || this.selectionCleared) return this.state.conversation;
+    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
+    return conversation;
+  }
+  /** The chat a request goes to: the one on screen, else the stored current one, else a new record. */
   private async ensureConversation(): Promise<Conversation> {
     const client = await this.connect();
     if (this.state.conversation) return this.state.conversation;
-    const settings = this.currentSettings() ?? undefined;
-    // After an explicit close the reader is in the new-chat state; creating a fresh chat is the
-    // honest equivalent of starting over, instead of letting the stored pointer re-adopt the chat
-    // the reader just closed.
-    const conversation = this.selectionCleared
-      ? await client.newConversation(this.paper, this.title, settings)
-      : await client.current(this.paper, this.title, settings);
+    const adopted = await this.adoptCurrent();
+    if (adopted) { await this.sync(); await this.refreshList(); return adopted; }
+    // The new-chat state (after `+` or a close) is the honest equivalent of starting over: the first
+    // question creates the record instead of re-adopting the chat that was just left.
+    const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
     this.selectionCleared = false;
-    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
+    // The New chat tab's draft lives under `unbound` until this first send creates a record.
+    this.drafts.delete('unbound'); this.positions.delete('unbound'); this.pendingSaves.delete('unbound');
+    this.update({ conversation, openConversations: this.withOpen(conversation), newChatOpen: false, draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
     await this.sync();
     await this.refreshList();
     return conversation;
+  }
+  /**
+   * Records with nothing in them — no message, no request, no saved draft, not open in this reader —
+   * are leftovers (a send that failed before its first message, or chats an older build created on
+   * open). They are removed so the history and any same-name numbering only ever reflect chats the
+   * owner can see. Best effort: a chat that refuses deletion stays.
+   */
+  private async pruneEmptyConversations(): Promise<void> {
+    const client = this.client; if (!client) return;
+    const open = new Set(this.state.openConversations.map(entry => entry.id));
+    const workspace = this.services.getWorkspace ? await this.getWorkspace().catch(() => null) : null;
+    let pruned = false;
+    for (const conversation of this.state.conversations) {
+      if (open.has(conversation.id) || conversation.messages.length > 0 || conversation.activeRequestId || conversation.queuedRequestIds?.length) continue;
+      const saved = workspace ? await workspace.readDraft(this.paper, conversation.id).catch(() => null) : null;
+      if (saved && draftHasContent(saved.draft)) continue;
+      try { await client.deleteConversation(conversation.paper, conversation.id); pruned = true; }
+      catch { /* a chat that cannot be deleted right now is simply kept */ }
+      if (saved && workspace) await workspace.deleteDraft(this.paper, conversation.id).catch(() => {});
+    }
+    if (pruned) { await this.refreshList(); if (this.state.history.length) await this.searchHistory(this.state.historyQuery).catch(() => {}); }
   }
   private async isolationNote(client: ReaderClient, conversation: Conversation): Promise<string | null> {
     if (conversation.messages.some(entry => entry.status === 'uncertain')) return UNCERTAIN_ISOLATION;
@@ -1152,35 +1176,36 @@ export class ConversationPresenter {
     const conversation = this.state.conversation; if (!conversation?.queuedRequestIds?.includes(requestId)) throw new ReaderError('NOT_FOUND', 'This request is not queued in the current chat.');
     await (await this.connect()).cancel(conversation.id, requestId); await this.sync();
   }
-  private conversationHasContent(conversation: Conversation): boolean {
-    const draft = this.drafts.get(conversation.id);
-    const pendingDraft = !!draft && (draft.question.trim().length > 0 || draft.citations.length > 0 || draft.images.length > 0
-      || draft.references.length > 0 || !!draft.skillId || !!draft.profileId || Object.keys(draft.overrides ?? {}).length > 0);
-    return conversation.messages.length > 0 || !!conversation.activeRequestId || !!conversation.queuedRequestIds?.length || pendingDraft;
-  }
+  /**
+   * Open the New chat tab. Nothing is created or written: the tab is the reader's unbound draft, and
+   * the first question sent from it creates the record. The chat that was on screen stays open as
+   * its own tab. Pressing `+` while the New chat tab is already on screen is a no-op.
+   */
   async newConversation(): Promise<void> {
     try {
-      await this.loadLocal(); const navigation = ++this.navigation;
-      // Deliberately starting a chat clears any pending Close state.
-      this.selectionCleared = false;
-      // The only deliberate no-op: the current chat is the blank one `New chat` just opened and the
-      // user has not used it. Reusing it is what keeps repeated presses from stacking empty chats,
-      // and it never re-adopts a *closed* or *restored* chat (their ids are not `freshBlankId`).
-      if (this.state.conversation && this.state.conversation.id === this.freshBlankId && !this.conversationHasContent(this.state.conversation)) {
-        this.update({ message: null, pendingExplain: null, contextReport: null });
-        return;
-      }
-      const client = await this.connect();
-      this.stageDraft();
-      const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
-      if (navigation !== this.navigation) return;
-      this.freshBlankId = conversation.id;
+      await this.loadLocal(); ++this.navigation;
+      if (!this.state.conversation) { this.update({ message: null, pendingExplain: null, contextReport: null }); return; }
       this.stageDraft(); this.draftVersion++;
-      // The new chat becomes an additional open pane: the chat that was on screen stays open with its
-      // own transcript, and this one is active.
-      this.update({ conversation, openConversations: this.withOpen(conversation), draft: this.emptyDraft(conversation.settings), scrollTop: 0, message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [], acquisitionTarget: null, messageFocus: null, document: { ...this.state.document, range: null, prepared: null, phase: 'idle' } });
-      this.stageDraft(); await this.sync(); await this.refreshList(); await this.refreshTaskState();
+      this.enterNewChat(this.state.openConversations);
+      await this.refreshTaskState();
     } catch (error) { this.update({ message: this.errorText(error) }); }
+  }
+  /** The new-chat state: no active record, the unbound draft, and `open` as the remaining tabs. */
+  private enterNewChat(open: Conversation[]): void {
+    const position = this.positions.get('unbound');
+    const unbound = this.drafts.get('unbound');
+    this.selectionCleared = true;
+    this.update({
+      conversation: null,
+      openConversations: open,
+      newChatOpen: true,
+      draft: unbound ? workspaceDraft(unbound) : this.emptyDraft(),
+      scrollTop: position?.scrollTop ?? 0,
+      message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [],
+      acquisitionTarget: null, messageFocus: null,
+      document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null },
+    });
+    this.stageDraft();
   }
   /**
    * Does the sidebar still have a chat to list for this attachment once `closingId` is gone?
@@ -1200,7 +1225,17 @@ export class ConversationPresenter {
    * Close the chat on screen. Kept as the single-pane entry point: the reader cancels the panel or
    * closes the chat's own title chip through it.
    */
-  closeConversation(): boolean { return this.closePane(this.state.conversation?.id ?? null); }
+  closeConversation(): boolean {
+    const id = this.state.conversation?.id ?? null;
+    if (id) return this.closePane(id);
+    // Closing the New chat tab returns to the last open chat; with no other tab it is a no-op.
+    const next = this.state.openConversations.at(-1);
+    if (!next || this.disposed) return false;
+    this.stageDraft(); this.draftVersion++; this.selectionCleared = false;
+    this.update({ ...this.panePatch(next, this.drafts.get(next.id) ?? null, this.positions.get(next.id)), newChatOpen: false });
+    this.stageDraft();
+    return false;
+  }
   /**
    * Leave one open chat without deleting or rewriting anything. The chat stays on disk and in
    * history. When another pane is still open the reader stays on that pane with its own draft and
@@ -1218,7 +1253,6 @@ export class ConversationPresenter {
     if (!closing) return false;
     this.stageDraft();
     const remaining = this.state.openConversations.filter(entry => entry.id !== id);
-    if (this.freshBlankId === id) this.freshBlankId = null;
     // Closing a background pane leaves the chat on screen untouched, including its prepared PDF.
     if (this.state.conversation?.id !== id) {
       this.update({ openConversations: remaining });
@@ -1233,19 +1267,7 @@ export class ConversationPresenter {
       this.stageDraft();
       return !this.hasChatForPaper(id);
     }
-    const position = this.positions.get('unbound');
-    const unbound = this.drafts.get('unbound');
-    this.selectionCleared = true;
-    this.update({
-      conversation: null,
-      openConversations: remaining,
-      draft: unbound ? workspaceDraft(unbound) : this.emptyDraft(),
-      scrollTop: position?.scrollTop ?? 0,
-      message: null, pendingExplain: null, contextReport: null, tasks: [], readingJobs: [],
-      acquisitionTarget: null, messageFocus: null,
-      document: { ...this.state.document, range: null, prepared: null, phase: 'idle', error: null },
-    });
-    this.stageDraft();
+    this.enterNewChat(remaining);
     return !this.hasChatForPaper(id);
   }
   async deleteConversation(id: string): Promise<void> {
@@ -1263,13 +1285,14 @@ export class ConversationPresenter {
       this.drafts.delete(id); this.positions.delete(id); this.pendingSaves.delete(id);
       if (this.services.getWorkspace) await (await this.getWorkspace()).deleteDraft(target.paper, id);
       const remaining = this.state.openConversations.filter(entry => entry.id !== id);
-      if (this.freshBlankId === id) this.freshBlankId = null;
       if (this.state.conversation?.id === id) {
         // Prefer a chat the reader still has open to the store's own fallback pointer, so deleting one
-        // pane does not silently jump to an unrelated chat.
+        // pane does not silently jump to an unrelated chat. With nothing left at all, the reader is in
+        // its new-chat state: no replacement record is created.
         const next = remaining.at(-1);
         if (next) { this.draftVersion++; this.update(this.panePatch(next, this.drafts.get(next.id) ?? null, this.positions.get(next.id), remaining)); this.stageDraft(); }
-        else await this.restoreConversation(conversation, false);
+        else if (conversation) await this.restoreConversation(conversation, false);
+        else { this.draftVersion++; this.enterNewChat(remaining); }
       } else this.update({ openConversations: remaining });
       await this.sync();
       await this.refreshList(); await this.refreshTaskState();
@@ -1293,9 +1316,6 @@ export class ConversationPresenter {
   private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft): Promise<void> {
     // A chat is active again, so a previous Close no longer governs adoption.
     this.selectionCleared = false;
-    // Any chat becoming active other than the blank one `New chat` just opened makes that blank one
-    // a normal chat: the next `New chat` must create a visible new conversation.
-    if (this.freshBlankId !== conversation.id) this.freshBlankId = null;
     let draft = override ?? this.drafts.get(conversation.id); let position = this.positions.get(conversation.id);
     if (!draft && this.services.getWorkspace) {
       const saved = await (await this.getWorkspace()).readDraft(this.paper, conversation.id);

@@ -53,7 +53,7 @@ function fixture(window = 20000) {
   };
   const makeClient = (): ReaderClient => ({
     snapshot: () => ({ revision: 1, runtime: 'ready', account: { state: 'signedIn' }, login: null, models: [], error: null }),
-    observe: () => () => undefined, refreshAccount: absent, startLogin: absent, cancelLogin: absent, current: absent, newConversation: absent, list: absent, select: absent, deleteConversation: absent, diagnostics: absent, close: absent,
+    observe: () => () => undefined, refreshAccount: absent, startLogin: absent, cancelLogin: absent, current: absent, peekCurrent: absent, newConversation: absent, list: absent, select: absent, deleteConversation: absent, diagnostics: absent, close: absent,
     get: id => id === conversation.id ? Promise.resolve(structuredClone(conversation)) : Promise.reject(new ReaderError('NOT_FOUND', 'Unknown conversation')),
     request: (_id, requestId) => { const state = receipts.get(requestId); return state ? Promise.resolve({ requestId, state, replay: false }) : Promise.reject(new ReaderError('NOT_FOUND', 'Unknown request')); },
     send: value => accept(value, false), enqueue: value => accept(value, true),

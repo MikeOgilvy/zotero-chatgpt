@@ -25,14 +25,24 @@ it('switches visible controls, accessible names and placeholders without replaci
 it('translates the open-chat strip name while a chat named like a control stays verbatim', () => {
   const { root, add } = setup();
   const strip = add('div', 'zcr-panes'); strip.setAttribute('role', 'tablist'); strip.setAttribute('aria-label', 'Open chats');
-  const tab = add('button', 'zcr-pane-tab', 'Send', strip);
-  tab.dataset.zcrAction = 'select-pane'; tab.setAttribute('aria-selected', 'true'); tab.title = 'Send';
+  const tab = add('div', 'zcr-pane-tab', '', strip);
+  tab.dataset.zcrPaneTab = ''; tab.dataset.zcrAction = 'select-pane'; tab.setAttribute('aria-selected', 'true'); tab.title = 'Send';
+  const label = add('span', 'zcr-pane-tab-label', 'Send', tab);
+  const fresh = add('div', 'zcr-pane-tab', '', strip);
+  fresh.dataset.zcrPaneTab = ''; fresh.dataset.zcrConversationId = 'new-chat'; fresh.setAttribute('aria-label', 'New chat');
+  const freshLabel = add('span', 'zcr-pane-tab-new', 'New chat', fresh);
   const locale = mountUILocale(root); locale.update('zh');
   expect(strip.getAttribute('aria-label')).toBe('已打开的对话');
   // A chip carries the chat's own name: a chat called "Send" keeps that name on screen and for AT.
-  expect(tab.textContent).toBe('Send');
+  expect(label.textContent).toBe('Send');
   expect(tab.title).toBe('Send');
-  locale.update('en'); expect(strip.getAttribute('aria-label')).toBe('Open chats'); locale.dispose();
+  // The unbound New chat tab is copy, unlike named titles.
+  expect(freshLabel.textContent).toBe('新建对话');
+  expect(fresh.getAttribute('aria-label')).toBe('新建对话');
+  locale.update('en');
+  expect(strip.getAttribute('aria-label')).toBe('Open chats');
+  expect(freshLabel.textContent).toBe('New chat');
+  locale.dispose();
 });
 
 it('translates the read-only column’s own copy while the chat it shows stays verbatim', () => {
@@ -59,7 +69,7 @@ it('translates the read-only column’s own copy while the chat it shows stays v
 
 it('never translates source, chat, history, candidate, profile or workflow content even when it matches a control', () => {
   const { root, add } = setup(); const protectedNodes: HTMLElement[] = [];
-  for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-pane-tab', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
+  for (const className of ['zcr-current-title', 'zcr-initial-title', 'zcr-history-item', 'zcr-pane-tab-label', 'zcr-command-option', 'zcr-message-text', 'zcr-message-reference', 'zcr-citation-text', 'zcr-task-question', 'zcr-task-quote', 'zcr-task-scope']) {
     const node = add('div', className, 'Send'); node.setAttribute('aria-label', 'Send'); protectedNodes.push(node);
     const embedded = add('button', 'zcr-button', 'Stop', node); embedded.dataset.zcrAction = 'send'; protectedNodes.push(embedded);
   }
@@ -275,17 +285,16 @@ it('translates the plus section headings and each row title and description', ()
   add('div', 'zcr-plus-heading', 'Attach', group);
   add('div', 'zcr-plus-heading', 'Reference', group);
   const row = add('button', 'zcr-plus-row', '', group);
-  row.dataset.zcrAction = 'pick-images'; row.setAttribute('aria-label', 'Choose images…'); row.title = 'Choose images…';
-  const title = add('span', 'zcr-plus-row-title', 'Choose images…', row);
-  const description = add('span', 'zcr-plus-row-description', 'From your computer', row);
+  row.dataset.zcrAction = 'pick-file'; row.setAttribute('aria-label', 'Attach file…'); row.title = 'Attach file…';
+  const title = add('span', 'zcr-plus-row-title', 'Attach file…', row);
+  const description = add('span', 'zcr-plus-row-description', 'Text or image from your computer', row);
   const locale = mountUILocale(group); locale.update('zh');
   const headings = [...group.querySelectorAll<HTMLElement>('.zcr-plus-heading')].map(node => node.textContent);
   expect(headings).toEqual(['添加附件', '引用']);
-  expect(title.textContent).toBe('选择图片…');
-  expect(description.textContent).toBe('来自你的电脑');
-  // The accessible name follows the visible title, so the row is announced in the reader language.
-  expect(row.getAttribute('aria-label')).toBe('选择图片…'); expect(row.title).toBe('选择图片…');
-  locale.update('en'); expect(title.textContent).toBe('Choose images…'); expect(description.textContent).toBe('From your computer'); locale.dispose();
+  expect(title.textContent).toBe('附加文件…');
+  expect(description.textContent).toBe('来自你电脑的文本或图片');
+  expect(row.getAttribute('aria-label')).toBe('附加文件…'); expect(row.title).toBe('附加文件…');
+  locale.update('en'); expect(title.textContent).toBe('Attach file…'); expect(description.textContent).toBe('Text or image from your computer'); locale.dispose();
 });
 
 it('translates the attach-file row and the file refusals while leaving the file name verbatim', () => {

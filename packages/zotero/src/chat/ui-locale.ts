@@ -20,7 +20,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Queue question': '将问题加入队列', 'Cancel queued question': '取消排队的问题',
   'Regenerate in new chat': '在新对话中重新生成', 'Edit in new chat': '在新对话中编辑',
   'Review annotation suggestions': '审核标注建议',
-  Attach: '添加附件', 'Add images or context': '添加图片或上下文', 'Choose images…': '选择图片…', 'Capture selected region': '截取所选区域',
+  Attach: '添加附件', 'Add images or context': '添加图片或上下文',
   // One local file, routed by the host: text-like files become text context, images become image
   // input. The label is deliberately about content, not about "uploading" a file anywhere.
   'Attach file…': '附加文件…', 'Text or image from your computer': '来自你电脑的文本或图片',
@@ -35,7 +35,7 @@ const COPY: Readonly<Record<string, string>> = {
   'The selected file is empty or exceeds the supported size limit.': '所选文件为空或超出支持的大小上限。',
   'This attached file has no readable text. Attach it again.': '此附加文件没有可读取的文本。请重新附加。',
   'Save literature to': '文献保存位置',
-  Reference: '引用', 'From your computer': '来自你的电脑',
+  Reference: '引用',
   Skill: 'Skill', 'Add a skill': '添加 skill', 'Installed skills for this chat': '此对话可用的 skill', 'Add references': '添加引用', 'Saved chats and articles': '已保存的对话与文章',
   'Target collection': '目标分类', 'Choose a collection…': '选择分类…', 'Preview image': '预览图片',
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
@@ -130,7 +130,7 @@ const COPY: Readonly<Record<string, string>> = {
 const CONTENT = [
   '.zcr-message-text', '.zcr-rendered', '.zcr-citation-text', '.zcr-current-title', '.zcr-initial-title',
   // An open-chat chip shows the chat's own title: a chat named "Send" must not be renamed on screen.
-  '.zcr-pane-tab',
+  '.zcr-pane-tab-label',
   // The read-only column's header names the chat it shows, which is that chat's own title.
   '.zcr-pane-preview-title',
   '.zcr-history-item', '.zcr-message-reference', '.zcr-command-option', '.zcr-command-label', '.zcr-command-description',
@@ -154,6 +154,8 @@ const TEXT = [
   '.zcr-document-status',
   // The read-only column's own note; the title beside it is reader data (see CONTENT).
   '.zcr-pane-preview-note',
+  // The unbound New chat tab is copy, unlike named chat titles.
+  '.zcr-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
   '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
   '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',
@@ -166,6 +168,8 @@ const ATTRIBUTES = [
   BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
   // The open-chat strip's own name is copy; the chat titles inside it are data and stay verbatim.
   '.zcr-panes',
+  '[data-zcr-pane-tab][data-zcr-conversation-id="new-chat"]',
+  '.zcr-pane-tab-new',
   '.zcr-plus-menu input', '.zcr-rename-form input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
   '.zcr-workspace-preview input', '.zcr-workspace-search', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.

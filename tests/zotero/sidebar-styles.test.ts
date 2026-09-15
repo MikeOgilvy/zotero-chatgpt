@@ -205,29 +205,20 @@ it('gives history rows a neutral keyboard focus ring instead of the accent outli
   expect(shippedCss()).not.toMatch(/\.zcr-history-item:focus-visible\s*\{[^}]*AccentColor/u);
 });
 
-it('shapes the current chat title as a rounded neutral chip with a small close cross', () => {
+it('shapes the selected chat tab with a small close cross', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
   const chrome = el('div', 'zcr-chrome');
-  const chip = el('div', 'zcr-chrome-main');
-  chip.setAttribute('data-zcr-chat-pill', '');
-  const title = el('button', 'zcr-current-title', 'A very long conversation name that must truncate');
+  const tab = el('div', 'zcr-pane-tab');
+  tab.setAttribute('aria-selected', 'true');
+  const title = el('span', 'zcr-pane-tab-label', 'A very long conversation name that must truncate');
   const close = el('button', 'zcr-current-close');
   close.setAttribute('aria-label', 'Close chat');
-  chip.append(title, close); chrome.append(chip); doc.body.append(chrome);
-  // The chip is fully rounded and its fill comes from the shared palette, not a hardcoded color.
-  expect(Number.parseFloat(cs(chip).borderTopLeftRadius)).toBeGreaterThanOrEqual(999);
-  expect(shippedCss()).toMatch(/\.zcr-chrome-main\[data-zcr-chat-pill\]\s*\{[^}]*var\(--fill-quinary/u);
-  // The title truncates inside the chip instead of pushing the cross out of the row.
+  tab.append(title, close); chrome.append(tab); doc.body.append(chrome);
   expect(cs(title).whiteSpace).toBe('nowrap');
   expect(cs(title).textOverflow).toBe('ellipsis');
-  // It is a control now, so it carries no default button chrome and reads as clickable.
-  expect(cs(title).borderTopWidth).toBe('0px');
-  expect(cs(title).cursor).toBe('pointer');
-  // The cross is a compact control, not a full toolbar button.
   expect(cs(close).width).toBe('18px');
   expect(cs(close).borderTopLeftRadius).toBe('999px');
-  // A neutral keyboard ring, never the accent outline the owner rejected.
   const focused = shippedRule(doc, '.zcr-current-close:focus-visible');
   expect(focused.outlineWidth).toBe('2px');
   expect(focused.outlineStyle).toBe('solid');
@@ -337,15 +328,10 @@ it('shapes the plus popover as a grouped, hairline-separated list with title and
   expect(shippedRule(doc, '.zcr-plus-row-description').cssText).toContain('var(--fill-secondary');
 });
 
-it('pushes the chrome actions to the row end even when the open chat makes the title hug its chip', () => {
+it('pushes the chrome actions to the row end so + and history stay on the trailing edge', () => {
   const { doc } = stylesheetDom();
-  // A `+` that sits next to the title instead of the row's right edge is the reported defect: with a
-  // chat open the title chip stops growing, so it no longer absorbs the free space and the actions
-  // would otherwise be laid out immediately after the chip.
-  expect(shippedRule(doc, '.zcr-chrome-main[data-zcr-chat-pill]').flexGrow).toBe('0');
   const actions = shippedRule(doc, '.zcr-chrome-actions');
   expect(actions.marginInlineStart).toBe('auto');
-  // The action group keeps its intrinsic size; the auto margin is what moves it, not a stretch.
   expect(actions.flexGrow).toBe('0');
   expect(actions.flexShrink).toBe('0');
 });
@@ -372,22 +358,15 @@ it('floats the rename popover under the chrome with the opaque menu treatment', 
   expect(shippedCss()).not.toMatch(/\.zcr-conversation-actions/u);
 });
 
-it('lays out the composer leading row so the plus and the capture-region shortcut share it', () => {
+it('lays out the composer leading row as a non-wrapping plus control', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
   const leading = el('div', 'zcr-composer-leading');
   const plus = el('button', 'zcr-icon-button zcr-plus');
-  const region = el('button', 'zcr-icon-button zcr-capture-region');
-  leading.append(plus, region); doc.body.append(leading);
-  // One non-wrapping flex row: the second control must not wrap under the plus in a narrow dock.
+  leading.append(plus); doc.body.append(leading);
   expect(cs(leading).display).toBe('flex');
-  // `flex-wrap` is unset, whose initial value is `nowrap`; wrapping must never be opted into.
   expect(cs(leading).flexWrap === '' || cs(leading).flexWrap === 'nowrap').toBe(true);
   expect(shippedCss()).not.toMatch(/\.zcr-composer-leading\s*\{[^}]*flex-wrap:\s*wrap/u);
-  expect(Number.parseFloat(cs(leading).gap)).toBeGreaterThan(0);
-  // Both keep the same 28px toolbar box, so the shortcut cannot squeeze the primary control.
-  expect(cs(plus).width).toBe(cs(region).width);
-  expect(Number.parseFloat(cs(region).width)).toBeGreaterThanOrEqual(28);
 });
 
 it('reveals message actions with opacity alone so they stay keyboard reachable', () => {
@@ -415,26 +394,25 @@ it('scrolls the open-chat strip inside the dock and rings its chips neutrally', 
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
   const strip = el('div', 'zcr-panes');
-  const tab = el('button', 'zcr-pane-tab', 'A chat');
-  const current = el('button', 'zcr-pane-tab', 'Current chat');
+  const tab = el('div', 'zcr-pane-tab');
+  const label = el('span', 'zcr-pane-tab-label', 'A chat');
+  tab.append(label);
+  const current = el('div', 'zcr-pane-tab');
   current.setAttribute('aria-selected', 'true');
+  current.append(el('span', 'zcr-pane-tab-label', 'Current chat'));
   strip.append(tab, current); doc.body.append(strip);
-  // A narrow dock scrolls the chips inside the strip instead of pushing them past the edge.
   expect(cs(strip).overflowX).toBe('auto');
   expect(cs(strip).flexWrap === '' || cs(strip).flexWrap === 'nowrap').toBe(true);
-  // A long chat name truncates in place rather than widening the row past the dock.
-  expect(cs(tab).whiteSpace).toBe('nowrap');
-  expect(cs(tab).textOverflow).toBe('ellipsis');
-  // The chat on screen is marked with the shared neutral fill, and the keyboard ring is neutral too.
-  expect(shippedRule(doc, '.zcr-pane-tab[aria-selected="true"]').cssText).toContain('var(--fill-quaternary');
+  expect(cs(label).whiteSpace).toBe('nowrap');
+  expect(cs(label).textOverflow).toBe('ellipsis');
+  expect(shippedRule(doc, '.zcr-pane-tab[aria-selected="true"]').cssText).toContain('var(--fill-quinary');
   expect(shippedRule(doc, '.zcr-pane-tab:focus-visible').outlineColor).not.toContain('AccentColor');
   expect(shippedCss()).not.toMatch(/\.zcr-pane-tab[^{},]*\{[^}]*AccentColor/u);
-  // The chips ride the chat text scale like the rest of the chrome, independently of the PDF.
   const sidebar = el('div', 'zcr-sidebar');
   sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
-  const scaled = el('button', 'zcr-pane-tab', 'A chat');
+  const scaled = el('span', 'zcr-pane-tab-label', 'A chat');
   sidebar.append(scaled); doc.body.append(sidebar);
-  expect(cs(scaled).fontSize).toBe('calc(11px * 1.5)');
+  expect(cs(scaled).fontSize).toBe('calc(12px * 1.5)');
 });
 
 it('lays the two chat columns side by side and separates them with a hairline', () => {

@@ -88,6 +88,7 @@ async function mountReadyChat(options: {
     snapshot: () => structuredClone(runtime), observe: l => { onRuntime = l; l(structuredClone(runtime)); return () => undefined; },
     refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
     current: () => Promise.resolve(structuredClone(conversation)),
+    peekCurrent: () => Promise.resolve(structuredClone(conversation)),
     newConversation: () => {
       conversation = {
         ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], lastSeq: 0,
@@ -900,7 +901,7 @@ it('keeps an attachment fallback title available in compact chrome without a her
   const client: ReaderClient = {
     snapshot: () => structuredClone(runtime), observe: l => { l(structuredClone(runtime)); return () => undefined; },
     refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
-    current: () => Promise.resolve(structuredClone(conversation)), newConversation: () => Promise.reject(new Error()),
+    current: () => Promise.resolve(structuredClone(conversation)), peekCurrent: () => Promise.resolve(structuredClone(conversation)), newConversation: () => Promise.reject(new Error()),
     list: () => Promise.resolve([structuredClone(conversation)]), select: () => Promise.reject(new Error()),
     get: () => Promise.resolve(structuredClone(conversation)), send: () => Promise.reject(new Error()),
     request: () => Promise.resolve({ requestId: 'r1', state: 'completed', replay: false }),
@@ -1276,7 +1277,7 @@ it('uses icon-only New chat and history-row delete actions with accessible names
   expect(removeChat?.querySelector('svg path')?.getAttribute('d')).toBe('M4 4l8 8M12 4l-8 8');
 });
 
-it('closes the current chat from the title pill cross without confirming, deleting, or losing the chat', async () => {
+it('closes the current chat from the selected tab cross without confirming, deleting, or losing the chat', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
     activeRequestId: null, messages: [], lastSeq: 0,
@@ -1289,8 +1290,8 @@ it('closes the current chat from the title pill cross without confirming, deleti
   const { root, presenter, client } = await mountReadyChat({ messages: [], conversations: [first, second] });
   const remove = vi.spyOn(client, 'deleteConversation');
   const chrome = root.querySelector('.zcr-chrome')!;
-  // The current chat title owns the reference's rounded chip, with the cross inside it.
-  const pill = chrome.querySelector<HTMLElement>('[data-zcr-chat-pill]')!;
+  // The selected tab owns the title and the close cross.
+  const pill = chrome.querySelector<HTMLElement>('[data-zcr-pane-tab][aria-selected="true"]')!;
   const close = pill.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!;
   expect(pill.contains(chrome.querySelector('[data-zcr-current-title]'))).toBe(true);
   // The accessible name says close, not delete; the glyph stays the calm cross.
@@ -1318,8 +1319,8 @@ it('closes the current chat from the title pill cross without confirming, deleti
   expect(presenter.snapshot().conversation?.id).toBe(first.id);
   expect(presenter.snapshot().openConversations.map(entry => entry.id)).toEqual([first.id]);
   expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
-  // The pane still belongs to a chat: the title chip and its cross are both back on screen.
-  expect(chrome.querySelector('[data-zcr-chat-pill]')).not.toBeNull();
+  // The pane still belongs to a chat: the selected tab and its cross are both back on screen.
+  expect(chrome.querySelector('[data-zcr-pane-tab][aria-selected="true"]')).not.toBeNull();
   expect(chrome.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.hidden).toBe(false);
   // The chat is still listed in history and re-opening it restores it.
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
@@ -1378,25 +1379,22 @@ async function mountTwoOpenChats(options: { width?: number; textScale?: { value:
 
 /**
  * The owner's side-by-side request, seen from the dock: starting a chat keeps the one on screen
- * open, and the panel shows which chats are open and switches between them. A single open chat needs
- * no switcher, so the strip only appears once there is a second pane to reach.
+ * open as its own tab, and New chat is an unbound tab until the first question is sent.
  */
 it('keeps the open chats as a pane strip and switches back to a chat with its own draft', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const first = presenter.snapshot().conversation!.id;
   const strip = () => root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  const tabs = () => [...strip().querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
-  expect(strip().hidden).toBe(true);
+  const tabs = () => [...strip().querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
+  expect(strip().hidden).toBe(false);
+  expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first]);
   presenter.setQuestion('第一问');
   root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!.click();
-  await vi.waitFor(() => expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first, presenter.snapshot().conversation!.id]));
-  const second = presenter.snapshot().conversation!.id;
-  expect(second).not.toBe(first);
+  await vi.waitFor(() => expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first, 'new-chat']));
+  expect(presenter.snapshot().conversation).toBeNull();
   expect(strip().hidden).toBe(false);
-  // Same-name chats are told apart exactly as the history list does it, and the chat on screen is
-  // the one the strip marks.
-  await vi.waitFor(() => expect(tabs()[1]!.textContent).toBe('Synthetic Paper A · 2'));
   expect(tabs()[0]!.textContent).toBe('Synthetic Paper A');
+  expect(tabs()[1]!.textContent).toBe('New chat');
   expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true']);
   expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('');
   // One click brings the first chat back, with its own draft: nothing was replaced or lost. The
@@ -1406,6 +1404,11 @@ it('keeps the open chats as a pane strip and switches back to a chat with its ow
   expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('第一问');
   expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']);
   expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('Synthetic Paper A');
+  // The New chat tab stayed in the strip; clicking it returns the unbound draft.
+  tabs()[1]!.click();
+  await vi.waitFor(() => expect(presenter.snapshot().conversation).toBeNull());
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('');
+  expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true']);
 });
 
 it('reaches every open chat from the arrow keys and keeps one chip in the tab order', async () => {
@@ -1413,9 +1416,9 @@ it('reaches every open chat from the arrow keys and keeps one chip in the tab or
   const first = presenter.snapshot().conversation!.id;
   await presenter.newConversation();
   const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  const tabs = () => [...strip.querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+  const tabs = () => [...strip.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
   // Roving tabindex: only the chat on screen is a stop for Tab; the arrows reach the others.
-  expect(tabs().map(tab => tab.tabIndex)).toEqual(tabs().map(tab => (tab.dataset.zcrConversationId === presenter.snapshot().conversation?.id ? 0 : -1)));
+  expect(tabs().map(tab => tab.tabIndex)).toEqual(tabs().map(tab => (tab.getAttribute('aria-selected') === 'true' ? 0 : -1)));
   expect(tabs()[0]!.tabIndex).toBe(-1);
   const win = root.ownerDocument.defaultView!;
   tabs()[1]!.focus();
@@ -1425,24 +1428,23 @@ it('reaches every open chat from the arrow keys and keeps one chip in the tab or
   expect(root.ownerDocument.activeElement).toBe(tabs()[1]);
   // Moving the focus is not a switch: the chat on screen only changes when a chip is activated.
   expect(presenter.snapshot().conversation?.id).not.toBe(first);
-  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('Synthetic Paper A · 2');
+  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('New chat');
 });
 
-it('drops the chip of a closed chat and hides the strip with the last open pane', async () => {
+it('drops the chip of a closed chat and keeps the remaining tab on screen', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const first = presenter.snapshot().conversation!.id;
   presenter.setQuestion('第一问');
   await presenter.newConversation();
   const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  const tabs = () => [...strip.querySelectorAll<HTMLButtonElement>('[data-zcr-pane-tab]')];
+  const tabs = () => [...strip.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
   expect(tabs()).toHaveLength(2);
-  // Closing the chat on screen from the chrome cross leaves the other open chat on screen, so the
-  // strip is down to one chip and steps out of the way.
+  // Closing the New chat tab from the selected-tab cross leaves the other open chat on screen.
   root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first));
   expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first]);
-  expect(strip.hidden).toBe(true);
-  // Closed, not deleted: the chat is still listed for this attachment.
+  expect(strip.hidden).toBe(false);
+  // Closed, not deleted: the first chat is still listed for this attachment.
   expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(tabs()[0]!.dataset.zcrConversationId);
   expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('第一问');
 });
@@ -1682,11 +1684,10 @@ it('keeps the New chat control available in the empty state after closing the cu
   expect(fresh.hidden).toBe(false);
   expect(fresh.disabled).toBe(false);
   expect(fresh.getAttribute('aria-label')).toMatch(/New chat/u);
+  // Already on the New chat tab: pressing + again is a no-op, and the unbound tab stays selected.
   fresh.click();
-  await vi.waitFor(() => {
-    expect(presenter.snapshot().conversation).not.toBeNull();
-    expect(root.querySelector<HTMLElement>('[data-zcr-chat-pill]')).not.toBeNull();
-  });
+  expect(presenter.snapshot().conversation).toBeNull();
+  expect(root.querySelector('[data-zcr-pane-tab][data-zcr-conversation-id="new-chat"][aria-selected="true"]')).not.toBeNull();
 });
 
 it('collapses the dock when closing the last chat for the attachment', async () => {
@@ -1786,7 +1787,7 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
   const client: ReaderClient = {
     snapshot: () => structuredClone(runtime), observe: l => { l(structuredClone(runtime)); return () => undefined; },
     refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
-    current: () => Promise.resolve(structuredClone(second)), newConversation: () => Promise.reject(new Error()),
+    current: () => Promise.resolve(structuredClone(second)), peekCurrent: () => Promise.resolve(structuredClone(second)), newConversation: () => Promise.reject(new Error()),
     list: () => Promise.resolve([structuredClone(first), structuredClone(second)]), select: () => Promise.reject(new Error()),
     get: () => Promise.resolve(structuredClone(second)), send: () => Promise.reject(new Error()),
     request: () => Promise.resolve({ requestId: 'r1', state: 'completed', replay: false }),
@@ -2360,9 +2361,8 @@ it('surfaces the presenter’s own sentence for a coded view failure and keeps t
   const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
   const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
   plus.click();
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="capture-region"]')!.click();
-  // Region capture without a native reader is a coded ReaderError, so its own sentence is shown.
-  await vi.waitFor(() => expect(viewError.textContent).toBe('PDF region capture is unavailable.'));
+  root.querySelector<HTMLButtonElement>('[data-zcr-action="pick-file"]')!.click();
+  await vi.waitFor(() => expect(viewError.textContent).toBe('Attaching a file is unavailable.'));
   expect(viewError.hidden).toBe(false);
 });
 
@@ -2432,6 +2432,28 @@ it('falls back to the plugin clipboard when the reader realm claims an image but
     input.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
+  } finally {
+    delete view.Cc; delete view.Ci; delete view.Services;
+  }
+});
+
+it('continues to the plugin clipboard when the reader-window clipboard route throws', async () => {
+  const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
+  const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const view = root.ownerDocument.defaultView! as unknown as { Cc: unknown; Ci: unknown; Services: unknown; Event: typeof Event };
+  view.Cc = { '@mozilla.org/widget/transferable;1': { createInstance: () => { throw new Error('nsIClipboard unavailable'); } } };
+  view.Ci = { nsITransferable: {}, nsIClipboard: {} };
+  view.Services = { clipboard: { kGlobalClipboard: 1, hasDataMatchingFlavors: () => { throw new Error('flavor probe failed'); }, getData: () => { throw new Error('getData failed'); } } };
+  input.focus();
+  const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: [] } });
+  try {
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(root.querySelector<HTMLElement>('[data-zcr-view-error]')!.hidden).toBe(true);
   } finally {
     delete view.Cc; delete view.Ci; delete view.Services;
   }
@@ -2513,14 +2535,13 @@ it('shows one current title and keeps the chat switch reachable from history', a
   const chrome = root.querySelector('.zcr-chrome')!;
   expect(chrome.querySelectorAll('[data-zcr-current-title]')).toHaveLength(1);
   expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
-  // The one title carries the chip; the destructive history delete is not in the chrome.
-  expect(chrome.querySelectorAll('[data-zcr-chat-pill]')).toHaveLength(1);
+  expect(chrome.querySelectorAll('[data-zcr-pane-tab][aria-selected="true"]')).toHaveLength(1);
   expect(chrome.querySelector('[data-zcr-action="delete-conversation"], [data-zcr-action="delete-current-conversation"]')).toBeNull();
   root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
   root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A · 2');
-  expect(chrome.querySelectorAll('[data-zcr-chat-pill]')).toHaveLength(1);
+  expect(chrome.querySelectorAll('[data-zcr-pane-tab][aria-selected="true"]')).toHaveLength(1);
 });
 
 it('keeps local history reachable when the account signs out and the runtime becomes unavailable', async () => {
@@ -2658,51 +2679,17 @@ it('closes the model popover on Escape and click outside', async () => {
   expect(menu.hidden).toBe(true);
 });
 
-it('keeps the plus and the capture-region shortcut at the composer start and removes the attach and @ buttons', async () => {
+it('keeps the plus at the composer start and removes the attach and @ buttons', async () => {
   const { root } = await mountReadyChat();
   const leading = root.querySelector<HTMLElement>('[data-zcr-composer-leading]')!;
   const controls = [...leading.querySelectorAll<HTMLButtonElement>('button')];
-  expect(controls.map(node => node.dataset.zcrAction)).toEqual(['composer-plus', 'capture-region']);
+  expect(controls.map(node => node.dataset.zcrAction)).toEqual(['composer-plus']);
   const plus = controls[0]!;
   expect(plus.dataset.zcrPlus).toBe('');
   expect(plus.getAttribute('aria-label')).toBe('Add images or context');
-  // Capturing the selected region is a direct control of its own, not a row inside the popover.
-  const region = controls[1]!;
-  expect(region.getAttribute('aria-label')).toBe('Capture selected region');
-  expect(region.getAttribute('title')).toBe('Capture selected region');
-  expect(region.hidden).toBe(false);
-  // The glyph is a selection marquee with a filled centre mark. Corner brackets alone rendered as a
-  // bare empty square at the toolbar icon size, which is how the owner read the broken control.
-  const glyph = region.querySelector('svg')!;
-  expect(glyph.querySelectorAll('[data-zcr-icon-mark]')).toHaveLength(1);
-  expect(glyph.querySelector('[data-zcr-icon-mark]')!.getAttribute('fill')).toBe('currentColor');
-  expect(plus.querySelectorAll('[data-zcr-icon-mark]')).toHaveLength(0);
-  // The old Attach details and the literal '@' trigger are gone, not merely hidden.
+  expect(root.querySelector('[data-zcr-action="capture-region"]')).toBeNull();
   expect(root.querySelector('.zcr-attachment-menu, .zcr-input-actions')).toBeNull();
   expect([...root.querySelectorAll('button')].filter(node => node.textContent?.trim() === '@')).toHaveLength(0);
-});
-
-it('captures the selected region from the composer shortcut and reports its refusal beside the composer', async () => {
-  const { root, presenter } = await mountReadyChat({ messages: [] });
-  const region = root.querySelector<HTMLButtonElement>('[data-zcr-action="capture-region"]')!;
-  // The shortcut lives in the composer row, not behind the plus popover.
-  expect(region.closest('[data-zcr-plus-menu]')).toBeNull();
-  expect(region.closest('[data-zcr-composer-leading]')).not.toBeNull();
-  const capture = vi.spyOn(presenter, 'captureRegion').mockResolvedValue(undefined);
-  region.click();
-  await vi.waitFor(() => expect(capture).toHaveBeenCalledTimes(1));
-  // The button passes nothing: the host captures the region the owner last selected, not whatever
-  // citation happens to be in the draft.
-  expect(capture).toHaveBeenCalledWith();
-  const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
-  expect(slot.hidden).toBe(true);
-  capture.mockRejectedValueOnce(new Error('/Users/somebody/private/state.json missing'));
-  region.click();
-  await vi.waitFor(() => expect(slot.hidden).toBe(false));
-  // The failure is reported honestly but without leaking the host's private path.
-  expect(slot.textContent).not.toContain('/Users/somebody');
-  // A plain button has no popover state: clicking it must not open the attach dialog.
-  expect(root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!.hidden).toBe(true);
 });
 
 it('groups the plus popover into titled sections with title and description rows', async () => {
@@ -2715,7 +2702,7 @@ it('groups the plus popover into titled sections with title and description rows
   expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
   expect(groups[2]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Skill');
   const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
-  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-images', 'pick-file', 'composer-references', 'composer-skill']);
+  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-file', 'composer-references', 'composer-skill']);
   for (const row of rows) {
     expect(row.tagName).toBe('BUTTON');
     const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
@@ -2794,14 +2781,8 @@ it('opens every attachment route from the plus menu and closes it after a choice
   expect(plus.getAttribute('aria-expanded')).toBe('true');
   const route = (action: string) => [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.dataset.zcrAction === action)!;
 
-  const pick = vi.spyOn(presenter, 'pickImages').mockResolvedValue(undefined);
-  route('pick-images').click();
-  await vi.waitFor(() => expect(pick).toHaveBeenCalledTimes(1));
-  expect(menu.hidden).toBe(true);
-
   plus.click();
-  // Attaching a real file is its own route beside the image route, and it goes through the presenter
-  // so the draft, caps and error reporting stay in one place.
+  // Images are files: the attach-file row is the only local-file route.
   const attachFile = route('pick-file');
   expect(attachFile.title).toBe('Attach file…');
   expect(attachFile.getAttribute('aria-label')).toBe('Attach file…');

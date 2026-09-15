@@ -46,6 +46,22 @@ async function hashInput(input: SendInput, version: 1 | 2 = 2): Promise<string> 
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
 const TERMINAL_STATES: RequestState[] = ['completed', 'cancelled', 'failed', 'uncertain'];
+/** Longest chat name derived from a question; longer questions are cut at a word edge with an ellipsis. */
+export const DERIVED_TITLE_LIMIT = 60;
+/**
+ * The chat name a first question yields: its first non-empty line, whitespace collapsed, cut to
+ * `DERIVED_TITLE_LIMIT` characters. An empty question (a selection-only explain) yields null so the
+ * chat keeps the name it was created with.
+ */
+export function titleFromQuestion(question: string): string | null {
+  const line = question.split(/\r?\n/u).map(part => part.replace(/\s+/gu, ' ').trim()).find(part => part.length > 0);
+  if (!line) return null;
+  const characters = Array.from(line);
+  if (characters.length <= DERIVED_TITLE_LIMIT) return line;
+  const cut = characters.slice(0, DERIVED_TITLE_LIMIT).join('');
+  const edge = cut.lastIndexOf(' ');
+  return `${(edge > DERIVED_TITLE_LIMIT / 2 ? cut.slice(0, edge) : cut).trimEnd()}…`;
+}
 function toPublic(conversation: StoredConversation): Conversation {
   const requestTiming = conversation.requests.map(request => ({
     requestId: request.requestId,
@@ -116,6 +132,15 @@ export class ReaderService {
     }
     return this.create(scope, title, settings);
   }
+  /** The stored current chat, if any. Nothing is created: opening the sidebar must not leave a record behind. */
+  async peekCurrent(paper: PaperScope): Promise<Conversation | null> {
+    const scope = validatePaperScope(paper);
+    const existing = await this.store.current(scope);
+    if (!existing) return null;
+    await this.load(existing.id, existing);
+    await this.ensureRecovered(existing.id);
+    return toPublic(await this.load(existing.id));
+  }
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
     return this.create(validatePaperScope(paper), title, settings);
   }
@@ -146,9 +171,9 @@ export class ReaderService {
     await this.ensureRecovered(selected.id);
     return toPublic(await this.load(selected.id));
   }
-  async deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> {
+  async deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation | null> {
     const scope = validatePaperScope(paper);
-    const title = await this.serial(conversationId, async () => {
+    await this.serial(conversationId, async () => {
       const conversation = await this.load(conversationId);
       if (paperId(scope) !== paperId(conversation.paper)) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
       if (conversation.activeRequestId || conversation.requests.some(r => ACTIVE.includes(r.state) || r.state === 'uncertain')) {
@@ -156,9 +181,9 @@ export class ReaderService {
       }
       await this.store.remove(scope, conversationId);
       this.loaded.delete(conversationId); this.recovered.delete(conversationId);
-      return conversation.title;
     });
-    return this.current(scope, title || 'PDF attachment');
+    // Deleting the last chat leaves the attachment with no chat, not with a freshly created empty one.
+    return this.peekCurrent(scope);
   }
   async renameConversation(conversationId: string, title: string): Promise<Conversation> {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > 1024) throw new ReaderError('INVALID_REQUEST', 'Enter a chat name between 1 and 1024 characters.');
@@ -499,6 +524,9 @@ export class ReaderService {
           return reference;
         });
         if (input.paper) c.paperIdentity = input.paper;
+        // The first question names the chat, the way an agent tab is named after what was asked; a name
+        // the owner typed is never overwritten, and a chat that already has messages keeps its name.
+        if (c.messages.length === 0 && !c.titleCustomized) c.title = titleFromQuestion(input.question) ?? c.title;
         c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action,
           ...(input.images?.length ? { images: input.images } : {}), ...(input.paper ? { paper: input.paper } : {}), ...(input.document ? { document: documentSummary(input.document) } : {}),
           ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}),

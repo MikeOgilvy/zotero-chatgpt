@@ -17,6 +17,8 @@ export interface PreferencePaneOptions {
   label: string;
   src: string;
   scripts: string[];
+  /** Built-in Zotero panes set this; a thrown load then cannot leave the previous pane on screen. */
+  defaultXUL: boolean;
 }
 export interface PreferencePaneRegistry {
   register(options: PreferencePaneOptions): Promise<string>;
@@ -50,6 +52,7 @@ export function createPreferencePaneRegistrar(host: PreferencePaneRegistrarHost)
     label: PREFERENCES_PANE_LABEL,
     src: `${host.rootURI}${PREFERENCES_PANE_SOURCE}`,
     scripts: [`${host.rootURI}${PREFERENCES_PANE_SCRIPT}`],
+    defaultXUL: true,
   });
   const register = async (): Promise<string> => host.panes!.register(options());
   return {

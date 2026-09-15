@@ -39,7 +39,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
   const persistConversation = (value: Conversation) => { conversations.set(value.id, value); if (conversation.id === value.id) conversation = value; };
   const client: ReaderClient = {
     snapshot: () => copy(runtime), observe: listener => { listener(copy(runtime)); return () => undefined; }, refreshAccount: () => Promise.resolve(), startLogin: () => Promise.reject(new Error('No login in tests')), cancelLogin: () => Promise.resolve(),
-    current: vi.fn(() => Promise.resolve(copy(conversation))), newConversation: vi.fn(() => { saveConversation({ ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], activeRequestId: null, lastSeq: 0 }); return Promise.resolve(copy(conversation)); }),
+    current: vi.fn(() => Promise.resolve(copy(conversation))), peekCurrent: vi.fn(() => Promise.resolve(copy(conversation))), newConversation: vi.fn(() => { saveConversation({ ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], activeRequestId: null, queuedRequestIds: [], lastSeq: 0 }); return Promise.resolve(copy(conversation)); }),
     list: () => Promise.resolve(copy([...conversations.values()].filter(item => item.paper.attachmentKey === paperA.attachmentKey))), get: id => { const found = conversations.get(id); return found ? Promise.resolve(copy(found)) : Promise.reject(new ReaderError('NOT_FOUND', 'Unknown')); }, select: (_paper, id) => { const value = conversations.get(id); if (!value) return Promise.reject(new Error('Unknown')); conversation = value; return Promise.resolve(copy(value)); },
     send: vi.fn<ReaderClient['send']>(input => { const target = conversations.get(input.conversationId)!; sent.push(copy(input)); persistConversation({ ...target, activeRequestId: input.requestId, lastSeq: target.lastSeq + 1, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, text: input.question, settings: input.settings, citations: input.citations, status: 'completed', ...(input.images ? { images: input.images } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.document ? { document: { id: input.document.id, revision: input.document.revision, parserVersion: input.document.parserVersion, totalPages: input.document.totalPages, pages: input.document.pages.map(page => ({ pageIndex: page.pageIndex, pageLabel: page.pageLabel, status: page.status })), textBytes: input.document.pages.reduce((sum, page) => sum + new TextEncoder().encode(page.text).length, 0) } } : {}), ...(input.references ? { references: input.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; }) } : {}) }] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
     enqueue: vi.fn<NonNullable<ReaderClient['enqueue']>>(input => { queued.push(copy(input)); saveConversation({ ...conversation, queuedRequestIds: [...(conversation.queuedRequestIds ?? []), input.requestId] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
@@ -49,7 +49,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     branchConversation: vi.fn<NonNullable<ReaderClient['branchConversation']>>((_id, messageId) => { saveConversation({ ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', activeRequestId: null, parentConversationId: conversation.id, forkMessageId: messageId, messages: [] }); return Promise.resolve(copy(conversation)); }),
     diagnostics: () => Promise.resolve({ pluginVersion: 'test', runtimeVersion: 'test', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }), subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, close: () => Promise.resolve(),
   };
-  const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickImages: vi.fn(() => Promise.resolve([copy(imageA)])), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportImage: vi.fn(() => Promise.resolve()) };
+  const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportImage: vi.fn(() => Promise.resolve()) };
   let id = 0;
   const services: PresenterServices = { ensureStarted: vi.fn(() => options.offline ? Promise.reject(new Error('Runtime unavailable')) : Promise.resolve(client)), openAuthorization: () => undefined, uuid: () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++id).padStart(12, '0')}`, now: () => '2026-09-12T00:00:00Z', getWorkspace: () => Promise.resolve(workspace), library, openHistory: vi.fn(() => Promise.resolve()), ...(options.searchTimeoutMs === undefined ? {} : { searchTimeoutMs: options.searchTimeoutMs }), ...(options.document ? { document: { prepare: () => Promise.resolve(copy(documentA)), validate: () => Promise.resolve(), readEnabled: () => true, writeEnabled: () => {} } } : {}) };
   const presenter = new ConversationPresenter(paperA, 'Paper A', services);
@@ -232,29 +232,7 @@ it('reorders images without mutating the previously captured draft', async () =>
   f.presenter.addImage(imageA); f.presenter.addImage(second); const before = f.presenter.snapshot().draft;
   f.presenter.moveImage(second.id, -1);
   expect(f.presenter.snapshot().draft.images.map(image => image.id)).toEqual([second.id, imageA.id]);
-  expect(before.images.map(image => image.id)).toEqual([imageA.id, second.id]); f.presenter.dispose();
-});
-
-it('captures the region of the open paper and never a draft reference to another PDF', async () => {
-  const f = fixture(); await f.presenter.activate();
-  const captureRegion = vi.fn(() => Promise.resolve(copy(imageA)));
-  f.services.library!.captureRegion = captureRegion;
-  // The composer's capture button passes no citation: the host resolves the region the owner selected.
-  await f.presenter.captureRegion();
-  expect(captureRegion).toHaveBeenCalledWith(paperA, undefined);
-  expect(f.presenter.snapshot().draft.images.map(image => image.id)).toEqual([imageA.id]);
-  // A citation for another article sitting in the draft must not become the captured region, because
-  // that would rasterize a PDF the owner is not looking at.
-  f.presenter.addCitation(copy(citationB));
-  await f.presenter.captureRegion();
-  expect(captureRegion).toHaveBeenLastCalledWith(paperA, undefined);
-  // A selection of this same paper is a usable explicit region, and the caller can still name one.
-  captureRegion.mockClear(); f.presenter.addCitation(copy(citationA));
-  await f.presenter.captureRegion();
-  expect(captureRegion).toHaveBeenLastCalledWith(paperA, citationA);
-  captureRegion.mockClear(); await f.presenter.captureRegion(copy(citationB));
-  expect(captureRegion).toHaveBeenLastCalledWith(paperA, citationB);
-  f.presenter.dispose();
+  expect(before.images.map(image => image.id)).toEqual([imageA.id, second.id]);   f.presenter.dispose();
 });
 
 function readingPort(conversationId: string) {
@@ -406,14 +384,14 @@ it('keeps a background annotation completion owned by its original chat after Ne
   const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.getTasks = () => Promise.resolve(t.port);
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', workflow: 'annotate' });
   await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
-  const requestId = f.sent[0]!.requestId; await f.presenter.newConversation(); const current = f.presenter.snapshot().conversation!.id;
-  expect(current).not.toBe(original); expect(f.presenter.snapshot().generating).toBe(false);
+  const requestId = f.sent[0]!.requestId;   await f.presenter.newConversation();
+  expect(f.presenter.snapshot().conversation).toBeNull(); expect(f.presenter.snapshot().generating).toBe(false);
   const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] });
   const old = f.conversations.get(original)!;
   f.conversations.set(original, { ...old, activeRequestId: null, messages: [...old.messages, { id: 'answer-a', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text }] });
   f.emitFor(original, { type: 'completed', requestId, messageId: 'answer-a', finalText: text });
   await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ conversationId: original, modelRequestId: requestId })));
-  expect(f.presenter.snapshot().conversation?.id).toBe(current); expect(f.presenter.snapshot().tasks).toEqual([]); f.presenter.dispose();
+  expect(f.presenter.snapshot().conversation).toBeNull(); expect(f.presenter.snapshot().tasks).toEqual([]); f.presenter.dispose();
 });
 
 it('recovers completed annotation output after a restart gap without re-planning an existing task', async () => {
@@ -434,11 +412,12 @@ it('keeps a new chat usable during older preparation and clears only the accepte
   f.services.document!.prepare = () => new Promise(resolve => { finish = resolve; });
   await f.presenter.activate(); const original = f.conversation().id; f.presenter.setQuestion('Question A'); const pending = f.presenter.send();
   await vi.waitFor(() => expect(f.presenter.snapshot().generating).toBe(true));
-  await f.presenter.newConversation(); const next = f.presenter.snapshot().conversation!.id;
+  await f.presenter.newConversation();
+  expect(f.presenter.snapshot().conversation).toBeNull();
   expect(f.presenter.snapshot().generating).toBe(false); f.presenter.setQuestion('Question B'); finish(documentA); await pending;
   expect(f.sent[0]?.conversationId).toBe(original); expect(f.presenter.snapshot().draft.question).toBe('Question B');
   await f.presenter.openConversation(original); expect(f.presenter.snapshot().draft.question).toBe('');
-  await f.presenter.openConversation(next); expect(f.presenter.snapshot().draft.question).toBe('Question B'); f.presenter.dispose();
+  await f.presenter.newConversation(); expect(f.presenter.snapshot().draft.question).toBe('Question B'); f.presenter.dispose();
 });
 
 it('settles an unanswered @ search with an honest failure instead of waiting forever', async () => {

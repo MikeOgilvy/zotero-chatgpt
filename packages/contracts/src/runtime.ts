@@ -70,7 +70,10 @@ export interface ReaderClient {
   refreshAccount(): Promise<void>;
   startLogin(): Promise<LoginFlow>;
   cancelLogin(): Promise<void>;
+  /** The attachment's current conversation, creating one when none is stored yet. */
   current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
+  /** The attachment's current conversation, or null; never creates or writes anything. */
+  peekCurrent(paper: PaperScope): Promise<Conversation | null>;
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation>;
   list(paper: PaperScope): Promise<Conversation[]>;
   get(conversationId: string): Promise<Conversation>;
@@ -80,7 +83,8 @@ export interface ReaderClient {
   releaseBatch?(conversationId: string, batchId: string): Promise<void>;
   request(conversationId: string, requestId: string): Promise<SendReceipt>;
   cancel(conversationId: string, requestId: string): Promise<SendReceipt>;
-  deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation>;
+  /** Deletes the chat and returns the attachment's remaining current chat, or null when none is left. */
+  deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation | null>;
   renameConversation?(conversationId: string, title: string): Promise<Conversation>;
   branchConversation?(conversationId: string, messageId: string): Promise<Conversation>;
   diagnostics(conversationId: string): Promise<ShareableDiagnostics>;

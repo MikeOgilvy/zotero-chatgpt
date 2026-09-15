@@ -45,40 +45,47 @@ function unavailable(root: Element, text: string): void {
 }
 
 function mount(root: Element): void {
-  // Zotero dispatches one load event per pane root, but a second one must never stack a second form.
-  if (panes.has(root)) return;
-  const zotero = scope.Zotero;
-  const bridge = zotero?.ZoteroCodexReaderPreferencesHost;
-  if (!zotero || !bridge) {
-    unavailable(root, 'Zotero Codex Reader preferences are unavailable because the plugin is not running.');
-    return;
-  }
-  // History methods cross as JSON text too. A host that has not published them yet gets a pane with
-  // no History section; a malformed payload is the section's problem, never a mount failure.
-  const history = bridge.readHistory && bridge.deleteHistory
-    ? {
-        readHistory: async (query: string): Promise<unknown> => JSON.parse(await bridge.readHistory!(query)) as unknown,
-        deleteHistory: async (ids: string[]): Promise<unknown> => JSON.parse(await bridge.deleteHistory!(JSON.stringify(ids))) as unknown,
-      }
-    : {};
-  const pane = createPreferencesPane({
-    read: async () => JSON.parse(await bridge.readSettings()) as WorkspaceSettings,
-    save: value => Promise.resolve(bridge.writeSettings(JSON.stringify(value))),
-    setSkillEnabled: (id, enabled) => Promise.resolve(bridge.setSkillEnabled(id, enabled)),
-    readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
-    writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
-    // The live model list is optional like History: an older host renders the bundled families and
-    // the honest "these come from the runtime" copy instead of failing to mount.
-    ...(bridge.readLiveModels ? {
-      readLiveModels: async (): Promise<unknown> => JSON.parse(await bridge.readLiveModels!()) as unknown,
-    } : {}),
-    ...history,
-  });
-  panes.set(root, pane);
-  void pane.mount(root).catch((error: unknown) => {
-    zotero.logError?.(error);
+  try {
+    // Zotero dispatches one load event per pane root, but a second one must never stack a second form.
+    if (panes.has(root)) return;
+    const zotero = scope.Zotero;
+    const bridge = zotero?.ZoteroCodexReaderPreferencesHost;
+    if (!zotero || !bridge) {
+      unavailable(root, 'Zotero Codex Reader preferences are unavailable because the plugin is not running.');
+      return;
+    }
+    // History methods cross as JSON text too. A host that has not published them yet gets a pane with
+    // no History section; a malformed payload is the section's problem, never a mount failure.
+    const history = bridge.readHistory && bridge.deleteHistory
+      ? {
+          readHistory: async (query: string): Promise<unknown> => JSON.parse(await bridge.readHistory!(query)) as unknown,
+          deleteHistory: async (ids: string[]): Promise<unknown> => JSON.parse(await bridge.deleteHistory!(JSON.stringify(ids))) as unknown,
+        }
+      : {};
+    const pane = createPreferencesPane({
+      read: async () => JSON.parse(await bridge.readSettings()) as WorkspaceSettings,
+      save: value => Promise.resolve(bridge.writeSettings(JSON.stringify(value))),
+      setSkillEnabled: (id, enabled) => Promise.resolve(bridge.setSkillEnabled(id, enabled)),
+      readAutomaticPdfText: () => bridge.readAutomaticPdfText(),
+      writeAutomaticPdfText: enabled => bridge.writeAutomaticPdfText(enabled),
+      // The live model list is optional like History: an older host renders the bundled families and
+      // the honest "these come from the runtime" copy instead of failing to mount.
+      ...(bridge.readLiveModels ? {
+        readLiveModels: async (): Promise<unknown> => JSON.parse(await bridge.readLiveModels!()) as unknown,
+      } : {}),
+      ...history,
+    });
+    panes.set(root, pane);
+    void pane.mount(root).catch((error: unknown) => {
+      zotero.logError?.(error);
+      unavailable(root, 'The preferences pane could not be displayed. Reopen the Preferences window to retry.');
+    });
+  } catch (error) {
+    // A throw from onload aborts Zotero's pane switch and leaves the previously selected pane
+    // (Better BibTeX, Appearance, …) on screen while the sidebar still highlights this plugin.
+    scope.Zotero?.logError?.(error);
     unavailable(root, 'The preferences pane could not be displayed. Reopen the Preferences window to retry.');
-  });
+  }
 }
 
 function unmount(root: Element): void {

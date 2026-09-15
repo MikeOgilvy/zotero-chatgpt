@@ -579,6 +579,7 @@ async function runHostSmoke(config) {
         src: pane ? String(pane.src) : null,
         label: pane ? String(pane.rawLabel) : null,
         scripts: pane && Array.isArray(pane.scripts) ? pane.scripts.map(String) : [],
+        defaultXUL: pane ? pane.defaultXUL === true : false,
       };
     };
     const identity = paneDetails();
@@ -586,7 +587,8 @@ async function runHostSmoke(config) {
       identity.paneCount === 1 && identity.pluginIDMatches &&
       typeof identity.src === 'string' && identity.src.endsWith('content/preferences/preferences.xhtml') &&
       identity.label === 'Zotero Codex Reader' &&
-      identity.scripts.length === 1 && identity.scripts[0].endsWith('content/preferences/pane.js'),
+      identity.scripts.length === 1 && identity.scripts[0].endsWith('content/preferences/pane.js') &&
+      identity.defaultXUL === true,
       identity);
     // Open the real Preferences window and select our pane; Zotero loads the fragment and its script.
     const prefWin = Zotero.Utilities.Internal.openPreferences(PANE_ID);

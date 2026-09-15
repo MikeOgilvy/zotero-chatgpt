@@ -144,7 +144,6 @@ function parseIndex(value: unknown): PaperIndex {
 }
 export class ConversationStore {
   private conversations = new Map<UUID, StoredConversation>();
-  private indexes = new Map<string, PaperIndex>();
   private queue = Promise.resolve();
   constructor(private storage: StoragePort, private clock: StoreClock) {}
   private serial<T>(operation: () => Promise<T>): Promise<T> {
@@ -206,17 +205,25 @@ export class ConversationStore {
     conversation.logSeq = logSeq;
     return conversation;
   }
+  /**
+   * The paper index is re-read on every use rather than cached: the preferences pane deletes chats
+   * through its own store instance, and a cached index here would keep listing a chat whose file is
+   * gone, which is how the sidebar ended up asking for an "Unknown conversation". The file is tiny.
+   */
   private async loadIndex(paper: PaperScope): Promise<PaperIndex> {
-    const path = this.indexPath(paper);
-    const cached = this.indexes.get(path); if (cached) return cached;
-    const raw = await this.readJson(path);
-    const index = raw === null ? { schemaVersion: 1 as const, conversations: [], current: null } : parseIndex(raw);
-    this.indexes.set(path, index); return index;
+    const raw = await this.readJson(this.indexPath(paper));
+    return raw === null ? { schemaVersion: 1 as const, conversations: [], current: null } : parseIndex(raw);
   }
   private async load(id: UUID): Promise<StoredConversation> {
+    const loaded = await this.loadIfPresent(id);
+    if (!loaded) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
+    return loaded;
+  }
+  /** A missing file is a dangling index entry (null); a present but unreadable one is still an error. */
+  private async loadIfPresent(id: UUID): Promise<StoredConversation | null> {
     const cached = this.conversations.get(id); if (cached) return cached;
     const raw = await this.readJson(this.conversationPath(id));
-    if (raw === null) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
+    if (raw === null) return null;
     const object = asRecord(raw);
     if (object.id !== id) unavailable();
     if (object.schemaVersion === 2 || object.schemaVersion === 3) {
@@ -228,10 +235,18 @@ export class ConversationStore {
     this.conversations.set(id, conversation); return conversation;
   }
   current(paper: PaperScope): Promise<StoredConversation | null> {
-    return this.serial(async () => { const index = await this.loadIndex(paper); return index.current ? clone(await this.load(index.current)) : null; });
+    return this.serial(async () => {
+      const index = await this.loadIndex(paper);
+      const conversation = index.current ? await this.loadIfPresent(index.current) : null;
+      return conversation ? clone(conversation) : null;
+    });
   }
   list(paper: PaperScope): Promise<StoredConversation[]> {
-    return this.serial(async () => { const index = await this.loadIndex(paper); const all = []; for (const id of index.conversations) all.push(clone(await this.load(id))); return all; });
+    return this.serial(async () => {
+      const index = await this.loadIndex(paper); const all = [];
+      for (const id of index.conversations) { const conversation = await this.loadIfPresent(id); if (conversation) all.push(clone(conversation)); }
+      return all;
+    });
   }
   get(id: UUID): Promise<StoredConversation> { return this.serial(async () => clone(await this.load(id))); }
   /** Does not populate the full-source cache: a subsequent get still verifies every source. */
@@ -247,38 +262,17 @@ export class ConversationStore {
       return clone(result);
     });
   }
-  /**
-   * The name a new chat gets. The first chat about an attachment is the plain title; a sibling that
-   * would collide gets the smallest unused `· 讨论 N`, so the number counts the chats that actually
-   * hold that title rather than every chat ever stored for the paper. Scanning is best-effort: a
-   * sibling this store cannot read is skipped instead of blocking the new chat or inventing a
-   * number, and the stored titles are never rewritten (they are data).
-   */
-  private async nextTitle(index: PaperIndex, title: string): Promise<string> {
-    const taken = new Set<string>();
-    for (const id of index.conversations) {
-      try {
-        const raw = await this.readJson(this.conversationPath(id));
-        if (raw !== null) taken.add(str(asRecord(raw).title));
-      } catch { /* an unreadable sibling cannot decide this chat's name */ }
-    }
-    if (!taken.has(title)) return title;
-    for (let suffix = 2; suffix <= taken.size + 2; suffix += 1) {
-      const candidate = `${title} · 讨论 ${suffix}`;
-      if (!taken.has(candidate)) return candidate;
-    }
-    return `${title} · 讨论 ${taken.size + 3}`;
-  }
   create(paper: PaperScope, title: string, settings: GenerationSettings): Promise<StoredConversation> {
     return this.serial(async () => {
       const index = await this.loadIndex(paper);
       const now = this.clock.now(); const id = this.clock.uuid();
-      const name = await this.nextTitle(index, title);
-      const conversation: StoredConversation = { schemaVersion: 3, documents: {}, paperIdentity: { title, authors: [] }, logSeq: 0, id, paper: validatePaperScope(paper), title: name, settings: validateSettings(settings), activeRequestId: null, messages: [], lastSeq: 0, createdAt: now, updatedAt: now, upstream: { threadId: null, permissionMode: 'read' }, requests: [] };
+      // The title is stored as given: no "讨论 N" counter is derived from sibling records, so a chat is
+      // never named after records the owner cannot see. Views tell same-name chats apart.
+      const conversation: StoredConversation = { schemaVersion: 3, documents: {}, paperIdentity: { title, authors: [] }, logSeq: 0, id, paper: validatePaperScope(paper), title: title.trim() || title, settings: validateSettings(settings), activeRequestId: null, messages: [], lastSeq: 0, createdAt: now, updatedAt: now, upstream: { threadId: null, permissionMode: 'read' }, requests: [] };
       await this.writeJson(this.conversationPath(id), { ...conversation, documents: undefined, documentIds: [] });
       const updated: PaperIndex = { ...index, conversations: [...index.conversations, id], current: id };
       await this.writeJson(this.indexPath(paper), updated);
-      this.conversations.set(id, conversation); this.indexes.set(this.indexPath(paper), updated);
+      this.conversations.set(id, conversation);
       return clone(conversation);
     });
   }
@@ -290,14 +284,16 @@ export class ConversationStore {
       const remaining = index.conversations.filter(entry => entry !== id);
       const updated: PaperIndex = { ...index, conversations: remaining, current: index.current === id ? remaining.at(-1) ?? null : index.current };
       try {
-        const conversation = await this.load(id);
-        for (const sourceId of Object.keys(conversation.documents ?? {})) await this.storage.remove(this.sourcePath(id, sourceId));
-        await this.storage.remove(this.conversationPath(id));
-        await this.storage.remove(this.logPath(id));
+        // A dangling entry (file already gone) still leaves the index: only the files that exist are removed.
+        const conversation = await this.loadIfPresent(id);
+        if (conversation) {
+          for (const sourceId of Object.keys(conversation.documents ?? {})) await this.storage.remove(this.sourcePath(id, sourceId));
+          await this.storage.remove(this.conversationPath(id));
+          await this.storage.remove(this.logPath(id));
+        }
       } catch { storageFailure(); }
       await this.writeJson(this.indexPath(paper), updated);
       this.conversations.delete(id);
-      this.indexes.set(this.indexPath(paper), updated);
     });
   }
   select(paper: PaperScope, id: UUID): Promise<StoredConversation> {
@@ -307,7 +303,6 @@ export class ConversationStore {
       const conversation = await this.load(id);
       const updated: PaperIndex = { ...index, current: id };
       await this.writeJson(this.indexPath(paper), updated);
-      this.indexes.set(this.indexPath(paper), updated);
       return clone(conversation);
     });
   }

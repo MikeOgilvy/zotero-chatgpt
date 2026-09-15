@@ -1,4 +1,4 @@
-import type { Citation, DocumentContext, Draft, ImageAttachment, PaperIdentity, PaperScope } from './index.ts';
+import type { DocumentContext, Draft, ImageAttachment, PaperIdentity, PaperScope } from './index.ts';
 
 export type WorkflowKind = 'read' | 'annotate' | 'acquire' | 'diagram';
 export interface Personalization {
@@ -156,20 +156,12 @@ export interface LibraryReferencePort {
   search(query: string): Promise<ReaderReference[]>;
   read(reference: ReaderReference, signal: AbortSignal): Promise<ReferenceInput>;
   open(paper: PaperScope): Promise<void>;
-  pickImages?(): Promise<ImageAttachment[]>;
   /**
-   * One explicitly chosen local file, read through the host's own file port. Text-like files become
-   * reference text and image files become image input; an unsupported or oversized file is refused
-   * with a message instead of being truncated or guessed at.
+   * One or more explicitly chosen local files, read through the host's own file port. Text-like files
+   * become reference text and image files become image input; an unsupported or oversized file is
+   * refused with a message instead of being truncated or guessed at.
    */
   pickFile?(): Promise<PickedFile>;
-  /**
-   * Rasterizes a PDF region as an image attachment. `citation` is a frozen selection of the same
-   * paper; without it the host uses the region the owner last selected in that paper. The paper is
-   * always explicit so the captured image can never come from a reference that merely happens to be
-   * open in the draft.
-   */
-  captureRegion?(paper: PaperScope, citation?: Citation): Promise<ImageAttachment | null>;
   capturePage?(paper: PaperScope, pageIndex: number): Promise<ImageAttachment | null>;
   exportImage?(image: ImageAttachment): Promise<void>;
 }

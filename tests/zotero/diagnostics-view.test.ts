@@ -28,7 +28,7 @@ it('keeps shareable diagnostics off the default sidebar; presenter still copies 
   const client: ReaderClient = {
     snapshot: () => structuredClone(runtime), observe: l => { l(structuredClone(runtime)); return () => undefined; },
     refreshAccount: async () => {}, startLogin: () => Promise.reject(new Error()), cancelLogin: async () => {},
-    current: () => Promise.resolve(structuredClone(conversation)), newConversation: () => Promise.reject(new Error()),
+    current: () => Promise.resolve(structuredClone(conversation)), peekCurrent: () => Promise.resolve(structuredClone(conversation)), newConversation: () => Promise.reject(new Error()),
     list: () => Promise.resolve([structuredClone(conversation)]), select: () => Promise.reject(new Error()),
     get: () => Promise.resolve(structuredClone(conversation)), send: () => Promise.reject(new Error()),
     request: () => Promise.reject(new Error()), cancel: () => Promise.reject(new Error()),

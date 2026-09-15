@@ -2,8 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { Window as HappyWindow } from 'happy-dom';
 import { createLibraryReferencePort, type LibraryDocumentSource, type LibraryFilePicker, type LibraryItem, type LibraryReader, type LibraryReferenceOptions, type NativeLibraryHost } from '../../packages/zotero/src/reader/library.ts';
 import { ReaderDocumentCache, type DocumentSource } from '../../packages/zotero/src/reader/document.ts';
-import { paperA, citationA, citationB, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
-import { forgetSelection, rememberSelection } from '../../packages/zotero/src/reader/current-selection.ts';
+import { paperA, TINY_PNG_DATA_URL } from '../contracts/factories.ts';
 import type { ReaderReference } from '../../packages/contracts/src/workspace.ts';
 import { validateReference } from '../../packages/contracts/src/workspace-validation.ts';
 
@@ -155,49 +154,20 @@ it('cancels pending source work and closes only the untouched background tab', a
 });
 
 it('validates picked image bytes and rejects oversized input before reading it', async () => {
-  const f = setup(); const result = await f.port.pickImages!();
-  expect(result[0]?.mime).toBe('image/png'); expect(result[0]?.name).toBe('image.png');
+  const f = setup(); const result = await f.port.pickFile();
+  expect(result.images[0]?.mime).toBe('image/png'); expect(result.images[0]?.name).toBe('image.png');
   expect(f.io.read).toHaveBeenCalledWith('/synthetic/image.png', { maxBytes: 2 * 1024 * 1024 + 1 });
   f.io.read.mockClear(); f.io.stat.mockResolvedValueOnce({ size: 3 * 1024 * 1024 });
-  await expect(f.port.pickImages!()).rejects.toThrow(/large|limit/iu); expect(f.io.read).not.toHaveBeenCalled();
+  await expect(f.port.pickFile()).rejects.toThrow(/large|limit/iu); expect(f.io.read).not.toHaveBeenCalled();
   f.io.read.mockResolvedValueOnce(new TextEncoder().encode('%PDF-not-an-image'));
-  await expect(f.port.pickImages!()).rejects.toThrow(/image/iu);
+  await expect(f.port.pickFile()).rejects.toThrow(/image/iu);
 });
 
-it('captures frozen PDF coordinates and whole pages with real paper provenance, then exports image bytes', async () => {
+it('captures whole pages with real paper provenance, then exports image bytes', async () => {
   const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
   const f = setup({ rasterize });
-  const citation = { ...citationA, positions: [{ ...citationA.positions[0]!, pageIndex: 0 }] };
-  const image = await f.port.captureRegion!(paperA, citation);
-  expect(rasterize).toHaveBeenCalledWith(expect.objectContaining({ paper: paperA, pageIndex: 0, rect: citation.positions[0]!.rects[0], scale: 2 }));
-  expect(image?.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 0, revision: f.pdf.revision });
   const page = await f.port.capturePage(paperA, 1); expect(page.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 1, revision: f.pdf.revision });
   await f.port.exportImage(page); expect(f.io.write).toHaveBeenCalledWith('/synthetic/SKILL.md', png);
-  // No citation and nothing selected: the owner is told what to do instead of getting an empty image.
-  forgetSelection(paperA);
-  await expect(f.port.captureRegion!(paperA)).rejects.toThrow(/select|region/iu);
-});
-
-it('captures the region the owner last selected without requiring a citation in the draft', async () => {
-  const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
-  const f = setup({ rasterize });
-  forgetSelection(paperA);
-  // The popup records what was selected; the composer button then captures it. Two per-line rects are
-  // unioned, so a wrapped selection is captured whole rather than as one line.
-  rememberSelection(paperA, { pageIndex: 0, rects: [[10, 20, 50, 40], [10, 44, 90, 64]] });
-  const image = await f.port.captureRegion!(paperA);
-  expect(rasterize).toHaveBeenCalledWith(expect.objectContaining({ paper: paperA, pageIndex: 0, rect: [10, 20, 90, 64] }));
-  expect(image?.origin).toEqual({ kind: 'paper', paper: paperA, pageIndex: 0, revision: f.pdf.revision });
-  // A region recorded for another PDF is never used for this one.
-  forgetSelection(paperA);
-  await expect(f.port.captureRegion!(paperA)).rejects.toThrow(/select|region/iu);
-});
-
-it('refuses to rasterize a citation that belongs to a different PDF than the open paper', async () => {
-  const rasterize = vi.fn<NonNullable<LibraryReferenceOptions['rasterize']>>().mockResolvedValue(png);
-  const f = setup({ rasterize });
-  await expect(f.port.captureRegion!(paperA, citationB)).rejects.toThrow(/another PDF/iu);
-  expect(rasterize).not.toHaveBeenCalled();
 });
 
 it('handles native tab lookup throwing for a not-yet-created tab', async () => {
@@ -245,10 +215,9 @@ it('uses native PDF coordinates at fixed resolution without changing reader zoom
   const pdfViewer = { currentScale: 1.5, currentScaleValue: 'page-width', scrollPageIntoView: vi.fn() };
   const nativeWindow = { document, PDFViewerApplication: { pdfDocument: pdf, pdfViewer } };
   f.host.Reader._readers.push({ itemID: 2, _internalReader: { _primaryView: { _iframeWindow: nativeWindow } } });
-  const citation = { ...citationA, positions: [{ pageIndex: 0, rects: [[10, 20, 50, 40] as [number, number, number, number]] }] };
-  const result = await f.port.captureRegion!(paperA, citation);
-  expect(result?.mime).toBe('image/png'); expect(dimensions).toEqual([[80, 40]]);
-  expect(getViewport).toHaveBeenLastCalledWith({ scale: 2, offsetX: -20, offsetY: -40 });
+  const result = await f.port.capturePage(paperA, 0);
+  expect(result.mime).toBe('image/png'); expect(dimensions).toEqual([[600, 800]]);
+  expect(getViewport).toHaveBeenLastCalledWith({ scale: 2, offsetX: 0, offsetY: 0 });
   expect(pdfViewer.currentScale).toBe(1.5); expect(pdfViewer.currentScaleValue).toBe('page-width');
   expect(pdfViewer.scrollPageIntoView).not.toHaveBeenCalled(); expect(canvas.width).toBe(0);
   page.view = [0, 0, 10000, 10000];
@@ -384,6 +353,20 @@ it('refuses an unsupported, oversized, binary, non-UTF8, empty or non-regular fi
   file.bytes('/synthetic/notes.txt', new Uint8Array(64), 'directory');
   await expect(f.port.pickFile()).rejects.toThrow(/folder/iu);
   expect(f.io.read.mock.calls.length).toBe(reads);
+});
+
+it('attaches multiple chosen files in one pick and never leaks their paths', async () => {
+  const f = setup();
+  f.picker.files = ['/synthetic/Notes/Weekly.Analysis.md', '/synthetic/figure.png'];
+  f.io.stat.mockImplementation((path: string) => Promise.resolve({ size: path.endsWith('.png') ? png.length : TEXT_FILE.length }));
+  f.io.read.mockImplementation((path: string) => Promise.resolve(path.endsWith('.png') ? png : new TextEncoder().encode(TEXT_FILE)));
+  const picked = await f.port.pickFile();
+  expect(f.picker.init).toHaveBeenCalledWith(expect.anything(), 'Attach files', f.picker.modeOpenMultiple);
+  expect(picked.references).toHaveLength(1);
+  expect(picked.references[0]).toMatchObject({ kind: 'file', label: 'Weekly.Analysis.md', text: TEXT_FILE });
+  expect(picked.images).toHaveLength(1);
+  expect(picked.images[0]).toMatchObject({ mime: 'image/png', name: 'figure.png' });
+  expect(JSON.stringify(picked)).not.toContain('/synthetic');
 });
 
 it('treats a cancelled file selection as no attachment and never reads anything', async () => {

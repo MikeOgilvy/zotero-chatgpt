@@ -7,7 +7,6 @@ import { injectReaderStyles } from './reader/dock.ts';
 import { NativeReaderPane, attachmentIdentity, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
-import { forgetSelection, rememberSelection } from './reader/current-selection.ts';
 import { paperIdentityOf } from './reader/metadata.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
@@ -189,11 +188,6 @@ function onSelectionPopup(event: SelectionPopupEvent): void {
   if (!identity || !metadata) return;
   try {
     const citation = captureSelection(event, paperOf(identity), metadata, { uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() });
-    // The composer's region-capture button rasterizes the region the owner last selected, and this
-    // popup is the only place where that page and those rects exist. Recording it here keeps the
-    // capture work without the owner having to push a citation into the draft first. Coordinates are
-    // the freshly copied ones (`captureSelection` copies them out of the content realm).
-    rememberSelection(citation.paper, { pageIndex: citation.positions[0]!.pageIndex, rects: citation.positions[0]!.rects });
     const version = freezeCitationVersion(Zotero, event.reader, citation);
     current.latestSelectionId = citation.id;
     citationVersions.set(citation, version);
@@ -221,9 +215,6 @@ function attach(event: ToolbarEvent): void {
 function reconcile(): void {
   for (const [reader, current] of readers) {
     if (!Zotero.Reader._readers.includes(reader)) {
-      // A closed PDF forgets the region it remembered: the coordinates belong to that open reader.
-      const identity = attachmentIdentity(Zotero, reader);
-      if (identity) forgetSelection(paperOf(identity));
       current.pane.dispose(); current.bar.dispose();
       for (const button of current.buttons) button.remove();
       readers.delete(reader);

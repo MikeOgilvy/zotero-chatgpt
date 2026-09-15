@@ -11,11 +11,8 @@ export const CLIPBOARD_IMAGE_FLAVORS = [
   'public.png', 'public.jpeg', 'public.jpg', 'public.gif', 'public.webp',
 ] as const;
 /**
- * macOS screenshots are offered as TIFF. The sidebar cannot attach TIFF (the image caps and formats
- * are unchanged), but asking for it is what turns a silent no-op into an honest refusal: the bytes
- * are recognized as an image this sidebar does not accept and are never converted or guessed at.
- * These are requested *after* the attachable flavors so a pasteboard that also offers PNG or JPEG
- * still attaches through the ordinary path.
+ * macOS screenshots are offered as TIFF. Asking for it after the attachable flavors is what turns a
+ * silent no-op into either a converted PNG (when imgITools can encode one) or an honest refusal.
  */
 export const UNSUPPORTED_IMAGE_FLAVORS = ['image/tiff', 'public.tiff'] as const;
 /** Every flavor a native clipboard read may ask for, in preference order. */
@@ -371,19 +368,33 @@ function readGeckoClipboardBytes(access: GeckoClipboardAccess): Uint8Array | und
     }
     return bytesFromTransferValue(holder.value, access);
   };
-  // Attachable flavors first, exactly as before: an image the sidebar accepts is never passed over
-  // for one it does not.
+  // Attachable flavors first: an image the sidebar accepts is never passed over for one it does not.
   for (const flavor of CLIPBOARD_IMAGE_FLAVORS) {
     const bytes = held(flavor);
     if (bytes && sniffImageMime(bytes)) return bytes;
   }
-  // Then the flavors only used to name an honest refusal (a macOS screenshot's TIFF), so a refused
-  // paste can be explained instead of looking like a paste that did nothing.
+  // macOS screenshots are TIFF. Convert through imgITools when that encoder is present; otherwise
+  // return the TIFF bytes so the caller can name an honest refusal instead of a silent no-op.
   for (const flavor of UNSUPPORTED_IMAGE_FLAVORS) {
     const bytes = held(flavor);
-    if (bytes?.length) return bytes;
+    if (!bytes?.length) continue;
+    const converted = pngFromTiff(bytes, access);
+    if (converted && sniffImageMime(converted)) return converted;
+    return bytes;
   }
   return undefined;
+}
+
+function pngFromTiff(bytes: Uint8Array, access: GeckoClipboardAccess): Uint8Array | undefined {
+  const tools = asRecord(access.Cc?.['@mozilla.org/image/tools;1']?.getService?.(access.Ci?.imgITools));
+  if (!tools) return undefined;
+  try {
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const container = callRecord(tools, 'decodeImageFromArrayBuffer', [buffer, 'image/tiff']);
+    return bytesFromTransferValue(callRecord(tools, 'encodeImage', [container, 'image/png']), access);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Privileged Gecko/Zotero clipboard. Never logs flavor payloads. */

@@ -187,15 +187,21 @@ it('names the reason a pasted DOM image was refused instead of dropping it silen
   expect(mixed.refused).toBe('too-large');
 });
 
-it('recognizes a screenshot the pasteboard only offers as TIFF and refuses it honestly', () => {
-  // macOS offers a TIFF family this sidebar cannot attach. Asking for it is what turns a silent
-  // no-op into "this format cannot be attached"; the bytes are never converted or guessed at.
+it('recognizes a screenshot the pasteboard only offers as TIFF and converts it when imgITools can encode PNG', () => {
+  // Without an encoder the TIFF is an honest refusal. With imgITools the same bytes become PNG.
   const host = fakeGeckoClipboard({ 'image/tiff': tiff });
   expect(geckoClipboardHasImage(host)).toBe(true);
   expect(readGeckoClipboardImage(host, () => PNG_ID)).toEqual({ images: [], refused: 'unsupported' });
+  const converting = fakeGeckoClipboard({ 'image/tiff': tiff }) as ReturnType<typeof fakeGeckoClipboard> & { Cc: Record<string, unknown> };
+  converting.Cc['@mozilla.org/image/tools;1'] = {
+    getService: () => ({
+      decodeImageFromArrayBuffer: () => ({ kind: 'tiff' }),
+      encodeImage: () => ({ data: String.fromCharCode(...PNG) }),
+    }),
+  };
+  expect(readGeckoClipboardImage(converting, () => PNG_ID).images).toEqual([PNG_ATTACHMENT]);
   const large = fakeGeckoClipboard({ 'image/png': oversizePng() });
   expect(readGeckoClipboardImage(large, () => PNG_ID)).toEqual({ images: [], refused: 'too-large' });
-  // A pasteboard with nothing image-like stays silent, and an attachable image still wins over TIFF.
   expect(readGeckoClipboardImage(fakeGeckoClipboard({ 'text/unicode': Uint8Array.from([65]) }), () => PNG_ID)).toEqual({ images: [] });
   expect(readGeckoClipboardImage(fakeGeckoClipboard({ 'image/tiff': tiff, 'image/png': PNG }), () => PNG_ID)).toEqual({ images: [PNG_ATTACHMENT] });
 });

@@ -1,10 +1,9 @@
-import { ReaderError, paperId, type Citation, type DocumentContext, type DocumentRevision, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
+import { ReaderError, paperId, type DocumentContext, type DocumentRevision, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { LIMITS, validateCitation, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
+import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
 import type { LibraryReferencePort, PickedFile, ReaderReference } from '../../../contracts/src/workspace.ts';
 import { paperIdentityOf, type PaperMetadata } from './metadata.ts';
-import { currentSelection } from './current-selection.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from './document.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
 import { imageFromBytes } from '../chat/pick-images.ts';
@@ -115,14 +114,6 @@ function contentFingerprint(bytes: Uint8Array): string {
 }
 function fileExtension(name: string): string { return /\.([a-z0-9]+)$/iu.exec(name)?.[1]?.toLowerCase() ?? ''; }
 function fail(message: string, code: ConstructorParameters<typeof ReaderError>[0] = 'INVALID_REQUEST'): never { throw new ReaderError(code, message); }
-/**
- * The one rectangle the raster path takes. A selection is often several per-line rects, so the union
- * is used instead of one line or the first rect: the capture must show the whole selected area.
- */
-function boundingRect(rects: Rect[]): Rect {
-  if (!rects.length) fail('Select a PDF region before capturing it.');
-  return [Math.min(...rects.map(rect => rect[0])), Math.min(...rects.map(rect => rect[1])), Math.max(...rects.map(rect => rect[2])), Math.max(...rects.map(rect => rect[3]))];
-}
 function check(signal: AbortSignal): void { if (signal.aborted) fail('Reference preparation cancelled.'); }
 async function waitRead<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   check(signal); let abort = () => {};
@@ -279,13 +270,13 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     }
     return results;
   };
-  const filePicker = (title: string, kind: 'images' | 'save' | 'file', name = '') => {
+  const filePicker = (title: string, kind: 'save' | 'file', name = '') => {
     const picker = options.createFilePicker?.() ?? (() => {
       const FilePicker = globals().ChromeUtils?.importESModule('chrome://zotero/content/modules/filePicker.mjs').FilePicker;
       return FilePicker ? new FilePicker() : fail('The native file picker is unavailable.', 'UNSUPPORTED_INTERACTION');
     })();
     const owner = window(); if (!owner) fail('Open a Zotero window before choosing a file.', 'UNSUPPORTED_INTERACTION');
-    picker.init(owner, title, kind === 'images' ? picker.modeOpenMultiple : kind === 'save' ? picker.modeSave : picker.modeOpen);
+    picker.init(owner, title, kind === 'save' ? picker.modeSave : picker.modeOpenMultiple);
     if (name) picker.defaultString = bareName(name, 'export.txt');
     return picker;
   };
@@ -314,7 +305,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     if (!Number.isSafeInteger(dimensions.width) || !Number.isSafeInteger(dimensions.height) || dimensions.width < 1 || dimensions.height < 1) fail('The selected image could not be decoded.');
     return validateImageAttachment({ ...value, ...(origin ? { origin: clone(origin) } : {}) });
   };
-  const capture = (paper: PaperScope, pageIndex: number, rect?: Rect, expected?: Citation['sourceRevision'] | DocumentRevision, signal = new AbortController().signal) => {
+  const capture = (paper: PaperScope, pageIndex: number, rect?: Rect, expected?: DocumentRevision, signal = new AbortController().signal) => {
     const scope = scopeOf(paper); const frozenRect = rect ? [...rect] as Rect : undefined;
     if (!Number.isSafeInteger(pageIndex) || pageIndex < 0) fail('Choose a valid PDF page.');
     return boundary(() => withReader(scope, signal, async (reader, source) => {
@@ -327,7 +318,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       if (!sameRevision(revision, fresh.revision)) fail('The PDF changed while preparing this image. Capture it again.');
       attachment(scope);
       return image(bytes, `${scope.attachmentKey} - p.${pageIndex + 1}.png`, { kind: 'paper', paper: scope, pageIndex, revision });
-    }), 'The native PDF image could not be rendered. This reader may not support region capture.');
+    }), 'The native PDF image could not be rendered. This reader may not support page capture.');
   };
   return {
     collections: () => boundary(async () => {
@@ -402,56 +393,39 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       }, 'The referenced PDF could not be read locally.');
     },
     open: paper => boundary(async () => { const scope = scopeOf(paper); await z.Reader.open(attachment(scope).id); }, 'The referenced PDF could not be opened.'),
-    pickImages: () => boundary(async () => {
-      const picker = filePicker('Attach images', 'images'); picker.appendFilter('Images', '*.png; *.jpg; *.jpeg; *.gif; *.webp');
-      if (await picker.show() !== picker.returnOK) return [];
-      const paths = picker.files ?? (picker.file ? [picker.file] : []);
-      if (paths.length > LIMITS.imagesPerRequest) fail(`Choose at most ${LIMITS.imagesPerRequest} images at a time.`);
-      const images: ImageAttachment[] = [];
-      for (const path of paths) images.push(await image(await readFile(path, LIMITS.imageBytes), path));
-      return images;
-    }, 'The selected image file could not be read or decoded.'),
-    // One explicitly chosen file, attached as real content rather than as a reference to a file the
+    // Explicitly chosen files, attached as real content rather than as a reference to a file the
     // model would have to open itself. The extension chooses the route and the bytes then have to
     // prove it, and the chosen path is dropped here: what leaves this port is a bare file name plus
     // either decoded UTF-8 text (reference context) or a validated image attachment. The model never
     // receives a filesystem path, cannot request a different one, and reads the body as data.
     pickFile: () => boundary(async () => {
-      const picker = filePicker('Attach a file', 'file');
+      const picker = filePicker('Attach files', 'file');
       picker.appendFilter('Images', IMAGE_FILE_PATTERNS); picker.appendFilter('Text', TEXT_FILE_PATTERNS); picker.appendFilter('All files', '*');
       if (await picker.show() !== picker.returnOK) return { references: [], images: [] };
-      const path = picker.file ?? picker.files?.[0]; if (!path) fail('No file was selected.');
-      const name = bareName(path, 'attachment'); const extension = fileExtension(name);
-      if ((IMAGE_FILE_EXTENSIONS as readonly string[]).includes(extension)) return { references: [], images: [await image(await readFile(path, LIMITS.imageBytes), name)] };
-      if (!(TEXT_FILE_EXTENSIONS as readonly string[]).includes(extension)) fail(`Attach a text file (${TEXT_FILE_EXTENSIONS.slice(0, 6).join(', ')}, …) or an image (${IMAGE_FILE_EXTENSIONS.join(', ')}).`);
-      const bytes = await readFile(path, LIMITS.referenceTextBytes);
-      let body: string;
-      try { body = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
-      catch { fail('This file is not UTF-8 text, so it cannot become text context. Attach a text file or an image.'); }
-      if (!body.trim()) fail('This file has no text to attach.');
-      // A misnamed binary would otherwise reach the model as mojibake. The readable whitespace
-      // controls (`\t`, `\n`, `\r`) stay; any other C0 control byte is treated as proof of binary.
-      if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(body)) fail('This file looks like binary data, so it cannot become text context.');
-      return { references: [{ id: `file-${options.clientId}-${contentFingerprint(bytes)}`, kind: 'file', label: name, text: body, capturedAt: now() }], images: [] };
-    }, 'The selected file could not be read.'),
-    // The region comes from an explicit frozen selection (a citation the owner pushed into the draft)
-    // or, failing that, from the selection the popup last recorded for this paper. Anything is
-    // rendered through the same source-audited path as a whole page, so a capture is always an image
-    // of the PDF that is open right now: the revision is re-read before and after the raster.
-    captureRegion: (paper, citation) => {
-      const scope = scopeOf(paper);
-      if (!citation) {
-        const selected = currentSelection(scope);
-        if (!selected) return Promise.reject(new ReaderError('INVALID_REQUEST', 'Select a PDF region before capturing it.'));
-        return capture(scope, selected.pageIndex, boundingRect(selected.rects));
+      const paths = picker.files?.length ? [...picker.files] : (picker.file ? [picker.file] : []);
+      if (!paths.length) fail('No file was selected.');
+      const references: PickedFile['references'] = [];
+      const images: ImageAttachment[] = [];
+      for (const path of paths) {
+        const name = bareName(path, 'attachment'); const extension = fileExtension(name);
+        if ((IMAGE_FILE_EXTENSIONS as readonly string[]).includes(extension)) {
+          images.push(await image(await readFile(path, LIMITS.imageBytes), name));
+          continue;
+        }
+        if (!(TEXT_FILE_EXTENSIONS as readonly string[]).includes(extension)) fail(`Attach a text file (${TEXT_FILE_EXTENSIONS.slice(0, 6).join(', ')}, …) or an image (${IMAGE_FILE_EXTENSIONS.join(', ')}).`);
+        const bytes = await readFile(path, LIMITS.referenceTextBytes);
+        let body: string;
+        try { body = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+        catch { fail('This file is not UTF-8 text, so it cannot become text context. Attach a text file or an image.'); }
+        if (!body.trim()) fail('This file has no text to attach.');
+        // A misnamed binary would otherwise reach the model as mojibake. The readable whitespace
+        // controls (`\t`, `\n`, `\r`) stay; any other C0 control byte is treated as proof of binary.
+        if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(body)) fail('This file looks like binary data, so it cannot become text context.');
+        references.push({ id: `file-${options.clientId}-${contentFingerprint(bytes)}`, kind: 'file', label: name, text: body, capturedAt: now() });
       }
-      const frozen = validateCitation(citation);
-      // A reference to another article can sit in the same draft; capturing it would silently render a
-      // PDF the owner is not looking at, so the citation must belong to the open paper.
-      if (paperId(frozen.paper) !== paperId(scope)) return Promise.reject(new ReaderError('INVALID_REQUEST', 'That selection belongs to another PDF. Select a region in this PDF first.'));
-      const position = frozen.positions[0]!;
-      return capture(scope, position.pageIndex, boundingRect(position.rects), frozen.documentRevision ?? frozen.sourceRevision);
-    },
+      if (images.length > LIMITS.imagesPerRequest) fail(`Choose at most ${LIMITS.imagesPerRequest} images at a time.`);
+      return { references, images };
+    }, 'The selected file could not be read.'),
     capturePage: (paper, pageIndex, signal) => capture(paper, pageIndex, undefined, undefined, signal),
     exportImage: original => boundary(async () => {
       const image = original.origin?.kind === 'generated' ? validateOutputImage(original) : validateImageAttachment(original);

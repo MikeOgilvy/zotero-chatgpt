@@ -298,6 +298,41 @@ describe('attachment conversations', () => {
     expect(a.settings).toEqual({ model: 'catalog-default', serviceTier: 'priority', effort: 'medium' }); expect(a.paper).toEqual(paperA);
     expect((await c.list(paperA)).map(x => x.id)).toEqual([a.id]);
   });
+  it('peeks the current chat without creating one, and deleting the last chat leaves none behind', async () => {
+    const { c, storage } = await signedIn();
+    expect(await c.peekCurrent(paperB)).toBeNull();
+    expect((await c.list(paperB))).toEqual([]);
+    expect([...storage.files.keys()].some(path => path.includes(paperB.attachmentKey))).toBe(false);
+    const b = await c.newConversation(paperB, 'Supplement B');
+    expect((await c.peekCurrent(paperB))?.id).toBe(b.id);
+    // The attachment ends up with no chat: no replacement empty chat is created or written.
+    expect(await c.deleteConversation(paperB, b.id)).toBeNull();
+    expect(await c.peekCurrent(paperB)).toBeNull();
+    expect((await c.list(paperB))).toEqual([]);
+  });
+  it('names a chat after its first question unless the owner named it, and never renames it again', async () => {
+    const { c, p, conversation, explain } = await signedIn();
+    expect(conversation.title).toBe('Synthetic Paper A');
+    await c.send(explain(701, { action: 'ask', question: '  这里的先验\n指什么？  ', citations: [] })); await tick();
+    expect((await c.get(conversation.id)).title).toBe('这里的先验');
+    complete(p, 'thread-1', 'turn-1', 'reply', 'answer'); await tick();
+    await c.send(explain(702, { action: 'ask', question: 'A second question', citations: [] })); await tick();
+    expect((await c.get(conversation.id)).title).toBe('这里的先验');
+    // A selection-only explain has no question text, so the created name stays.
+    const second = await c.newConversation(paperA, 'Synthetic Paper A');
+    await c.send(explain(703, { conversationId: second.id })); await tick();
+    expect((await c.get(second.id)).title).toBe('Synthetic Paper A');
+    // An owner-given name wins over the derived one.
+    const third = await c.newConversation(paperA, 'Synthetic Paper A');
+    await c.renameConversation!(third.id, 'My notes');
+    await c.send(explain(704, { conversationId: third.id, action: 'ask', question: 'Something else', citations: [] })); await tick();
+    expect((await c.get(third.id)).title).toBe('My notes');
+    const long = 'word '.repeat(30).trim();
+    const fourth = await c.newConversation(paperA, 'Synthetic Paper A');
+    await c.send(explain(705, { conversationId: fourth.id, action: 'ask', question: long, citations: [] })); await tick();
+    const title = (await c.get(fourth.id)).title;
+    expect(title.endsWith('…')).toBe(true); expect(Array.from(title).length).toBeLessThanOrEqual(61);
+  });
   it('selects a previous conversation as current for the same attachment', async () => {
     const { c } = await signedIn();
     const first = await c.current(paperA, 'Synthetic Paper A');

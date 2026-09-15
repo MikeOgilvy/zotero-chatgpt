@@ -140,34 +140,6 @@ body.zcr-dock-open #split-view .primary-view,
   box-sizing: border-box;
   background: var(--material-background, var(--color-background, Canvas));
 }
-.zcr-chrome-main {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.zcr-current-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 18px;
-  color: var(--fill-primary, CanvasText);
-  /* The title is the rename control, so it is a button with none of a button's default chrome and
-     the pointer cursor that says it can be activated. */
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.zcr-current-title:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; border-radius: 4px; }
 .zcr-chrome-source, .zcr-context-citation {
   display: flex;
   flex-wrap: nowrap;
@@ -184,9 +156,7 @@ body.zcr-dock-open #split-view .primary-view,
   align-items: center;
   gap: 0;
   flex: 0 0 auto;
-  /* The title chip stops growing once a chat is open (`.zcr-chrome-main[data-zcr-chat-pill]`), so the
-     auto margin is what keeps the new-chat and history controls pinned to the row's trailing edge
-     instead of letting them sit next to the title. */
+  /* The tab strip grows; this auto margin keeps + and history pinned to the trailing edge. */
   margin-inline-start: auto;
 }
 .zcr-chrome .zcr-icon-button {
@@ -218,18 +188,6 @@ body.zcr-dock-open #split-view .primary-view,
 /* Neutral rings on the transcript/composer controls the owner rejected the accent outline on. */
 .zcr-icon-button:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 
-/* The current chat title carries the reference's rounded neutral chip. The chip hugs the title, the
-   title truncates instead of pushing the cross out of the row, and the cross is a small, calm
-   control that closes the chat (it never deletes: history keeps the chat). */
-.zcr-chrome-main[data-zcr-chat-pill] {
-  flex: 0 1 auto;
-  max-width: 100%;
-  gap: 4px;
-  padding: 2px 3px 2px 10px;
-  border-radius: 999px;
-  background: var(--fill-quinary, var(--material-toolbar, color-mix(in srgb, CanvasText 7%, transparent)));
-}
-.zcr-chrome-main[data-zcr-chat-pill] .zcr-current-title { flex: 0 1 auto; }
 .zcr-current-close {
   display: inline-flex;
   align-items: center;
@@ -256,42 +214,49 @@ body.zcr-dock-open #split-view .primary-view,
   outline-offset: 1px;
 }
 
-/* The chats the reader has open side by side. The dock is one attachment pane, so the strip names
-   every open chat and marks the one on screen; it only appears once a second chat exists. A narrow
-   dock scrolls the strip inside itself instead of pushing chips past the edge. */
+/* Cursor-style agent tabs in the chrome: named chats plus the unbound New chat tab, always visible.
+   A narrow dock scrolls the strip inside itself instead of pushing chips past the edge. */
 .zcr-panes {
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
+  gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 0 2px 4px;
+  padding: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
 }
 .zcr-pane-tab {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 160px;
-  padding: 3px 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  max-width: 180px;
+  padding: 3px 4px 3px 8px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--fill-secondary, GrayText);
   font: inherit;
-  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
 }
+.zcr-pane-tab-label, .zcr-pane-tab-new {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
+  font-weight: 500;
+  line-height: 18px;
+  color: inherit;
+}
 .zcr-pane-tab:hover { background: var(--fill-quinary, ButtonFace); color: var(--fill-primary, CanvasText); }
-/* The chat on screen is the marked chip: the same neutral fill the title pill uses, never an accent. */
 .zcr-pane-tab[aria-selected="true"] {
-  background: var(--fill-quaternary, ButtonFace);
-  border-color: var(--zcr-border);
+  background: var(--fill-quinary, var(--material-toolbar, color-mix(in srgb, CanvasText 7%, transparent)));
   color: var(--fill-primary, CanvasText);
 }
 .zcr-pane-tab:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }

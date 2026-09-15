@@ -11,7 +11,7 @@ import {
 const rootURI = 'file:///plugin/';
 
 function host(overrides: Partial<PreferencePaneRegistrarHost> = {}) {
-  const register = vi.fn<(options: { pluginID: string; id: string; label: string; src: string; scripts: string[] }) => Promise<string>>()
+  const register = vi.fn<(options: { pluginID: string; id: string; label: string; src: string; scripts: string[]; defaultXUL: boolean }) => Promise<string>>()
     .mockResolvedValue(PREFERENCES_PANE_ID);
   const unregister = vi.fn<(id: string) => void>();
   const logError = vi.fn<(error: unknown) => void>();
@@ -31,6 +31,7 @@ it('registers the native pane once with the bundled fragment and script, and unr
     label: PREFERENCES_PANE_LABEL,
     src: `${rootURI}${PREFERENCES_PANE_SOURCE}`,
     scripts: [`${rootURI}${PREFERENCES_PANE_SCRIPT}`],
+    defaultXUL: true,
   });
   // A second startup in the same session must not register a duplicate pane.
   await expect(registrar.ensure()).resolves.toBe(PREFERENCES_PANE_ID);

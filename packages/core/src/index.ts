@@ -243,13 +243,14 @@ class RuntimeSession implements ReaderClient {
   }
   // ---- conversations (delegated) --------------------------------------------------------------
   current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> { return this.service.current(paper, title, settings); }
+  peekCurrent(paper: PaperScope): Promise<Conversation | null> { return this.service.peekCurrent(paper); }
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> { return this.service.newConversation(paper, title, settings); }
   list(paper: PaperScope): Promise<Conversation[]> { return this.service.list(paper); }
   get(conversationId: string): Promise<Conversation> { return this.service.get(conversationId); }
   select(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.select(paper, conversationId); }
   renameConversation(conversationId: string, title: string): Promise<Conversation> { return this.service.renameConversation(conversationId, title); }
   branchConversation(conversationId: string, messageId: string): Promise<Conversation> { return this.service.branchConversation(conversationId, messageId); }
-  deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation> { return this.service.deleteConversation(paper, conversationId); }
+  deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation | null> { return this.service.deleteConversation(paper, conversationId); }
   send(input: SendInput): Promise<SendReceipt> { return this.service.send(input); }
   enqueue(input: SendInput): Promise<SendReceipt> { return this.service.enqueue(input); }
   releaseBatch(conversationId: string, batchId: string): Promise<void> { return this.service.releaseBatch(conversationId, batchId); }
