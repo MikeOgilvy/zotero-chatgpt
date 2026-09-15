@@ -357,7 +357,16 @@ async function runHostSmoke(config) {
       { state: contextRing().dataset.zcrContextState, strokeDasharray: contextRing().querySelector('.zcr-context-ring-fill')?.getAttribute('stroke-dasharray'), label: ringLabel });
     await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'native-runtime-initialization', 90000);
     await check('native-runtime-handshake-ready', panel()?.dataset.zcrRuntime === 'ready', { visibleStatus: panel()?.querySelector('[role="status"]')?.textContent, visibleError: refusalAlert()?.textContent });
-    await until(() => panel()?.dataset.zcrConversation || panel()?.querySelector('[data-zcr-action="picker"]')?.disabled, 'native-conversation-or-signed-out', 30000);
+    // Opening the dock is a local tab, not a stored chat: first-open has no conversation id until
+    // the first send. signedOut still disables the picker; signedIn with an unbound composer is the
+    // same login-independent local surface the next check records.
+    await until(() => {
+      const chat = panel();
+      if (!chat) return false;
+      if (chat.dataset.zcrConversation) return true;
+      if (chat.querySelector('[data-zcr-action="picker"]')?.disabled) return true;
+      return ['signedIn', 'signedOut'].includes(chat.dataset.zcrAuth);
+    }, 'native-conversation-or-signed-out', 30000);
     await check('local-conversation-independent-of-login', ['signedIn', 'signedOut'].includes(panel().dataset.zcrAuth), { auth: panel().dataset.zcrAuth, conversation: panel().dataset.zcrConversation || null });
     const conversationA = panel().dataset.zcrConversation || '';
     // The removed panel no longer wraps the page indicator; the source row is a bare chat sibling.
