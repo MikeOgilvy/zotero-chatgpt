@@ -2,10 +2,6 @@
 import { join } from 'node:path';
 
 export const HOST_DRIVERS = {
-  s1: 'tests/host/driver.js',
-  s2: 'tests/host/s2-driver.js',
-  s3: 'tests/host/s3-driver.js',
-  s4: 'tests/host/s4-driver.js',
   s5: 'tests/host/s5-driver.js',
   s6: 'tests/host/s6-driver.js',
   context: 'tests/host/context-driver.js',
@@ -13,7 +9,7 @@ export const HOST_DRIVERS = {
   'live-model': 'tests/host/live-model-driver.js',
 };
 
-const EXCLUSIVE = ['s2', 's3', 's4', 's5', 's6', 'context', 'live-model'];
+const EXCLUSIVE = ['s5', 's6', 'context', 'live-model'];
 
 /**
  * @param {string[]} argv
@@ -25,12 +21,12 @@ export function selectHostStage(argv) {
   if (argv.includes('--native') && (acceptance || argv.includes('--live') || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--native requires only the dedicated --context driver');
   if (argv.includes('--live') && (acceptance || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--live requires only the dedicated --context driver');
   const manualContext = acceptance && selected.length === 1 && selected[0] === 'context';
-  if (acceptance && ((selected.length > 0 && !manualContext) || argv.includes('--login'))) {
-    throw new Error('Pass --acceptance without --s2, --s3, --s4, --s5, --s6, or --login');
-  }
-  if (selected.length > 1) throw new Error('Pass only one of --s2, --s3, --s4, --s5, --s6');
+  if (acceptance && selected.length > 0 && !manualContext) throw new Error('Pass --acceptance without --s5 or --s6');
+  if (selected.length > 1) throw new Error('Pass only one of --context, --live-model, --s5, --s6');
   if (acceptance) return { stage: manualContext ? 'context' : 'acceptance', driver: null, installDriver: false };
-  const stage = selected[0] ?? 's1';
+  // No implicit default: preparing a profile rewrites its extensions, so the stage must be named.
+  if (selected.length === 0) throw new Error('Pass one of --context, --live-model, --s5, --s6, or --acceptance');
+  const stage = selected[0];
   return { stage, driver: argv.includes('--native') ? 'tests/host/native-agent-driver.ts' : HOST_DRIVERS[stage], installDriver: true };
 }
 

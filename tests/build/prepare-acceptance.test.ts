@@ -16,10 +16,6 @@ function failureMessage(error: unknown): string {
 
 describe('human-acceptance host prepare', () => {
   it('refuses --acceptance together with a host-driver stage', async () => {
-    await expect(execFileAsync(process.execPath, [prepare, '--acceptance', '--s4'], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s2, --s3, --s4, --s5, --s6, or --login/.test(failureMessage(error)));
-  });
-
-  it('refuses --acceptance together with --login', async () => {
-    await expect(execFileAsync(process.execPath, [prepare, '--acceptance', '--login'], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s2, --s3, --s4, --s5, --s6, or --login/.test(failureMessage(error)));
+    await expect(execFileAsync(process.execPath, [prepare, '--acceptance', '--s5'], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s5 or --s6/.test(failureMessage(error)));
   });
 });

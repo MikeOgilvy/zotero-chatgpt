@@ -14,7 +14,6 @@ const root = resolve(import.meta.dirname, '..');
 const subjectID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
 const subjectManifest = JSON.parse(await readFile(join(root, 'packages/zotero/manifest.json'), 'utf8'));
 const argumentsList = process.argv.slice(2);
-const interactiveLogin = argumentsList.includes('--login');
 const { driver: driverPath, installDriver } = selectHostStage(argumentsList);
 const tree = selectHostTree(argumentsList, root);
 const { profile, dataDir, reportPath, pdfPath } = tree;
@@ -122,7 +121,6 @@ if (twoVersion) {
 }
 const config = {
   live: argumentsList.includes('--live'),
-  interactiveLogin,
   subjectID,
   subjectVersion: twoVersion ? rollbackIdentity.version : subjectManifest.version,
   artifactHash: createHash('sha256').update(await readFile(subjectXpi)).digest('hex'),

@@ -83,8 +83,8 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--native', '--live'])).rejects.toThrow();
     await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();
   });
-  it('defaults to the S1 driver', async () => {
-    await expect(select([])).resolves.toEqual({ stage: 's1', driver: 'tests/host/driver.js', installDriver: true });
+  it('refuses to prepare a profile without an explicit stage', async () => {
+    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
   });
 
   it('selects the S5 restart driver', async () => {
@@ -99,9 +99,9 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--acceptance'])).resolves.toEqual({ stage: 'acceptance', driver: null, installDriver: false });
   });
 
-  it('rejects combining --acceptance with a host-driver stage or --login', async () => {
-    await expect(select(['--acceptance', '--s4'])).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s2, --s3, --s4, --s5, --s6, or --login/.test(failureMessage(error)));
-    await expect(select(['--acceptance', '--login'])).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s2, --s3, --s4, --s5, --s6, or --login/.test(failureMessage(error)));
+  it('rejects combining --acceptance with a host-driver stage', async () => {
+    await expect(select(['--acceptance', '--s5'])).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s5 or --s6/.test(failureMessage(error)));
+    await expect(select(['--acceptance', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s5 or --s6/.test(failureMessage(error)));
   });
 
   it('puts S6 in .zcr-dev/s6-virgin, not the signed-in profile', async () => {
@@ -151,7 +151,7 @@ describe('dedicated host-test stage selection', () => {
   });
 
   it('rejects combining exclusive stage flags', async () => {
-    await expect(select(['--s4', '--s5'])).rejects.toSatisfy((error: unknown) => /Pass only one of --s2, --s3, --s4, --s5, --s6/.test(failureMessage(error)));
-    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --s2, --s3, --s4, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-model, --s5, --s6/.test(failureMessage(error)));
   });
 });

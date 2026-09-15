@@ -86,7 +86,7 @@ npm run test:unit -- tests/zotero/document-version.test.ts tests/zotero/reader-l
 npm run test:unit -- tests/runtime/generated-image.test.ts
 ```
 
-保留的 `--s2` 至 `--s6` 是测试驱动标识，不是新的产品授权范围。s2/s3 在已登录时可能发合成模型请求，`--login` 会启动官方授权；s5 会管理自己启动的运行进程；s6 用独立 virgin/upgrade 树验证安装生命周期。运行前读相应 driver 与参数，不复用正常或用途不明的 profile。
+保留的 `--s5` 与 `--s6` 是测试驱动标识，不是新的产品授权范围。s5 在 `.zcr-dev/{profile,data}` 上管理自己启动的运行进程（TERM 后恢复、禁用/启用、uncertain 残留隔离）；s6 用独立 virgin/upgrade 树验证安装生命周期。旧的 S1–S4 驱动（外壳启停、原生 runtime、选区、交互）针对的是已被 in-reader dock 取代的 context-pane UI 钩子，无法再对当前产品运行，已于 2026-09-15 删除，其历史证据见 progress 的“历史”一节。`prepare-host-test.mjs` 没有隐式默认阶段：必须显式传 `--context`、`--live-model`、`--s5`、`--s6` 或 `--acceptance` 之一，否则拒绝准备任何 profile。运行前读相应 driver 与参数，不复用正常或用途不明的 profile。
 
 ```sh
 node scripts/prepare-host-test.mjs --s6
