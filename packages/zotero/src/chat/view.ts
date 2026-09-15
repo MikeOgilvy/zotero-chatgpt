@@ -963,7 +963,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   });
   input.addEventListener('keydown', event => {
     if (isComposing(event)) return;
-    if (event.key === 'Escape' && !renameForm.hidden) { event.preventDefault(); toggleRename(false); currentTitle.focus(); return; }
+    if (event.key === 'Escape' && !renameForm.hidden) { event.preventDefault(); toggleRename(false); renameTrigger?.focus(); return; }
     if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); togglePicker(false); return; }
     if (event.key !== 'Enter' || event.shiftKey) return;
     // An open chooser owns Enter. Closing it must never submit the draft.
@@ -978,7 +978,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const items = menuItems(panel);
     (last ? items.at(-1) : items[0])?.focus();
   };
-  const bindMenuKeys = (panel: HTMLElement, trigger: HTMLElement, close: () => void) => {
+  const bindMenuKeys = (panel: HTMLElement, trigger: { focus(): void }, close: () => void) => {
     panel.addEventListener('keydown', event => {
       if (isComposing(event)) return;
       if (event.key === 'Escape') {
@@ -997,7 +997,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     });
   };
   bindMenuKeys(menu, picker, () => togglePicker(false));
-  bindMenuKeys(renameForm, currentTitle, () => toggleRename(false));
+  bindMenuKeys(renameForm, { focus() { renameTrigger?.focus(); } }, () => toggleRename(false));
   bindMenuKeys(historyPanel, historyBtn, () => toggleHistory(false));
   bindMenuKeys(plusMenu, plus, () => togglePlus(false));
   for (const [trigger, panel, open] of [

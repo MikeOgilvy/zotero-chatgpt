@@ -211,6 +211,10 @@ async function mountReadyChat(options: {
 const assistantMessage = (text: string): Conversation['messages'][number] => ({
   id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text,
 });
+/** A stored chat the prune-empty path must keep: no messages would look like an old leftover. */
+const keptUser = (id: string): Conversation['messages'][number] => ({
+  id, requestId: `r-${id}`, role: 'user', phase: null, settings, text: 'kept', citations: [], status: 'completed',
+});
 
 function applySidebarStyles(root: HTMLElement): CSSStyleDeclaration {
   const doc = root.ownerDocument;
@@ -1280,11 +1284,11 @@ it('uses icon-only New chat and history-row delete actions with accessible names
 it('closes the current chat from the selected tab cross without confirming, deleting, or losing the chat', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
-    activeRequestId: null, messages: [], lastSeq: 0,
+    activeRequestId: null, messages: [keptUser('k1')], lastSeq: 0,
     createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
   };
   const second: Conversation = {
-    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
+    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [keptUser('k2')],
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
   const { root, presenter, client } = await mountReadyChat({ messages: [], conversations: [first, second] });
@@ -1349,7 +1353,9 @@ async function mountTwoOpenChats(options: { width?: number; textScale?: { value:
     { id: 'o1', requestId: 'r9', role: 'user', phase: null, settings, text: '第二个问题', citations: [], status: 'completed' },
     { id: 'o2', requestId: 'r9', role: 'assistant', phase: 'final', settings, text: '第二个回答', citations: [], status: 'completed' },
   ]);
-  const third = chatWith('bbbbbbbb-0000-4000-8000-00000000000e', 'Third chat', []);
+  const third = chatWith('bbbbbbbb-0000-4000-8000-00000000000e', 'Third chat', [
+    { id: 't1', requestId: 'rt', role: 'user', phase: null, settings, text: '第三问', citations: [], status: 'completed' },
+  ]);
   const resizeCallbacks: Array<() => void> = [];
   const mounted = await mountReadyChat({
     resizeCallbacks,
@@ -1706,11 +1712,11 @@ it('collapses the dock when closing the last chat for the attachment', async () 
 it('does not collapse the dock while other chats for the attachment remain', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
-    activeRequestId: null, messages: [], lastSeq: 0,
+    activeRequestId: null, messages: [keptUser('k1')], lastSeq: 0,
     createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
   };
   const second: Conversation = {
-    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
+    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [keptUser('k2')],
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
   const closeDock = vi.fn();
@@ -1740,11 +1746,12 @@ it('does not collapse the dock while other chats for the attachment remain', asy
 it('keeps the dock open for a legacy archived record now that it is an ordinary chat', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
-    activeRequestId: null, messages: [], lastSeq: 0,
+    activeRequestId: null, messages: [keptUser('k1')], lastSeq: 0,
     createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
   };
   const archived: Conversation = {
     ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002', archivedAt: '2026-09-12T09:00:00.000Z',
+    messages: [keptUser('k2')],
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-12T09:00:00.000Z',
   };
   const closeDock = vi.fn();
@@ -2004,9 +2011,9 @@ it('renders single-line history rows with a per-status glyph and keeps the dropp
       paperIdentity: { title: 'Distinct PDF Title', authors: [] },
       messages: [{ id: 'm-done', requestId: 'r-done', role: 'assistant', phase: 'final', settings, text: 'A preview body that used to sit on a second line.', citations: [], status: 'completed' }],
     });
-    const draft = agedConversation('aaaaaaaa-0000-4000-8000-000000000012', 'Draft chat', '2026-09-10T09:05:00.000Z', { messages: [] });
+    const draft = agedConversation('2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', 'Draft chat', '2026-09-10T09:05:00.000Z', { messages: [] });
     const active = agedConversation('aaaaaaaa-0000-4000-8000-000000000013', 'Active chat', '2026-09-10T09:10:00.000Z', { activeRequestId: 'live-request' });
-    const { root } = await mountReadyChat({ conversations: [done, draft, active] });
+    const { root } = await mountReadyChat({ messages: [], conversations: [draft, done, active] });
     const item = root.querySelector<HTMLButtonElement>(`[data-zcr-history] button.zcr-history-item[data-zcr-conversation-id="${done.id}"]`)!;
     // One line: the title only, no preview line or other inline block.
     expect(item.querySelectorAll('.zcr-history-title')).toHaveLength(1);
@@ -2524,11 +2531,11 @@ it('keeps dock type at 1 when the open PDF zooms', async () => {
 it('shows one current title and keeps the chat switch reachable from history', async () => {
   const first: Conversation = {
     id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Synthetic Paper A', settings,
-    activeRequestId: null, messages: [], lastSeq: 0,
+    activeRequestId: null, messages: [keptUser('k1')], lastSeq: 0,
     createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z',
   };
   const second: Conversation = {
-    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002',
+    ...first, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [keptUser('k2')],
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
   const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, second] });

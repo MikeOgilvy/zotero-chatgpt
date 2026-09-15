@@ -311,7 +311,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     return boundary(() => withReader(scope, signal, async (reader, source) => {
       const captured = await waitRead(source.capture(signal), signal); const revision = clone(captured.revision);
       if (pageIndex >= captured.pdf.numPages) fail('The selected PDF page is unavailable.');
-      if (expected && ('fingerprint' in expected ? !sameRevision(expected, revision) : expected.size !== revision.size || (Number(expected.modifiedAt) !== revision.modifiedAt && Date.parse(expected.modifiedAt) !== revision.modifiedAt))) fail('The PDF changed after this selection was captured. Select the region again.');
+      if (expected && !sameRevision(expected, revision)) fail('The PDF changed after this selection was captured. Capture the page again.');
       const input: LibraryRasterInput = { reader, paper: scope, revision, pageIndex, scale: 2, signal, ...(frozenRect ? { rect: frozenRect } : {}) };
       const bytes = await waitRead(options.rasterize ? options.rasterize(input) : rasterizeNative(input, options.cloneInto ?? ((value, target, flags) => globals().Cu?.cloneInto(value, target, flags) ?? fail('Native PDF rendering is unavailable.', 'UNSUPPORTED_INTERACTION')), options.waiveXrays ?? (value => globals().Cu?.waiveXrays?.(value) ?? value)), signal);
       const fresh = await waitRead(source.capture(signal), signal);
@@ -461,7 +461,7 @@ async function rasterizeNative(input: LibraryRasterInput, cloneInto: NonNullable
   const left = Math.min(bounds[0]!, bounds[2]!); const top = Math.min(bounds[1]!, bounds[3]!);
   const width = Math.ceil(Math.abs(bounds[2]! - bounds[0]!)); const height = Math.ceil(Math.abs(bounds[3]! - bounds[1]!));
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 || width * height > MAX_RASTER_PIXELS) fail('This PDF region exceeds the readable image size limit. Select a smaller region; it was not downsampled.', 'PAYLOAD_TOO_LARGE');
-  const crop = waiveXrays(page.getViewport(cloneInto({ scale: input.scale, offsetX: -left, offsetY: -top }, nativeWindow) as { scale: number; offsetX: number; offsetY: number })) as RasterViewport;
+  const crop = waiveXrays(page.getViewport(cloneInto({ scale: input.scale, offsetX: 0 - left, offsetY: 0 - top }, nativeWindow) as { scale: number; offsetX: number; offsetY: number })) as RasterViewport;
   const canvas = nativeWindow.document.createElement('canvas'); canvas.width = width; canvas.height = height;
   const context: (CanvasRenderingContext2D & { skipBlender?: boolean }) | null = canvas.getContext('2d', { alpha: false });
   if (!context) fail('Native PDF image rendering is unavailable.', 'UNSUPPORTED_INTERACTION');

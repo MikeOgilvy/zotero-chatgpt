@@ -7,7 +7,7 @@ import type { ReaderReference, ReaderSkill, ReaderWorkspace, PickedFile, SavedDr
 import type { AgentTaskRecord, AgentTasks } from '../../packages/contracts/src/tasks.ts';
 import type { ReadingJob } from '../../packages/core/src/context/coordinator.ts';
 import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
-import { paperA, paperB, citationA, citationB, imageA, settings } from '../contracts/factories.ts';
+import { paperA, paperB, citationA, imageA, settings } from '../contracts/factories.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };

@@ -17,7 +17,7 @@ const PNG_ATTACHMENT = {
   dataUrl: TINY_PNG_DATA_URL,
 };
 
-function fakeGeckoClipboard(flavors: Record<string, Uint8Array>) {
+function fakeGeckoClipboard(flavors: Record<string, Uint8Array>, tools?: { decodeImageFromArrayBuffer: () => unknown; encodeImage: () => unknown }) {
   const available = Object.keys(flavors);
   const Ci = {
     nsIClipboard: { kGlobalClipboard: 1 },
@@ -49,6 +49,7 @@ function fakeGeckoClipboard(flavors: Record<string, Uint8Array>) {
           getData: () => undefined,
         }),
       },
+      ...(tools ? { '@mozilla.org/image/tools;1': { getService: () => tools } } : {}),
     },
     Ci,
     Services: {
@@ -192,13 +193,10 @@ it('recognizes a screenshot the pasteboard only offers as TIFF and converts it w
   const host = fakeGeckoClipboard({ 'image/tiff': tiff });
   expect(geckoClipboardHasImage(host)).toBe(true);
   expect(readGeckoClipboardImage(host, () => PNG_ID)).toEqual({ images: [], refused: 'unsupported' });
-  const converting = fakeGeckoClipboard({ 'image/tiff': tiff }) as ReturnType<typeof fakeGeckoClipboard> & { Cc: Record<string, unknown> };
-  converting.Cc['@mozilla.org/image/tools;1'] = {
-    getService: () => ({
-      decodeImageFromArrayBuffer: () => ({ kind: 'tiff' }),
-      encodeImage: () => ({ data: String.fromCharCode(...PNG) }),
-    }),
-  };
+  const converting = fakeGeckoClipboard({ 'image/tiff': tiff }, {
+    decodeImageFromArrayBuffer: () => ({ kind: 'tiff' }),
+    encodeImage: () => ({ data: String.fromCharCode(...PNG) }),
+  });
   expect(readGeckoClipboardImage(converting, () => PNG_ID).images).toEqual([PNG_ATTACHMENT]);
   const large = fakeGeckoClipboard({ 'image/png': oversizePng() });
   expect(readGeckoClipboardImage(large, () => PNG_ID)).toEqual({ images: [], refused: 'too-large' });

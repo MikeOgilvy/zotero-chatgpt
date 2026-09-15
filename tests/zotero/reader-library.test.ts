@@ -361,6 +361,7 @@ it('attaches multiple chosen files in one pick and never leaks their paths', asy
   f.io.stat.mockImplementation((path: string) => Promise.resolve({ size: path.endsWith('.png') ? png.length : TEXT_FILE.length }));
   f.io.read.mockImplementation((path: string) => Promise.resolve(path.endsWith('.png') ? png : new TextEncoder().encode(TEXT_FILE)));
   const picked = await f.port.pickFile();
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- vi.fn spy, not invoked as a method
   expect(f.picker.init).toHaveBeenCalledWith(expect.anything(), 'Attach files', f.picker.modeOpenMultiple);
   expect(picked.references).toHaveLength(1);
   expect(picked.references[0]).toMatchObject({ kind: 'file', label: 'Weekly.Analysis.md', text: TEXT_FILE });
