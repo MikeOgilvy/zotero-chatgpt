@@ -65,6 +65,31 @@ it('counts a removal as done when the record is gone even if the call reported a
   expect(storage.files.has(storePath(chat.id))).toBe(false);
 });
 
+it('reports a refused removal as failed and leaves the stored chat on disk', async () => {
+  const { storage, workspace, make } = seed();
+  const chat = await make(paperA, 'Kept', 'question');
+  const entry = (await new HistoryManager(workspace).listing()).entries[0]!;
+  storage.fail = true;
+  const report = await new HistoryManager(workspace).remove([entry]);
+  expect(report.changed).toEqual([]);
+  expect(report.failed.map(item => item.id)).toEqual([chat.id]);
+  expect(report.partial).toBe(true);
+  storage.fail = false;
+  expect(storage.files.has(storePath(chat.id))).toBe(true);
+  expect(ids(await workspace.history())).toEqual([chat.id]);
+});
+
+it('refuses to delete a chat whose answer or native task is unfinished', async () => {
+  const { storage, workspace, make } = seed();
+  const chat = await make(paperA, 'Running', 'question');
+  const entry: HistoryEntry = { ...(await new HistoryManager(workspace).listing()).entries[0]!, unfinishedWork: true };
+  const report = await new HistoryManager(workspace).remove([entry]);
+  expect(report.changed).toEqual([]);
+  expect(report.failed.map(item => item.id)).toEqual([chat.id]);
+  expect(report.partial).toBe(true);
+  expect(storage.files.has(storePath(chat.id))).toBe(true);
+});
+
 it('filters by scope and paper, counts both scopes, and handles an empty result', async () => {
   const { workspace, make } = seed();
   const activeA = await make(paperA, 'Active A', 'alpha question');
