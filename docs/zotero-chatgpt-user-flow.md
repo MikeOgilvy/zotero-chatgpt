@@ -149,9 +149,9 @@ PDF 缩放、聊天字号、控件尺度独立。真实 dock 保持当前 PDF �
 
 关键门槛还包括：当前 PDF 自动成为两种模式的隐式上下文；Chat Mode 只读、无 Zotero/文件写入且不计入 Agent/动作额度；Chat Mode 与 Agent Mode 共用同一会话，切换模式后续用先前对话与文档引用；干净登录；全文直接问/选区背景；发送后切附件；同名隔离；关闭恢复/改名可搜；@chat 无递归；设置/skill 冻结；长文覆盖/扫描缺口；压缩后取证/替换失效；停止重启不重写；撤销保护人工；下载失败不报成功；生成图区分原文。各自执行证据统一记录在 progress。
 
-## 产品 review 检查清单（0.4.0a12，2026-09-18）
+## 产品 review 检查清单（0.4.0a13，2026-09-18）
 
-用途：owner 在本轮 a12 的 **driver-free 验收实例**里逐项确认。图例：**[自动]** = 本轮真实宿主 `--context` 32/32 或单元测试已核对的行为；**[目视]** = 只有 owner 在真实 Zotero/Gecko 上才能判断的视觉/交互；**[已知风险]** = 重构期未在宿主观察、最可能出问题的地方。任何 **[自动]** 项若你在真实交互中看到相反行为，以你的观察为准并记为缺陷；本条目的证据边界见 [progress](progress.md) 的“打包与宿主验证回合”。
+用途：owner 在本轮 a13 的 **driver-free 验收实例**里逐项确认。图例：**[自动]** = 本轮真实宿主 `--context` 32/32 或单元测试已核对的行为；**[目视]** = 只有 owner 在真实 Zotero/Gecko 上才能判断的视觉/交互；**[已知风险]** = 重构期未在宿主观察、最可能出问题的地方。任何 **[自动]** 项若你在真实交互中看到相反行为，以你的观察为准并记为缺陷；本条目的证据边界见 [progress](progress.md) 的“打包与宿主验证回合”。**注意：本轮的 `--context` 冻结 driver 不点击模式控件、不做写操作**，因此 A/B 组中标 **[自动]** 的模式行为是**单元测试与静态结构**证据（见 progress 的“Stage 8”与“打包与宿主验证回合（0.4.0a13）”），**不是**真实 dock 上的模式切换观察；真实宿主只证明了 a13 字节能加载、当前 PDF 本地读取/会话/偏好路径仍工作。
 
 启动（不要用日常 profile；本轮已准备好验收树，第一行准备命令可跳过）：
 
@@ -164,9 +164,9 @@ node scripts/prepare-host-test.mjs --context --acceptance
 
 准备说明：合成库、合成主/补充 PDF 与已有会话都在；自动 driver 已移除。打开助手本身不发模型请求。该实例在新的 `zotero-chatgpt/v1/` 存储身份下为 **signed out**（旧登录不迁移），`Chat`/`Agent` 的本地行为无需登录即可观察；真实模型回答不在本轮范围（NOT RUN）。
 
-**单一插件状态（2026-09-18 协调者复核后清理，owner review 前必读）**：重命名前那个**不同 addon 身份**的旧插件 `{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}`（`0.4.0a10`，旧存储根 `zotero-codex-reader/v1/`、旧产品名）此前仍以 `active: true` 留在这棵验收树里，且宿主测试 driver `zchatgpt-host-test@local` 的注册也未随其 XPI 一起移除——即之前"driver-free"只做了一半。协调者已确认这两点，并已清理：删除了旧插件的 XPI 与两条注册。**当前 `.zotero-chatgpt-dev/context/profile/extensions.json` 里唯一 active 的 `app-profile` 插件是 `{90909501-7b5b-4985-9f55-566e9890746c}` `0.4.0a12`**，`extensions/` 下也只有这一个 XPI。旧插件是**真实**风险而非潜在风险：它是一枚 bootstrapped 插件，激活即 `ItemPaneManager.registerSection({ paneID: 'codex-reader', …sidenav… })` 并注册 reader `renderToolbar` 监听、注入自有 `data-zcr-*` dock；而 a12 的 `--context` 驱动只按 `data-zchatgpt-*` 与 subject addon id 断言，所以当时它**照样 32/32 PASS**，掩盖了并存。若你在 review 中仍看到两个侧栏/两个工具栏按钮或落在旧产品名上，请立刻停下并记录为缺陷。清理后重新跑 `--context` 仍为 **32/32 PASS、`recordedRequests = 0`**（见 [progress](progress.md) 的"打包与宿主验证回合"）。
+**单一插件状态（2026-09-18 a13 回合重新准备，owner review 前必读）**：`prepare-host-test.mjs --context --acceptance` 只移除自动 driver 的 XPI，**不会**清掉残留在 `extensions.json` 里的旧插件/驱动注册（a12 回合就因此出现过旧 a10 插件与 driver 注册并存的污染）。a13 回合已在专用树内核对并清理：**当前 `.zotero-chatgpt-dev/context/profile/extensions.json` 里唯一 active 的 `app-profile` 插件是 `{90909501-7b5b-4985-9f55-566e9890746c}` `0.4.0a13`**，`extensions/` 下也只有这一个 XPI、无 `zchatgpt-host-test@local` 的 XPI 或注册。旧插件是**真实**风险而非潜在风险：重命名前那枚**不同 addon 身份**的 `{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}`（`0.4.0a10`，旧存储根 `zotero-codex-reader/v1/`、旧产品名）是 bootstrapped 插件，激活即 `ItemPaneManager.registerSection({ paneID: 'codex-reader', …sidenav… })` 并注册 reader `renderToolbar` 监听、注入自有 `data-zcr-*` dock；而 `--context` 驱动只按 `data-zchatgpt-*` 与 subject addon id 断言，所以旧插件并存时**照样 32/32 PASS**，会掩盖污染。若你在 review 中仍看到两个侧栏/两个工具栏按钮或落在旧产品名上，请立刻停下并记录为缺陷。a13 清理后重跑 `--context` 仍为 **32/32 PASS、`recordedRequests = 0`**（见 [progress](progress.md) 的"打包与宿主验证回合（0.4.0a13）"）。
 
-> 注意：`prepare-host-test.mjs --context --acceptance` 只负责移除自动 driver 的 XPI，**不会**清掉此前残留在 `extensions.json` 里的旧插件/驱动注册；若将来在别处重现"两个侧栏"，先核对上面这条 active 列表。本验收树已核对为单一 a12 插件、无 driver 注册。
+> 注意：`prepare-host-test.mjs --context --acceptance` 只负责移除自动 driver 的 XPI，**不会**清掉此前残留在 `extensions.json` 里的旧插件/驱动注册；若将来在别处重现"两个侧栏"，先核对上面这条 active 列表。本验收树已核对为单一 a13 插件、无 driver 注册。
 
 ### A. 模式开关与每轮冻结
 
