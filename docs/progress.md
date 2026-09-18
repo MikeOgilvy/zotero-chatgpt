@@ -5,11 +5,11 @@
 ## 当前状态
 
 - **产品分层**：**Chat Mode**（当前 PDF 上下文阅读与问答）已实质实现，证据见下“已交付路径”与宿主 `--context` 报告；叠加其上的 **Agent Mode** 动作能力（真实模型行为、标注与获取整理的真实库写入及 UI、skill 作者 UI 等）仍有独立差距，见“剩余差距与下一任务”。2026-09-18 的 Chat Mode / Agent Mode 文档决策见下节；它不改变本页任何证据层级。
-- **架构分层（2026-09-18 重构，见下）：原生读取与原生写入已分开**——`zotero/library`（读取）+ `zotero/library/native-support.ts`（共享宿主访问）+ `zotero/actions`（写入）。`reader`/`library`/`chat` 不再依赖写入侧，旧的 `zotero/agent/` 目录已删除，`agent` 术语从代码中移除。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制。
+- **架构分层（2026-09-18 重构 + Stage 1，见下）**：原生读取与原生写入已分开——`zotero/library`（读取）+ `zotero/library/native-support.ts`（共享宿主访问）+ `zotero/actions`（写入）。`reader`/`library`/`chat` 不再依赖写入侧，旧的 `zotero/agent/` 目录已删除，`agent` 术语从代码中移除。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制。Stage 1 起，Chat/Agent 模式是**每请求显式冻结、随请求记录持久化、并由边界断言强制**的路由字段（`RequestMode = 'chat' | 'agent'`，请求输入 hash `hashVersion: 3`）；但**面向用户的模式开关与任何按 `mode` 门禁的行为仍 NOT IMPLEMENTED**（见下“Stage 1”）。
 
-- **Git**：`main` 基线 `59c21f3`；重构提交 `b6df0e5`、`013df5b`、`11cf37d`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。2026-09-18 的 `602c640` 引入 Chat Mode / Agent Mode 文档决策；同日按 owner 授权完成项目重命名（提交 `c2840ac`，见下“项目重命名”）。`dist/`、`build/`、`.zotero-chatgpt-dev/` 不在版本控制内。
+- **Git**：`main` 基线 `59c21f3`；重构提交 `b6df0e5`、`013df5b`、`11cf37d`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。2026-09-18 的 `602c640` 引入 Chat Mode / Agent Mode 文档决策；同日按 owner 授权完成项目重命名（提交 `c2840ac`，见下“项目重命名”）；同日 Stage 1 留下四个本地提交 `aa7446a`、`27ec1ef`、`7a58d12`、`25a7e76`（见下“Stage 1”），**均未 push**，前一条已记录基线为 `2d3d757`。`dist/`、`build/`、`.zotero-chatgpt-dev/` 不在版本控制内。
 - **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a11`。重命名改变了 addon id、bundle 文件名与 manifest 字节，按“侧载新字节先升版本”的规则升到 **a11**，不覆盖 a10 的标签；npm 工作区版本不是侧载身份，未随动。a7 的 `fcdcbc51…` 与 a8 的 `896063bf…` 从未装进 owner 正常 profile。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
-- **本轮门禁（0.4.0a11，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` 打包前 **1071 passed / 2 skipped**；`npm run package:dev` → `dist/zotero-chatgpt-0.4.0a11-dev.xpi`（92,676,309 bytes，SHA-256 `2c9494b5521394cdf99e2f4b6150868fd3ed41d4b7df07130a17eb711d130863`）；`npm run verify:artifacts` **84 files PASS**；打包后复跑 `test:unit` **1073 passed / 79 files / 0 skipped**。**真实宿主与真实模型 NOT RUN**：a11 的 addon id 与字节从未装进任何 `.zotero-chatgpt-dev/` 树，故无 `--context` 结论可沿用（a10 的 32/32 属于重命名前的另一身份，见下）。
+- **本轮门禁（Stage 1，HEAD `25a7e76`，2026-09-18，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **79 files / 1079 passed / 0 skipped**（5.64s）。**本次未运行** `npm run package:dev` / `npm run verify:artifacts` / `install:dev` / `verify:install` / `release:dry-run` 与任何宿主驱动，故 **`dist/` 与 0.4.0a11 字节不变、没有新 XPI**。最近一次完整发行回合仍是 0.4.0a11 重命名：`npm run package:dev` → `dist/zotero-chatgpt-0.4.0a11-dev.xpi`（92,676,309 bytes，SHA-256 `2c9494b5521394cdf99e2f4b6150868fd3ed41d4b7df07130a17eb711d130863`），`npm run verify:artifacts` **84 files PASS**，该树打包前 **1071 passed / 2 skipped**、打包后 **1073 passed / 79 files / 0 skipped**。**真实宿主与真实模型 NOT RUN**：a11 的 addon id 与字节从未装进任何 `.zotero-chatgpt-dev/` 树，故无 `--context` 结论可沿用（a10 的 32/32 属于重命名前的另一身份，见下）。
 
 ### 产品方向：Chat Mode / Agent Mode（2026-09-18 文档决策）
 
@@ -18,7 +18,7 @@
 - 产品定位是“ChatGPT 式的论文阅读侧栏”；Chat Mode 是完整的一等产品，Agent Mode 是可选的动作能力。两者共用同一个文档上下文层与同一会话。
 - 当前打开的 PDF 是**隐式上下文**，不是手动附加的文件；上下文按“轻量元数据 / 即时 reader 上下文 / 按需全文检索”分层取用，不要求每轮整篇发送。
 - 第 1 阶段的产品价值由 Chat Mode 承载：自动当前 PDF 上下文、高质量全文检索、页/引用定位与良好阅读体验；Agent Mode 的标注、笔记、元数据编辑、文献库整理、下载、文件动作与多步工作流按顺序补上。
-- **尚未在代码中实现独立的模式开关/模式路由**：今天只有单一对话路径，加上叠加的 `core/tasks` + `zotero/actions` 动作能力。模式切换 UI、跨模式续用同一会话、把模式作为每轮冻结设置属于待实现差距（见下 Epic F）。
+- **尚未在代码中实现独立的模式开关/模式路由**：今天只有单一对话路径，加上叠加的 `core/tasks` + `zotero/actions` 动作能力。模式切换 UI、跨模式续用同一会话属于待实现差距（见下 Epic F）；其中“把模式作为每轮冻结设置”的**契约与持久化**已由同日 Stage 1 落定（见下“Stage 1”），但 UI 与按 `mode` 门禁的行为仍未实现。
 - 契约见[产品规格](zotero-chatgpt-user-flow.md)的“定位与范围”“当前 PDF 默认上下文”“会话、历史与请求”，以及[架构与契约](module-design.md)的模式请求策略段落。
 
 ### 项目重命名：Zotero ChatGPT（2026-09-18，owner 授权）
@@ -69,7 +69,7 @@
 
 本页**只有这一处**声明当前测试计数；其它出现过的数字都是历史值，只在 Git 历史中。
 
-- 本机（macOS，`dist/` 存在当前 manifest 版本的 XPI）：**1073 passed / 79 files / 0 skipped**（2026-09-18 a11 树，重命名后，打包后复跑）；打包前同树为 1071 passed / 2 skipped，差额即 `install-lifecycle.test.ts` 的两条 `it.skipIf`。重命名不改变测试条数（a10 → a11 仍为同一组 1073 / 1071+2）。相对 a9 的 1068：删除 `tests/zotero/reader/metadata.test.ts` 的 2 条再导出用例（该兼容层已删除），新增 `tests/build/dependency-boundaries.test.ts` 的 7 条分层守卫，净 +5。
+- 本机（macOS，`dist/` 仍是 0.4.0a11 XPI，Stage 1 未打包）：**1079 passed / 79 files / 0 skipped**（2026-09-18 Stage 1 树，HEAD `25a7e76`，未打包）；相对 Stage 1 前的 1073 为 **+6**（`27ec1ef` 分层断言 +1、`7a58d12` `mode` 校验 +1、`25a7e76` 的 `recovery.test.ts` +3 与 `store.test.ts` +1；`aa7446a` 纯文档 +0）。a11 重命名树打包前为 1071 passed / 2 skipped、打包后 1073 passed / 79 files / 0 skipped，差额即 `install-lifecycle.test.ts` 的两条 `it.skipIf`（本机 `dist/` 有当前 manifest 版本 XPI 时两条都执行）；重命名不改变测试条数（a10 → a11 仍为同一组 1073 / 1071+2）。相对 a9 的 1068：删除 `tests/zotero/reader/metadata.test.ts` 的 2 条再导出用例（该兼容层已删除），新增 `tests/build/dependency-boundaries.test.ts` 的 7 条分层守卫，净 +5（Stage 1 又在该文件加 1 条，见上）。
 - 差额来自 `tests/build/install-lifecycle.test.ts` 的两条 `it.skipIf`：(1) `copies the existing packaged XPI into a virgin isolated tree` 要求 `dist/` 有当前版本 XPI；(2) `verifies the Apple signature of the Codex binary inside the existing XPI` 还要求 `darwin` 与 `/usr/bin/codesign`。
 - CI：`ci.yml` 的 `package` 作业在 `package:dev` **之后**再跑一次 `test:unit`，故 (1) 执行、(2) 在 linux runner 上始终 skip，预期为"本机计数 − 1 passed / 1 skipped"。CI 打出的 XPI 是 darwin/arm64 产物、在 linux 上构建、从不宿主执行。
 
@@ -123,6 +123,20 @@
 - **未改的判定**：侧栏/工具栏/助手显示名仍是 “Codex”（指后端 runtime，不是产品名），`NATIVE_ANNOTATION_PROVENANCE` 与 `clientInfo.name = zotero_codex_reader` 当时作为协议/持久化身份保留。2026-09-18 的重命名已把 `clientInfo.name` 改为 `zotero_chatgpt`、provenance 改为 `[AI · Zotero ChatGPT]`；侧栏/工具栏的 “Codex” 仍保留，因为那是对后端 runtime 的指称，改成产品名属于单独的产品文案决定。
 - **忽略目录操作（不产生提交）**：`rm dist/*.xpi dist/SHA256SUMS` 后重建。被删的 a9 `dist/` 副本可由 `.zotero-chatgpt-dev/context/profile/extensions/{8a5f5bde-…}.xpi`（hash 与 `3207d7e7…` 一致）核对；a4/a5 备份未触碰。
 
+## Stage 1：契约与模式冻结（2026-09-18）
+
+依据[仓库重构计划](repository-refactor-plan.md) §I Stage 1 与 §L，把“每轮请求的模式”做成显式、可冻结、可单测的契约，并在本阶段内消除 Chat 路径对 `core/tasks` 的唯一生产依赖。四个本地提交 `aa7446a`、`27ec1ef`、`7a58d12`、`25a7e76`，**均未 push**（前一条已记录基线 `2d3d757`）。**本阶段不产生真实模型证据，也不产生新发行物。**
+
+- **决策（owner 2026-09-18，`aa7446a`，纯文档）**：D1 先把 `parseAnnotationCandidates` 迁出 `core/tasks` 再让边界断言在 Stage 1 即为绿，不交付故意失败的测试；D2 模式用独立字段 `RequestMode = 'chat' | 'agent'` 承载，不扩展/复用 `WorkflowKind`；D3 已持久化且无 `mode` 的请求一律解释为 `'chat'`；D4 本阶段即授权实施。计划书附录 1 第 2、3 项据此标为已决。
+- **搬迁（`27ec1ef`）**：`parseAnnotationCandidates` 及其逐候选校验器从 `packages/core/src/tasks/controller.ts` 纯搬迁到 `packages/contracts/src/tasks.ts`，与 `AnnotationProposal` 同处；`controller.ts` 改为从 `contracts` import `validateAnnotationProposal`。行为、限额、错误文案与 `INVALID_REQUEST` 均不变，`contracts` 未引入 Node/Zotero/DOM。这消除了 `chat` → `core/tasks` 的唯一生产边（此前 `presenter.ts` 从 `core/tasks` import 该解析器），且零新增模块/目录/层。
+- **契约（`7a58d12`）**：`contracts/src/index.ts` 新增 `RequestMode`，`SendInput` 加 `readonly mode?`、`Message` 加可选 `mode`；`validateSendInput` 只接受恰好 `'chat'`/`'agent'`，缺省保持缺省、语义固定为 `'chat'`（D3），不把默认值写回校验结果。
+- **边界（`27ec1ef`）**：`tests/build/dependency-boundaries.test.ts` 新增断言——`packages/zotero/src/chat/**` 不得 import `core/src/tasks/**`（与既有的“chat 不得 import `zotero/actions`”并列），迁移后即刻为绿。
+- **冻结与持久化（`25a7e76`）**：请求输入 hash 升到 `hashVersion: 3`，额外 hash `mode ?? 'chat'`；`reconstructInput` 按记录自身的 `hashVersion` 重新 hash，v1/v2 记录仍逐字重建（不因新字段变 `uncertain`，不变量 11）。`RequestRecord.hashVersion` 接受 `2 | 3`；store 读写可选 `mode`，缺字段的旧记录仍可读、不迁移、不重写；`schemaVersion` 未变。`presenter.ts` 在 `frozenWorkflow` 同一快照上冻结 `mode`（`frozenMode()`：skill 为 `read` → `'chat'`，其它 skill → `'agent'`），因 `mode` 在契约上是 `readonly`，它随交给会话的请求副本传递而非像 `workflow` 那样回写。**未新增模式 UI，也没有任何动作按 `mode` 门禁。**
+- **门禁（2026-09-18，HEAD `25a7e76`）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **79 files / 1079 passed / 0 skipped**（5.64s）。相对 Stage 1 前基线 `2d3d757` 的 1073 为 **+6**：`27ec1ef` 分层断言 +1、`7a58d12` `mode` 校验 +1、`25a7e76` 的 `recovery.test.ts` +3 与 `store.test.ts` +1，`aa7446a` 纯文档 +0。`package:dev`、`verify:artifacts`、`install:dev`、`verify:install`、`release:dry-run` 与 `tests/host/**` 驱动**均未运行**，故**无新 XPI**、`dist/` 仍是 0.4.0a11 字节。
+- **临时性（诚实标注）**：`mode` 当前由冻结时的 skill 推导，**没有用户控制**；`PresenterServices.getTasks` 仍是注入项，`getTasks`/`getReading` 成为唯一 Agent 入口是计划中的 Stage 4。这是过渡桥，不是最终设计。
+
+证据层级：**代码 + 单元测试**。**真实宿主 NOT RUN**（未执行任何 `tests/host/**` 驱动）；**真实模型 NOT RUN**。
+
 ## 仓库整理（2026-09-15）
 
 目标：只保留 Zotero 原生界面 → TypeScript core → Gecko stdio → 随包 Codex App Server 的源码、四份有效文档与其配套脚本/测试/CI。每个可验证变更一个本地提交（`18d43c5`…HEAD）。
@@ -155,6 +169,7 @@
 
 - **a10 已有 `--context` 32/32 宿主证据（见上）；`--context --native` NOT RUN**，真实模型（`--live`/`--live-model`）NOT RUN。a10 改动过当时的 `content/zcr.js`（模块搬迁、未发送标签文案、偏好面板标签），宿主证据只覆盖 `--context` 列出的本地路径与 UI 切换。
 - **a11（重命名后）真实宿主与真实模型均 NOT RUN**：新 addon id `{90909501-…}` 与 `content/zchatgpt.js` 字节从未装进 `.zotero-chatgpt-dev/{context,live,s6}*` 的任何树，所以 a11 **没有** `--context` 证据，**不得把 a10 的 32/32 记到 a11 名下**。重跑前需先把 a11 XPI 装进专用树；由于存储目录与 pref 分支都已改名，此前登录的 `account/` 也不在新的 `zotero-chatgpt/v1/` 下。
+- **Stage 1（HEAD `25a7e76`）无宿主、无发行物证据**：`package:dev`/`verify:artifacts` 未运行，无新 XPI；未执行任何 `tests/host/**` 驱动，`mode` 的冻结与持久化只有代码 + 单元证据。
 - 真实模型输出/流式/停止/在途恢复、真实图像生成、真实档位/用量；`--live` 与 `--live-model` 均 NOT RUN。
 - a9 `--context` 报告的 8 项 `notRun`（见上；与 a5 名单相同）。
 - Cursor 式标签条在真实 dock 宽度/主题下的**目视**、剪贴板粘贴（含 macOS TIFF）、Attach file 多选、偏好面板从其它插件切到本面板、书目卡片与本地读取状态在真实大论文上的呈现（含 12 秒就绪等待）、历史直删后的焦点/滚动、attach 弹层键盘操作、workflow→skill 文案在原生偏好面板的渲染、IME 组合期间后台会话流式回答不抢焦点、后台会话流式回答的到达顺序。a9 `--context` 覆盖了未建记录的本地会话、一列转录所依赖的已有检查、偏好 `defaultXUL` 与 zh/en 文案，**不**覆盖 a10 的 `new-chat-tab-before-or-with-connection`，也不是上述目视/IME/剪贴板项。
