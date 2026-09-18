@@ -264,7 +264,7 @@ it('routes long-source sends and explicit queues through the shared reading coor
   const f = fixture({ document: true }); const r = readingPort(f.conversation().id);
   const long = { ...copy(documentA), pages: documentA.pages.map(page => ({ ...page, text: 'A source paragraph.\n\n'.repeat(200) })) };
   f.services.document!.prepare = () => Promise.resolve(long); f.services.contextBudget = smallBudget; f.services.agent = agentPort({ reading: () => Promise.resolve(r.reading) });
-  await f.presenter.activate(); f.presenter.setQuestion('Summarize all pages'); await f.presenter.send();
+  await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('Summarize all pages'); await f.presenter.send();
   expect(r.reading.start).toHaveBeenCalledWith(expect.objectContaining({ document: long }), expect.objectContaining({ mode: 'multi-pass' })); expect(f.sent).toHaveLength(0);
   expect(f.presenter.snapshot().contextReport?.mode).toBe('multi-pass');
   // The planner's own per-source explanation reaches the report instead of a generic sentence.
@@ -312,7 +312,9 @@ it('loads persisted reading jobs without a runtime connection', async () => {
   const f = fixture({ offline: true }); const r = readingPort(f.conversation().id); const t = taskPort(f.conversation().id);
   r.jobs.push({ schemaVersion: 1, id: 'saved-job', conversationId: f.conversation().id, inputHash: 'hash', revision: 1, status: 'uncertain', steps: [], createdAt: 'now', updatedAt: 'now', cancelRequested: false });
   const reading = vi.fn(() => Promise.resolve(r.reading)); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port), reading }); await f.presenter.activate();
-  expect(reading).toHaveBeenCalledWith(undefined); expect(f.presenter.snapshot().readingJobs).toEqual(r.jobs); f.presenter.dispose();
+  f.presenter.setMode('agent');
+  await vi.waitFor(() => expect(f.presenter.snapshot().readingJobs).toEqual(r.jobs));
+  expect(reading).toHaveBeenCalledWith(undefined); f.presenter.dispose();
 });
 
 it('turns an acquire workflow into a scoped native preview without sending a model request', async () => {
@@ -509,3 +511,122 @@ it('lists matching articles and saved chats from both @ sources for an unfiltere
   expect(results.map(item => item.kind)).toEqual(['article', 'chat']);
   f.presenter.dispose();
 });
+
+/**
+ * The mode execution split. Chat Mode is read context + reason + answer and must never reach the
+ * injected Agent capability (tasks + reading coordinator), while Agent Mode may. The capability is
+ * a fake port whose functions are spies, so "touched Agent infrastructure" is an exact call count.
+ */
+function agentSpies(conversationId: string) {
+  const t = taskPort(conversationId); const r = readingPort(conversationId);
+  const tasksList = vi.fn(t.port.list); const readingList = vi.fn(r.reading.list);
+  const tasks = vi.fn(() => Promise.resolve({ ...t.port, list: tasksList }));
+  const reading = vi.fn(() => Promise.resolve({ ...r.reading, list: readingList }));
+  return { port: agentPort({ tasks, reading }), tasks, reading, tasksList, readingList, task: t, read: r };
+}
+const finish = (f: ReturnType<typeof fixture>) => f.emit({ type: 'completed', requestId: f.sent.at(-1)!.requestId, messageId: 'answer', finalText: 'Done' });
+
+it('answers a Chat-mode summary from the open PDF without touching the Agent capability', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  await f.presenter.activate();
+  f.presenter.setQuestion('Summarize this paper.'); await f.presenter.send();
+  expect(f.presenter.snapshot().mode).toBe('chat');
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]).toMatchObject({ mode: 'chat' });
+  expect(f.sent[0]!.document?.pages.map(page => page.pageIndex)).toEqual(documentA.pages.map(page => page.pageIndex));
+  expect(agent.tasks).not.toHaveBeenCalled();
+  expect(agent.reading).not.toHaveBeenCalled();
+  expect(agent.read.reading.start).not.toHaveBeenCalled();
+  f.presenter.dispose();
+});
+
+it('keeps a complex conceptual question in Chat mode with no Agent execution', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  await f.presenter.activate();
+  f.presenter.setQuestion('Compare the method in this paper with predictive coding.'); await f.presenter.send();
+  expect(f.sent).toHaveLength(1); expect(f.sent[0]!.mode).toBe('chat');
+  expect(agent.tasks).not.toHaveBeenCalled(); expect(agent.reading).not.toHaveBeenCalled();
+  f.presenter.dispose();
+});
+
+it('refuses a natural-language write request in Chat mode with an explicit Agent-mode message', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  await f.presenter.activate();
+  for (const question of [
+    'Highlight all important claims in this paper.',
+    'Fix the metadata for this item.',
+    'Create notes from this paper and save them to Zotero',
+    'Find these papers in my library and organize them into a collection',
+  ]) {
+    f.presenter.setQuestion(question); await f.presenter.send();
+    expect(f.sent, question).toHaveLength(0); expect(f.queued, question).toHaveLength(0);
+    expect(f.presenter.snapshot().message, question).toMatch(/Agent mode/iu);
+  }
+  expect(agent.tasks).not.toHaveBeenCalled(); expect(agent.reading).not.toHaveBeenCalled();
+  f.presenter.dispose();
+});
+
+it('runs the same write request through the Agent path once Agent mode is selected', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', name: 'Annotate', workflow: 'annotate' });
+  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent');
+  f.presenter.setQuestion('Highlight all important claims in this paper.'); await f.presenter.send();
+  expect(f.sent).toHaveLength(1); expect(f.sent[0]).toMatchObject({ mode: 'agent' });
+  // The Agent turn reaches the task planner through the injected capability, unlike Chat mode.
+  const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Central definition' }] });
+  f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' });
+  f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
+  await vi.waitFor(() => expect(agent.task.port.planAnnotations).toHaveBeenCalledTimes(1));
+  f.presenter.dispose();
+});
+
+it('does not touch Agent infrastructure again after switching back to Chat mode', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  await f.presenter.activate();
+  f.presenter.setMode('agent');
+  await vi.waitFor(() => expect(agent.tasksList).toHaveBeenCalled());
+  const taskCalls = agent.tasksList.mock.calls.length; const readingCalls = agent.readingList.mock.calls.length;
+  // A second chat for the same attachment makes the tab-change refresh path reach the capability in
+  // the ungated design, so this is a real assertion about refresh, not a no-op.
+  const original = f.conversation().id; const other = { ...f.conversation(), id: 'eeeeeeee-0000-4000-8000-000000000009', title: 'Other chat' };
+  f.conversations.set(other.id, other);
+  f.presenter.setMode('chat');
+  f.presenter.setQuestion('Explain Figure 3.'); await f.presenter.send(); finish(f);
+  f.presenter.setQuestion('Summarize this paper.'); await f.presenter.send(); finish(f);
+  await f.presenter.openConversation(other.id);
+  await f.presenter.openConversation(original);
+  await f.presenter.activate();
+  expect(agent.tasksList.mock.calls.length).toBe(taskCalls); expect(agent.readingList.mock.calls.length).toBe(readingCalls);
+  expect(agent.read.reading.start).not.toHaveBeenCalled();
+  f.presenter.dispose();
+});
+
+it('preserves the same conversation and document context across a mode switch', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  await f.presenter.activate(); const id = f.conversation().id;
+  f.presenter.setQuestion('Summarize this paper.'); await f.presenter.send(); finish(f);
+  f.presenter.setMode('agent'); f.presenter.setQuestion('Second claim?'); await f.presenter.send(); finish(f);
+  f.presenter.setMode('chat'); f.presenter.setQuestion('Explain Figure 3.'); await f.presenter.send(); finish(f);
+  const state = f.presenter.snapshot();
+  expect(state.conversation?.id).toBe(id);
+  expect(state.conversation?.messages.filter(message => message.role === 'user').map(message => message.mode)).toEqual(['chat', 'agent', 'chat']);
+  expect(state.document.paper).toEqual(paperA);
+  expect(state.document.prepared?.paper).toEqual(paperA);
+  f.presenter.dispose();
+});
+
+it('refuses a multi-pass Chat request instead of silently starting a reading job', async () => {
+  const f = fixture({ document: true }); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  const long = { ...copy(documentA), pages: documentA.pages.map(page => ({ ...page, text: 'A source paragraph.\n\n'.repeat(200) })) };
+  f.services.document!.prepare = () => Promise.resolve(long); f.services.contextBudget = smallBudget;
+  await f.presenter.activate();
+  f.presenter.setQuestion('Summarize all pages'); await f.presenter.send();
+  expect(agent.reading).not.toHaveBeenCalled();
+  expect(agent.read.reading.start).not.toHaveBeenCalled();
+  expect(f.sent).toHaveLength(0); expect(f.queued).toHaveLength(0);
+  expect(f.presenter.snapshot().contextReport?.mode).toBe('multi-pass');
+  expect(f.presenter.snapshot().message).toMatch(/multi-pass/iu);
+  expect(f.presenter.snapshot().message).toMatch(/Agent mode/iu);
+  f.presenter.dispose();
+});
+
