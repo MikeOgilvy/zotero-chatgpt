@@ -39,6 +39,12 @@ export function isOfferableModelId(id: string): boolean {
   return BUNDLED_FAMILY.test(id) || (SPARK_FAMILY.test(id) && SPARK_MARKER.test(id));
 }
 
+/**
+ * True for the historical picker families (GPT-6 / GPT-5.6) only. The composer keeps the family rule
+ * as its fallback when an allowlist leaves nothing offerable; the Spark family is allowlist-only.
+ */
+export function isBundledFamilyModelId(id: string): boolean { return BUNDLED_FAMILY.test(id); }
+
 const ACRONYMS: Readonly<Record<string, string>> = { gpt: 'GPT', ai: 'AI' };
 function titleCase(part: string): string {
   const acronym = ACRONYMS[part.toLowerCase()];
@@ -62,6 +68,40 @@ export function modelLabel(id: string): string {
 export const DEFAULT_ALLOWED_MODEL_IDS: readonly string[] = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 export function defaultAllowedModels(): AllowedModel[] {
   return DEFAULT_ALLOWED_MODEL_IDS.map(id => ({ id, name: modelLabel(id) }));
+}
+
+/**
+ * The picker's ordering: the pinned newest-first rank leads, then everything else by id, so a new
+ * sibling of either family cannot silently land ahead of the pinned newest model and the server's
+ * array order is never trusted. (`gpt-6-astra` is first regardless of how the runtime pages the
+ * catalog.)
+ */
+function offerRank(id: string): number {
+  const index = DEFAULT_ALLOWED_MODEL_IDS.indexOf(id);
+  return index === -1 ? DEFAULT_ALLOWED_MODEL_IDS.length : index;
+}
+function compareOfferRank(a: string, b: string): number { return offerRank(a) - offerRank(b) || a.localeCompare(b); }
+/**
+ * The exact ids the composer may offer from a live catalog, newest-first. This is the whole offer
+ * policy in one place — which ids are eligible, their order, and what happens when a stored list has
+ * nothing offerable left:
+ *
+ * - With an enforced allowlist, exactly the catalog ids it names, in rank order (including ids
+ *   outside the historical families).
+ * - Otherwise the historical GPT-6 / GPT-5.6 family rule, in rank order.
+ * - A list whose ids have all left the live catalog degrades to the family rule rather than blanking
+ *   a working picker; only when even that yields nothing is the raw catalog order kept.
+ *
+ * The composer renders this list and nothing else; the stored record is never rewritten here.
+ */
+export function offeredModelIds(catalogIds: readonly string[], allowedIds?: readonly string[]): string[] {
+  const ranked = (ids: readonly string[]): string[] => [...ids].sort(compareOfferRank);
+  if (allowedIds !== undefined) {
+    const offered = catalogIds.filter(id => allowedIds.includes(id));
+    if (offered.length) return ranked(offered);
+  }
+  const family = catalogIds.filter(isBundledFamilyModelId);
+  return family.length ? ranked(family) : [...catalogIds];
 }
 
 export interface ModelCandidate { id: string; name: string }
@@ -91,6 +131,15 @@ export function modelCandidates(liveModelIds: readonly string[] = []): ModelCand
  */
 export function allowedModelIds(allowedModels: readonly AllowedModel[] | undefined): string[] {
   return [...new Set((allowedModels ?? defaultAllowedModels()).map(model => model.id))];
+}
+
+/**
+ * The ids a stored record must keep even though this build cannot offer them (a family the owner
+ * saved before it was excluded): stored, de-duplicated, in stored order. The pane has no row for
+ * these, so a save must carry them through instead of dropping them; they are never offered.
+ */
+export function unofferableAllowedModelIds(allowedModels: readonly AllowedModel[] | undefined): string[] {
+  return allowedModelIds(allowedModels).filter(id => !isOfferableModelId(id));
 }
 
 /**

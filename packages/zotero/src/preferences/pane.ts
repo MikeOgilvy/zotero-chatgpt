@@ -1,5 +1,5 @@
 import type { AllowedModel, Personalization, ReaderSkill, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { defaultAllowedModels, isOfferableModelId, MODEL_ID, modelChoices, modelLabel, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
+import { defaultAllowedModels, isOfferableModelId, MODEL_ID, modelChoices, modelLabel, unofferableAllowedModelIds, type ModelCandidate } from '../../../core/src/workspace/allowed-models.ts';
 import { CHAT_TEXT_SCALE_MAX, CHAT_TEXT_SCALE_MIN, clampChatTextScale } from '../chat/text-scale.ts';
 import { mountUILocale } from '../chat/ui-locale.ts';
 import { createHistorySection, type HistorySection } from './history-section.ts';
@@ -477,10 +477,10 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
    * Stored names are kept where the id is unchanged, so a preserved unknown id keeps the label the
    * user last saw; catalog candidates use this module's derived label.
    *
-   * Rows are only the offerable families. A stored id this build can no longer offer has no row, so
-   * it is carried through in its stored order instead of being silently dropped from the record — the
-   * same guarantee `allowedModelIds` and the store already document. It is never offered and never
-   * sent; an id the owner actually unchecked does have a row and is removed.
+   * Rows are only the offerable families. Which stored ids must survive without a row is the core
+   * rule (`unofferableAllowedModelIds`), not a local recomputation: the pane renders rows and hands
+   * the checked ids back, and the policy decides what the record keeps. A carried id is never
+   * offered and never sent; an id the owner actually unchecked does have a row and is removed.
    */
   async function saveAllowedModels(): Promise<void> {
     if (busy || disposed || !current) return;
@@ -494,8 +494,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       ...(current.allowedModels ?? defaultAllowedModels()).map(model => [model.id, model.name] as const),
       ...modelChoices(current.allowedModels, liveModels ?? []).map(candidate => [candidate.id, candidate.name] as const),
     ]);
-    const rendered = new Set(modelRows.keys());
-    const carried = [...new Set((current.allowedModels ?? []).map(model => model.id))].filter(id => !rendered.has(id));
+    const carried = unofferableAllowedModelIds(current.allowedModels);
     const allowedModels: AllowedModel[] = [...selected, ...carried].map(id => ({ id, name: names.get(id) ?? modelLabel(id) }));
     await commit(settings => ({ ...settings, allowedModels }), 'Allowed models saved.');
   }

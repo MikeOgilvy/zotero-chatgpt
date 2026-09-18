@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { ModelOption } from '../../packages/contracts/src/runtime.ts';
 import type { AllowedModel } from '../../packages/contracts/src/workspace.ts';
 import {
-  DEFAULT_ALLOWED_MODEL_IDS, MODEL_ID, allowedModelIds, defaultAllowedModels, enforcedAllowedModelIds, isDefaultAllowedModels, isOfferableModelId, modelCandidates, modelChoices, modelLabel, resolveAllowedModels,
+  DEFAULT_ALLOWED_MODEL_IDS, MODEL_ID, allowedModelIds, defaultAllowedModels, enforcedAllowedModelIds, isDefaultAllowedModels, isOfferableModelId, modelCandidates, modelChoices, modelLabel, offeredModelIds, resolveAllowedModels, unofferableAllowedModelIds,
 } from '../../packages/core/src/workspace/allowed-models.ts';
 import { PINNED_MODEL_CATALOG } from '../../runtime/model-capabilities.ts';
 
@@ -117,4 +117,35 @@ it('keeps an excluded id out of the picker and degrades to the family default wh
   expect(enforcedAllowedModelIds([{ id: 'gpt-retired-x', name: 'a' }])).toBeUndefined();
   // Nothing is dropped from the record itself: only the picker enforcement narrows.
   expect(allowedModelIds([{ id: 'gpt-5.5', name: 'a' }, { id: 'gpt-5.2', name: 'b' }])).toEqual(['gpt-5.5', 'gpt-5.2']);
+});
+
+it('ranks the composer offer list here, newest-first, so no UI keeps its own order', () => {
+  // The runtime pages the catalog newest-last; the policy, not the array, decides the order.
+  const catalog = ['gpt-5.6-luna', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.4'];
+  expect(offeredModelIds(catalog)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna']);
+  // An enforced allowlist is authoritative and keeps the same rank, even outside the two families.
+  expect(offeredModelIds(catalog, ['gpt-5.6-luna', 'gpt-5.5'])).toEqual(['gpt-5.6-luna', 'gpt-5.5']);
+  // A stale allowlist degrades to the family rule, never to raw catalog order.
+  expect(offeredModelIds(catalog, ['gpt-retired-x'])).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna']);
+  // Only when even the family rule yields nothing is the catalog order kept, so the picker never blanks.
+  const otherFamilies = ['gpt-5.5', 'gpt-5.4'];
+  expect(offeredModelIds(otherFamilies)).toEqual(otherFamilies);
+  expect(offeredModelIds(otherFamilies, [])).toEqual(otherFamilies);
+  // Unknown siblings of either family rank behind the pinned newest models, then by id.
+  expect(offeredModelIds(['gpt-6-future', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.6-aurora']))
+    .toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-aurora', 'gpt-6-future']);
+});
+
+it('names the stored ids a save must carry because this build cannot offer them', () => {
+  const stored: AllowedModel[] = [
+    { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
+    { id: 'gpt-5.5', name: 'GPT-5.5' },
+    { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
+    { id: 'gpt-5.5', name: 'duplicate' },
+  ];
+  // Only the ids with no row are carried, de-duplicated and in stored order; the absent field means
+  // the default set, which is entirely offerable.
+  expect(unofferableAllowedModelIds(stored)).toEqual(['gpt-5.5']);
+  expect(unofferableAllowedModelIds(undefined)).toEqual([]);
+  expect(unofferableAllowedModelIds(defaultAllowedModels())).toEqual([]);
 });

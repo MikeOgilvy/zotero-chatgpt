@@ -1,5 +1,6 @@
 import type { GenerationSettings } from '../../../contracts/src/index.ts';
 import type { ModelOption } from '../../../contracts/src/runtime.ts';
+import { offeredModelIds } from '../../../core/src/workspace/allowed-models.ts';
 
 export type ComposerField = 'model' | 'speed' | 'effort';
 export interface ComposerOption { value: string; label: string }
@@ -16,54 +17,17 @@ function modelOf(models: readonly ModelOption[], id: string): ModelOption | unde
 }
 
 /**
- * The picker offers only the account's GPT-6 and GPT-5.6 families. Ordering is derived from this
- * explicit rank rather than the server's array: the live `model/list` (includeHidden: false) lists
- * GPT-5.6-Sol first and GPT-6-Astra second, so the array head is not the newest model. Unknown
- * members of either family still rank behind these four, sorted by id, so a new sibling cannot
- * silently land ahead of the pinned newest model.
- */
-const OFFERED_MODEL_RANK = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const;
-const OFFERED_MODEL_FAMILY = /^gpt-(?:6|5\.6)(?:$|[-.])/u;
-
-function offeredRank(id: string): number {
-  const index = OFFERED_MODEL_RANK.indexOf(id as (typeof OFFERED_MODEL_RANK)[number]);
-  return index === -1 ? OFFERED_MODEL_RANK.length : index;
-}
-
-/** The historical GPT-6 / GPT-5.6 families, in catalog order. */
-function familyModels(models: readonly ModelOption[]): ModelOption[] {
-  return models.filter(model => OFFERED_MODEL_FAMILY.test(model.id));
-}
-/** Newest-first by the explicit rank, then by id. Never mutates the caller's array. */
-function rankedModels(models: readonly ModelOption[]): ModelOption[] {
-  return models.slice().sort((a, b) => offeredRank(a.id) - offeredRank(b.id) || a.id.localeCompare(b.id));
-}
-
-/**
- * The models the picker may offer, newest-first. Every other family stays in the runtime snapshot
- * for capability lookups and historical message captions but never appears in the menu. When the
- * account offers none of the two families, the full list is kept rather than emptying a working
- * picker; that also keeps synthetic catalogs (and offline tests) usable.
+ * The models the picker may offer, in the order the core policy ranks them. The eligibility rule,
+ * the rank and the never-blank fallback all live in `core/workspace/allowed-models.ts`
+ * (`offeredModelIds`); this function only maps the resulting ids back onto the catalog entries the
+ * UI needs to render, so the composer cannot drift from the policy the Preferences pane enforces.
  *
  * `allowedIds` is the Preferences allowlist from `enforcedAllowedModelIds`. `undefined` keeps the
- * historical family rule exactly as it was. When provided, exactly those catalog ids are offered in
- * the same rank order, including ids outside the two families.
- *
- * A stale list whose ids are all gone from the live catalog (or an empty list) must never blank the
- * picker and must never change the owner's default model. It degrades to the historical family
- * result — newest-first, `gpt-6-astra` first — not to raw catalog order, which would leak every
- * other family back into the menu and promote the catalog head to the default. Only when even the
- * family rule yields nothing is the raw full list kept.
+ * historical family rule exactly as it was.
  */
 export function offeredModels(models: readonly ModelOption[], allowedIds?: readonly string[]): ModelOption[] {
-  if (allowedIds === undefined) {
-    const family = familyModels(models);
-    return family.length ? rankedModels(family) : models.slice();
-  }
-  const offered = models.filter(model => allowedIds.includes(model.id));
-  if (offered.length) return rankedModels(offered);
-  const family = familyModels(models);
-  return family.length ? rankedModels(family) : models.slice();
+  const byId = new Map(models.map(model => [model.id, model] as const));
+  return offeredModelIds(models.map(model => model.id), allowedIds).flatMap(id => { const model = byId.get(id); return model ? [model] : []; });
 }
 
 /**
