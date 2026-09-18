@@ -648,9 +648,10 @@ Agent Mode:
 
 ## 附录 2：本计划未验证的断言
 
-- 所有 `real host` 级别的行为（缩放、IME、焦点、滚动锚点、审批/撤销、真实文件 IO）**未在本次验证**；Stage 3-6 必须由 owner 在有权限的环境执行。**Stage 6 已实施但真实宿主仍未运行**：模式控件在真实 dock 的布局、IME、焦点、滚动锚点与原生缩放均**未观察**；Stage 7 的删除本身不改变宿主行为，但也**未在宿主上复跑**。
-- 所有 `real model` 行为（真实 Codex 输出、模态支持）**未验证**；本文件没有把任何 mock 当作模型输出。
-- `release artifact` 级别只确认了 `dist/` 文件名存在，未运行 `verify:artifacts`；Stage 6/7 后**未重新打包**，`dist/` 仍是 0.4.0a11 字节，本分支的代码尚未出现在任何 XPI 中。
+- **已取得真实宿主证据（`--context`，未调用模型，2026-09-18）**：7 阶段重构树已打包为 `zotero-chatgpt-0.4.0a12-dev.xpi`（92,679,180 B，SHA-256 `b1677ecd0f2ad525c6dc5734dcd78a12aee9fc1987e57019c204717d7aa157cb`），并在专用 `.zotero-chatgpt-dev/context` 树完成 **32/32 PASS**、`recordedRequests = 0`：隔离 profile、当前 XPI 激活、当前 PDF 本地抽取与页标签、自动全文准备、未发送标签为 New chat、选区来源/返回引用页、关闭重开保持当前页、草稿保持、同名附件隔离、附件切换、reader 缩放与聊天字号独立、单 dock、合成性能样本、偏好面板注册/挂载/中英文文案/禁用启用不叠加，以及“本会话零模型请求”。细节、归档与一次已归档的 harness 失败见 [progress](progress.md) 的“打包与宿主验证回合”。
+- **仍然未验证的真实宿主项**：该 frozen `--context` driver **不点击 Chat/Agent 模式控件**，故 Stage 6 模式切换在真实 dock 的布局/命中区、真实 IME、焦点、滚动锚点与原生缩放均**未观察**；Chat 模式的“结构性只读”仍是结构结论（未在真实库中尝试写操作）。审批、写账本、对账、撤销、真实原生文件选择/导出与 `--context --native` 均**未运行**。上面的宿主证据只覆盖列出的本地路径，不推广到其它行为。
+- **真实模型**：真实 Codex 输出、模态支持、图像生成、停止/在途恢复**未验证**；本文件没有把任何 mock 当作模型输出。`--live`/`--live-model` NOT RUN。
+- **发行物**：`release artifact` 级别现已包含 a12 的 `npm run package:dev` 与 `npm run verify:artifacts` **84 files PASS**（不再是“只确认 `dist/` 文件名存在”）；但**签名公开发行、无 Node 安装、下载隔离、干净 checkout 重建、升级/回退验收**仍**未运行**。
 - 行号与文件行数基于 commit `2d3d757`；任何代码改动都会使行号漂移，执行时以符号名与注释为准。
 
 ---
