@@ -880,14 +880,6 @@ body.zchatgpt-dock-open #split-view .primary-view,
 .zchatgpt-workspace-control:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
 .zchatgpt-workspace-chip > .zchatgpt-workspace-control:first-child { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .zchatgpt-workspace-chip > .zchatgpt-workspace-control:last-child { flex: 0 0 28px; padding: 0; }
-.zchatgpt-workspace-settings { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
-.zchatgpt-workspace-settings details { border-top: 1px solid var(--zchatgpt-border, GrayText); padding-top: 8px; }
-.zchatgpt-workspace-settings summary { cursor: pointer; min-height: 24px; }
-.zchatgpt-workspace-settings label { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin: 8px 0; }
-.zchatgpt-workspace-settings input, .zchatgpt-workspace-settings textarea, .zchatgpt-workspace-settings select { width: 100%; min-width: 0; max-width: 100%; min-height: 28px; padding: 4px 6px; box-sizing: border-box; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; }
-.zchatgpt-workspace-settings textarea { resize: vertical; min-height: 52px; max-height: 220px; }
-.zchatgpt-workspace-settings input[type=checkbox] { width: auto; min-height: 0; }
-.zchatgpt-workspace-settings :focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
 .zchatgpt-workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .zchatgpt-workspace-muted { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
 .zchatgpt-workspace-status { margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
@@ -895,7 +887,6 @@ body.zchatgpt-dock-open #split-view .primary-view,
 .zchatgpt-workspace-preview[hidden], .zchatgpt-workspace-status[hidden] { display: none; }
 .zchatgpt-workspace-preview pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; user-select: text; }
 .zchatgpt-workspace-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.zchatgpt-workspace-editor { margin-top: 8px; }
 
 /* One keyboard-owned command menu shared by every composer chooser. */
 .zchatgpt-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 8px; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }

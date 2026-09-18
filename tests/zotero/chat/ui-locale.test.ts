@@ -100,24 +100,19 @@ it('translates skill chip action labels without translating the skill name', () 
   locale.update('en'); expect(preview.title).toBe('Preview skill Send'); expect(remove.getAttribute('aria-label')).toBe('Remove skill Stop'); locale.dispose();
 });
 
-it('localizes task-scope, workflow-source and profile-delete templates while keeping identifiers verbatim', () => {
+it('localizes task-scope templates while keeping identifiers verbatim', () => {
   const { root, add } = setup();
   const card = add('details', 'zchatgpt-task-card'); const body = add('div', 'zchatgpt-task-body', '', card);
   const pdfScope = add('p', 'zchatgpt-task-muted', 'PDF PDFONE01 · candidate pages 1, 3', body);
   const emptyScope = add('p', 'zchatgpt-task-muted', 'PDF PDFONE01 · candidate pages none', body);
   const collectionScope = add('p', 'zchatgpt-task-muted', 'Target collection: My Papers', body);
-  const editor = add('div', 'zchatgpt-workspace-editor');
-  const source = add('p', 'zchatgpt-workspace-muted', 'Source: user\nPermissions: read, write\nUnsupported dependencies: none', editor);
-  const settings = add('div', 'zchatgpt-workspace-settings'); const skill = add('details', '', '', settings); const actions = add('div', 'zchatgpt-workspace-actions', '', skill); const prompt = add('span', '', 'Delete Derive?', actions);
   const locale = mountUILocale(root); locale.update('zh');
   expect(pdfScope.textContent).toBe('PDF PDFONE01 · 候选页 1, 3');
   expect(emptyScope.textContent).toBe('PDF PDFONE01 · 候选页 无');
   expect(collectionScope.textContent).toBe('目标分类：My Papers');
-  expect(source.textContent).toBe('来源：user\n权限：read, write\n不支持的依赖：无');
-  expect(prompt.textContent).toBe('删除 Derive？');
   locale.update('en');
   expect(pdfScope.textContent).toBe('PDF PDFONE01 · candidate pages 1, 3');
-  expect(prompt.textContent).toBe('Delete Derive?'); locale.dispose();
+  expect(collectionScope.textContent).toBe('Target collection: My Papers'); locale.dispose();
 });
 
 it('localizes the context ring accessible report in both directions', () => {
@@ -249,12 +244,12 @@ it('localizes completed metadata outcomes, annotation review counts and switches
   const header = add('div', 'zchatgpt-task-row-header', '', task); const outcome = add('span', 'zchatgpt-task-muted', 'Metadata saved; PDF unavailable (download failed)', header);
   const review = add('button', 'zchatgpt-button', 'Review 3 annotation suggestions'); review.dataset.zchatgptAction = 'review-annotations';
   const speed = add('button', 'zchatgpt-switch'); speed.dataset.zchatgptSetting = 'speed'; speed.setAttribute('aria-label', 'Fast');
-  const meta = add('div', 'zchatgpt-message-meta', 'High'); const editor = add('div', 'zchatgpt-workspace-editor'); const editHeading = add('strong', '', 'Edit Send', editor);
+  const meta = add('div', 'zchatgpt-message-meta', 'High');
   const locale = mountUILocale(root); locale.update('zh');
   expect(summary.textContent).toBe('获取文献 · 已完成 · 2 个元数据条目 · 已附加 0 个 PDF');
   expect(outcome.textContent).toBe('元数据已保存；PDF 不可用（下载失败）'); expect(review.textContent).toBe('审核 3 条标注建议');
-  expect(speed.getAttribute('aria-label')).toBe('快速'); expect(meta.textContent).toBe('High'); expect(editHeading.textContent).toBe('编辑 Send');
-  locale.update('en'); expect(summary.textContent).toBe('Acquire literature · Completed · 2 metadata item(s) · 0 PDFs attached'); expect(editHeading.textContent).toBe('Edit Send'); locale.dispose();
+  expect(speed.getAttribute('aria-label')).toBe('快速'); expect(meta.textContent).toBe('High');
+  locale.update('en'); expect(summary.textContent).toBe('Acquire literature · Completed · 2 metadata item(s) · 0 PDFs attached'); locale.dispose();
 });
 
 it('localizes the Chat / Agent mode selector while keeping the product term and pressed state', () => {

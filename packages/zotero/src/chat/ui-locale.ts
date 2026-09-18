@@ -138,10 +138,7 @@ const TEXT = [
   BUTTONS, '.zchatgpt-picker-heading', '[data-zchatgpt-setting="effort"] .zchatgpt-picker-option-label', '.zchatgpt-picker-toggle-row > span',
   '.zchatgpt-history-heading', '.zchatgpt-history-empty', '.zchatgpt-status-line', '.zchatgpt-message-meta',
   '.zchatgpt-context-disclosure > p', '.zchatgpt-error',
-  '.zchatgpt-workspace-settings label', '.zchatgpt-workspace-settings > details > summary', '.zchatgpt-workspace-status', '.zchatgpt-workspace-editor > strong',
-  '.zchatgpt-workspace-settings > details > div > p.zchatgpt-workspace-muted', '.zchatgpt-workspace-editor > p.zchatgpt-workspace-muted', '.zchatgpt-workspace-actions > span',
-  '.zchatgpt-workspace-settings select[name="detail"] option', '.zchatgpt-workspace-settings select[name="mathematics"] option',
-  '.zchatgpt-workspace-settings select[name="workflow"] option',
+  '.zchatgpt-workspace-status',
   '[data-zchatgpt-collection-target] option[value=""]', '.zchatgpt-plus-menu', '.zchatgpt-plus-heading', '.zchatgpt-plus-row-title', '.zchatgpt-plus-row-description', '.zchatgpt-acquisition-target', '.zchatgpt-command-heading', '.zchatgpt-command-status',
   '.zchatgpt-task-card > summary', '.zchatgpt-task-row-header > .zchatgpt-task-muted', '.zchatgpt-task-check', '.zchatgpt-task-field',
   '.zchatgpt-task-field option[value=""]', '.zchatgpt-task-counts', '.zchatgpt-task-body > .zchatgpt-task-muted',
@@ -296,7 +293,6 @@ export function mountUILocale(root: Element): { update(language: UILanguage): vo
     if (language === 'en') return source;
     const text = source.trim(); let translated: string;
     if (attribute) translated = actionLabel(text);
-    else if (node.matches('.zchatgpt-workspace-editor > strong')) translated = actionLabel(text);
     else if (node.matches('.zchatgpt-message-meta')) {
       const status = /^(Recorded|Responding…|Stopped|Failed|Queued|Cancelled before sending|Unconfirmed: the connection was interrupted\. The request was not sent again\.)( · .+)?$/u.exec(text);
       translated = status ? COPY[status[1]!]! + (status[2] ?? '') : text;
