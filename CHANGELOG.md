@@ -6,6 +6,7 @@ All notable user-facing changes will be recorded here. Versions below are **deve
 
 ### Development preview `0.4.0-alpha.1`
 
+- Documented the **Chat Mode / Agent Mode** product architecture: Chat Mode is the first-class read-only conversational reader (automatic current-PDF context, retrieval, page/quote citations), Agent Mode adds Zotero/file actions on the same shared document context and conversation, and the currently opened PDF is treated as implicit context rather than a manually attached file. Docs only; no behavior change.
 - Adopted the MIT license for the project; the root `LICENSE` now ships inside the development XPI and `package.json` declares `"license": "MIT"`.
 - Added agent/task/workspace contracts and persistent local services: workspace preferences, research profiles and SKILL.md, unified `@article`/`@chat` references, offline history/drafts, and a native task ledger with approval, undo and conflict detection.
 - Added context planning and long-document handling: per-turn budget from the runtime window or the pinned catalog, focused and multi-pass reading, batch queueing, deterministic source ids and a 3 × 16 MiB local text cache, plus loaded-vs-disk SHA-256 PDF version checks.

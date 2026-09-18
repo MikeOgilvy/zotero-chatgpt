@@ -4,7 +4,16 @@
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
-产品默认路径是 Reader / Chat：在当前 PDF/附件上阅读、推理与问答。`core/tasks` 里的原生任务编排（候选 → 确定性校验 → 审批 → 原生动作 → 结果账本 → 撤销）是在 Reader 之上叠加的**动作能力**，只在显式工具调用与任务授权时运行；它不是对整个产品的身份定义，也不改变默认阅读路径。
+产品默认路径是 **Chat Mode**：在当前 PDF/附件上阅读、推理与问答。`core/tasks` 里的原生任务编排（候选 → 确定性校验 → 审批 → 原生动作 → 结果账本 → 撤销）是在 Chat Mode 之上叠加的 **Agent Mode 动作能力**，只在显式工具调用与任务授权时运行；它不是对整个产品的身份定义，也不改变默认阅读路径。
+
+**Chat Mode / Agent Mode 共用同一个文档上下文层。** Reader 产生 Current Document Context（Zotero 书目与附件身份、PDF 文本、当前页、选区、邻近文本、标注、引用与页定位信息），两种模式都从它取数；区别只是该轮是否暴露 `core/tasks` + `zotero/actions` 的写入能力。不存在第二套 reader 管道，模式也不是两个层：
+
+```text
+Reader → Current Document Context → Chat Mode  → LLM → 回答
+                                   → Agent Mode → 工具/动作 → 结果
+```
+
+上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-codex-user-flow.md)。
 
 ## 分层与依赖方向
 
@@ -30,7 +39,7 @@ packages/zotero          Zotero 适配与 UI
   runtime                本地服务、GeckoStorage、发行资产校验、生成图像加载、进程监督器
 ```
 
-依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。
+依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。同理，Chat Mode / Agent Mode 不是两个层，而是同一层之上的两种请求策略：Chat Mode 只用只读端口（`reader`/`library`/`codex`/`context`），Agent Mode 额外接入 `core/tasks` 与 `zotero/actions`。
 
 `core/tasks/controller.ts` 是审批与原生写入意图的唯一所有者；`zotero/actions/native.ts` 只是无状态执行器，本身不保存审批或账本状态。
 
@@ -54,7 +63,7 @@ core 只依赖 contracts。bootstrap/index 负责组装；视图借用服务端�
 
 ## 当前 PDF、引用与预算
 
-默认只准备当前附件；打开 PDF 可在本地逐页读取，外发发生在发送或已授权任务边界。`@article` 搜索先返回元数据，选定后才读取对应 PDF。`@chat` 是明确消息的有界快照，不递归展开嵌套引用，也不被当作文献原始证据。
+默认只准备当前附件；打开 PDF 可在本地逐页读取，外发发生在发送或已授权任务边界。上下文按“轻量元数据 / 即时 reader 上下文 / 按需全文检索”分层取用，不要求每轮整篇发送；只有预算可容纳且策略允许时才纳入全部授权文本。`@article` 搜索先返回元数据，选定后才读取对应 PDF。`@chat` 是明确消息的有界快照，不递归展开嵌套引用，也不被当作文献原始证据。
 
 本地文本缓存最多保留 3 份结果，每份 **16 MiB UTF-8 文本**，超过上限要求缩小页范围，不静默裁剪。来源 ID 由文献身份、版本、解析器、页范围和文本摘要确定，LRU 驱逐不会把同一来源变成随机新身份。片段保留来源关联、物理页号、印刷页标签、空白/失败状态及实际覆盖；页内分块或不完整文本使用 partial。
 

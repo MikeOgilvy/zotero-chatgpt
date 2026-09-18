@@ -4,6 +4,8 @@ Zotero GPT Reader 当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a1
 
 四份权威文档分别负责[产品行为](zotero-codex-user-flow.md)、[架构与数据契约](module-design.md)、本文的开发操作、[进度与验收结果](progress.md)。不要再复制旧阶段计划或把单元、宿主、模型、发行证据混写成一个 PASS。
 
+产品模式（Chat Mode / Agent Mode）由[产品规格](zotero-codex-user-flow.md)定义；两种模式共用同一文档上下文层，模式路由尚未成为独立的构建或宿主阶段，本文件的命令不区分模式。
+
 模块边界由 `tests/build/dependency-boundaries.test.ts` 静态强制（contracts ← core ← zotero；`reader`/`library`/`chat` 不依赖 `actions`）。`npm run test:unit` 里它和普通回归一起跑，改目录结构或加跨层导入时会直接失败；分区说明见[架构与契约](module-design.md)的“分层与依赖方向”。
 
 ## 构建与本地验证

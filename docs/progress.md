@@ -4,12 +4,22 @@
 
 ## 当前状态
 
-- **产品分层**：Reader / Chat（当前 PDF 上下文阅读与问答）已实质实现，证据见下“已交付路径”与宿主 `--context` 报告；叠加其上的动作能力（真实模型行为、标注与获取整理的真实库写入及 UI、skill 作者 UI 等）仍有独立差距，见“剩余差距与下一任务”。产品定位不改变本页任何证据层级。
+- **产品分层**：**Chat Mode**（当前 PDF 上下文阅读与问答）已实质实现，证据见下“已交付路径”与宿主 `--context` 报告；叠加其上的 **Agent Mode** 动作能力（真实模型行为、标注与获取整理的真实库写入及 UI、skill 作者 UI 等）仍有独立差距，见“剩余差距与下一任务”。2026-09-18 的 Chat Mode / Agent Mode 文档决策见下节；它不改变本页任何证据层级。
 - **架构分层（2026-09-18 重构，见下）：原生读取与原生写入已分开**——`zotero/library`（读取）+ `zotero/library/native-support.ts`（共享宿主访问）+ `zotero/actions`（写入）。`reader`/`library`/`chat` 不再依赖写入侧，旧的 `zotero/agent/` 目录已删除，`agent` 术语从代码中移除。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制。
 
 - **Git**：`main` 基线 `59c21f3`；重构提交 `b6df0e5`、`013df5b`、`11cf37d`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。`dist/`、`build/`、`.zcr-dev/` 不在版本控制内。
 - **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a10`（侧载新 chrome 字节必须升版本；a7 的 `fcdcbc51…` 与 a8 的 `896063bf…` 从未装进 owner 正常 profile）。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
 - **本轮门禁（0.4.0a10，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` 打包前 **1071 passed / 2 skipped**；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a10-dev.xpi`（92,675,982 bytes，SHA-256 `8770ffd0ac32439a2f196c1e84a922b8fc2822e3d82ca3f0e5999b4327613f80`）；`npm run verify:artifacts` **84 files PASS**；打包后复跑 `test:unit` **1073 passed / 79 files / 0 skipped**。专用 `.zcr-dev/context` 真实宿主 `--context`：**32 executed / 32 PASS / 0 FAIL**，`recordedRequests = 0`。**真实模型 NOT RUN**。
+
+### 产品方向：Chat Mode / Agent Mode（2026-09-18 文档决策）
+
+本轮**只改文档**，不产生代码、单元、宿主或模型证据；测试计数、产物 hash 与门禁数字均不变。
+
+- 产品定位是“ChatGPT 式的论文阅读侧栏”；Chat Mode 是完整的一等产品，Agent Mode 是可选的动作能力。两者共用同一个文档上下文层与同一会话。
+- 当前打开的 PDF 是**隐式上下文**，不是手动附加的文件；上下文按“轻量元数据 / 即时 reader 上下文 / 按需全文检索”分层取用，不要求每轮整篇发送。
+- 第 1 阶段的产品价值由 Chat Mode 承载：自动当前 PDF 上下文、高质量全文检索、页/引用定位与良好阅读体验；Agent Mode 的标注、笔记、元数据编辑、文献库整理、下载、文件动作与多步工作流按顺序补上。
+- **尚未在代码中实现独立的模式开关/模式路由**：今天只有单一对话路径，加上叠加的 `core/tasks` + `zotero/actions` 动作能力。模式切换 UI、跨模式续用同一会话、把模式作为每轮冻结设置属于待实现差距（见下 Epic F）。
+- 契约见[产品规格](zotero-codex-user-flow.md)的“定位与范围”“当前 PDF 默认上下文”“会话、历史与请求”，以及[架构与契约](module-design.md)的模式请求策略段落。
 
 ### 产物边界
 
@@ -43,10 +53,10 @@
 - 本地文本缓存最多 3 份、每份 16 MiB；来源 ID 由文献身份/版本/解析器/页范围/文本摘要确定性生成；加载字节与磁盘 SHA-256 比较可发现 size/mtime 不变的替换。预算取 runtime 窗口、否则固定 catalog；聚焦/多轮计划。全文存为独立不可变 source 文件，逐轮消息只存摘要。
 - 会话：同附件并发打开不重复建会话；同名正文与补充附件隔离；新建对话独立草稿；离线历史、改名/分支/排队；schema 3 读写与旧 schema 1/2 安全拒绝；删除活动/不确定聊天被拒绝。**`+` 只打开未持久化的 New chat 标签，第一次发送才建记录**；store 按给定标题写入，不加 “讨论 N”。**未发送草稿会持久化并在插件重启后恢复**（`presenter.ts` `stageDraft`/`flushDraft` → `workspace.saveDraft`；`index.ts` `shutdown` 屏障强制 flush；恢复在 `loadLocal`；只有 `pageRange` 故意不恢复）——代码/单元结论，重启后端到端宿主观察未做。
 - 多会话：dock 可同时打开多个会话面板（Cursor 式标签条始终可见，方向键只移焦点）；**只有当前会话一列转录**，其它打开的会话只在标签条上，不随宽度并排第二列。同名会话只在标签条上显示 `标题 · 2`，已有存储标题永不重写。
-- 侧栏：无三点菜单（重命名在选中标签、账户用量在模型选择器）；已打开会话在左；未发送标签固定为 New chat（agent 模式可称 New agent），不显示文章标题，`+` 在已有命名会话旁仍是 New chat 文案，切走后仍留在条上，选中标签才有关闭 X，`+`/历史靠右；附件弹层只有 Attach file（多选文本或图片）；reference 与 skill 分入口；面向用户一律称 "skill"，存储 schema/id/名称逐字不变；历史行直删。
+- 侧栏：无三点菜单（重命名在选中标签、账户用量在模型选择器）；已打开会话在左；未发送标签固定为 New chat（Agent Mode 下可称 New agent），不显示文章标题，`+` 在已有命名会话旁仍是 New chat 文案，切走后仍留在条上，选中标签才有关闭 X，`+`/历史靠右；附件弹层只有 Attach file（多选文本或图片）；reference 与 skill 分入口；面向用户一律称 "skill"，存储 schema/id/名称逐字不变；历史行直删。
 - 全局设置在 Zotero 原生偏好设置面板（`startup()` 注册 `defaultXUL: true`、`shutdown()` 清理，JSON 文本函数桥，一次一个校验快照/skill 修订，拒绝写入即重读；pane `mount` 抛错不能中断切面板）；面板文案随 store 的 `uiLanguage`。侧栏只保留每对话内容。
 - 论断溯源：点击 `zcr.invalid/source/<id>/<page>` 引文先校验冻结 revision，再按链接 title 的逐字引用在该页字符盒定位，命中临时高亮、未命中诚实提示；点击路径无库写入。
-- 标注/获取整理（Reader 之上的动作能力，`zotero/actions` + `core/tasks`）：候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验；第三方 skill 不能授予权限。
+- 标注/获取整理（Chat Mode 之上的 Agent Mode 动作能力，`zotero/actions` + `core/tasks`）：候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验；第三方 skill 不能授予权限。
 - 模型/多模态：固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴/拖放/选文件多图（2 MiB 输入；reader clipboard 抛错继续走插件 realm；macOS TIFF 可转 PNG）、16 MiB 生成图校验、diagram 线程能力；诚实耗时指示（首个文本到达即冻结）。区域截图入口已删除；`capturePage` 端口仍在。
 - 安装/发行：`install:dev`（`plan`/`install`/`check`/`revert`/`rollback`）自校验；MIT `LICENSE` 与 5 个打包依赖许可（`linkify-it`/`mdurl`/`uc.micro`/`punycode.js` MIT，`entities@4.5.0` BSD-2-Clause）随包，`verify:artifacts` 列为必需；CI 用 `.nvmrc`，无 upload/publish/tag。
 
@@ -72,7 +82,7 @@
 
 ## 架构重构（2026-09-18）
 
-目标：让目录结构直接表达产品分层（Reader / Chat 是主体，动作能力是叠加层），并让“读取”与“写入”在代码里就是两件事。每个可验证变更一个本地提交（`b6df0e5`、`013df5b`、`11cf37d`、`823e62d`）。**本轮不产生真实模型证据。**
+目标：让目录结构直接表达产品分层（Chat Mode 是主体，Agent Mode 动作能力是叠加层），并让“读取”与“写入”在代码里就是两件事。每个可验证变更一个本地提交（`b6df0e5`、`013df5b`、`11cf37d`、`823e62d`）。**本轮不产生真实模型证据。**
 
 - **契约**：`contracts/src/agent.ts` → `contracts/src/native.ts`，端口拆成 `NativeReaderPort`（只读：引文定位、标注/条目/附件检查、元数据预览、DOI 查重）与 `NativeActionPort extends NativeReaderPort`（写入）；`NativeAgentError` → `NativeOperationError`。任务契约 `AgentTask*` → `ActionTask*`（`schemaVersion: 1` 与 JSON 字段不变，持久化记录兼容）。`NATIVE_ANNOTATION_PROVENANCE` 的字面值 `[AI · Zotero Codex Reader]` 原样保留：它写进真实标注。
 - **Zotero 适配**：删除 `zotero/agent/`。`agent/native.ts` 拆成 `library/native-read.ts`（读取）、`library/native-support.ts`（共享宿主访问与校验）、`actions/native.ts`（写入，`createNativeActionPort`）。`reader/library.ts` → `library/reference.ts`。宿主私有类型集中到 `host/native.ts`。
@@ -109,6 +119,7 @@
 | **C 工作区作者能力** | skill 创建/编辑/复制/导入/导出/试跑 UI —— 2026-09-15 已删除 presenter 里无 view 调用的 CRUD 包装，数据层 `WorkspaceStore.saveSkill/importSkill/deleteSkill` 与 presenter `selectSkill`/`saveSkill` 保留，UI 需在其上重建；research-topic profile 与 per-chat override 的 UI（数据层在 `contracts/src/workspace.ts`）；固定来源 + 从选中来源新建会话；`@collection`/`@note`/`@annotation`（kind 已声明，`library/reference.ts` `search()` 只返回 `article`）；参考文件拖拽（今天只有图片） | 代码 + 单元（自主） | 无；UI 目视与真实库接线归 D |
 | **D 视觉/交互/长时** | 偏好面板 zh/en + 暗色/亮色 + 键盘 Tab；真实 Gecko 高亮与阅读锚点视觉；真实 IME；多窗口一致性；窄窗/多显示器/主题溢出；reduced-motion；Cursor 式标签条在真实 dock 宽度/主题下的表现 | 真实宿主视觉（截图/录屏 + 人工） | 需 owner 在场目视；契约级检查可自主做 |
 | **E 发行与安装生命周期** | 无 Node 安装、下载隔离、干净 checkout 重建（历史上在临时 worktree 复现过一次，未重跑）、升级/回退、**签名**公开发行，全部在真实产物上 | 真实产物 + 签名发行 | 签名与公开发行需 owner 明确授权（当前授权不含 push/publish/付费服务） |
+| **F 模式与共享上下文** | Chat Mode / Agent Mode 的模式切换 UI 与模式路由；两种模式共用同一文档上下文层与同一会话、跨模式续用先前对话与文档引用；上下文分层取用（轻量元数据 / 即时 reader / 按需全文）在真实请求中的体现；Chat Mode 轮次不计入 Agent/动作额度 | 代码 + 单元（自主）；额度记账与真实请求归 A | 无；额度记账需 owner 授权的真实账户 |
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
 
