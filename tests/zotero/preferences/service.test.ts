@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { ReaderError } from '../../../packages/contracts/src/index.ts';
 import type { ReaderSkill, ReaderWorkspace, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
-import { createPreferencesService } from '../../../packages/zotero/src/workspace/preferences-service.ts';
+import { createPreferencesService } from '../../../packages/zotero/src/preferences/service.ts';
 
 const copy = <T>(value: T): T => structuredClone(value);
 

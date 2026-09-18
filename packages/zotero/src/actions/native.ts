@@ -183,15 +183,11 @@ function isNativeOperationError(error: unknown): error is { code: string } {
 }
 
 /**
- * Compose the native boundary. The returned port includes the read methods, so callers that only
- * read can use `createNativeReader` instead and never build the write half.
+ * Compose the native boundary at one place: the returned port includes the read methods, because
+ * every action re-reads the state it changes. Read-only callers build `createNativeReaderPort` with
+ * their own `createNativeSupport` instead and never construct the write half.
  */
 export function createNativeActionPortFrom(options: NativeSupportOptions): NativeActionPort {
   const support = createNativeSupport(options);
   return createNativeActionPort(support, createNativeReaderPort(support));
-}
-
-/** Read-only native boundary; no write method exists on this port. */
-export function createNativeReader(options: NativeSupportOptions): NativeReaderPort {
-  return createNativeReaderPort(createNativeSupport(options));
 }

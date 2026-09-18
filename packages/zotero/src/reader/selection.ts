@@ -2,8 +2,8 @@ import { ReaderError, type Citation, type PaperScope, type Rect } from '../../..
 import { validateCitation } from '../../../contracts/src/validation.ts';
 import type { HostItem, HostReader, ZoteroHost } from './host-types.ts';
 import { nativeDocumentSource } from './document.ts';
-import { ABSTRACT_LIMIT, MAX_PEOPLE, METADATA_FIELD_LIMIT, PERSON_LIMIT, TAG_LIMIT, TAGS_LIMIT, capList, capText, type PaperMetadata } from './metadata.ts';
-export type { PaperMetadata } from './metadata.ts';
+import { ABSTRACT_LIMIT, MAX_PEOPLE, METADATA_FIELD_LIMIT, PERSON_LIMIT, TAG_LIMIT, TAGS_LIMIT, capList, capText, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
+export type { PaperMetadata } from '../../../core/src/context/bibliography.ts';
 /** Zotero 9.0.6 `renderTextSelectionPopup` payload (reader.js:25427-25433, 70462-70484). */
 export interface SelectionAnnotation {
   type?: string; color?: string | undefined; sortIndex?: string; pageLabel?: string | undefined;

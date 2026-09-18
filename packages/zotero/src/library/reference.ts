@@ -3,7 +3,7 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import type { NativeCollectionTarget } from '../../../contracts/src/native.ts';
 import type { LibraryReferencePort, PickedFile, ReaderReference } from '../../../contracts/src/workspace.ts';
-import { paperIdentityOf, type PaperMetadata } from '../reader/metadata.ts';
+import { paperIdentityOf, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from '../reader/document.ts';
 import type { HostReader, ZoteroHost } from '../reader/host-types.ts';
 import { imageFromBytes } from '../chat/pick-images.ts';

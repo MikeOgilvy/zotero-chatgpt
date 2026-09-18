@@ -1158,14 +1158,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    * Reconcile the Cursor-style tab strip. A chip is kept by id instead of rebuilt, so a click or an
    * arrow key lands on a node that is still in the document: switching chats never steals the focus
    * the reader put on the strip. The strip is always visible: a single open chat is still a tab.
-   * With no named chat on screen the unbound tab carries the article title from the first paint —
-   * before `activate()` restores or creates anything — so the dock is named as soon as the input
-   * exists. `+` beside a named chat is the New chat copy; that tab is still not a record.
+   * The unsent tab is the `New chat` copy, not the article title: paper identity comes from the
+   * attachment/context system, never from a tab label. `+` beside a named chat is the same copy;
+   * that tab is still not a record.
    */
   const renderPanes = (state: PresenterState) => {
     panes.hidden = false;
-    const paperTitle = state.paperTitle.trim();
-    const firstOpenTitle = state.openConversations.length === 0 ? paperTitle : '';
     const models: Array<{ id: string; label: string; title: string; conversation: Conversation | null; localize: boolean }> = state.openConversations.map(conversation => ({
       id: conversation.id,
       label: conversationLabel(conversation, state.conversations),
@@ -1174,8 +1172,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       localize: false,
     }));
     if (state.newChatOpen || !state.conversation) {
-      const unboundLabel = firstOpenTitle || COPY.newChat;
-      models.push({ id: NEW_CHAT_TAB_ID, label: unboundLabel, title: unboundLabel, conversation: null, localize: !firstOpenTitle });
+      models.push({ id: NEW_CHAT_TAB_ID, label: COPY.newChat, title: COPY.newChat, conversation: null, localize: true });
     }
     const ids = new Set(models.map(entry => entry.id));
     for (const [id, node] of paneNodes) if (!ids.has(id)) { node.remove(); paneNodes.delete(id); }

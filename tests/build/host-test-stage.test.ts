@@ -70,7 +70,7 @@ describe('dedicated host-test stage selection', () => {
     ], { cwd: repositoryRoot });
     const registered = new Set<string>(Object.values(JSON.parse(stdout) as Record<string, string>));
     // Selected by --native rather than by HOST_DRIVERS.
-    registered.add('tests/host/native-agent-driver.ts');
+    registered.add('tests/host/native-action-driver.ts');
     const files = readdirSync(path.join(repositoryRoot, 'tests/host'))
       .filter(name => /-driver\.(js|ts)$/u.test(name))
       .map(name => `tests/host/${name}`);
@@ -78,7 +78,7 @@ describe('dedicated host-test stage selection', () => {
     expect(files.filter(file => !registered.has(file))).toEqual([]);
   });
   it('isolates native task checks and forbids combining their automatic driver with live or manual mode', async () => {
-    await expect(select(['--context', '--native'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/native-agent-driver.ts' });
+    await expect(select(['--context', '--native'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/native-action-driver.ts' });
     await expect(select(['--native'])).rejects.toThrow();
     await expect(select(['--context', '--native', '--live'])).rejects.toThrow();
     await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();

@@ -6,7 +6,7 @@ import {
   PREFERENCES_PANE_SOURCE,
   createPreferencePaneRegistrar,
   type PreferencePaneRegistrarHost,
-} from '../../../packages/zotero/src/workspace/preferences-registration.ts';
+} from '../../../packages/zotero/src/preferences/registration.ts';
 
 const rootURI = 'file:///plugin/';
 

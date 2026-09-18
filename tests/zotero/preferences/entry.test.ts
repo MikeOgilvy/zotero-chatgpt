@@ -42,7 +42,7 @@ const bridge: PreferencesBridge = {
 };
 shared.Zotero = { ZoteroCodexReaderPreferencesHost: bridge, logError: error => failures.push(error) };
 // Import once: Zotero evaluates this script once per Preferences window and then reuses the pane.
-await import('../../../packages/zotero/src/preferences-entry.ts');
+await import('../../../packages/zotero/src/preferences/entry.ts');
 
 function root(html = '<vbox/>') {
   const window = new Window({ url: 'https://test.invalid' });

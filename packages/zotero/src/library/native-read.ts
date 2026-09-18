@@ -1,6 +1,6 @@
 import { clone } from '../../../contracts/src/clone.ts';
 import { type NativeAnnotationCandidate, type NativeAnnotationPosition, type NativeItemSnapshot, type NativeReaderPort } from '../../../contracts/src/native.ts';
-import type { PaperScope, Rect } from '../../../contracts/src/index.ts';
+import type { Rect } from '../../../contracts/src/index.ts';
 import { lineRects, type LocateChar } from '../reader/locate.ts';
 import type { NativeZoteroHost } from '../host/native.ts';
 import { boundary, checkSignal, fail, key, normalizedText, publicURL, revisionMatches, string, waitRead, type NativeSupport } from './native-support.ts';

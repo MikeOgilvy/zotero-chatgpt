@@ -1,5 +1,5 @@
-import type { WorkspaceSettings } from '../../contracts/src/workspace.ts';
-import { createPreferencesPane } from './workspace/preferences-pane.ts';
+import type { WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import { createPreferencesPane } from './pane.ts';
 
 /**
  * Entry point of the Preferences pane script.

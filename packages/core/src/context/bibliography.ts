@@ -4,8 +4,8 @@ import type { PaperIdentity } from '../../../contracts/src/index.ts';
  * Pure bibliography formatting, shared by `core` (model context) and `packages/zotero` (reader).
  *
  * It lives in `core/context` because the layering is contracts → core → zotero: `zotero` may import
- * `core`, but `core` must never import `zotero`. The reader's `reader/metadata.ts` re-exports this
- * module so its existing import path and export names stay stable.
+ * `core`, but `core` must never import `zotero`. The reader-facing callers (`reader/selection.ts`,
+ * `library/reference.ts`) import this module directly.
  *
  * No DOM, no Node and no Zotero: the caller passes fields it already read from the host (see
  * `packages/zotero/src/reader/selection.ts`), and these functions only decide how they are spelled,

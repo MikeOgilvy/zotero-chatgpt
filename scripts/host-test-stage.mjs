@@ -27,7 +27,7 @@ export function selectHostStage(argv) {
   // No implicit default: preparing a profile rewrites its extensions, so the stage must be named.
   if (selected.length === 0) throw new Error('Pass one of --context, --live-model, --s5, --s6, or --acceptance');
   const stage = selected[0];
-  return { stage, driver: argv.includes('--native') ? 'tests/host/native-agent-driver.ts' : HOST_DRIVERS[stage], installDriver: true };
+  return { stage, driver: argv.includes('--native') ? 'tests/host/native-action-driver.ts' : HOST_DRIVERS[stage], installDriver: true };
 }
 
 /**

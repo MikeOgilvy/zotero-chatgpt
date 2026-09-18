@@ -268,7 +268,15 @@ async function runHostSmoke(config) {
     const coldStart = win.performance.now(); toggle().click();
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
-    await check('title-before-or-with-connection', panel()?.textContent.includes(title));
+    // The unsent tab is the New chat copy in either interface language. It must not be named after
+    // the paper: paper identity is carried by the attachment/context system, not by a tab label.
+    const unsentTab = () => panel()?.querySelector('[data-zcr-current-title]');
+    const NEW_CHAT_COPY = ['New chat', '新建对话'];
+    await check('new-chat-tab-before-or-with-connection',
+      unsentTab()?.dataset.zcrConversationId === 'new-chat'
+        && NEW_CHAT_COPY.includes((unsentTab()?.querySelector('[data-zcr-pane-label]')?.textContent ?? '').trim())
+        && !unsentTab()?.textContent?.includes(title),
+      { tabId: unsentTab()?.dataset.zcrConversationId ?? null, label: unsentTab()?.querySelector('[data-zcr-pane-label]')?.textContent ?? null, articleTitle: title });
     // Wait for the product's own gate sequence for this file: one gate from `prepare()`, a second from
     // `validate()`, which it can only reach after the whole-document read returned. Nothing of the
     // driver's is on the document, and the wait can fail honestly.

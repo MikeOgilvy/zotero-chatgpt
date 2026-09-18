@@ -92,7 +92,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Reconcile unconfirmed writes before undoing. They will not be resent automatically.': '撤销前请先核对未确认的写入，它们不会被自动重发。',
   'Changed outputs and human changes are preserved. Undo checks the recorded version again.': '已修改的结果和人工更改会被保留。撤销时会再次核对记录的版本。',
   'PDF download is unavailable for this target; approval saves metadata only.': '此目标无法下载 PDF；批准后仅保存元数据。',
-  // Native Zotero Preferences pane (workspace/preferences-pane.ts). Messages the store raises
+  // Native Zotero Preferences pane (preferences/pane.ts). Messages the store raises
   // through the same text reach the sidebar too, so the key is deliberately shared.
   Chat: '对话',
   Models: '模型', 'PDF text': 'PDF 文本',
@@ -103,7 +103,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Automatic PDF text preparation is on.': '已开启自动准备 PDF 文本。', 'Automatic PDF text preparation is off.': '已关闭自动准备 PDF 文本。',
   'Skill updated.': 'skill 已更新。',
   'The stored preferences could not be read.': '无法读取已保存的偏好。',
-  // History management section (workspace/history-section.ts). Counts, paper titles, timestamps and
+  // History management section (preferences/history-section.ts). Counts, paper titles, timestamps and
   // chat titles are data and stay verbatim; only the phrases below are translated.
   Paper: '文献', 'All papers': '全部文献', 'Select all': '全选',
   'Delete selected': '删除所选项',

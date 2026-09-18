@@ -6,7 +6,7 @@ import { ReaderError } from '../../../packages/contracts/src/index.ts';
 import type { ReaderSkill, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
 import { defaultAllowedModels } from '../../../packages/core/src/workspace/allowed-models.ts';
-import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/workspace/preferences-pane.ts';
+import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/preferences/pane.ts';
 
 const copy = <T>(value: T): T => structuredClone(value);
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };

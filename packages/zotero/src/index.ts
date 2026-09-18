@@ -7,13 +7,13 @@ import { injectReaderStyles } from './reader/dock.ts';
 import { NativeReaderPane, attachmentIdentity, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
-import { paperIdentityOf } from './reader/metadata.ts';
+import { paperIdentityOf } from '../../core/src/context/bibliography.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
-import { createPreferencesService } from './workspace/preferences-service.ts';
-import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './workspace/preferences-registration.ts';
+import { createPreferencesService } from './preferences/service.ts';
+import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './preferences/registration.ts';
 import { ReaderError, paperId, type Citation, type PaperIdentity, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
@@ -29,7 +29,7 @@ let runtime: ReturnType<typeof createRuntimeSupervisor> | undefined;
 let documentCache: ReaderDocumentCache | undefined;
 let localServices: ReturnType<typeof createLocalServices> | undefined;
 let preferencePanes: PreferencePaneRegistrar | undefined;
-/** Small, JSON-only surface the Preferences window script may call; see preferences-entry.ts. */
+/** Small, JSON-only surface the Preferences window script may call; see preferences/entry.ts. */
 interface PreferencesBridgeHost {
   ZoteroCodexReaderPreferencesHost?: unknown;
   ZoteroCodexReaderPreferencesPane?: unknown;
@@ -49,7 +49,7 @@ function clientId(): string {
   if (typeof existing === 'string' && UUID.test(existing)) return existing;
   const fresh = crypto.randomUUID(); Zotero.Prefs.set(CLIENT_ID_PREF, fresh, true); return fresh;
 }
-export function paperOf(identity: AttachmentIdentity): PaperScope { return { clientId: clientId(), libraryId: identity.libraryID, attachmentKey: identity.key }; }
+function paperOf(identity: AttachmentIdentity): PaperScope { return { clientId: clientId(), libraryId: identity.libraryID, attachmentKey: identity.key }; }
 /**
  * Freezes everything the reader read about this paper into the one identity the session and the
  * model context carry. `paperIdentityOf` owns the field list, the caps and the "absent stays absent"

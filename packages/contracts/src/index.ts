@@ -153,7 +153,7 @@ export function advanceRequestTiming(current: readonly RequestTiming[] | undefin
  *
  * The optional names mirror Zotero's own item field names (`publicationTitle`, `journalAbbreviation`,
  * `bookTitle`, ...) so an extracted value stays traceable to the single field it came from. The
- * reader only fills a field it actually read; see `packages/zotero/src/reader/metadata.ts`.
+ * reader only fills a field it actually read; see `packages/core/src/context/bibliography.ts`.
  */
 export interface PaperIdentity {
   title: string;

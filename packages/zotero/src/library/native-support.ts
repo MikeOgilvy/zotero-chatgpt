@@ -18,10 +18,9 @@ export interface NativeSupportOptions {
   environment?: HostEnvironment;
 }
 
-export const NATIVE_ITEM_TYPES = new Set(['journalArticle', 'conferencePaper', 'preprint', 'book', 'bookSection', 'report', 'thesis', 'webpage']);
-export const NATIVE_METADATA_FIELDS = ['DOI', 'url', 'date', 'publicationTitle', 'bookTitle', 'conferenceName', 'volume', 'issue', 'pages', 'publisher', 'place', 'ISBN', 'abstractNote', 'language'] as const;
-export const NATIVE_KEY = /^[A-Z0-9]{8}$/u;
-
+const NATIVE_ITEM_TYPES = new Set(['journalArticle', 'conferencePaper', 'preprint', 'book', 'bookSection', 'report', 'thesis', 'webpage']);
+const NATIVE_METADATA_FIELDS = ['DOI', 'url', 'date', 'publicationTitle', 'bookTitle', 'conferenceName', 'volume', 'issue', 'pages', 'publisher', 'place', 'ISBN', 'abstractNote', 'language'] as const;
+const NATIVE_KEY = /^[A-Z0-9]{8}$/u;
 export function fail(code: NativeOperationErrorCode, message: string): never { throw new NativeOperationError(code, message); }
 export function checkSignal(signal?: AbortSignal): void { if (signal?.aborted) fail('CANCELLED', 'Task cancelled before the next native operation.'); }
 export function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) fail('INVALID_INPUT', 'Expected a structured native task input.'); return value as Record<string, unknown>; }
@@ -75,12 +74,12 @@ export async function boundary<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); }
   catch (error) { if (error instanceof NativeOperationError) throw error; fail('UNAVAILABLE', 'The native operation could not be completed.'); }
 }
-export function nativeEnvironment(): HostEnvironment {
+function nativeEnvironment(): HostEnvironment {
   const native = globalThis as unknown as { IOUtils: Omit<HostEnvironment, 'join'>; PathUtils: Pick<HostEnvironment, 'join'> };
   return { join: (...parts) => native.PathUtils.join(...parts), stat: path => native.IOUtils.stat(path), read: path => native.IOUtils.read(path), remove: (path, options) => native.IOUtils.remove(path, options), computeHexDigest: (path, algorithm) => native.IOUtils.computeHexDigest(path, algorithm) };
 }
 /** Lower-level host HTTP retains cancellation and anonymous options; Attachments.downloadFile drops them. */
-export async function requestWithSignal<T>(signal: AbortSignal | undefined, run: (options: HostHTTPOptions) => Promise<T>): Promise<T> {
+async function requestWithSignal<T>(signal: AbortSignal | undefined, run: (options: HostHTTPOptions) => Promise<T>): Promise<T> {
   checkSignal(signal); let cancel = () => {};
   const abort = () => cancel(); signal?.addEventListener('abort', abort, { once: true });
   try {

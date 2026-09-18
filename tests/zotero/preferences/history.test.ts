@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { PaperScope } from '../../../packages/contracts/src/index.ts';
 import type { HistoryEntry, HistoryListing, HistoryMutationReport, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
-import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/workspace/preferences-pane.ts';
+import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/preferences/pane.ts';
 import { paperA, paperB } from '../../contracts/factories.ts';
 
 const NOW = '2026-09-13T10:00:00.000Z';

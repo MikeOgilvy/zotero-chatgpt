@@ -524,7 +524,7 @@ export class ReaderService {
           return reference;
         });
         if (input.paper) c.paperIdentity = input.paper;
-        // The first question names the chat, the way an agent tab is named after what was asked; a name
+        // The first question names the chat, the way a chat tab is named after what was asked; a name
         // the owner typed is never overwritten, and a chat that already has messages keeps its name.
         if (c.messages.length === 0 && !c.titleCustomized) c.title = titleFromQuestion(input.question) ?? c.title;
         c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action,

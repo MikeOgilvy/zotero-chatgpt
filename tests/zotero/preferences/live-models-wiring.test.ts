@@ -2,8 +2,8 @@ import { Window } from 'happy-dom';
 import { expect, it, vi } from 'vitest';
 import type { HistoryListing, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
-import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/workspace/preferences-pane.ts';
-import { createPreferencesService, type PreferencesService } from '../../../packages/zotero/src/workspace/preferences-service.ts';
+import { createPreferencesPane, type PreferencesPaneHost } from '../../../packages/zotero/src/preferences/pane.ts';
+import { createPreferencesService, type PreferencesService } from '../../../packages/zotero/src/preferences/service.ts';
 
 /**
  * The wiring, not the widget: these tests compose the same objects the plugin entry composes — the
@@ -32,7 +32,7 @@ function mountPane(service: PreferencesService) {
     writeAutomaticPdfText: vi.fn(),
     readHistory: () => Promise.resolve(listing),
     deleteHistory: () => Promise.resolve({ action: 'delete', requested: 0, changed: [], failed: [], warnings: [], partial: false }),
-    // Exactly what `preferences-entry.ts` does: the port is forwarded only when the service has it.
+    // Exactly what `preferences/entry.ts` does: the port is forwarded only when the service has it.
     ...(service.readLiveModels ? { readLiveModels: async (): Promise<unknown> => JSON.parse(await service.readLiveModels!()) as unknown } : {}),
   };
   const window = new Window({ url: 'https://test.invalid' });

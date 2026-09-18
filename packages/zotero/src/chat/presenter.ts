@@ -56,7 +56,8 @@ export interface PresenterState {
   /**
    * True while the unbound New chat tab is in the strip. Cursor keeps that tab after the reader
    * switches to a named chat: `+` opens it, the first send turns it into a record, and close
-   * removes it. `conversation === null` means the tab is the one on screen.
+   * removes it. `conversation === null` means the tab is the one on screen. The tab is always the
+   * `New chat` copy; paper identity is carried by the attachment/context system, not the label.
    */
   newChatOpen: boolean;
   conversations: Conversation[];
@@ -66,7 +67,6 @@ export interface PresenterState {
   generating: boolean;
   /** Incremented when the view should move focus into the question input. */
   focusToken: number;
-  paperTitle: string;
   workspace: WorkspaceSettings | null;
   /**
    * The one chat listing. It holds every stored chat for the query, including records that carry a
@@ -189,14 +189,14 @@ export class ConversationPresenter {
    * chat, so the adoption paths must not treat it as the active conversation: the next request
    * starts a fresh chat. Cleared as soon as a conversation becomes active again.
    *
-   * A new chat is not stored until its first question is sent (`ensureConversation`), the way an
-   * agent tab exists only on screen until it is used: opening the dock, pressing `+`, or closing the
-   * last tab never leaves an empty record behind, so nothing invisible is ever counted or named.
+   * A new chat is not stored until its first question is sent (`ensureConversation`), the way a tab
+   * exists only on screen until it is used: opening the dock, pressing `+`, or closing the last tab
+   * never leaves an empty record behind, so nothing invisible is ever counted or named.
    */
   private selectionCleared = false;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0, paperTitle: title,
+    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0,
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
   }

@@ -119,7 +119,7 @@ export function bundleOptions(outputDirectory) {
 export function preferencesBundleOptions(outputDirectory) {
   return {
     bundle: true,
-    entryPoints: [path.join(zoteroPackage, "src/preferences-entry.ts")],
+    entryPoints: [path.join(zoteroPackage, "src/preferences/entry.ts")],
     format: "iife",
     outfile: path.join(outputDirectory, "content/preferences/pane.js"),
     platform: "browser",
