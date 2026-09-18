@@ -449,6 +449,13 @@ export class ConversationPresenter {
     if (id !== null) { const skill = this.state.workspace?.skills.find(skill => skill.id === id); if (!skill || !skill.enabled || skill.unsupportedDependencies.length) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Choose an enabled skill with supported dependencies.'); }
     this.changeDraft({ ...this.state.draft, skillId: id });
   }
+  /**
+   * Test-only surface, kept deliberately (plan §H R8): the sidebar preferences/workspace/profile
+   * editor that used to call these was removed, and production now writes preferences, appearance,
+   * profiles and skills through Zotero's own Preferences window and the workspace store. They stay
+   * until the behavior-level tests that drive them are replaced, so no covered behavior is dropped
+   * just because its old UI is gone.
+   */
   async selectProfile(id: string | null): Promise<void> {
     await this.loadLocal(); if (id !== null && !this.state.workspace?.profiles.some(profile => profile.id === id)) throw new ReaderError('NOT_FOUND', 'This research profile is unavailable.');
     this.changeDraft({ ...this.state.draft, profileId: id });
@@ -652,6 +659,11 @@ export class ConversationPresenter {
     // failure that landed before the restore is re-announced here. A later failure sets it itself.
     if (this.state.document.phase === 'error' && this.state.document.error && !this.state.message) this.update({ message: this.state.document.error });
   }
+  /**
+   * Test-only surface, kept deliberately (plan §H R8): the reader-opt-in and page-range controls that
+   * called these were removed from the sidebar, and the document port is now driven by Zotero's own
+   * reader state. Kept until the tests driving them are replaced, not deleted ahead of them.
+   */
   setDocumentEnabled(enabled: boolean): void {
     this.services.document?.writeEnabled(enabled);
     this.update({ document: { ...this.state.document, enabled } });
@@ -1390,7 +1402,11 @@ export class ConversationPresenter {
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
   async cancelLogin(): Promise<void> { try { await this.client?.cancelLogin(); } catch (error) { this.update({ message: this.errorText(error) }); } }
-  /** Copies whitelist JSON only. The view uses the host clipboard hook; this method never reads files. */
+  /**
+   * Copies whitelist JSON only. The view uses the host clipboard hook; this method never reads files.
+   * Test-only surface, kept deliberately (plan §H R8): the diagnostics panel that called it is not
+   * mounted in production, and the tests that drive it stay until that panel returns or they move.
+   */
   async copyDiagnostics(): Promise<string | null> {
     try {
       const client = await this.connect();

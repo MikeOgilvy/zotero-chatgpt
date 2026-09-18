@@ -1,6 +1,6 @@
 import type { ErrorCode } from '../../../contracts/src/index.ts';
 export interface TurnFailure { code: ErrorCode; message: string; retryable: boolean }
-// Maps the typed 0.144.1 `codexErrorInfo` of a failed turn to a stable code and constant,
+// Maps the pinned 0.154.0 runtime's typed `codexErrorInfo` of a failed turn to a stable code and constant,
 // user-presentable text. The free-text upstream `message` is never copied: it may contain
 // account or provider details that must not reach the UI, records or diagnostics.
 const reasons: Record<string, TurnFailure> = {
