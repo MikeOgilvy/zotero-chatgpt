@@ -466,7 +466,15 @@ async function runHostSmoke(config) {
     await until(() => toggle(), 'sibling-toolbar'); toggle().click();
     await until(() => shell()?.dataset.attachmentKey === b.key && input(), 'sibling-sidebar', 60000);
     const siblingConversation = panel()?.dataset.zcrConversation || '';
-    await check('same-title-attachments-separated', shell().dataset.attachmentKey === b.key && input().value === '' && panel().textContent.includes(title) && (!conversationA || siblingConversation !== conversationA), { attachmentKey: shell().dataset.attachmentKey, siblingConversation: siblingConversation || null, conversationA: conversationA || null });
+    // Same-title attachments are different papers. The proof is the reader binding, not a tab label:
+    // the tab is the `New chat` copy now, so assert the shell is bound to the sibling attachment, its
+    // composer is empty (the main attachment's draft did not bleed across), the main attachment's own
+    // chat is not reused, and the main draft text never appears in the sibling surface.
+    await check('same-title-attachments-separated',
+      shell().dataset.attachmentKey === b.key && a.key !== b.key && input().value === ''
+        && (!conversationA || siblingConversation !== conversationA)
+        && !panel().textContent.includes('Unsent synthetic question about the current PDF'),
+      { attachmentKey: shell().dataset.attachmentKey ?? null, siblingAttachmentKey: b.key, mainAttachmentKey: a.key, siblingConversation: siblingConversation || null, conversationA: conversationA || null });
     tabId = opened.tabID; win.Zotero_Tabs.select(tabId);
     await until(() => shell()?.dataset.attachmentKey === a.key && input(), 'main-attachment-restored', 60000);
     await check('attachment-switch-keeps-draft', input().value === 'Unsent synthetic question about the current PDF');
