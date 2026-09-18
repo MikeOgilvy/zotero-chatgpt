@@ -149,9 +149,9 @@ PDF 缩放、聊天字号、控件尺度独立。真实 dock 保持当前 PDF �
 
 关键门槛还包括：当前 PDF 自动成为两种模式的隐式上下文；Chat Mode 只读、无 Zotero/文件写入且不计入 Agent/动作额度；Chat Mode 与 Agent Mode 共用同一会话，切换模式后续用先前对话与文档引用；干净登录；全文直接问/选区背景；发送后切附件；同名隔离；关闭恢复/改名可搜；@chat 无递归；设置/skill 冻结；长文覆盖/扫描缺口；压缩后取证/替换失效；停止重启不重写；撤销保护人工；下载失败不报成功；生成图区分原文。各自执行证据统一记录在 progress。
 
-## 产品 review 检查清单（0.4.0a13，2026-09-18）
+## 产品 review 检查清单（0.4.0a14，2026-09-18）
 
-用途：owner 在本轮 a13 的 **driver-free 验收实例**里逐项确认。图例：**[自动]** = 本轮真实宿主 `--context` 32/32 或单元测试已核对的行为；**[目视]** = 只有 owner 在真实 Zotero/Gecko 上才能判断的视觉/交互；**[已知风险]** = 重构期未在宿主观察、最可能出问题的地方。任何 **[自动]** 项若你在真实交互中看到相反行为，以你的观察为准并记为缺陷；本条目的证据边界见 [progress](progress.md) 的“打包与宿主验证回合”。**注意：本轮的 `--context` 冻结 driver 不点击模式控件、不做写操作**，因此 A/B 组中标 **[自动]** 的模式行为是**单元测试与静态结构**证据（见 progress 的“Stage 8”与“打包与宿主验证回合（0.4.0a13）”），**不是**真实 dock 上的模式切换观察；真实宿主只证明了 a13 字节能加载、当前 PDF 本地读取/会话/偏好路径仍工作。
+用途：owner 在本轮 a14 的 **driver-free 验收实例**里逐项确认。图例：**[自动]** = 本轮真实宿主 `--context` 35/35 或单元测试已核对的行为；**[目视]** = 只有 owner 在真实 Zotero/Gecko 上才能判断的视觉/交互；**[已知风险]** = 重构期未在宿主观察、最可能出问题的地方。任何 **[自动]** 项若你在真实交互中看到相反行为，以你的观察为准并记为缺陷；本条目的证据边界见 [progress](progress.md) 的“打包与宿主验证回合”。**a14 的 `--context` 驱动已真实点击模式控件**：它观察并断言默认档为 Chat、选项带分段类（`.zchatgpt-mode-option`，不是通用按钮皮）、点击 `Agent` 后 `aria-pressed`/`data-zchatgpt-mode` 变为 agent、再点 `Chat` 回到 chat（见 progress 的“打包与宿主验证回合（0.4.0a14）”）；它仍**不做写操作、不发模型请求**，因此 C/D 组中标 **[自动]** 的模式路由仍是**单元测试与运行时边界断言**证据，真实 dock 上的视觉细节（字号、窄 dock 溢出、IME/焦点）仍属 **[目视]**。
 
 启动（不要用日常 profile；本轮已准备好验收树，第一行准备命令可跳过）：
 
@@ -164,14 +164,15 @@ node scripts/prepare-host-test.mjs --context --acceptance
 
 准备说明：合成库、合成主/补充 PDF 与已有会话都在；自动 driver 已移除。打开助手本身不发模型请求。该实例在新的 `zotero-chatgpt/v1/` 存储身份下为 **signed out**（旧登录不迁移），`Chat`/`Agent` 的本地行为无需登录即可观察；真实模型回答不在本轮范围（NOT RUN）。
 
-**单一插件状态（2026-09-18 a13 回合重新准备，owner review 前必读）**：`prepare-host-test.mjs --context --acceptance` 只移除自动 driver 的 XPI，**不会**清掉残留在 `extensions.json` 里的旧插件/驱动注册（a12 回合就因此出现过旧 a10 插件与 driver 注册并存的污染）。a13 回合已在专用树内核对并清理：**当前 `.zotero-chatgpt-dev/context/profile/extensions.json` 里唯一 active 的 `app-profile` 插件是 `{90909501-7b5b-4985-9f55-566e9890746c}` `0.4.0a13`**，`extensions/` 下也只有这一个 XPI、无 `zchatgpt-host-test@local` 的 XPI 或注册。旧插件是**真实**风险而非潜在风险：重命名前那枚**不同 addon 身份**的 `{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}`（`0.4.0a10`，旧存储根 `zotero-codex-reader/v1/`、旧产品名）是 bootstrapped 插件，激活即 `ItemPaneManager.registerSection({ paneID: 'codex-reader', …sidenav… })` 并注册 reader `renderToolbar` 监听、注入自有 `data-zcr-*` dock；而 `--context` 驱动只按 `data-zchatgpt-*` 与 subject addon id 断言，所以旧插件并存时**照样 32/32 PASS**，会掩盖污染。若你在 review 中仍看到两个侧栏/两个工具栏按钮或落在旧产品名上，请立刻停下并记录为缺陷。a13 清理后重跑 `--context` 仍为 **32/32 PASS、`recordedRequests = 0`**（见 [progress](progress.md) 的"打包与宿主验证回合（0.4.0a13）"）。
+**单一插件状态（2026-09-18 a14 回合重新准备，owner review 前必读）**：`prepare-host-test.mjs --context --acceptance` 只移除自动 driver 的 XPI，**不会**清掉残留在 `extensions.json` 里的旧插件/驱动注册（a12 回合就因此出现过旧 a10 插件与 driver 注册并存的污染）。a14 回合已在专用树内核对并清理：**当前 `.zotero-chatgpt-dev/context/profile/extensions.json` 里唯一 active 的 `app-profile` 插件是 `{90909501-7b5b-4985-9f55-566e9890746c}` `0.4.0a14`**，`extensions/` 下也只有这一个 XPI、无 `zchatgpt-host-test@local` 的 XPI 或注册（`--acceptance` 会把 driver 注册留成一条指向已删 XPI 的 stale 条目，本回合已从 `addons` 数组移除）。旧插件是**真实**风险而非潜在风险：重命名前那枚**不同 addon 身份**的 `{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}`（`0.4.0a10`，旧存储根 `zotero-codex-reader/v1/`、旧产品名）是 bootstrapped 插件，激活即 `ItemPaneManager.registerSection({ paneID: 'codex-reader', …sidenav… })` 并注册 reader `renderToolbar` 监听、注入自有 `data-zcr-*` dock；而 `--context` 驱动只按 `data-zchatgpt-*` 与 subject addon id 断言，所以旧插件并存时**照样 35/35 PASS**，会掩盖污染。若你在 review 中仍看到两个侧栏/两个工具栏按钮或落在旧产品名上，请立刻停下并记录为缺陷。a14 清理后重跑 `--context` 仍为 **35/35 PASS、`recordedRequests = 0`**（见 [progress](progress.md) 的"打包与宿主验证回合（0.4.0a14）"）。
 
-> 注意：`prepare-host-test.mjs --context --acceptance` 只负责移除自动 driver 的 XPI，**不会**清掉此前残留在 `extensions.json` 里的旧插件/驱动注册；若将来在别处重现"两个侧栏"，先核对上面这条 active 列表。本验收树已核对为单一 a13 插件、无 driver 注册。
+> 注意：`prepare-host-test.mjs --context --acceptance` 只负责移除自动 driver 的 XPI，**不会**清掉此前残留在 `extensions.json` 里的旧插件/驱动注册；若将来在别处重现"两个侧栏"，先核对上面这条 active 列表。本验收树已核对为单一 a14 插件、无 driver 注册。
 
 ### A. 模式开关与每轮冻结
 
-1. **控件位置与外观 [目视]** — composer 起始处应有紧凑的分段控件 `Chat | Agent`，当前档有选中态（`aria-pressed=true`、`data-zchatgpt-mode`）。失败：控件缺失、压住输入框/附件入口、两档无法区分、窄 dock 溢出。
-2. **默认档为 Chat [自动]** — 新会话与重启后的未发送标签默认 `Chat`（`presenter.state.mode` 缺省）。失败：默认停在 `Agent`。
+1. **控件位置与外观 [自动+目视]** — composer 起始处应有紧凑的分段控件 `Chat | Agent`，当前档有选中态（`aria-pressed=true`、`data-zchatgpt-mode`）。a14 宿主已断言 `role=group`、选项类为 `.zchatgpt-mode-option`（不是 `.zchatgpt-button`）且不被通用按钮皮覆盖；像素级位置、窄 dock 溢出与视觉观感仍 **[目视]**。失败：控件缺失、压住输入框/附件入口、两档无法区分、窄 dock 溢出。
+2. **默认档为 Chat [自动·宿主已观察]** — 新会话与重启后的未发送标签默认 `Chat`（`presenter.state.mode` 缺省）；a14 宿主在真实 dock 上观察到默认 `chat` 且 Chat 档 `aria-pressed=true`。失败：默认停在 `Agent`。
+2a. **点击切换真实生效 [自动·宿主已观察]** — a14 宿主真实点击 `Agent` 后 `aria-pressed`/`data-zchatgpt-mode` 变为 `agent`，再点 `Chat` 回到 `chat`（非仅 CSS/前端装样子）。失败：点击不改变状态，或状态只在视觉上变化。
 3. **切换只影响下一轮 [自动]** — 已发送的历史轮次保持其冻结的 `mode`；切换只改下一条发送。失败：切换后旧消息被改写，或上一轮被重发。
 4. **每请求冻结并持久化 [自动]** — 模式在 `sendDraft` 提交前捕获并随请求记录持久化（`Message.mode`、hashVersion 3）；缺 `mode` 的旧记录按其旧 hashVersion 重建，不重分类为 chat。失败：旧记录变 `uncertain`、被改写。
 5. **切模式不新建会话、不丢草稿 [自动+目视]** — 在 `Chat`/`Agent` 间往返后仍是同一个会话，历史与草稿都在。失败：出现新会话、草稿清空、文档引用丢失。
@@ -187,6 +188,7 @@ node scripts/prepare-host-test.mjs --context --acceptance
 9c. **自然语言动作指令被拒 [自动]** — Chat 档下 “Highlight all important claims…” / “Fix the metadata…” / “Create notes … save to Zotero” / “Find these papers … organize them into a collection” 等明确变更指令不发送、不执行，并返回 “Agent mode is required…”。由 `core/chat/action-intent.ts` 的确定性分类器判定（无模型调用，保守偏假阴性）。失败：Chat 下执行或排队了写入。
 9d. **切回 Chat 后不再订阅 Agent [自动]** — Agent→Chat 后，后续发送与刷新（activation/切会话）不再调用任务/阅读端口。失败：仅停留在 Chat 档仍持续触碰 Agent 基础设施。
 9e. **Chat 档删除不初始化 Agent [自动]** — 纯 Chat 会话（无 `mode: 'agent'`、无非 `read` workflow、无 `batch`）在 Chat 档删除时，任务/阅读端口**从未**被调用，且删除成功；反之，记录中带有 Agent 工作的会话即使当前在 Chat 档，未完成时仍拒绝删除且不 `cancel`/`undo`。失败：Chat 档删除仍获取任务控制器/阅读协调器，或为省初始化而放过未完成工作。
+9f. **运行时强制边界（不只前端）[自动]** — 会话服务在接受请求前调用 `core/chat/mode-boundary.ts` 的 `assertModeBoundary()`：`mode !== 'agent'`（含缺省）却携带 `batch` 多轮阅读或非 `read` skill 的请求以 `UNSUPPORTED_INTERACTION` 拒绝，**不落记录、不起 turn**；阅读协调器 `create()` 拒绝 Chat 请求，其每一步 `makeRequest()` 显式把 step 冻结为 `mode: 'agent'`。带 PDF 文档/引用/图片的普通只读请求仍被接受。失败：绕过 presenter 的直接调用仍能以 Chat 创建阅读作业或原生任务。
 10. **真实库只读 [目视]** — Chat 下问答不应在 Zotero 库/PDF/标注产生任何写入。失败：出现新标注/高亮/条目/文件改动。（本轮未在真实库尝试写操作，只能你目视。）
 
 ### C. Agent Mode 动作与审批

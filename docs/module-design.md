@@ -1,6 +1,6 @@
 # 架构与契约
 
-本文描述 **0.4.0a13 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a14 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
@@ -27,6 +27,7 @@ submit()  ──mode=chat──▶ chat/chat-execution.ts   只读上下文 + �
 - `chat/chat-execution.ts` 是 Chat 路径。它拿到只读端口与一次请求，只能拒绝并发出一条请求。它**不**接受任何 Agent 能力参数，也**不** import 阅读协调器（`core/context/coordinator`）、`core/tasks` 或 `zotero/actions`，因此结构上无法创建任务或启动阅读作业。Agent-only 的 skill、明确的库/PDF 变更指令、以及需要多轮阅读的超大上下文，都在这里被拒绝并提示切换到 Agent Mode。
 - `chat/agent-execution.ts` 是 Agent 路径，是唯一会 `planAcquisition` 或 `reading.start`/`reading.enqueue` 的地方。它通过 presenter 注入的 `ports`（`tasks()`/`reading(client)`）触达能力，端口的所有权、缓存与订阅仍在 presenter。
 - `submit()` 只按冻结的 `mode` 调用上述二者之一；共享的文档准备、引用校验、上下文预算与计划仍留在 presenter，两种模式共用。
+- 边界不只由前端保证：会话服务在接受任何请求前调用 `core/chat/mode-boundary.ts` 的 `assertModeBoundary()`，任何 `mode !== 'agent'`（含缺省）却携带 Agent 工作（`batch` 多轮阅读，或非 `read` skill）的请求都以 `UNSUPPORTED_INTERACTION` 拒绝，既不落记录也不起 turn；阅读协调器 `create()` 同样拒绝 Chat 请求，其每一步 `makeRequest()` 又显式把 step 冻结为 `mode: 'agent'`（含恢复旧作业）。因此绕过 presenter 的直接调用也无法以 Chat 创建阅读作业或原生任务；带 PDF 文档、引用与图片的普通只读请求不受影响。
 - `refreshTaskState()` 只在 `state.mode === 'agent'` 时运行；`setMode('agent')` 才按需 hydrate。Chat Mode **不初始化 Agent 能力**（`ActionTasks` 或 `ReadingCoordinator`）覆盖其三条可能触达能力的路径：**发送**（`chat-execution.ts`，结构上无能力）、**刷新**（`refreshTaskState` 按模式门禁）、以及**删除**（见下）。
 - 删除会话时的「未完成原生任务 / 未完成阅读作业」忙碌检查会获取任务端口与阅读端口，因此它受一个显式条件约束：`this.state.mode === 'agent'` **或** `conversationHasAgentWork(conversation)`。后者是 `core/chat/agent-work.ts` 的纯函数，只看该会话自身记录——某个 `message.mode === 'agent'`，或（旧记录）非 `read` 的 `workflow.skill.workflow`，或 `message.batch`（只由阅读协调器写入，因此也覆盖 Stage 6–7 从 Chat 轮次升级出阅读作业那段遗留数据）。文案与拒绝行为不变：仍抛 `BUSY` 且从不调用 `cancel`/`undo`。真实数据里未完成任务/阅读作业必然伴随上述某一种消息，所以纯 Chat 会话的删除不会初始化能力，而任何真实保护都不失效。
 - `chat/capability.ts` 定义唯一的 Agent 能力接口 `AgentCapability`（组合根仍以 `PresenterAgent` 名注入）。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制：Chat 执行模块不得 import 协调器/任务/写入实现，且 `ChatSendContext` 不得含 `agent` 成员——加回该成员会让 `HasAgentMember` 类型断言编译失败。

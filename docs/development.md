@@ -1,6 +1,6 @@
 # 开发、测试与发行
 
-Zotero ChatGPT 当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a13**（2026-09-18 重命名为 Zotero ChatGPT 升到 a11 后，7 阶段 Chat/Agent 重构改变了 bundle 字节，按“新字节先升版本”升到 a12；随后 Stage 8 Chat/Agent 执行路径分离再次改动 `content/zchatgpt.js` 与 manifest 字节，升到 a13；npm 工作区版本不是侧载身份，未随动）。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
+Zotero ChatGPT 当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a14**（2026-09-18 重命名为 Zotero ChatGPT 升到 a11 后，7 阶段 Chat/Agent 重构改变了 bundle 字节，按“新字节先升版本”升到 a12；随后 Stage 8 Chat/Agent 执行路径分离再次改动 `content/zchatgpt.js` 与 manifest 字节，升到 a13；同日 Chat/Agent 模式修复改了模式控件渲染、核心边界与 `content/zchatgpt.js` 字节，升到 a14；npm 工作区版本不是侧载身份，未随动）。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
 
 四份权威文档分别负责[产品行为](zotero-chatgpt-user-flow.md)、[架构与数据契约](module-design.md)、本文的开发操作、[进度与验收结果](progress.md)。不要再复制旧阶段计划或把单元、宿主、模型、发行证据混写成一个 PASS。
 
@@ -33,11 +33,11 @@ npm run verify:artifacts
 | `npm run install:dev -- <command>` | 真实 Zotero profile 的开发 XPI 安装与自校验（`plan`/`install`/`check`/`revert`/`rollback`）；见下节 |
 | `npm run release:dry-run` | 检查本地发行计划，githubRelease=null；不发布或上传 |
 
-当前目标文件名为 `dist/zotero-chatgpt-0.4.0a13-dev.xpi`。不要在文档多处手写 digest；以 `dist/SHA256SUMS`、实际包身份和 progress 为准。
+当前目标文件名为 `dist/zotero-chatgpt-0.4.0a14-dev.xpi`。不要在文档多处手写 digest；以 `dist/SHA256SUMS`、实际包身份和 progress 为准。
 
 ```sh
 npm run verify:install -- build-info \
-  --xpi dist/zotero-chatgpt-0.4.0a13-dev.xpi \
+  --xpi dist/zotero-chatgpt-0.4.0a14-dev.xpi \
   --out .zotero-chatgpt-dev/build-info.json --json
 ```
 
@@ -69,7 +69,7 @@ node scripts/prepare-host-test.mjs --context --acceptance
 
 | 准备命令 | 会自动执行的内容 |
 | --- | --- |
-| `node scripts/prepare-host-test.mjs --context` | 当前 PDF 本地提取、页面标签/范围、原生 UI/会话/附件切换及合成性能样本；重启会话后还预检原生偏好设置面板（注册身份、真实打开 Preferences 窗口并挂载面板、禁用/启用不叠加面板）且不写业务记录；不发模型请求 |
+| `node scripts/prepare-host-test.mjs --context` | 当前 PDF 本地提取、页面标签/范围、Chat/Agent 模式控件（真实 dock 的默认态、选项类、点击切换与回切）、原生 UI/会话/附件切换及合成性能样本；重启会话后还预检原生偏好设置面板（注册身份、真实打开 Preferences 窗口并挂载面板、禁用/启用不叠加面板）且不写业务记录；不发模型请求 |
 | `node scripts/prepare-host-test.mjs --context --native` | 将工作树生产模块编入独立测试 driver；新建合成条目、PDF、collection 和标注，执行审批/撤销/冲突、SHA、截图、后台引用；并对冻结 revision 用合成 quote 实跑临时高亮导航（不写文献库）；还会尝试固定公开 DOI 的**未保存网络元数据预览**，不调用模型或下载 OA PDF |
 | `node scripts/prepare-host-test.mjs --context --live` | 本地检查后对合成 PDF **真实调用已登录账户的模型**，检查回答来源及停止/完成竞态；会消耗实际可用额度，执行前必须有对应授权 |
 | `node scripts/prepare-host-test.mjs --context --acceptance` | 无自动 driver 的人工试用 |
@@ -109,8 +109,8 @@ node scripts/prepare-host-test.mjs --s6
 **为什么单纯重启不解决**：编译默认是 `pref("extensions.startupScanScopes", 0)`（`/Applications/Zotero.app/Contents/Resources/app/omni.ja` → `defaults/preferences/zotero.js`）。同一 build 启动时 `XPIProvider.checkForChanges` 传 `aAppChanged === false`，`XPIStates.scanForChanges(ignoreSideloads)` 命中 `if (ignoreSideloads && !(loc.scope & startupScanScopes)) continue;`，直接跳过 profile 位置（`SCOPE_PROFILE = 1`），从不比较文件 mtime/size；启动也不调用 `AddonManager.getNewSideloads()`。只有一次**包含 profile scope 的扫描**才会让登记追上。
 
 ```sh
-npm run install:dev -- plan     --profile "<profile 目录>" --xpi dist/zotero-chatgpt-0.4.0a13-dev.xpi
-npm run install:dev -- install  --profile "<profile 目录>" --xpi dist/zotero-chatgpt-0.4.0a13-dev.xpi
+npm run install:dev -- plan     --profile "<profile 目录>" --xpi dist/zotero-chatgpt-0.4.0a14-dev.xpi
+npm run install:dev -- install  --profile "<profile 目录>" --xpi dist/zotero-chatgpt-0.4.0a14-dev.xpi
 npm run install:dev -- check    --profile "<profile 目录>"
 npm run install:dev -- revert   --profile "<profile 目录>"
 npm run install:dev -- rollback --profile "<profile 目录>"
@@ -140,7 +140,7 @@ node scripts/prepare-host-test.mjs --live-model
 
 ## 发行边界
 
-0.4.0a13 是开发预览，`update_url` 仍为 zotero-chatgpt-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
+0.4.0a14 是开发预览，`update_url` 仍为 zotero-chatgpt-dev.invalid 占位，未启用公开更新频道。固定 runtime 及第三方库/字体的许可必须随资产保留；项目自身按 MIT 许可发布，正文见根目录 `LICENSE`，`package.json` 的 `license` 字段与之一致。Intel、Windows、Linux 未经过同等验证，不能进入已支持平台声明。
 
 发行前还需以实际最终包完成干净 checkout 重建、无 Node 环境、下载隔离属性、长期性能和多窗口等验收；隔离官方登录、真实输出与图像生成仍未完成。0.3→0.4→0.3 的升级保留记录与回退安全拒绝已在 s6 隔离树验证（见 progress），但这不等于签名公开发行的升级验收。**目前不能从工作树 native 驱动通过推断最终 0.4 XPI 的原生 UI 接线、真实图像生成或公开发行已通过。** 所有结果与未完成门槛只在 progress 更新。
 
