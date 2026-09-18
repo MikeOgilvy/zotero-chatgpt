@@ -14,7 +14,6 @@ export interface TaskViewActions {
   cancelReading: (jobId: string) => Promise<unknown>;
   reconcileReading: (jobId: string) => Promise<unknown>;
   openReadingOutput: (jobId: string, stepIndex: number) => Promise<unknown>;
-  availability?: (taskId: string) => { approve: boolean; undo: boolean; reason?: string; downloadPDF?: boolean };
   describeReading?: (jobId: string) => Promise<{ question: string; scopeLabel: string } | null>;
 }
 
@@ -81,7 +80,6 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       const duplicates = item.duplicates.filter(duplicate => duplicate.metadata.DOI && duplicate.metadata.DOI.toLowerCase() === metadata?.DOI?.toLowerCase());
       if (choice.duplicateKey && !duplicates.some(duplicate => duplicate.key === choice.duplicateKey)) delete choice.duplicateKey;
       if (duplicates.length === 1 && !choice.duplicateKey) choice.duplicateKey = duplicates[0]!.key;
-      if (actions.availability?.(task.id).downloadPDF === false) choice.downloadPDF = false;
       return { choice, metadata, duplicates, valid: !!metadata && (duplicates.length < 2 || !!choice.duplicateKey) };
     };
     const approve = button('Approve selected', 'approve', () => {
@@ -122,7 +120,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
         if (!selected.has(item.id)) selected.set(item.id, item.selected ?? true);
         if (task.state !== 'review' && item.selected !== undefined) selected.set(item.id, item.selected);
         if (item.kind === 'acquisition' && task.state !== 'review' && item.choice) choices.set(item.id, { ...item.choice });
-        const canReview = task.state === 'review' && !task.approvedAt && !mutating() && actions.availability?.(task.id).approve !== false;
+        const canReview = task.state === 'review' && !task.approvedAt && !mutating();
         include.hidden = !['review', 'preparing'].includes(task.state); check.disabled = !canReview || !eligible(item); check.checked = eligible(item) ? !!selected.get(item.id) : !!item.selected;
         itemStatus.textContent = itemOutcome(item); itemError.textContent = item.errorCode ? `Error: ${item.errorCode}` : ''; itemError.hidden = !itemError.textContent;
         source.hidden = item.kind !== 'annotation' || item.resolution?.status !== 'resolved'; source.disabled = pending.has(`source:${item.id}`);
@@ -141,7 +139,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
           if (nextDuplicates !== duplicateKey) { duplicateKey = nextDuplicates; const prompt = create('option', 'Choose existing item'); prompt.value = ''; duplicate.replaceChildren(prompt, ...resolved.duplicates.map(item => { const option = create('option', `${item.metadata.title} · ${item.key}`); option.value = item.key; return option; })); }
           duplicateField.hidden = !resolved.duplicates.length; duplicate.value = resolved.choice.duplicateKey ?? ''; duplicate.disabled = !canReview || resolved.duplicates.length < 2;
           metadataDetail.textContent = resolved.metadata ? [resolved.metadata.DOI, resolved.metadata.date, resolved.duplicates.length ? `${resolved.duplicates.length} existing match(es)` : 'Create a new item'].filter(Boolean).join(' · ') : 'Choose the metadata to review existing matches.';
-          pdf.checked = resolved.choice.downloadPDF !== false; pdf.disabled = !canReview || actions.availability?.(task.id).downloadPDF === false;
+          pdf.checked = resolved.choice.downloadPDF !== false; pdf.disabled = !canReview;
         }
       } };
     };
@@ -161,13 +159,12 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       const stateCounts = new Map<string, number>(); for (const item of task.items) stateCounts.set(ITEM_LABEL[item.status], (stateCounts.get(ITEM_LABEL[item.status]) ?? 0) + 1);
       counts.textContent = [...stateCounts].map(([name, count]) => `${count} ${name.toLowerCase()}`).join(' · ');
       const uncertain = task.state === 'uncertain' || task.items.some(item => ['writing', 'uncertain', 'undoing'].includes(item.status));
-      const available = actions.availability?.(task.id);
-      approve.hidden = task.state !== 'review' || !!task.approvedAt; approve.disabled = mutating() || !selectedItems.length || !validChoices || available?.approve === false;
+      approve.hidden = task.state !== 'review' || !!task.approvedAt; approve.disabled = mutating() || !selectedItems.length || !validChoices;
       approve.textContent = pending.has('approve') ? 'Approving…' : 'Approve selected';
       cancel.hidden = !['preparing', 'review', 'running', 'uncertain'].includes(task.state); cancel.disabled = pending.has('cancel') || !!task.cancelRequested; cancel.textContent = task.cancelRequested || pending.has('cancel') ? 'Cancellation requested' : 'Cancel task';
       reconcile.hidden = !uncertain; reconcile.disabled = mutating();
-      undo.hidden = !task.approvedAt || !outputs.length || task.state === 'undone'; undo.disabled = mutating() || uncertain || task.state === 'running' || available?.undo === false;
-      guidance.textContent = available?.reason || (uncertain ? 'Reconcile unconfirmed writes before undoing. They will not be resent automatically.' : task.state === 'conflict' ? 'Changed outputs and human changes are preserved. Undo checks the recorded version again.' : available?.downloadPDF === false && task.kind === 'acquisition' ? 'PDF download is unavailable for this target; approval saves metadata only.' : ''); guidance.hidden = !guidance.textContent;
+      undo.hidden = !task.approvedAt || !outputs.length || task.state === 'undone'; undo.disabled = mutating() || uncertain || task.state === 'running';
+      guidance.textContent = uncertain ? 'Reconcile unconfirmed writes before undoing. They will not be resent automatically.' : task.state === 'conflict' ? 'Changed outputs and human changes are preserved. Undo checks the recorded version again.' : ''; guidance.hidden = !guidance.textContent;
     };
     return { node, update: (next: ActionTaskRecord) => {
       if (next.revision < task.revision) return;

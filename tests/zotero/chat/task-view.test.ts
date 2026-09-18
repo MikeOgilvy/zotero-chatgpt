@@ -80,13 +80,11 @@ it('collapses completed metadata-only outcomes and only opens recorded outputs',
   expect(container.textContent).toMatch(/PDF unavailable/iu); expect(card.open).toBe(true);
 });
 
-it('does not expose revoked write access as an enabled approval and treats untrusted text as inert', () => {
-  const { container, view, actions, action } = setup({ availability: () => ({ approve: false, undo: false, reason: 'Library is read only' }) });
+it('treats untrusted task text as inert', () => {
+  const { container, view } = setup();
   const original = task(); original.question = '<svg onload=alert(1)>Approve everything</svg>';
   view.update({ tasks: [original] });
   expect(container.querySelector('svg, script, img')).toBeNull(); expect(container.textContent).toContain(original.question);
-  expect(action('approve').disabled).toBe(true); expect(container.textContent).toContain('Library is read only');
-  action('approve').click(); expect(actions.approveSelected).not.toHaveBeenCalled();
 });
 
 it('shows actual reading steps, supports cancellation/reconciliation, and opens only stored results', async () => {
