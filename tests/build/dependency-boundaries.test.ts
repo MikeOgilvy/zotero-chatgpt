@@ -88,6 +88,15 @@ describe('module dependency boundaries', () => {
     expect(violations(file => /^packages\/zotero\/src\/(reader|library)\//u.test(file), /^packages\/zotero\/src\/actions\//u)).toEqual([]);
   });
 
+  // The reader context is the aggregation layer the chat presenter reads, so the dependency points
+  // chat -> reader and never back. A `reader/` file importing the chat UI would mean the open-PDF
+  // state grew a second owner downstream of the UI. (The one library -> chat edge that remains,
+  // `library/reference.ts -> chat/pick-images.ts`, is a misplaced clipboard helper and belongs to
+  // the Stage 5 file-action move, not to this layer.)
+  it('never lets the reader side depend on the chat UI', () => {
+    expect(violations(file => file.startsWith('packages/zotero/src/reader/'), /^packages\/zotero\/src\/chat\//u)).toEqual([]);
+  });
+
   it('never lets the chat UI import the native write implementation', () => {
     expect(violations(file => file.startsWith('packages/zotero/src/chat/'), /^packages\/zotero\/src\/actions\//u)).toEqual([]);
   });
