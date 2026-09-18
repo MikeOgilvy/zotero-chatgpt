@@ -25,9 +25,7 @@ export interface ChatViewHooks {
   exportImage?(image: ImageAttachment): Promise<void>;
   openLink?(url: string): void;
   readTextScale?(): number;
-  writeTextScale?(scale: number): void;
   zoomTargets?: Array<Document | HTMLElement>;
-  pasteTargets?: Array<Document | HTMLElement>;
   readerZoom?: ReaderZoomHost;
   /**
    * Collapse the reader dock through the reader's own close path (the same one the toolbar toggle
@@ -321,7 +319,7 @@ interface HistoryRowSource {
   /** Present only where the row can be deleted; the workspace history port owns no delete today. */
   remove?: () => void;
 }
-export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentity, close: () => void): HTMLElement {
+export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentity): HTMLElement {
   const doc = body.ownerDocument;
   const element = (tag: string, text: string, className?: string) => {
     const node = doc.createElementNS(HTML, tag);
@@ -334,8 +332,6 @@ export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentit
   root.setAttribute('aria-label', COPY.paneLabel);
   root.dataset.attachmentKey = identity.key;
   root.dataset.libraryId = String(identity.libraryID);
-  // Close stays on the reader toolbar toggle. Plugin chrome belongs in the in-reader dock.
-  void close;
   body.replaceChildren(root);
   return root;
 }
@@ -491,7 +487,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!id) return;
     void presenter.renameConversation(id, renameInput.value).then(() => { toggleRename(false); renameTrigger?.focus(); }).catch(reportViewError);
   });
-  renameForm.append(renameInput, saveName);
   renameForm.append(renameInput, saveName);
   const historyPanel = el('div', 'zchatgpt-history-panel');
   historyPanel.id = `${viewId}-history`;
@@ -863,7 +858,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   input.addEventListener('paste', onPaste);
   chat.addEventListener('paste', onPaste);
   const pasteDocuments = new Set<Document>([doc]);
-  for (const target of hooks.pasteTargets ?? hooks.zoomTargets ?? []) {
+  for (const target of hooks.zoomTargets ?? []) {
     const next = 'nodeType' in target && target.nodeType === 9 ? target as Document : target.ownerDocument;
     if (next) pasteDocuments.add(next);
   }
@@ -1494,10 +1489,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     scopeNotice.hidden = !state.pendingExplain;
     acknowledgeScope.hidden = !state.pendingExplain;
     if (state.workspace) {
-      if (!workspaceView) workspaceView = mountWorkspaceView({ input, context: composerContext, leading }, {
+      if (!workspaceView) workspaceView = mountWorkspaceView({ input, context: composerContext }, {
         searchReferences: (query, kind, signal) => presenter.searchReferences(query, kind, signal), previewReference: (reference, signal) => presenter.previewReference(reference, signal),
         addReference: async reference => { await presenter.addReference(reference); }, removeReference: async id => { await presenter.removeReference(id); },
-        selectSkill: id => presenter.selectSkill(id), selectProfile: id => presenter.selectProfile(id),
+        selectSkill: id => presenter.selectSkill(id),
         setReferenceRange: (id, range) => presenter.setReferenceRange(id, range),
       });
       const nextDraftKey = `${state.draft.references.map(reference => `${reference.id}:${reference.range?.join('-') ?? ''}:${reference.capturedAt}`).join(',')}:${state.draft.skillId}:${state.draft.profileId}`;

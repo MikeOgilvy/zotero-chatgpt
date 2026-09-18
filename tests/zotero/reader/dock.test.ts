@@ -27,7 +27,7 @@ it('mounts the chat dock inside reader content below the toolbar, not in a conte
   const mounted = mountReaderDock(doc);
   expect(mounted).toBeTruthy();
   const { dock, body } = mounted!;
-  const sidebar = renderReaderShell(body, { title: 'Paper', key: 'PDFONE01', libraryID: 1 }, () => undefined);
+  const sidebar = renderReaderShell(body, { title: 'Paper', key: 'PDFONE01', libraryID: 1 });
   expect(split.contains(dock)).toBe(true);
   expect(split.contains(sidebar)).toBe(true);
   expect(split.classList.contains('zchatgpt-dock-open')).toBe(true);
@@ -99,7 +99,7 @@ it('opens NativeReaderPane chat in the reader iframe column and hides the ItemPa
     Prefs: { get: (key: string) => key === 'layout' ? 'standard' : 360, set() {} },
     Items: { get: () => ({ key: 'PDFONE01', libraryID: 1, getField: () => 'Synthetic paper' }) },
   } as unknown as ZoteroHost;
-  const pane = new NativeReaderPane(zotero, reader, 'codex-reader', new Set(), (body, identity, close) => { renderReaderShell(body, identity, close); });
+  const pane = new NativeReaderPane(zotero, reader, 'codex-reader', new Set(), (body, identity) => { renderReaderShell(body, identity); });
   await pane.controller.toggle();
   const dock = readerDoc.querySelector('[data-zchatgpt-dock]');
   const sidebar = readerDoc.querySelector('[data-zchatgpt-sidebar]');
@@ -171,7 +171,7 @@ it('attaches the dock stylesheet to the reader iframe document and keeps a compo
   expect(dock.style.background).not.toMatch(/#fff/u);
   expect(dock.getAttribute('style') ?? '').not.toMatch(/min-width:\s*0(?:px)?(?:;|$)/u);
 
-  const sidebar = renderReaderShell(body, { title: 'Paper', key: 'PDFONE01', libraryID: 1 }, () => undefined);
+  const sidebar = renderReaderShell(body, { title: 'Paper', key: 'PDFONE01', libraryID: 1 });
   expect(sidebar.classList.contains('zchatgpt-sidebar')).toBe(true);
   expect(doc.getElementById('split-view')?.contains(sidebar)).toBe(true);
   expect(doc.querySelector('.toolbar')?.contains(sidebar)).toBe(false);

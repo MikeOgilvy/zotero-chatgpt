@@ -9,10 +9,9 @@ export interface WorkspaceViewActions {
   addReference: (reference: ReaderReference) => Promise<void>;
   removeReference: (id: string) => Promise<void>;
   selectSkill: (id: string | null) => Promise<void>;
-  selectProfile: (id: string | null) => Promise<void>;
   setReferenceRange?: (id: string, range: [number, number] | null) => Promise<void>;
 }
-export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement; leading: HTMLElement }
+export interface WorkspaceMounts { input: HTMLTextAreaElement; context: HTMLElement }
 
 function failure(error: unknown): string { return error instanceof Error ? error.message : 'The action could not be completed.'; }
 function referenceDetail(reference: ReaderReference): string {
@@ -199,8 +198,8 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
 
   // Per-chat research profiles are gone from the composer: profiles are configured in Zotero's own
   // Preferences window, and a request uses those global preferences. A draft saved before this
-  // removal still carries `profileId` and keeps applying at send time (see presenter.selectProfile),
-  // so the field stays in the data model but has no control here.
+  // removal still carries `profileId` and keeps applying at send time (see presenter's profile
+  // resolution), so the field stays in the data model but has no control here.
   /** The status slot reports refusals from the scoped controls (reference and skill chips). */
   mounts.context.append(status);
   let chipsKey = '';

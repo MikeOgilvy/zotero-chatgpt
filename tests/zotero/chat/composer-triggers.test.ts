@@ -21,10 +21,10 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const actions: WorkspaceViewActions = {
     searchReferences: vi.fn().mockResolvedValue([reference]), previewReference: vi.fn().mockResolvedValue(reference),
     addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined),
-    selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined),
+    selectSkill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  const view = mountWorkspaceView({ input, context, leading }, actions);
+  const view = mountWorkspaceView({ input, context }, actions);
   const state: WorkspaceViewState = { settings: structuredClone(settings), draft: { references: [], skillId: null, profileId: null } };
   view.update(state);
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };

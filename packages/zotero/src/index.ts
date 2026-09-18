@@ -154,7 +154,7 @@ function entry(reader: HostReader): ReaderEntry {
   if (!current) {
     const buttons = new Set<HTMLButtonElement>();
     const pane = new NativeReaderPane(Zotero, reader, paneID, buttons, (body, identity, close, opened) => {
-      const root = renderReaderShell(body, identity, close);
+      const root = renderReaderShell(body, identity);
       const presenter = presenterFor(identity, reader);
       const unmount = mountChatView(root, presenter, {
         ...hooks,

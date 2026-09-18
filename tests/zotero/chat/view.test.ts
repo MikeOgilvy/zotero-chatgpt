@@ -172,14 +172,13 @@ async function mountReadyChat(options: {
   const doc = documentOf();
   const body = doc.createElement('div');
   doc.body.append(body);
-  const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
+  const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId });
   const scale = options.textScale ?? { value: 1 };
   const timers = options.captureTimers ? captureIntervalTimers(doc.defaultView as unknown as ViewWindow) : null;
   const teardown = mountChatView(root, presenter, {
     ...(options.closeDock ? { closeDock: options.closeDock } : {}),
     openCitation: options.openCitation ?? (() => Promise.resolve()),
     readTextScale: () => scale.value,
-    writeTextScale: value => { scale.value = value; },
     uuid: options.uuid ?? (() => imageA.id),
     ...(options.copyText ? { copyText: options.copyText } : {}),
     ...(options.openDocumentPage ? { openDocumentPage: options.openDocumentPage } : {}),
@@ -237,7 +236,7 @@ function captureIntervalTimers(view: ViewWindow) {
 it('uses an in-pane sidebar without impersonating the reader toolbar or adding a close control', () => {
   const doc = documentOf();
   const body = doc.createElement('div');
-  const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: 'PDFONE01', libraryID: 1 }, () => undefined);
+  const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: 'PDFONE01', libraryID: 1 });
   expect(root.className).toMatch(/zchatgpt-sidebar/u);
   expect(root.classList.contains('zchatgpt-paper')).toBe(true);
   expect(root.dataset.attachmentKey).toBe('PDFONE01');
@@ -912,7 +911,7 @@ it('keeps an attachment fallback title available in compact chrome without a her
   await presenter.activate();
   const doc = documentOf();
   const body = doc.createElement('div');
-  const root = renderReaderShell(body, { title: 'PDF', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
+  const root = renderReaderShell(body, { title: 'PDF', key: paperA.attachmentKey, libraryID: paperA.libraryId });
   mountChatView(root, presenter);
   const title = root.querySelector('[data-zchatgpt-current-title]');
   expect(title?.textContent).toBe('PDF');
@@ -948,7 +947,7 @@ it('shows the New chat tab at first paint without creating a chat', async () => 
   });
   const doc = documentOf();
   const body = doc.createElement('div');
-  const root = renderReaderShell(body, { title, key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
+  const root = renderReaderShell(body, { title, key: paperA.attachmentKey, libraryID: paperA.libraryId });
   mountChatView(root, presenter);
   // Host `new-chat-tab-before-or-with-connection` fires as soon as the composer exists, before restore.
   expect(root.querySelector('[data-zchatgpt-input]')).toBeTruthy();
@@ -1714,7 +1713,7 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
   await presenter.activate();
   const doc = documentOf();
   const body = doc.createElement('div');
-  const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
+  const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId });
   mountChatView(root, presenter);
   const panel = root.querySelector('[data-zchatgpt-history]');
   expect(panel?.querySelector('select')).toBeNull();

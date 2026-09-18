@@ -80,7 +80,7 @@ async function mountDockWithChat() {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
-  const root = renderReaderShell(mounted.body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
+  const root = renderReaderShell(mounted.body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId });
   const teardown = mountChatView(root, presenter);
   await Promise.resolve();
   return { doc, mounted, root, teardown };

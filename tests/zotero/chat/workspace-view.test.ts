@@ -15,10 +15,10 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   pane.append(context, input, leading); document.body.append(pane);
   const actions: WorkspaceViewActions = {
     searchReferences: vi.fn().mockResolvedValue([reference]), previewReference: vi.fn().mockResolvedValue(reference),
-    addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined), selectSkill: vi.fn().mockResolvedValue(undefined), selectProfile: vi.fn().mockResolvedValue(undefined),
+    addReference: vi.fn().mockResolvedValue(undefined), removeReference: vi.fn().mockResolvedValue(undefined), selectSkill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  const view = mountWorkspaceView({ input, context, leading }, actions);
+  const view = mountWorkspaceView({ input, context }, actions);
   const state: WorkspaceViewState = { settings: structuredClone(settings), draft: { references: [], skillId: null, profileId: null } };
   view.update(state);
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
@@ -66,13 +66,14 @@ it('previews reference and skill chips as inert text and removes them through ca
 });
 
 it('renders no per-chat research-profile control in the composer and points at the native Preferences window', () => {
-  const { context, actions, pane } = setup();
+  const { context, pane } = setup();
   // The profile select, its visible "Profile" label and its scope row are gone from the composer.
   expect(context.querySelector('[data-zchatgpt-profile]')).toBeNull();
   expect(context.querySelector('[data-zchatgpt-chat-scope]')).toBeNull();
   expect(context.querySelector('.zchatgpt-chat-profile-label')).toBeNull();
   expect(pane.textContent).not.toContain('Global preferences');
-  expect(actions.selectProfile).not.toHaveBeenCalled();
+  // The per-chat profile control was removed with the composer's profile row; profiles are
+  // configured in Zotero's own Preferences window, so the composer never selects one.
   // The global controls live in Zotero's own Preferences window, not the sidebar; the old
   // in-pane hint at that window was redundant and is gone with the container it lived in.
   expect(pane.querySelector('[name="background"]')).toBeNull();
