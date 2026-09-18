@@ -40,8 +40,8 @@ const HARMLESS_ITEMS = ['userMessage', 'reasoning', 'plan', 'contextCompaction']
 const ANSWER_LIMIT = 1024 * 1024;
 /** At most one liveness `progress` event per run per second; reasoning deltas arrive far faster. */
 const PROGRESS_INTERVAL_MS = 1000;
-async function hashInput(input: SendInput, version: 1 | 2 = 2): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version === 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}) }));
+async function hashInput(input: SendInput, version: 1 | 2 | 3 = 3): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version >= 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -304,7 +304,11 @@ export class ReaderService {
   private async reconstructInput(conversation: StoredConversation, request: RequestRecord): Promise<SendInput | null> {
     const user = conversation.messages.find(m => m.requestId === request.requestId && m.role === 'user');
     if (!user) return null;
-    const paper = user.paper ?? (request.hashVersion === 2 ? undefined : user.citations[0]
+    // `hashVersion` is the request-input hash version, not the conversation storage schemaVersion. v1
+    // derived a paper identity from the citation, v2 hashes `paper` verbatim, and v3 additionally
+    // hashes the frozen `mode`. Older versions must keep reconstructing byte for byte (invariant 11).
+    const version = request.hashVersion ?? 1;
+    const paper = user.paper ?? (version >= 2 ? undefined : user.citations[0]
       ? { title: user.citations[0].title, authors: user.citations[0].authors, ...(user.citations[0].year ? { year: user.citations[0].year } : {}), ...(user.citations[0].doi ? { doi: user.citations[0].doi } : {}) }
       : conversation.title.trim() ? { title: conversation.title, authors: [] } : undefined);
     const document = user.document ? conversation.documents?.[user.document.id] : undefined;
@@ -315,18 +319,20 @@ export class ReaderService {
       return { ...reference, ...(document ? { document } : {}) };
     });
     if (user.referenceDocuments?.some(source => !conversation.documents?.[source.document.id])) return null;
-    const images = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}) };
+    // A record written before the field existed has no `mode`; `hashInput` hashes `'chat'` for v3 (D3),
+    // so an absent mode reconstructs consistently instead of making the request `uncertain`.
+    const restoredFields = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}), ...(user.mode ? { mode: user.mode } : {}) };
     if (request.action) {
-      const restored = { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
-      if ((request.hashVersion === 2 || user.workflow || user.references || user.batch || user.contextReport) && await hashInput(restored, request.hashVersion ?? 1) !== request.hash) return null;
+      const restored = { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...restoredFields };
+      if ((version >= 2 || user.workflow || user.references || user.batch || user.contextReport) && await hashInput(restored, version) !== request.hash) return null;
       return restored;
     }
     for (const action of ['explain', 'ask'] as const) {
-      const input: SendInput = { requestId: request.requestId, conversationId: conversation.id, action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
-      if (await hashInput(input, request.hashVersion ?? 1) === request.hash) return input;
+      const input: SendInput = { requestId: request.requestId, conversationId: conversation.id, action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...restoredFields };
+      if (await hashInput(input, version) === request.hash) return input;
     }
-    if (request.hashVersion === 2) return null;
-    return { requestId: request.requestId, conversationId: conversation.id, action: user.citations.length > 0 ? 'explain' : 'ask', question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...images };
+    if (version >= 2) return null;
+    return { requestId: request.requestId, conversationId: conversation.id, action: user.citations.length > 0 ? 'explain' : 'ask', question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...restoredFields };
   }
   private async applyHistory(conversation: StoredConversation, request: RequestRecord, turn: HistoryTurn): Promise<void> {
     if (turn.status === 'inProgress') {
@@ -483,7 +489,7 @@ export class ReaderService {
       const live = await this.load(input.conversationId);
       const existing = live.requests.find(r => r.requestId === input.requestId);
       if (existing) {
-        if (existing.hash !== (existing.hashVersion === 2 ? hash : await hashInput(input, 1))) throw new ReaderError('REQUEST_CONFLICT', 'This request ID was already used for different content.');
+        if (existing.hash !== await hashInput(input, existing.hashVersion ?? 1)) throw new ReaderError('REQUEST_CONFLICT', 'This request ID was already used for different content.');
         return { receipt: this.receipt(existing, true), run: null };
       }
       if (this.closed || !this.upstream.ready()) throw new ReaderError('RUNTIME_UNAVAILABLE', 'Codex is not available; retry the connection first.', true);
@@ -514,7 +520,7 @@ export class ReaderService {
       if (live.requests.filter(request => request.state === 'accepted').length >= 10) throw new ReaderError('BUSY', 'This chat already has ten waiting questions.');
       const waiting = !!live.activeRequestId || !!otherBatch;
       const now = this.options.now();
-      const request: RequestRecord = { requestId: input.requestId, hash, hashVersion: 2, state: 'accepted', turnId: null, createdAt: now, updatedAt: now, action: input.action };
+      const request: RequestRecord = { requestId: input.requestId, hash, hashVersion: 3, state: 'accepted', turnId: null, createdAt: now, updatedAt: now, action: input.action };
       await this.commit(input.conversationId, (c, emit) => {
         c.requests.push(request);
         c.schemaVersion = 3;
@@ -528,6 +534,7 @@ export class ReaderService {
         // the owner typed is never overwritten, and a chat that already has messages keeps its name.
         if (c.messages.length === 0 && !c.titleCustomized) c.title = titleFromQuestion(input.question) ?? c.title;
         c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action,
+          ...(input.mode ? { mode: input.mode } : {}),
           ...(input.images?.length ? { images: input.images } : {}), ...(input.paper ? { paper: input.paper } : {}), ...(input.document ? { document: documentSummary(input.document) } : {}),
           ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}),
           ...(references ? { references, referenceDocuments: input.references!.flatMap(ref => ref.document ? [{ referenceId: ref.id, document: documentSummary(ref.document) }] : []) } : {}),

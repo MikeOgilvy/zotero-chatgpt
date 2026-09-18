@@ -6,7 +6,7 @@ import { parseThreadUsage } from '../codex/model-capabilities.ts';
 import { DOCUMENT_BYTES, documentSummary, validateDocument, validateRevision } from '../../../contracts/src/document.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
 import { encodeRequestLog, parseRequestLog } from './log.ts';
-export interface RequestRecord { requestId: UUID; hash: string; hashVersion?: 2; state: RequestState; turnId: string | null; createdAt: string; updatedAt: string; action?: 'explain' | 'ask'; firstTokenAt?: string; lastEventAt?: string }
+export interface RequestRecord { requestId: UUID; hash: string; hashVersion?: 2 | 3; state: RequestState; turnId: string | null; createdAt: string; updatedAt: string; action?: 'explain' | 'ask'; firstTokenAt?: string; lastEventAt?: string }
 /** Persisted shape. Requests share the conversation file so accepted state and the user message land atomically. */
 export interface StoredConversation extends Conversation { schemaVersion: 1 | 2 | 3; documents?: Record<string, DocumentContext>; logSeq: number; upstream: { threadId: string | null; permissionMode?: 'read' | 'diagram' }; requests: RequestRecord[] }
 /** Snapshot and journal metadata only. Referenced source files have not been opened or verified. */
@@ -85,6 +85,9 @@ function parseConversation(value: unknown, metadataOnly = false): StoredConversa
     if (m.upstreamItemId !== undefined) { const id = str(m.upstreamItemId); if (!id.length || id.length > 1024) unavailable(); message.upstreamItemId = id; }
     if (m.effectiveSettings !== undefined) message.effectiveSettings = settingsOf(m.effectiveSettings);
     if (m.action === 'explain' || m.action === 'ask') message.action = m.action;
+    // Frozen routing mode. Absent on records written before the field existed; D3 interprets it as
+    // `'chat'`, so it is not materialized here and an old record is never rewritten just to add it.
+    if (m.mode !== undefined) { if (m.mode !== 'chat' && m.mode !== 'agent') unavailable(); message.mode = m.mode; }
     if (m.paper !== undefined) { try { message.paper = validatePaperIdentity(m.paper); } catch { unavailable(); } }
     try {
       if (m.workflow !== undefined) message.workflow = validateWorkflow(m.workflow);
@@ -115,7 +118,7 @@ function parseConversation(value: unknown, metadataOnly = false): StoredConversa
     const r = asRecord(entry);
     if (!requestStates.includes(str(r.state) as RequestState)) unavailable();
     const record: RequestRecord = { requestId: str(r.requestId), hash: str(r.hash), state: r.state as RequestState, turnId: nullableStr(r.turnId), createdAt: str(r.createdAt), updatedAt: str(r.updatedAt) };
-    if (r.hashVersion !== undefined) { if (r.hashVersion !== 2) unavailable(); record.hashVersion = 2; }
+    if (r.hashVersion !== undefined) { if (r.hashVersion !== 2 && r.hashVersion !== 3) unavailable(); record.hashVersion = r.hashVersion; }
     if (r.action === 'explain' || r.action === 'ask') record.action = r.action;
     if (r.firstTokenAt !== undefined) record.firstTokenAt = str(r.firstTokenAt);
     if (r.lastEventAt !== undefined) record.lastEventAt = str(r.lastEventAt);

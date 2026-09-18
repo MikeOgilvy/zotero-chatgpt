@@ -35,7 +35,7 @@ describe('conversation store', () => {
   it.each([
     ['page outside its document', (raw: Record<string, unknown>) => { raw.messages = [{ ...((raw.messages as object[])[0]), document: { ...documentSummary(documentA), pages: [{ pageIndex: 2, pageLabel: '3', status: 'text' }] } }]; }],
     ['unregistered source id', (raw: Record<string, unknown>) => { raw.documentIds = []; }],
-    ['unsupported hash version', (raw: Record<string, unknown>) => { raw.requests = [{ requestId: 'r1', hash: 'h', hashVersion: 3, state: 'completed', turnId: null, createdAt: 'now', updatedAt: 'now' }]; }],
+    ['unsupported hash version', (raw: Record<string, unknown>) => { raw.requests = [{ requestId: 'r1', hash: 'h', hashVersion: 4, state: 'completed', turnId: null, createdAt: 'now', updatedAt: 'now' }]; }],
     ['invalid upstream item id', (raw: Record<string, unknown>) => { raw.messages = [{ ...((raw.messages as object[])[0]), upstreamItemId: '' }]; }],
   ])('refuses corrupt metadata: %s', async (_label, corrupt) => {
     const { storage, store: s } = store(); const c = await s.create(paperA, 'A', settings); c.documents = { [documentA.id]: documentA };
@@ -98,6 +98,26 @@ describe('conversation store', () => {
     expect(loaded.upstream.threadId).toBe('thread-1'); expect(loaded.lastSeq).toBe(3); expect(loaded.activeRequestId).toBe('r1');
     expect(storage.writes.filter(w => w.includes('"requests"')).length).toBeGreaterThan(0);
     expect(loaded).not.toBe(conversation);
+  });
+  it('round-trips a frozen mode and leaves a pre-field record readable without rewriting it (D3)', async () => {
+    const { storage, store: s } = store();
+    const conversation = await s.create(paperA, 'Paper A', settings);
+    conversation.messages.push({ id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'q', citations: [citationA], status: 'completed', mode: 'agent' });
+    conversation.requests.push({ requestId: 'r1', hash: 'h', hashVersion: 3, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now' });
+    await s.save(conversation);
+    const reloaded = new ConversationStore(storage, { uuid: () => 'x', now: () => 'later' });
+    expect((await reloaded.get(conversation.id)).messages[0]?.mode).toBe('agent');
+    expect((await reloaded.get(conversation.id)).requests[0]?.hashVersion).toBe(3);
+    // A record written before `mode` existed has no field and must stay readable as chat without the
+    // store rewriting the file to add one.
+    const path = `conversations/${conversation.id}.json`;
+    const raw = JSON.parse(new TextDecoder().decode(storage.files.get(path))) as { messages: Array<Record<string, unknown>> };
+    delete raw.messages[0]!.mode;
+    const legacyBytes = new TextEncoder().encode(JSON.stringify(raw));
+    storage.files.set(path, legacyBytes);
+    const legacy = await new ConversationStore(storage, { uuid: () => 'x', now: () => 'later' }).get(conversation.id);
+    expect(legacy.messages[0]).not.toHaveProperty('mode');
+    expect(storage.files.get(path)).toEqual(legacyBytes);
   });
   it('returns detached copies so callers cannot mutate the stored state', async () => {
     const { store: s } = store();

@@ -1,6 +1,6 @@
 import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runtime.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput } from '../../../contracts/src/index.ts';
+import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { parseAnnotationCandidates, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
@@ -1021,6 +1021,14 @@ export class ConversationPresenter {
     return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
   }
   /**
+   * Routing mode for one request, frozen with the workflow on the same snapshot (D2). Until a mode
+   * control exists, a non-read skill is the only thing that selects the agent path; everything else
+   * is a chat request, which is also what an absent mode means (D3). No action is gated on it yet.
+   */
+  private frozenMode(workflow: WorkflowSnapshot | undefined): RequestMode {
+    return workflow?.skill && workflow.skill.workflow !== 'read' ? 'agent' : 'chat';
+  }
+  /**
    * Does this draft still point at a research profile that exists? When it does not, the dead
    * reference is dropped so the global preferences apply, and the caller reports it visibly rather
    * than failing an unreachable send or silently changing behaviour.
@@ -1093,6 +1101,8 @@ export class ConversationPresenter {
     try {
       const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace);
       if (workflow) input.workflow = workflow;
+      // Frozen with the workflow on the same snapshot; default chat (D3), no UI change yet.
+      const mode = this.frozenMode(workflow);
       if (workflow?.skill?.workflow === 'acquire') {
         if (queued) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Acquisition previews use task review, not the model request queue. Your draft is kept.');
         if (!context.acquisitionTarget) throw new ReaderError('INVALID_REQUEST', 'Choose a target collection before acquiring articles.');
@@ -1113,12 +1123,16 @@ export class ConversationPresenter {
       if (input.images?.length && modalities && !modalities.includes('image')) throw new ReaderError('MODEL_UNAVAILABLE', 'The selected model does not accept image input.');
       const plan = await this.planInput(input, current); aborted(controller.signal);
       if (this.state.conversation?.id === conversation.id) this.update({ contextReport: input.contextReport ?? null });
+      // `mode` is readonly on the contract, so it rides on the request copy handed to the session
+      // rather than being assigned back like `workflow`; the hash and the stored message use it.
+      const request: SendInput = { ...input, mode };
       if (plan) {
         const reading = await this.getReading(client);
         this.readingDescriptions.set(input.requestId, { question: input.question, scopeLabel: [input.document ? input.paper?.title || this.title : '', ...(input.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ') });
-        this.acceptReading(await (queued ? reading.enqueue(input, plan) : reading.start(input, plan)));
-      } else if (queued) await client.enqueue!(input);
-      else await client.send(input);
+        this.acceptReading(await (queued ? reading.enqueue(request, plan) : reading.start(request, plan)));
+      }
+      else if (queued) await client.enqueue!(request);
+      else await client.send(request);
       if (this.state.conversation?.id === conversation.id) await this.sync();
       await this.refreshList();
     }

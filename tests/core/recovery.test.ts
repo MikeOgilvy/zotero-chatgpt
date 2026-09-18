@@ -3,6 +3,7 @@ import { createReaderClient } from '../../packages/core/src/index.ts';
 import { ConversationStore } from '../../packages/core/src/sessions/store.ts';
 import type { ReaderClient } from '../../packages/contracts/src/runtime.ts';
 import type { ReaderEvent, SendInput } from '../../packages/contracts/src/index.ts';
+import { validateCitation } from '../../packages/contracts/src/validation.ts';
 import { MemoryStorage, flush } from './doubles.ts';
 import { server, methods, thread, turn } from './fixtures.ts';
 import { citationA, paperA, settings } from '../contracts/factories.ts';
@@ -11,8 +12,12 @@ let ids = 0;
 afterEach(async () => { for (const c of clients.splice(0)) await c.close().catch(() => undefined); vi.useRealTimers(); });
 const uuid = () => `00000000-0000-4000-8000-${String(++ids).padStart(12, '0')}`;
 const requestId = (n: number) => `11111111-0000-4000-8000-${String(n).padStart(12, '0')}`;
-async function hashInput(input: SendInput): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings }));
+// Mirrors `hashInput` in `packages/core/src/sessions/service.ts` for the versions these tests seed:
+// `images` is hashed by every version, v2 adds `paper`, v3 additionally hashes the frozen `mode`.
+// Citations are normalized exactly as `validateCitation` does it on the way in, because the hash is
+// taken over the validated input and is order-sensitive.
+async function hashInput(input: SendInput, version: 1 | 2 | 3 = 1): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations.map(validateCitation), settings: input.settings, images: input.images ?? [], ...(version >= 2 && input.paper ? { paper: input.paper } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -47,6 +52,53 @@ describe('process restart and uncertain reconciliation', () => {
     expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
     expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
     expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
+  });
+  it('reconstructs a hashVersion 3 request whose frozen mode is agent', async () => {
+    const storage = new MemoryStorage();
+    const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
+    const created = await store.create(paperA, 'Synthetic Paper A', settings);
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings, mode: 'agent' };
+    const hash = await hashInput(input, 3);
+    created.requests.push({ requestId: input.requestId, hash, hashVersion: 3, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'explain' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed', mode: 'agent' });
+    created.activeRequestId = input.requestId;
+    await store.save(created);
+    const { c, p } = await signedIn(undefined, storage);
+    await flush(); await tick(20);
+    // The frozen mode participates in the v3 hash, so a mismatch would leave the request uncertain.
+    expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
+    expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
+  });
+  it('treats a hashVersion 3 request with no mode as chat, not as uncertain (D3)', async () => {
+    const storage = new MemoryStorage();
+    const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
+    const created = await store.create(paperA, 'Synthetic Paper A', settings);
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings };
+    const hash = await hashInput(input, 3);
+    created.requests.push({ requestId: input.requestId, hash, hashVersion: 3, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'explain' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed' });
+    created.activeRequestId = input.requestId;
+    await store.save(created);
+    const { c, p } = await signedIn(undefined, storage);
+    await flush(); await tick(20);
+    expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
+    expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
+  });
+  it('keeps a hashVersion 2 record written before the mode field reconstructable (invariant 11)', async () => {
+    const storage = new MemoryStorage();
+    const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
+    const created = await store.create(paperA, 'Synthetic Paper A', settings);
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings };
+    const hash = await hashInput(input, 2);
+    created.requests.push({ requestId: input.requestId, hash, hashVersion: 2, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'explain' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed' });
+    created.activeRequestId = input.requestId;
+    await store.save(created);
+    const { c, p } = await signedIn(undefined, storage);
+    await flush(); await tick(20);
+    // v2 must keep hashing without `mode`; otherwise already-persisted requests become uncertain.
+    expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
+    expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
   });
   it('retries accepted redelivery after sign-in if the conversation was opened while signed out', async () => {
     const storage = new MemoryStorage();
