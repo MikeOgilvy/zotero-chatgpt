@@ -15,6 +15,23 @@ Reader → Current Document Context → Chat Mode  → LLM → 回答
 
 上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-chatgpt-user-flow.md)。
 
+### Chat / Agent 执行路径与能力边界
+
+Stage 8 起，两种模式不再是同一个 `submit()` 里的分支，而是两条具名执行路径，模式调度只看当轮冻结的 `mode`：
+
+```text
+submit()  ──mode=chat──▶ chat/chat-execution.ts   只读上下文 + 推理 + 回答
+          └─mode=agent─▶ chat/agent-execution.ts  任务编排 / 多轮阅读 / 工具动作
+```
+
+- `chat/chat-execution.ts` 是 Chat 路径。它拿到只读端口与一次请求，只能拒绝并发出一条请求。它**不**接受任何 Agent 能力参数，也**不** import 阅读协调器（`core/context/coordinator`）、`core/tasks` 或 `zotero/actions`，因此结构上无法创建任务或启动阅读作业。Agent-only 的 skill、明确的库/PDF 变更指令、以及需要多轮阅读的超大上下文，都在这里被拒绝并提示切换到 Agent Mode。
+- `chat/agent-execution.ts` 是 Agent 路径，是唯一会 `planAcquisition` 或 `reading.start`/`reading.enqueue` 的地方。它通过 presenter 注入的 `ports`（`tasks()`/`reading(client)`）触达能力，端口的所有权、缓存与订阅仍在 presenter。
+- `submit()` 只按冻结的 `mode` 调用上述二者之一；共享的文档准备、引用校验、上下文预算与计划仍留在 presenter，两种模式共用。
+- `refreshTaskState()` 只在 `state.mode === 'agent'` 时运行；`setMode('agent')` 才按需 hydrate。Chat Mode 的发送与刷新路径都不会初始化 `ActionTasks` 或 `ReadingCoordinator`。
+- `chat/capability.ts` 定义唯一的 Agent 能力接口 `AgentCapability`（组合根仍以 `PresenterAgent` 名注入）。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制：Chat 执行模块不得 import 协调器/任务/写入实现，且 `ChatSendContext` 不得含 `agent` 成员——加回该成员会让 `HasAgentMember` 类型断言编译失败。
+- 判定「这是不是一条动作指令」由 `core/chat/action-intent.ts` 的纯函数完成，无模型调用；规则保守，疑问句与主题介词一律判为普通问答。
+
+
 ## 分层与依赖方向
 
 目录边界就是模块边界，由 `tests/build/dependency-boundaries.test.ts` 静态强制：
@@ -39,7 +56,7 @@ packages/zotero          Zotero 适配与 UI
   runtime                本地服务、GeckoStorage、发行资产校验、生成图像加载、进程监督器
 ```
 
-依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。同理，Chat Mode / Agent Mode 不是两个层，而是同一层之上的两种请求策略：Chat Mode 只用只读端口（`reader`/`library`/`codex`/`context`），Agent Mode 额外接入 `core/tasks` 与 `zotero/actions`。
+依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。同理，Chat Mode / Agent Mode 不是两个层，而是同一层之上的两种请求策略：Chat Mode 只用只读端口（`reader`/`library`/`codex`/`context`），Agent Mode 额外接入 `core/tasks` 与 `zotero/actions`。这两条策略现在落在 `chat/chat-execution.ts` 与 `chat/agent-execution.ts`：前者不得 import `core/context/coordinator`、`core/tasks`、`zotero/actions` 或能力类型，后者才经 presenter 注入的端口触达 Agent 侧。
 
 `core/tasks/controller.ts` 是审批与原生写入意图的唯一所有者；`zotero/actions/native.ts` 只是无状态执行器，本身不保存审批或账本状态。
 

@@ -11,7 +11,7 @@ Zotero ChatGPT 是深度融入 Zotero 的 GPT 式文献阅读与问答产品：�
 - **Chat Mode（对话阅读器）**：轻量对话式读论文。自动使用当前打开的 PDF，回答问题，解释文字、图表、方法、公式与概念，总结段落或全文；以当前页/选区/邻近文本为即时上下文，必要时从全文检索相关段落，并可做只读的 Zotero/文献库搜索。只读：不修改 Zotero 数据或文件、不创建标注/高亮、不执行多步动作，且不计入 Agent/动作额度。
 - **Agent Mode（可动作阅读器）**：在与 Chat Mode 完全相同的自动 PDF 上下文之上，可显式调用工具与多步动作（创建/编辑标注、高亮、建笔记、改元数据、整理条目/集合、检索/下载文献、修改被许可的文件），并在适用处使用审批 / 动作账本 / 撤销 / 对账。动作仍以确定性校验 / 原生执行作为安全边界，模型不获得通用脚本或任意文件系统工具。可消耗 Agent/动作额度。
 
-概念上：Chat Mode 是 `用户 → 文档上下文 → LLM → 回答`；Agent Mode 是 `用户 → 文档上下文 → agent → 工具/动作 → 结果`。
+概念上：Chat Mode 是 `用户 → 文档上下文 → LLM → 回答`；Agent Mode 是 `用户 → 文档上下文 → agent → 工具/动作 → 结果`。实现上（Stage 8）两条路径分别落在 `chat/chat-execution.ts` 与 `chat/agent-execution.ts`，`submit()` 只按当轮冻结的 `mode` 调度；Chat 路径不接受 Agent 能力、不 import 任务编排或阅读协调器，因此“只读”是运行时不变量而非 UI 约定。
 
 **Chat Mode 是完整的一等产品，不是弱化的 Agent Mode。** 产品定位是“一个 ChatGPT 式的论文阅读侧栏，Agent Mode 是可选的、作用于 Zotero 与文件的能力”。
 
@@ -182,6 +182,10 @@ node scripts/prepare-host-test.mjs --context --acceptance
 7. **结构性只读 [自动]** — Chat 档下 `acquire`/`diagram`/其它非 `read` skill 在触达模型、文档读取与任务层之前即被拒绝，文案为 “Switch to Agent…”。失败：Chat 下出现审批/任务/写意图或任何 Zotero 写入。
 8. **任务/采集面隐藏 [自动]** — Chat 档下任务面板与采集目标不渲染（`visibleTasks` 为空）。失败：Chat 下仍显示待审批任务。
 9. **不触达 Agent 基础设施 [自动]** — `chat/**` 不 import `core/tasks` 或 `zotero/actions`（dependency-boundaries 断言）。失败：边界断言变红。
+9a. **执行路径分离 [自动]** — 两种模式各有具名路径：`chat/chat-execution.ts`（Chat，只读+一条请求）与 `chat/agent-execution.ts`（Agent，唯一会建任务/起阅读作业处）。`submit()` 只按冻结的 `mode` 二选一。失败：Chat 仍与 Agent 共用同一条可触达任务的路径。
+9b. **超大上下文不静默升级 [自动]** — Chat 档遇到需要多轮阅读的计划时拒绝并提示 “multi-pass … Agent mode”，**不**调用 `getReading`、不创建阅读作业。失败：Chat 发送自动转成 Agent 阅读任务。
+9c. **自然语言动作指令被拒 [自动]** — Chat 档下 “Highlight all important claims…” / “Fix the metadata…” / “Create notes … save to Zotero” / “Find these papers … organize them into a collection” 等明确变更指令不发送、不执行，并返回 “Agent mode is required…”。由 `core/chat/action-intent.ts` 的确定性分类器判定（无模型调用，保守偏假阴性）。失败：Chat 下执行或排队了写入。
+9d. **切回 Chat 后不再订阅 Agent [自动]** — Agent→Chat 后，后续发送与刷新（activation/切会话）不再调用任务/阅读端口。失败：仅停留在 Chat 档仍持续触碰 Agent 基础设施。
 10. **真实库只读 [目视]** — Chat 下问答不应在 Zotero 库/PDF/标注产生任何写入。失败：出现新标注/高亮/条目/文件改动。（本轮未在真实库尝试写操作，只能你目视。）
 
 ### C. Agent Mode 动作与审批
