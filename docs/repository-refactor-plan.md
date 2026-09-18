@@ -381,7 +381,7 @@ Agent Mode:
 | `zotero/src/reader/{dock,layout,reader-pane,selection,selection-actions,source-highlight,toolbar,locate,host-types}.ts` | Reader 集成 | 归入显式的 reader context 层，`locate.ts` 保持纯函数 | KEEP BUT MOVE | 只做归属声明，不合并文件 |
 | `zotero/src/reader/context.ts` | — | **新增**：`ReaderContext` 聚合（身份+版本+选区+范围+布局） | REPLACE（替代分散字段） | Stage 2 的核心产出（已实施 2026-09-18，`2d83c26`；实时布局锚点未并入，见 §I Stage 2 实施记录） |
 | `zotero/src/library/native-read.ts`、`native-support.ts` | Zotero 只读访问 | 不变 | KEEP | 已是读侧边界 |
-| `zotero/src/library/reference.ts` | 搜索/读 PDF/打开条目 **+ 选文件/截图/导出** | 保留读逻辑；IO 动作移到 `zotero/src/actions/files.ts` | SPLIT | 需先抽接口（`LibraryReferencePort` 已存在） |
+| `zotero/src/library/reference.ts` | 搜索/读 PDF/打开条目 **+ 选文件/截图/导出** | 保留读逻辑；IO 动作移到 `zotero/src/actions/files.ts` | SPLIT | `LibraryReferencePort` 已存在，无需新抽象。**已实施（2026-09-18，Stage 5，`406dcc6`）**：`pickFile`/`exportImage` 迁到 `actions/files.ts`（`createFileActions`）；共享宿主原语入中性的 `library/native-files.ts`；组合根 `index.ts` 合并两半。**`capturePage` 按决定留在读端口**（无 Zotero 写入；冻结的 `tests/host/native-action-driver.ts` 依赖它），见附录 1 #5 |
 | `zotero/src/actions/native.ts` | Zotero 写入 | 不变，成为动作边界 | KEEP | **后期前不要动** |
 | `zotero/src/host/native.ts` | Zotero 内部类型 | 不变 | KEEP | — |
 | `zotero/src/runtime/*` | 进程/存储/准备/监督 | 不变 | KEEP | 高风险区，后置 |
@@ -390,7 +390,7 @@ Agent Mode:
 | `zotero/src/chat/{draft,task-view,workspace-view,context-view,source-links,render-answer,command-menu,generation-settings,message-time,pick-images,text-scale,ui-locale}.ts` | 侧栏子模块 | 不变（`generation-settings` 的策略下沉 core） | KEEP | 策略下沉属 Stage 3（已实施 2026-09-18，`0913d49`：`offeredModelIds`/`unofferableAllowedModelIds` 归 `core/workspace/allowed-models.ts`） |
 | `zotero/src/preferences/*` + `preferences.xhtml` | 偏好设置 UI/桥 | 不变；`pane.ts` 的 allowlist 逻辑改为调用 core | KEEP | 已隔离 |
 | `runtime/*` | 发行身份 | 不变 | KEEP | 禁止改 |
-| `tests/build/dependency-boundaries.test.ts` | 分层门禁 | 增加 Chat/Agent 边界断言 | REFACTOR | Stage 1 起持续扩展 |
+| `tests/build/dependency-boundaries.test.ts` | 分层门禁 | 增加 Chat/Agent 边界断言 | REFACTOR | Stage 1 起持续扩展。Stage 5（`406dcc6`）后共 10 条：新增「`library/**` 不得 import `chat/**`」，并在「解析所守护的 import」里加入 `actions/files.ts -> library/native-files.ts` 这条新边 |
 | `tests/{contracts,core,zotero,runtime}/**` | 回归网 | 不变 | KEEP | 拆分前先补覆盖 |
 | `tests/host/**` | 真实宿主驱动 | 不变 | KEEP | 本任务禁止运行 |
 | `scripts/*.mjs` | 构建/发行 | 不变 | KEEP | — |
@@ -411,13 +411,13 @@ Agent Mode:
 
 | 风险 | 证据 | 失败模式 | 安全拆除顺序 |
 | --- | --- | --- | --- |
-| R1 `chat` → `core/tasks` 静态 import | `code: presenter.ts:13` | 拆分 presenter 时 Agent 依赖被带进 Chat；Chat 模式无法脱离 action 基础设施 | ① 先把 `parseAnnotationCandidates` 从 `core/src/tasks/controller.ts` 纯搬迁到 `packages/contracts`（D1，Stage 1 完成）；② 加 boundary 断言「chat 不得 import core/tasks」，搬迁后即为绿，不引入故意失败的测试；③ 后续再让 `getTasks` 成为唯一入口（Stage 4）。**Stage 3（2026-09-18，`cad7eea`）核对**：`getTasks`/`getReading` 已是 Chat 路径唯一 Agent 触达点，未发现新边；端口化的正式化（组合根显式装配）仍属 Stage 4 |
+| R1 `chat` → `core/tasks` 静态 import | `code: presenter.ts:13` | 拆分 presenter 时 Agent 依赖被带进 Chat；Chat 模式无法脱离 action 基础设施 | ① 先把 `parseAnnotationCandidates` 从 `core/src/tasks/controller.ts` 纯搬迁到 `packages/contracts`（D1，Stage 1 完成）；② 加 boundary 断言「chat 不得 import core/tasks」，搬迁后即为绿，不引入故意失败的测试；③ 后续再让 `getTasks` 成为唯一入口（Stage 4）。**Stage 3（2026-09-18，`cad7eea`）核对**：`getTasks`/`getReading` 已是 Chat 路径唯一 Agent 触达点，未发现新边。**Stage 4（2026-09-18，`40f47ac`）完成**：两个可选成员合并为显式 `PresenterAgent`，组合根 `assembleAgent` 为唯一装配点；Chat 不提供 Agent 能力时得到既有 `UNSUPPORTED_INTERACTION` 文案，不新增分支 |
 | R2 组合根模块级可变 Map | `code: index.ts:43-44` | 并行 view/presenter 竞争；测试间串味；局部重构就可能引发跨 tab 状态泄漏 | ① 把 `presenters`/`readers`/`windows`/`citationVersions` 收进一个显式 `PluginRuntime` 对象；② 只在 `startup/shutdown` 创建/销毁；③ 加生命周期单测 |
 | R3 conversation 双写者 | `code: sessions/store.ts:280-296`；`core/workspace/store.ts` | 偏好设置删除与侧栏保存并发 → 索引与文件不一致（历史上出现过 "Unknown conversation"） | ① 把删除收敛到 `sessions/store.ts`；② `HistoryManager` 退化为只读查询；③ 用现有 `unit test` 回归 |
-| R4 presenter 直接做域逻辑（`openTaskSource` 手搓 `Citation`） | `code: presenter.ts:551-557` | UI 层复制领域构造规则，`Citation` 校验/页映射会漂移 | ① 在 core 提供 `citationFromAnnotation`；② presenter 只调用 |
+| R4 presenter 直接做域逻辑（`openTaskSource` 手搓 `Citation`） | `code: presenter.ts:551-557` | UI 层复制领域构造规则，`Citation` 校验/页映射会漂移 | ① 在 core 提供 `citationFromAnnotation`；② presenter 只调用。**已修复（2026-09-18，commit `679e2d7`）**：构造器落在 `packages/contracts/src/tasks.ts`（**非 core**，理由见 §I Stage 4：Stage 1 边界禁止 `chat` → `core/tasks`，且 `Citation`/`validateCitation` 本就属 `contracts`）；presenter 只调用它 |
 | R5 `estimateBudget` 与 `buildContextBudget` 双实现 | `code: presenter.ts:1032-1046`；`core/codex/model-capabilities.ts:104` | 预算口径分叉，覆盖率说明与真实发送不一致 | ① 让组合根注入 `contextBudget`；② 删 presenter 副本；③ 用 planner 单测锁定。**已修复（2026-09-18，commit `3be663d`）**：presenter 侧副本整体迁入 `core/src/codex/model-capabilities.ts` 的 `estimateRequestBudget()`，presenter 只保留一行委托；`PresenterServices.contextBudget?` 仍是宿主覆盖点；单测锁定单一来源（core 与 presenter 两侧） |
 | R6 请求 hash 与持久化记录耦合 | `code: core/sessions/service.ts` 的 `hashInput`/`reconstructInput` | 加 `mode` 后若不同时支持 v2 重建，旧记录会被判 `uncertain` 或错认 | ① 先只读地枚举 hashVersion 分支；② 加 v2→v3 重建测试；③ 再落 `mode` |
-| R7 会话 id 跨系统复用 | `code: core/tasks/controller.ts`、`core/context/coordinator.ts` 的 `conversationId` | 删除/归档会话时 task/reading job 变孤儿 | ① 在删除路径显式检查未完成任务（已有 `unfinishedWork` 语义，`core/workspace/history.ts:136-139`）；② 加断言测试 |
+| R7 会话 id 跨系统复用 | `code: core/tasks/controller.ts`、`core/context/coordinator.ts` 的 `conversationId` | 删除/归档会话时 task/reading job 变孤儿 | ① 在删除路径显式检查未完成任务（已有 `unfinishedWork` 语义，`core/workspace/history.ts:136-139`）；② 加断言测试。**已覆盖（2026-09-18，commit `40f47ac`）**：删除路径在生产代码里已检查任务与阅读两侧；`tests/zotero/chat/presenter-workspace.test.ts` 新增阅读侧断言（未完成阅读任务时拒绝删除，不 cancel/undo） |
 | R8 测试与实现细节绑定 | 测试专用 presenter 方法 `presenter.ts:418-455`；`ChatViewHooks.readTextScale` 仅测试注入 | 想删死代码时先破坏测试，导致不敢删 | ① 先补行为级测试；② 再删测试专用包装；③ 最后删死代码 |
 | R9 宿主假设藏在工具函数 | `view.ts:855` 的 paste targets、`pick-images` 的 Gecko 特权剪贴板 | 非宿主环境（vitest）与真实宿主行为分叉，mock 通过 ≠ 宿主通过 | ① 把宿主访问收敛到 `index.ts` 注入的 hooks；② 需要宿主证据的改动必须跑宿主驱动（本任务不跑） |
 | R10 包依赖未声明 | `packages/core/package.json` 无 `@zotero-chatgpt/contracts` 依赖，全部相对路径跨包 import | 构建顺序/工具链假设隐藏；package 边界不可靠 | ① 补 `package.json` 依赖并改用包名，或明确记录「相对路径是约定」；② 由 boundary 测试继续兜底 |
@@ -488,21 +488,34 @@ Agent Mode:
   - 门禁结果：typecheck PASS；lint PASS；test:unit **79 files / 1085 passed / 0 skipped**（较 Stage 1 的 1079 为 +6：`model-capabilities` +2、`presenter` +1、`allowed-models` +3）。
   - **真实宿主 NOT RUN**（Chat「结构性只读」未在真实 Zotero/真实库中观察，仅为结构结论）；**真实模型 NOT RUN**。
 
-### Stage 4 — Agent capability 端口化
+### Stage 4 — Agent capability 端口化（2026-09-18 已实施，代码 + 单元测试）
 
 - 目标：Agent 专属能力只经注入端口进入。
 - 具体动作：`parseAnnotationCandidates` 移出 presenter；`getTasks`/`getReading` 成为唯一 Agent 入口；组合根里显式装配 Agent 能力。
 - 退出门禁：typecheck/lint/test:unit；新增「Chat 模式不构造 ActionTasks」单测。
 - 回滚/风险：动作路径是最高风险区 → 不改 `actions/native.ts` 与 `tasks/controller.ts` 语义。
 - 宿主证据：**需要**（需真实宿主审批/撤销），本任务不执行；没有宿主证据前不得宣称动作行为正确。
+- **实施记录（2026-09-18，commits `679e2d7`、`40f47ac`，证据层级：代码 + 单元测试）**：
+  - `chat/presenter.ts` 的 `PresenterServices.getTasks?()` + `getReading?()` 合并为显式接口 `PresenterAgent { tasks(): Promise<ActionTasks>; reading(client?): Promise<PresenterReading> }`，注入点为 `PresenterServices.agent?`；`index.ts` 的 `assembleAgent(localServices)` 是**唯一**装配点。Chat 路径的所有任务/阅读触达仍经 `this.getTasks()`/`this.getReading()`，二者现在先要求 `this.services.agent`。未引入 DI 容器/注册表/事件总线；未新建 `core/src/agent/**` 或第二套 session（Agent Mode 继续复用 `core/sessions`）。
+  - **R4 已修（`679e2d7`）**：`openTaskSource` 改为调用新的域构造器 `citationFromAnnotation`。**与本节 R4 措辞的偏离按事实记录**：构造器落在 `packages/contracts/src/tasks.ts`（紧邻 Stage 1 迁入的 `parseAnnotationCandidates`），**不**在 `core`——因为 Stage 1 的边界断言禁止 `chat` → `core/tasks`，放进 core 会把 Agent 依赖带回 Chat，且 `Citation`/`validateCitation` 本就属 `contracts`。
+  - **R7 断言测试（`40f47ac`）**：`tests/zotero/chat/presenter-workspace.test.ts` 新增「阅读任务未完成时会话删除被拒绝且不 cancel/undo」；另加「完全未装配 `agent` 时普通 chat 仍成功且 `tasks`/`readingJobs` 为空」（不变量 4）。
+  - 门禁结果：typecheck PASS；lint PASS；test:unit **79 files / 1087 passed / 0 skipped**（较 Stage 3 的 1085 为 +2）。
+  - **真实宿主 NOT RUN**（审批/写账本/对账/撤销未观察）；**真实模型 NOT RUN**。
 
-### Stage 5 — Zotero 适配层收口
+### Stage 5 — Zotero 适配层收口（2026-09-18 已实施，代码 + 单元测试）
 
 - 目标：读写边界与文件动作归属清晰。
 - 具体动作：`library/reference.ts` 的 `pickFile`/截图/导出移到 `actions/files.ts`；`contracts/workspace.ts` 拆出 `library.ts`；`core/workspace/store.ts` 交出删除写入。
 - 退出门禁：typecheck/lint/test:unit；dependency-boundaries（读侧不依赖写侧）。
 - 回滚/风险：`LibraryReferencePort` 被偏好设置与侧栏共用 → 先抽接口再搬。
 - 宿主证据：需要（真实文件选择/导出）；本任务不执行。
+- **实施记录（2026-09-18，commit `406dcc6`，证据层级：代码 + 单元测试）**：
+  - **文件动作迁移**：新增 `packages/zotero/src/actions/files.ts` 的 `createFileActions`，承接 `pickFile`/`exportImage`；`library/reference.ts` 只保留 `search`/`read`/`open`/`collections`/`capturePage`。共享的宿主原语（文件选择器、受限读取、`imgITools` 解码、字节→`ImageAttachment`、导出写入）抽到中性的 `packages/zotero/src/library/native-files.ts`（`createNativeFiles`），不是通用文件服务抽象。组合根 `index.ts` 的 `libraryPort()` 把读端口与文件动作合并为 presenter 所需的单一 `LibraryReferencePort`；`runtime/local-services.ts` 未改。
+  - **越界边已消除**：`library/reference.ts -> chat/pick-images.ts` 的 `imageFromBytes`（纯字节→data URL）迁到 `packages/contracts/src/image.ts`（连同 `sniffImageMime`；大小上限复用 `LIMITS.imageBytes`），`chat/pick-images.ts` 与 `native-files.ts` 都消费它。`tests/build/dependency-boundaries.test.ts` 新增「`library/**` 不得 import `chat/**`」；既有的「reader/library 不得 import `actions/`」约束新文件。断言现为 10 条。
+  - **`capturePage` 去留（决定：留在读端口）**：它只把已打开的 PDF 在内存中渲染成 `ImageAttachment`，无 Zotero 写入；且**冻结的** `tests/host/native-action-driver.ts` 经 `createLibraryReferencePort(...).capturePage` 使用它，本阶段禁止改该文件。故 `capturePage` 保留在读端口（`NativeLibraryReferencePort`），本节「截图移入 actions」一条据此按事实修正；`pickFile`/`exportImage` 已不在读端口。
+  - **未做（属其它阶段）**：`contracts/workspace.ts` 拆出 `library.ts`、`core/workspace/store.ts` 交出删除写入均**未实施**——它们不是「读侧不依赖写侧」这一退出门禁的必需项，且 `removeConversation` 属主变更牵连偏好设置删除路径，留给后续单独评估。
+  - 门禁结果：typecheck PASS；lint PASS；test:unit **79 files / 1088 passed / 0 skipped**（较 Stage 4 的 1087 为 +1）。
+  - **真实宿主 NOT RUN**（真实文件选择/导出/光栅化未观察；`actions/native.ts` 写入语义未改）；**真实模型 NOT RUN**。
 
 ### Stage 6 — UI 集成 Chat/Agent 开关
 
@@ -614,7 +627,7 @@ Agent Mode:
 2. **模式的最小载体** — **已决（owner 2026-09-18）**：使用新的独立字段 `RequestMode = 'chat' | 'agent'`，**不**扩展或复用 `WorkflowKind`。值是每轮请求冻结的显式契约，可观测、可单测；`WorkflowKind` 语义不变。
 3. **`mode` 缺省语义** — **已决（owner 2026-09-18）**：已持久化且没有 `mode` 字段的请求一律解释为 `'chat'`；只影响解释，不据此迁移或重写旧记录，hash 仍按各自 `hashVersion` 重建。
 4. **conversation 存储唯一属主**：是否允许 `WorkspaceStore` 继续持有 `removeConversation`（当前偏好设置删除依赖它），还是全部委托 `ConversationStore`。
-5. **`capturePage` 的去留**：无生产调用者，但被宿主驱动与测试使用；不确定是否计划保留截图能力。
+5. **`capturePage` 的去留**：无生产调用者，但被宿主驱动与测试使用；不确定是否计划保留截图能力。 — **已决（2026-09-18，Stage 5，commit `406dcc6`）**：保留，且**留在读端口** `NativeLibraryReferencePort`（`library/reference.ts`）。理由：它只把已打开的 PDF 在内存中渲染成 `ImageAttachment`，不产生任何 Zotero 写入，属读能力；且冻结的宿主驱动 `tests/host/native-action-driver.ts` 经 `createLibraryReferencePort(...).capturePage` 使用它。`pickFile`/`exportImage` 已迁到 `actions/files.ts`，不再属读端口。
 6. **测试专用 presenter 方法**（`saveSkill`/`saveProfile`/`setDocumentRange` 等）是删除，还是补回真实 UI 入口。
 7. **`packages/core` 是否改用包名 import**（现为相对路径）——是补齐 `package.json` 依赖，还是把「相对路径跨包」正式定为约定。
 8. **`paneID: 'codex-reader'` / CSS 类名是否改名**：属对外可见标识，改名需宿主回归与用户设置迁移判断。
