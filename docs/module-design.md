@@ -1,33 +1,46 @@
 # 架构与契约
 
-本文描述 **0.4.0a9 工作树实现**。产品行为由[产品规格](zotero-codex-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a10 工作树实现**。产品行为由[产品规格](zotero-codex-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
-产品默认路径是 Reader / Chat：在当前 PDF/附件上阅读、推理与问答。原生任务与 agent 端口（`core/tasks`、`zotero/agent` 以及审批、账本与撤销）是在 Reader 之上叠加的**动作能力**，只在显式工具调用与任务授权时运行；它们不是对整个产品的身份定义，也不改变默认阅读路径。
+产品默认路径是 Reader / Chat：在当前 PDF/附件上阅读、推理与问答。`core/tasks` 里的原生任务编排（候选 → 确定性校验 → 审批 → 原生动作 → 结果账本 → 撤销）是在 Reader 之上叠加的**动作能力**，只在显式工具调用与任务授权时运行；它不是对整个产品的身份定义，也不改变默认阅读路径。
 
-## 模块与寿命
+## 分层与依赖方向
 
-| 模块 | 责任 |
-| --- | --- |
-| `packages/contracts/src` | 文献身份、来源版本、消息、工作区、原生任务和端口；`validation`、`document`、`workspace-validation` 校验跨模块数据 |
-| `core/codex` | JSONL、握手、模型/能力/用量、固定版本策略、错误及恢复历史解析 |
-| `core/sessions` | 会话、请求哈希、串行状态变更、持久化队列、上游线程、取消与对账 |
-| `core/context` | 全文/聚焦/分批计划、预算估算、固定输入与分步结果、恢复和批次占用；`bibliography.ts` 是书目字段清单、长度上限与"缺失即缺失"规则的唯一实现，同时供请求的紧凑书目块与侧栏书目卡片使用 |
-| `core/workspace` | 离线历史、草稿、图片资产、偏好、研究主题和 SKILL.md |
-| `core/tasks` | 原生任务候选、任务级审批、写入意图、结果账本、对账与撤销 |
-| `zotero/reader` | 当前附件、原生 dock/缩放/选区、文本及版本校验、原文定位、页面图像、显式文章引用；`selection.ts` 从 Zotero 条目抽取书目字段，`metadata.ts` 只是 `core/context/bibliography.ts` 的再导出以保留原有导入路径 |
-| `zotero/agent` | Reader 之上的动作端口（无状态 NativeAgentPort）：定位引文、标注、元数据/查重、集合成员关系及 OA 附件 |
-| `zotero/chat` | Presenter 与视图投影、统一输入、历史/任务/上下文、净化 Markdown 和 KaTeX。dock 是 Cursor 式标签条加**一列**转录；没有第二列只读聊天。 |
-| `zotero/runtime` | 本地服务、GeckoStorage、发行资产校验、生成图像加载、自有进程监督器 |
+目录边界就是模块边界，由 `tests/build/dependency-boundaries.test.ts` 静态强制：
 
-core 只依赖 contracts，不依赖 DOM、Zotero 或 Node。bootstrap/index 负责组装；视图借用服务端口，不持有原始管道或账户目录。关闭 sidebar 或卸载某个视图不结束任务。原生任务、阅读批次和模型请求各自保存状态；它们不以一个仍然打开的阅读器窗口作为存续条件。
+```text
+packages/contracts       领域契约：文献身份、消息、工作区、runtime、原生端口与动作任务
+        ↑
+packages/core            与宿主无关的领域逻辑
+  codex                  Codex App Server 协议：JSONL、握手、模型/能力/用量、策略、恢复历史
+  sessions               会话、请求哈希、持久化队列、上游线程、取消与对账
+  context                全文/聚焦/分批计划、预算、来源缓存、书目格式化
+  workspace              离线历史、草稿、图片资产、偏好、研究主题、SKILL.md
+  tasks                  动作任务编排：审批、写入意图、结果账本、对账、撤销
+        ↑
+packages/zotero          Zotero 适配与 UI
+  host                   Zotero 9 私有宿主表面（items/collections/translators/HTTP/file I/O）
+  reader                 当前附件、dock/缩放/选区、文本与版本校验、原文定位、页面图像
+  library                读取侧：引用搜索、条目/附件读取、引文定位、文件名/图钉读取、页面栅格化
+  actions                写入侧：标注、条目、集合成员关系、OA 附件与精确快照撤销
+  chat                   Presenter 与视图投影、统一输入、历史/任务/上下文、Markdown 与 KaTeX
+  preferences            Zotero 原生偏好设置面板（pane、注册、服务、历史管理节）
+  runtime                本地服务、GeckoStorage、发行资产校验、生成图像加载、进程监督器
+```
+
+依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。
+
+`core/tasks/controller.ts` 是审批与原生写入意图的唯一所有者；`zotero/actions/native.ts` 只是无状态执行器，本身不保存审批或账本状态。
+
+core 只依赖 contracts。bootstrap/index 负责组装；视图借用服务端口，不持有原始管道或账户目录。关闭 sidebar 或卸载某个视图不结束任务。原生任务、阅读批次和模型请求各自保存状态；它们不以一个仍然打开的阅读器窗口作为存续条件。
 
 本地工作区和原生任务记录可在运行组件未启动、离线或未登录时读取。发送模型请求仍需可用 runtime 和官方登录。监督器只管理自己启动的进程，确认退出后才替换；插件关闭分别停止本地工作和 runtime，一方清理失败不能跳过另一方，也不能提前丢掉仍待终止的进程句柄。阅读协调器停止新派发并等待自己的写入结束后才能交给替代实例。
 
 ## 身份、发送与队列
 
-`PaperScope` 是持久随机 profile `clientId`、`libraryId`、`attachmentKey` 的组合；数值 itemID 只用于当前宿主查找。标题、文件名或父条目不是附件身份。正文与补充材料分别拥有会话和来源。
+`PaperScope` 是持久随机 profile `clientId`、`libraryId`、`attachmentKey` 的组合；数值 itemID 只用于当前宿主查找。标题、文件名或父条目不是附件身份，标签文字也不承担身份。正文与补充材料分别拥有会话和来源。
 
 发送前复制问题、附件/库/profile、PDF 版本、选区、图像、引用、skill 版本、偏好和模型设置。文献内容与第三方 skill 只能提供数据，不能选择原生写入 key、集合、任意路径或新增权限。同名附件、切标签、编辑草稿和下一轮设置不改变已捕获的请求。
 
@@ -89,7 +102,7 @@ SKILL.md 正文与注册表不再维护两份副本。读取时从文件重新�
 
 固定运行时由 `runtime/manifest.ts` 锁定 **Codex 0.154.0 / darwin arm64**、归档/二进制 SHA-256 和许可证。`app-server --strict-config`、配置值与来源校验、空执行环境目录、`CODEX_EXEC_SERVER_URL=none` 禁用 shell、外部工具、MCP、插件、记忆和任意环境继承。普通阅读不启用图像生成；明确选择 diagram 后才开启对应线程能力，并用运行时特性报告核实。下一次普通阅读恢复禁止生成，实时和恢复历史中的未授权工具活动都关闭连接。
 
-输入图像每张 **2 MiB**，生成输出每张 **16 MiB**，不为适配上限自动缩图。输出只接受已完成 imageGeneration 的可验证 PNG/JPEG/WebP 内联数据或显式白名单目录中的文件，校验编码、magic、大小、路径和符号链接；未识别的编码不算成功。生成图与原文截图有不同 origin。已保存且验证过的生成图优先用于恢复，不能因运行时临时文件过期抹去已确认成果。侧栏附图走 `pickFile`（原生多选：文本文件成为 reference 正文，PNG/JPEG/GIF/WebP 成为图像附件）和剪贴板/拖放；`captureRegion` 已删除。剪贴板读按路由继续：reader 窗口的 `nsIClipboard` 抛错不得吞掉后续的插件 realm 读取；macOS 截图 TIFF 仅在 `imgITools` 能解码并编码为 PNG 时附加，否则诚实拒绝。`capturePage` 端口仍保留给 native-agent 驱动。
+输入图像每张 **2 MiB**，生成输出每张 **16 MiB**，不为适配上限自动缩图。输出只接受已完成 imageGeneration 的可验证 PNG/JPEG/WebP 内联数据或显式白名单目录中的文件，校验编码、magic、大小、路径和符号链接；未识别的编码不算成功。生成图与原文截图有不同 origin。已保存且验证过的生成图优先用于恢复，不能因运行时临时文件过期抹去已确认成果。侧栏附图走 `pickFile`（原生多选：文本文件成为 reference 正文，PNG/JPEG/GIF/WebP 成为图像附件）和剪贴板/拖放；`captureRegion` 已删除。剪贴板读按路由继续：reader 窗口的 `nsIClipboard` 抛错不得吞掉后续的插件 realm 读取；macOS 截图 TIFF 仅在 `imgITools` 能解码并编码为 PNG 时附加，否则诚实拒绝。`capturePage` 端口仍保留给 native-action 驱动。
 
 Zotero 9.0.6 的关键适配集中在 reader：
 
@@ -99,6 +112,6 @@ Zotero 9.0.6 的关键适配集中在 reader：
 - await 得到的 PDFPageProxy 可能被 Xray 隐去 getViewport/render/view；只对已确认的宿主页对象用 Cu.waiveXrays，再以原生坐标渲染，不改变 PDF 缩放或焦点。
 - 原生 Preferences 面板注册 `defaultXUL: true`；pane 脚本 `mount` 包在 try/catch 里，onload 抛错不能中断 Zotero 的 `_loadPane` 切走其它面板（否则侧栏高亮本插件、内容仍是上一面板）。
 
-已有 **12 项 native 驱动通过**的证据来自工作树生产模块被打包进独立测试 driver。它证明对应原生 API 流程，不等于最终 0.4 XPI 的 UI 接线、真实图像生成、升级或完整平台验收；详情仅在[进度与验收](progress.md)维护。
+已有 **12 项 native 驱动通过**的证据来自工作树生产模块被打包进独立测试 driver（`tests/host/native-action-driver.ts`）。它证明对应原生 API 流程，不等于最终 0.4 XPI 的 UI 接线、真实图像生成、升级或完整平台验收；详情仅在[进度与验收](progress.md)维护。
 
 账户、缓存、历史、原生标注、删除聊天和卸载相互独立。诊断只输出白名单版本/状态/错误码，不含正文、图像、认证或原始管道内容。认证目录不进入普通备份/报告；没有跨设备同步承诺。
