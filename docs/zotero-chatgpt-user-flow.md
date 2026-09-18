@@ -186,6 +186,7 @@ node scripts/prepare-host-test.mjs --context --acceptance
 9b. **超大上下文不静默升级 [自动]** — Chat 档遇到需要多轮阅读的计划时拒绝并提示 “multi-pass … Agent mode”，**不**调用 `getReading`、不创建阅读作业。失败：Chat 发送自动转成 Agent 阅读任务。
 9c. **自然语言动作指令被拒 [自动]** — Chat 档下 “Highlight all important claims…” / “Fix the metadata…” / “Create notes … save to Zotero” / “Find these papers … organize them into a collection” 等明确变更指令不发送、不执行，并返回 “Agent mode is required…”。由 `core/chat/action-intent.ts` 的确定性分类器判定（无模型调用，保守偏假阴性）。失败：Chat 下执行或排队了写入。
 9d. **切回 Chat 后不再订阅 Agent [自动]** — Agent→Chat 后，后续发送与刷新（activation/切会话）不再调用任务/阅读端口。失败：仅停留在 Chat 档仍持续触碰 Agent 基础设施。
+9e. **Chat 档删除不初始化 Agent [自动]** — 纯 Chat 会话（无 `mode: 'agent'`、无非 `read` workflow、无 `batch`）在 Chat 档删除时，任务/阅读端口**从未**被调用，且删除成功；反之，记录中带有 Agent 工作的会话即使当前在 Chat 档，未完成时仍拒绝删除且不 `cancel`/`undo`。失败：Chat 档删除仍获取任务控制器/阅读协调器，或为省初始化而放过未完成工作。
 10. **真实库只读 [目视]** — Chat 下问答不应在 Zotero 库/PDF/标注产生任何写入。失败：出现新标注/高亮/条目/文件改动。（本轮未在真实库尝试写操作，只能你目视。）
 
 ### C. Agent Mode 动作与审批
