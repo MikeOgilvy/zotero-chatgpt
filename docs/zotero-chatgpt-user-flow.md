@@ -164,6 +164,10 @@ node scripts/prepare-host-test.mjs --context --acceptance
 
 准备说明：合成库、合成主/补充 PDF 与已有会话都在；自动 driver 已移除。打开助手本身不发模型请求。该实例在新的 `zotero-chatgpt/v1/` 存储身份下为 **signed out**（旧登录不迁移），`Chat`/`Agent` 的本地行为无需登录即可观察；真实模型回答不在本轮范围（NOT RUN）。
 
+**单一插件状态（2026-09-18 协调者复核后清理，owner review 前必读）**：重命名前那个**不同 addon 身份**的旧插件 `{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}`（`0.4.0a10`，旧存储根 `zotero-codex-reader/v1/`、旧产品名）此前仍以 `active: true` 留在这棵验收树里，且宿主测试 driver `zchatgpt-host-test@local` 的注册也未随其 XPI 一起移除——即之前"driver-free"只做了一半。协调者已确认这两点，并已清理：删除了旧插件的 XPI 与两条注册。**当前 `.zotero-chatgpt-dev/context/profile/extensions.json` 里唯一 active 的 `app-profile` 插件是 `{90909501-7b5b-4985-9f55-566e9890746c}` `0.4.0a12`**，`extensions/` 下也只有这一个 XPI。旧插件是**真实**风险而非潜在风险：它是一枚 bootstrapped 插件，激活即 `ItemPaneManager.registerSection({ paneID: 'codex-reader', …sidenav… })` 并注册 reader `renderToolbar` 监听、注入自有 `data-zcr-*` dock；而 a12 的 `--context` 驱动只按 `data-zchatgpt-*` 与 subject addon id 断言，所以当时它**照样 32/32 PASS**，掩盖了并存。若你在 review 中仍看到两个侧栏/两个工具栏按钮或落在旧产品名上，请立刻停下并记录为缺陷。清理后重新跑 `--context` 仍为 **32/32 PASS、`recordedRequests = 0`**（见 [progress](progress.md) 的"打包与宿主验证回合"）。
+
+> 注意：`prepare-host-test.mjs --context --acceptance` 只负责移除自动 driver 的 XPI，**不会**清掉此前残留在 `extensions.json` 里的旧插件/驱动注册；若将来在别处重现"两个侧栏"，先核对上面这条 active 列表。本验收树已核对为单一 a12 插件、无 driver 注册。
+
 ### A. 模式开关与每轮冻结
 
 1. **控件位置与外观 [目视]** — composer 起始处应有紧凑的分段控件 `Chat | Agent`，当前档有选中态（`aria-pressed=true`、`data-zchatgpt-mode`）。失败：控件缺失、压住输入框/附件入口、两档无法区分、窄 dock 溢出。
