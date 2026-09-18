@@ -31,15 +31,15 @@ export function selectHostStage(argv) {
 }
 
 /**
- * S6 uses a virgin tree so the signed-in `.zcr-dev/profile` is never overwritten.
+ * S6 uses a virgin tree so the signed-in `.zotero-chatgpt-dev/profile` is never overwritten.
  * @param {string[]} argv
  * @param {string} repositoryRoot
  */
 export function selectHostTree(argv, repositoryRoot) {
   const { stage } = selectHostStage(argv);
-  const dev = join(repositoryRoot, '.zcr-dev');
+  const dev = join(repositoryRoot, '.zotero-chatgpt-dev');
   if (stage === 'context') return { stage, profile: join(dev, 'context/profile'), dataDir: join(dev, 'context/data'), reportPath: join(dev, 'context/host-report.json'), pdfPath: join(dev, 'context/fixtures/reading.pdf') };
-  // Human-gated model-catalog measurement, isolated in its own `.zcr-dev/live` tree.
+  // Human-gated model-catalog measurement, isolated in its own `.zotero-chatgpt-dev/live` tree.
   if (stage === 'live-model') return { stage, profile: join(dev, 'live/profile'), dataDir: join(dev, 'live/data'), reportPath: join(dev, 'live/host-report.json'), pdfPath: join(dev, 'live/fixtures/reading.pdf') };
   if (stage === 's6') {
     const twoVersion = argv.includes('--upgrade-xpi') && argv.includes('--rollback-xpi');

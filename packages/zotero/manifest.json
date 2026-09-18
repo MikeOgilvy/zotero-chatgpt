@@ -1,14 +1,14 @@
 {
   "manifest_version": 2,
-  "name": "Zotero GPT Reader (Development)",
-  "version": "0.4.0a10",
+  "name": "Zotero ChatGPT (Development)",
+  "version": "0.4.0a11",
   "description": "Development preview for reading and discussing papers with a GPT-style assistant in Zotero.",
   "applications": {
     "zotero": {
-      "id": "{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}",
+      "id": "{90909501-7b5b-4985-9f55-566e9890746c}",
       "strict_min_version": "9.0.6",
       "strict_max_version": "9.0.*",
-      "update_url": "https://zcr-dev.invalid/updates.json"
+      "update_url": "https://zotero-chatgpt-dev.invalid/updates.json"
     }
   }
 }

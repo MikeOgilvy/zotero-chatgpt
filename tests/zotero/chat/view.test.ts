@@ -31,7 +31,7 @@ const model: ModelOption = {
 };
 
 function documentOf(): Document {
-  return new Window({ url: 'https://zcr.test/' }).document as unknown as Document;
+  return new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
 }
 
 async function mountReadyChat(options: {
@@ -236,11 +236,11 @@ it('uses an in-pane sidebar without impersonating the reader toolbar or adding a
   const doc = documentOf();
   const body = doc.createElement('div');
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: 'PDFONE01', libraryID: 1 }, () => undefined);
-  expect(root.className).toMatch(/zcr-sidebar/u);
-  expect(root.classList.contains('zcr-paper')).toBe(true);
+  expect(root.className).toMatch(/zchatgpt-sidebar/u);
+  expect(root.classList.contains('zchatgpt-paper')).toBe(true);
   expect(root.dataset.attachmentKey).toBe('PDFONE01');
   expect(root.dataset.libraryId).toBe('1');
-  expect(root.style.getPropertyValue('--zcr-reader-toolbar-height')).toBe('');
+  expect(root.style.getPropertyValue('--zchatgpt-reader-toolbar-height')).toBe('');
   expect(root.querySelector('header')).toBeNull();
   expect(root.textContent).not.toMatch(/^\s*Codex\s/u);
   expect(root.querySelector('[aria-label="Close Codex sidebar"]')).toBeNull();
@@ -251,19 +251,19 @@ it('keeps attachment identity on the root but puts paper context outside the mes
   const { root } = await mountReadyChat();
   expect(root.dataset.attachmentKey).toBe(paperA.attachmentKey);
   expect(root.dataset.libraryId).toBe(String(paperA.libraryId));
-  const thread = root.querySelector('[data-zcr-messages]')!;
+  const thread = root.querySelector('[data-zchatgpt-messages]')!;
   expect(thread.textContent).not.toContain('Library 1');
   expect(thread.textContent).not.toContain('Attachment PDFONE01');
-  expect(thread.querySelectorAll('[data-zcr-citation]')).toHaveLength(1);
+  expect(thread.querySelectorAll('[data-zchatgpt-citation]')).toHaveLength(1);
   expect(thread.textContent).not.toContain(citationA.title);
-  const chrome = root.querySelector('.zcr-chrome');
-  const title = root.querySelector('[data-zcr-current-title]');
+  const chrome = root.querySelector('.zchatgpt-chrome');
+  const title = root.querySelector('[data-zchatgpt-current-title]');
   expect(chrome?.contains(title)).toBe(true);
   expect(thread.contains(title)).toBe(false);
   expect(title?.textContent).toBe('Synthetic Paper A');
   expect(title?.getAttribute('title')).toBe('Synthetic Paper A');
   expect(title?.textContent).not.toContain(`Library ${paperA.libraryId}`);
-  const back = root.querySelector('[data-zcr-action="open-citation"]');
+  const back = root.querySelector('[data-zchatgpt-action="open-citation"]');
   expect(back?.getAttribute('aria-label')).toBe('Return to source');
   expect(back?.textContent?.trim()).toBe('');
 });
@@ -279,14 +279,14 @@ it('reads the paper metadata in the background without writing a card on screen'
   // neither the card, its heading nor any of its field labels are rendered for a richly described
   // paper. What the reader read still travels with the request; that is asserted separately in
   // "sends every field the reader read in the paper identity instead of a four-field subset".
-  expect(root.querySelector('[data-zcr-bibliography]')).toBeNull();
-  expect(root.querySelector('[data-zcr-bibliography-key]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-bibliography]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-bibliography-key]')).toBeNull();
   expect(root.textContent).not.toMatch(/About this paper|Journal abbrev\.|Abstract/u);
   expect(root.textContent).not.toContain('Nature');
 
   // A bare PDF renders no such surface either: the removal is the element's, not the data's.
   const bare = await mountReadyChat();
-  expect(bare.root.querySelector('[data-zcr-bibliography]')).toBeNull();
+  expect(bare.root.querySelector('[data-zchatgpt-bibliography]')).toBeNull();
   expect(bare.root.textContent).not.toContain('About this paper');
 });
 
@@ -294,7 +294,7 @@ it('shows the local read of this PDF so a successful auto-read is not invisible'
   const { root } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   await vi.waitFor(() => expect(status.hidden).toBe(false));
   expect(status.textContent).toBe('Read all 2 pages locally');
 });
@@ -303,7 +303,7 @@ it('reports reading in progress instead of leaving the owner with no evidence at
   const { root } = await mountReadyChat({
     document: { prepare: () => new Promise(() => {}), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   await vi.waitFor(() => expect(status.hidden).toBe(false));
   expect(status.textContent).toBe('Reading this PDF…');
 });
@@ -316,7 +316,7 @@ it('claims only the pages that really carried text when part of the PDF is scann
   const { root } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(partial), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   await vi.waitFor(() => expect(status.hidden).toBe(false));
   expect(status.textContent).toBe('Read 1 of 2 pages locally');
 });
@@ -326,7 +326,7 @@ it('shows no reading status at all when the owner has switched the local read of
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
   });
   await new Promise(resolve => setTimeout(resolve, 0));
-  const status = root.querySelector<HTMLElement>('[data-zcr-document-status]')!;
+  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   expect(status.hidden).toBe(true);
   expect(status.textContent).toBe('');
 });
@@ -339,10 +339,10 @@ it('sends every field the reader read in the paper identity instead of a four-fi
     pages: '1-9', publisher: 'Synthetic Press', language: 'en', tags: ['genomics'], editors: ['Grace Hopper'],
   };
   const { root } = await mountReadyChat({ messages: [], sent, identity });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   input.value = 'What does this mean?';
   input.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="send"]')!.click();
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   // The identity the model sees is the same object the reader froze, so a `hashVersion: 2` replay of
   // the stored copy hashes identically instead of silently dropping a field.
@@ -351,9 +351,9 @@ it('sends every field the reader read in the paper identity instead of a four-fi
 
 it('keeps pending citations in the composer, not in the transcript', async () => {
   const { root } = await mountReadyChat({ messages: [], draftCitations: [citationA] });
-  expect(root.querySelectorAll('[data-zcr-messages] [data-zcr-citation]')).toHaveLength(0);
-  expect(root.querySelectorAll('[data-zcr-draft-citations] [data-zcr-citation]')).toHaveLength(1);
-  const remove = root.querySelector('[data-zcr-draft-citations] [data-zcr-action="remove-citation"]');
+  expect(root.querySelectorAll('[data-zchatgpt-messages] [data-zchatgpt-citation]')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-draft-citations] [data-zchatgpt-citation]')).toHaveLength(1);
+  const remove = root.querySelector('[data-zchatgpt-draft-citations] [data-zchatgpt-action="remove-citation"]');
   expect(remove?.getAttribute('aria-label')).toBe('Remove');
   expect(remove?.textContent?.trim()).toBe('');
 });
@@ -363,11 +363,11 @@ it('shows persisted source selections and generated image outputs with a usable 
     { id: 'source', requestId: 'r1', role: 'user', phase: null, settings, text: 'Explain', citations: [citationA], status: 'completed', images: [imageA] },
     { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
   ] });
-  expect(root.querySelector('[data-zcr-message="source"] [data-zcr-citation]')).not.toBeNull();
-  expect(root.querySelectorAll('[data-zcr-message] [data-zcr-image]')).toHaveLength(2);
-  const preview = root.querySelector<HTMLButtonElement>('[data-zcr-message="image-output"] [data-zcr-action="preview-image"]')!;
+  expect(root.querySelector('[data-zchatgpt-message="source"] [data-zchatgpt-citation]')).not.toBeNull();
+  expect(root.querySelectorAll('[data-zchatgpt-message] [data-zchatgpt-image]')).toHaveLength(2);
+  const preview = root.querySelector<HTMLButtonElement>('[data-zchatgpt-message="image-output"] [data-zchatgpt-action="preview-image"]')!;
   preview.click();
-  expect(root.querySelector('[data-zcr-image-preview]')?.hasAttribute('hidden')).toBe(false);
+  expect(root.querySelector('[data-zchatgpt-image-preview]')?.hasAttribute('hidden')).toBe(false);
 });
 it('opens a cited answer page through the frozen document navigation and leaves external links to openLink', async () => {
   const openDocumentPage = vi.fn(() => Promise.resolve());
@@ -376,16 +376,16 @@ it('opens a cited answer page through the frozen document navigation and leaves 
     messages: [
       { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What is defined?', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
-        text: `Definition [page](https://zcr.invalid/source/${documentA.id}/1) and [external](https://example.com/paper).` },
+        text: `Definition [page](https://zchatgpt.invalid/source/${documentA.id}/1) and [external](https://example.com/paper).` },
     ],
     openDocumentPage, openLink,
   });
-  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const text = root.querySelector<HTMLElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text]')!;
   const [cited, external] = [...text.querySelectorAll<HTMLAnchorElement>('a')];
   expect(cited?.hasAttribute('href')).toBe(false);
   expect(cited?.textContent).toBe('p. ii');
-  expect(cited?.dataset.zcrSource).toBe(documentA.id);
-  expect(cited?.dataset.zcrPage).toBe('1');
+  expect(cited?.dataset.zchatgptSource).toBe(documentA.id);
+  expect(cited?.dataset.zchatgptPage).toBe('1');
   cited?.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: documentA.paper, revision: documentA.revision }, 1, null));
   expect(openLink).not.toHaveBeenCalled();
@@ -402,11 +402,11 @@ it('resolves a citation into a persisted referenced document with that reference
         references: [{ id: 'ref-1', kind: 'article', label: 'Supplement', paper: paperB, capturedAt: 'now' }],
         referenceDocuments: [{ referenceId: 'ref-1', document: referenced }] },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
-        text: `See [page](https://zcr.invalid/source/${referenced.id}/0).` },
+        text: `See [page](https://zchatgpt.invalid/source/${referenced.id}/0).` },
     ],
     openDocumentPage,
   });
-  const anchor = root.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
+  const anchor = root.querySelector<HTMLAnchorElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text] a')!;
   expect(anchor.textContent).toBe('p. i');
   anchor.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: paperB, revision: documentA.revision }, 0, null));
@@ -418,15 +418,15 @@ it('carries the verbatim link title quote into the frozen page open and reports 
     messages: [
       { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What is defined?', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
-        text: `Definition [page](https://zcr.invalid/source/${documentA.id}/1 "the   exact   words")` },
+        text: `Definition [page](https://zchatgpt.invalid/source/${documentA.id}/1 "the   exact   words")` },
     ],
     openDocumentPage,
   });
-  const anchor = root.querySelector<HTMLAnchorElement>('[data-zcr-message="a1"] [data-zcr-text] a')!;
+  const anchor = root.querySelector<HTMLAnchorElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text] a')!;
   anchor.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(openDocumentPage).toHaveBeenCalledWith({ paper: documentA.paper, revision: documentA.revision }, 1, 'the exact words'));
   // The host reported the passage could not be located: the claim is traced but nothing is fabricated.
-  await vi.waitFor(() => expect(root.querySelector('[data-zcr-message="a1"] [data-zcr-text] [role="status"]')?.textContent).toBe(UNLOCATED_SOURCE_TEXT));
+  await vi.waitFor(() => expect(root.querySelector('[data-zchatgpt-message="a1"] [data-zchatgpt-text] [role="status"]')?.textContent).toBe(UNLOCATED_SOURCE_TEXT));
 });
 
 it('degrades an unresolvable answer citation without launching it externally', async () => {
@@ -435,11 +435,11 @@ it('degrades an unresolvable answer citation without launching it externally', a
     messages: [
       { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Q', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
-        text: '[page](https://zcr.invalid/source/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/0)' },
+        text: '[page](https://zchatgpt.invalid/source/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/0)' },
     ],
     openLink,
   });
-  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const text = root.querySelector<HTMLElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text]')!;
   const anchor = text.querySelector<HTMLAnchorElement>('a')!;
   expect(anchor.hasAttribute('href')).toBe(false);
   expect(anchor.getAttribute('aria-disabled')).toBe('true');
@@ -457,11 +457,11 @@ it('surfaces a constant failure when the frozen source cannot be opened, without
     messages: [
       { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Q', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
-        text: `[page](https://zcr.invalid/source/${documentA.id}/0)` },
+        text: `[page](https://zchatgpt.invalid/source/${documentA.id}/0)` },
     ],
     openDocumentPage, openLink,
   });
-  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
+  const text = root.querySelector<HTMLElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text]')!;
   text.querySelector<HTMLAnchorElement>('a')!.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(text.querySelector('[role="status"]')?.textContent).toBe('The source could not be opened. Reopen the PDF and try again.'));
   expect(text.textContent).not.toContain('/private');
@@ -471,82 +471,82 @@ it('surfaces a constant failure when the frozen source cannot be opened, without
 it('reports a failed view action in a dedicated slot without leaking the raw error', async () => {
   const { root, presenter } = await mountReadyChat();
   vi.spyOn(presenter, 'cancelQueuedRequest').mockRejectedValue(new Error('/private/library/file.pdf'));
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]')!.click();
-  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="cancel-queued"]')!.click();
+  const viewError = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
   await vi.waitFor(() => expect(viewError.hidden).toBe(false));
   expect(viewError.textContent).toBe('This action could not be completed.');
   expect(root.textContent).not.toContain('/private');
-  expect(root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')?.hidden).toBe(true);
+  expect(root.querySelector<HTMLElement>('[role="alert"]:not([data-zchatgpt-view-error])')?.hidden).toBe(true);
 });
 
 it('reports a rejected citation open without clobbering the presenter message slot', async () => {
   const openCitation = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
   const { root } = await mountReadyChat({ draftCitations: [citationA], openCitation });
-  root.querySelector<HTMLButtonElement>('[data-zcr-context-source] [data-zcr-action="open-citation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-context-source] [data-zchatgpt-action="open-citation"]')!.click();
   await vi.waitFor(() => expect(openCitation).toHaveBeenCalled());
-  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  const viewError = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
   await vi.waitFor(() => expect(viewError.textContent).toBe('The source could not be opened.'));
   expect(root.textContent).not.toContain('/private');
 });
 
 it('routes a rejected draft-citation open through the same dedicated slot', async () => {  const openCitation = vi.fn(() => Promise.reject(new Error('/private/library/file.pdf')));
   const { root } = await mountReadyChat({ draftCitations: [citationA], openCitation });
-  root.querySelector<HTMLButtonElement>('[data-zcr-citation] [data-zcr-action="open-citation"]')!.click();
-  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-citation] [data-zchatgpt-action="open-citation"]')!.click();
+  const viewError = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
   await vi.waitFor(() => expect(viewError.textContent).toBe('The source could not be opened.'));
   expect(root.textContent).not.toContain('/private');
 });
 
 it('announces status through the dedicated live region instead of the whole transcript', async () => {
   const { root } = await mountReadyChat();
-  expect(root.querySelector('[data-zcr-messages]')?.hasAttribute('aria-live')).toBe(false);
-  expect(root.querySelector('.zcr-status-line')?.getAttribute('role')).toBe('status');
+  expect(root.querySelector('[data-zchatgpt-messages]')?.hasAttribute('aria-live')).toBe(false);
+  expect(root.querySelector('.zchatgpt-status-line')?.getAttribute('role')).toBe('status');
 });
 
 it('offers a discoverable copy control for an answer and confirms the copy', async () => {
   const copyText = vi.fn();
   const { root } = await mountReadyChat({ messages: [assistantMessage('先验是初始信念。')], copyText });
-  const copy = root.querySelector<HTMLButtonElement>('[data-zcr-action="copy-answer"]')!;
+  const copy = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-answer"]')!;
   expect(copy.hidden).toBe(false);
-  expect(copy.dataset.zcrCopied).toBeUndefined();
+  expect(copy.dataset.zchatgptCopied).toBeUndefined();
   copy.click();
   expect(copyText).toHaveBeenCalledWith('先验是初始信念。');
-  expect(copy.dataset.zcrCopied).toBe('true');
+  expect(copy.dataset.zchatgptCopied).toBe('true');
   expect(copy.getAttribute('aria-label')).toBe('Copied');
 });
 
 it('offers a copy control for every fenced code block', async () => {
   const copyText = vi.fn();
   const { root } = await mountReadyChat({ messages: [assistantMessage('See:\n\n```ts\nconst x = 1;\n```\n')], copyText });
-  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
-  const wrapper = text.querySelector<HTMLElement>('.zcr-code-block');
+  const text = root.querySelector<HTMLElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text]')!;
+  const wrapper = text.querySelector<HTMLElement>('.zchatgpt-code-block');
   expect(wrapper?.parentElement).toBe(text);
-  const copy = wrapper!.querySelector<HTMLButtonElement>('[data-zcr-action="copy-code"]')!;
+  const copy = wrapper!.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-code"]')!;
   copy.click();
   expect(copyText).toHaveBeenCalledWith('const x = 1;\n');
-  expect(copy.dataset.zcrCopied).toBe('true');
+  expect(copy.dataset.zchatgptCopied).toBe('true');
 });
 
 it('gives every markdown table its own local scroll container', async () => {
   const { root } = await mountReadyChat({ messages: [assistantMessage('| a | b |\n| - | - |\n| 1 | 2 |\n')] });
-  const text = root.querySelector<HTMLElement>('[data-zcr-message="a1"] [data-zcr-text]')!;
-  const wrapper = text.querySelector<HTMLElement>('.zcr-table-block');
+  const text = root.querySelector<HTMLElement>('[data-zchatgpt-message="a1"] [data-zchatgpt-text]')!;
+  const wrapper = text.querySelector<HTMLElement>('.zchatgpt-table-block');
   expect(wrapper?.parentElement).toBe(text);
   expect(wrapper?.firstElementChild?.tagName).toBe('TABLE');
 });
 
 it('draws a complete solid ring while the context is unknown, never a percentage or empty placeholder', async () => {
   const { root } = await mountReadyChat();
-  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  const ring = root.querySelector<HTMLElement>('[data-zchatgpt-context-usage]')!;
   // The composer holds no token text at all: the ring is the whole indicator.
-  expect(ring.className).toBe('zcr-context-ring');
+  expect(ring.className).toBe('zchatgpt-context-ring');
   expect(ring.textContent).toBe('');
-  expect(ring.dataset.zcrContextState).toBe('unknown');
+  expect(ring.dataset.zchatgptContextState).toBe('unknown');
   expect(ring.getAttribute('role')).toBe('status');
   expect(ring.title).toContain('unknown');
   expect(ring.getAttribute('aria-label')).toBe(ring.title);
   // 'none' leaves one unbroken stroke, so the unknown ring is solid rather than an empty arc.
-  expect(ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
+  expect(ring.querySelector('.zchatgpt-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
 });
 
 it('keeps the solid ring and the honest number when a usage report has no window', async () => {
@@ -557,9 +557,9 @@ it('keeps the solid ring and the honest number when a usage report has no window
       total: { inputTokens: 12300, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12600 },
     },
   });
-  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
-  expect(ring.dataset.zcrContextState).toBe('unknown');
-  expect(ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
+  const ring = root.querySelector<HTMLElement>('[data-zchatgpt-context-usage]')!;
+  expect(ring.dataset.zchatgptContextState).toBe('unknown');
+  expect(ring.querySelector('.zchatgpt-context-ring-fill')!.getAttribute('stroke-dasharray')).toBe('none');
   expect(ring.getAttribute('aria-label')).toContain('12,300');
   expect(ring.getAttribute('aria-label')).toContain('window is unknown');
   expect(ring.getAttribute('aria-label')).not.toContain('%');
@@ -573,13 +573,13 @@ it('fills the ring from the last runtime report and keeps the numbers in the too
       total: { inputTokens: 12345, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0, totalTokens: 12645 },
     },
   });
-  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
-  expect(ring.dataset.zcrContextState).toBe('runtime-reported');
+  const ring = root.querySelector<HTMLElement>('[data-zchatgpt-context-usage]')!;
+  expect(ring.dataset.zchatgptContextState).toBe('runtime-reported');
   expect(ring.textContent).toBe('');
   expect(ring.getAttribute('aria-label')).toContain('12,345');
   expect(ring.getAttribute('aria-label')).toContain('128,000');
   expect(ring.getAttribute('aria-label')).toContain('not remaining context.');
-  const filled = ring.querySelector('.zcr-context-ring-fill')!.getAttribute('stroke-dasharray')!.split(' ').map(Number);
+  const filled = ring.querySelector('.zchatgpt-context-ring-fill')!.getAttribute('stroke-dasharray')!.split(' ').map(Number);
   expect(filled[1]).toBeCloseTo(50.27, 2);
   expect(filled[0]! / filled[1]!).toBeCloseTo(12345 / 128000, 4);
 });
@@ -590,8 +590,8 @@ it('shows the concrete context report on the ring, only after a request and only
     messages: [], sent,
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
-  const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
+  const ring = root.querySelector<HTMLElement>('[data-zchatgpt-context-usage]')!;
+  const details = root.querySelector<HTMLElement>('.zchatgpt-context-details')!;
   // Before any request the ring stays in its neutral unknown state and invents no coverage.
   expect(details.hidden).toBe(true);
   expect(details.textContent).toBe('');
@@ -644,7 +644,7 @@ it('names the supplied page set and the excluded pages on the ring for a focused
   presenter.setQuestion('What is the definition of x?');
   await presenter.send();
   await vi.waitFor(() => expect(presenter.snapshot().contextReport?.mode).toBe('focused'));
-  const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
+  const details = root.querySelector<HTMLElement>('.zchatgpt-context-details')!;
   expect(details.textContent).toContain('Question-focused selection');
   // The report's own counts, and the concrete page indexes it selected, are visible rather than implied.
   expect(details.textContent).toContain('1 of 2 pages');
@@ -669,13 +669,13 @@ it('keeps the ring coverage disclosure after a UI-language switch', async () => 
   presenter.setQuestion('What does this paper claim?');
   await presenter.send();
   await vi.waitFor(() => expect(presenter.snapshot().contextReport).not.toBeNull());
-  const details = root.querySelector<HTMLElement>('.zcr-context-details')!;
-  const ring = root.querySelector<HTMLElement>('[data-zcr-context-usage]')!;
+  const details = root.querySelector<HTMLElement>('.zchatgpt-context-details')!;
+  const ring = root.querySelector<HTMLElement>('[data-zchatgpt-context-usage]')!;
   expect(details.textContent).toContain('2 of 2 pages');
   await presenter.saveAppearance({ uiLanguage: 'zh' });
   await vi.waitFor(() => expect(presenter.snapshot().workspace?.uiLanguage).toBe('zh'));
   // The disclosure survives the switch in place: it is not torn down, emptied or rebuilt from scratch.
-  expect(root.querySelector<HTMLElement>('.zcr-context-details')).toBe(details);
+  expect(root.querySelector<HTMLElement>('.zchatgpt-context-details')).toBe(details);
   // The disclosure's own copy actually switches, not just the ring's accessible name: labels render
   // in the new language and the value templates translate their phrasing while carrying the counts
   // through verbatim.
@@ -706,7 +706,7 @@ it('keeps the ring coverage disclosure after a UI-language switch', async () => 
 it('closes the dock once and stays a safe no-op for a repeat close or with no chat open', async () => {
   const closeDock = vi.fn();
   const { root, presenter, teardown } = await mountReadyChat({ messages: [], closeDock });
-  const closeCurrent = root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!;
+  const closeCurrent = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!;
   closeCurrent.click();
   expect(presenter.snapshot().conversation).toBeNull();
   expect(closeDock).toHaveBeenCalledTimes(1);
@@ -730,8 +730,8 @@ it('counts the wait in whole seconds and refreshes it on each tick', async () =>
       captureTimers: true, messages: [], activeRequestId: requestId,
       requestTiming: [{ requestId, acceptedAt: new Date(base - 3000).toISOString(), firstTextAt: null, settledAt: null }],
     });
-    const timer = root.querySelector<HTMLElement>('[data-zcr-request-timing]')!;
-    const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+    const timer = root.querySelector<HTMLElement>('[data-zchatgpt-request-timing]')!;
+    const text = root.querySelector<HTMLElement>('[data-zchatgpt-request-timing-text]')!;
     expect(timer.hidden).toBe(false);
     expect(timer.querySelector('svg')).toBeTruthy();
     expect(text.textContent).toBe('Waiting 3s');
@@ -751,7 +751,7 @@ it('freezes the wait at the first delivered text instead of counting the stream'
       captureTimers: true, messages: [], activeRequestId: requestId,
       requestTiming: [{ requestId, acceptedAt: new Date(base - 4000).toISOString(), firstTextAt: null, settledAt: null }],
     });
-    const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+    const text = root.querySelector<HTMLElement>('[data-zchatgpt-request-timing-text]')!;
     expect(text.textContent).toBe('Waiting 4s');
     emit({ seq: 1, conversationId: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId, at: new Date(base - 1000).toISOString(), type: 'delta', messageId: 'a1', text: '答' });
     expect(text.textContent).toBe('Waiting 3s');
@@ -770,7 +770,7 @@ it('reports the settled answer duration once and stops ticking', async () => {
       captureTimers: true, messages: [], activeRequestId: requestId,
       requestTiming: [{ requestId, acceptedAt: new Date(base - 40000).toISOString(), firstTextAt: null, settledAt: null }],
     });
-    const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+    const text = root.querySelector<HTMLElement>('[data-zchatgpt-request-timing-text]')!;
     expect(text.textContent).toBe('Waiting 40s');
     emit({ seq: 1, conversationId: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId, at: new Date(base - 37000).toISOString(), type: 'delta', messageId: 'a1', text: '答' });
     emit({ seq: 2, conversationId: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId, at: new Date(base - 10000).toISOString(), type: 'completed', messageId: 'a1', finalText: '答' });
@@ -798,8 +798,8 @@ it('clears the elapsed-time interval on teardown so the view leaks no timer', as
 
 it('shows an explicit unknown instead of a fabricated duration when timing is missing', async () => {
   const { root } = await mountReadyChat({ messages: [], activeRequestId: '55555555-5555-4555-8555-555555555555' });
-  const timer = root.querySelector<HTMLElement>('[data-zcr-request-timing]')!;
-  const text = root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!;
+  const timer = root.querySelector<HTMLElement>('[data-zchatgpt-request-timing]')!;
+  const text = root.querySelector<HTMLElement>('[data-zchatgpt-request-timing-text]')!;
   expect(timer.hidden).toBe(false);
   expect(text.textContent).toBe('Elapsed time unavailable');
   expect(text.textContent).not.toMatch(/\d/u);
@@ -807,7 +807,7 @@ it('shows an explicit unknown instead of a fabricated duration when timing is mi
 
 it('hides the elapsed-time indicator when no request timing exists at all', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  expect(root.querySelector<HTMLElement>('[data-zcr-request-timing]')!.hidden).toBe(true);
+  expect(root.querySelector<HTMLElement>('[data-zchatgpt-request-timing]')!.hidden).toBe(true);
 });
 
 it('keeps a request that is reasoning without text visibly alive instead of dead', async () => {
@@ -821,60 +821,60 @@ it('keeps a request that is reasoning without text visibly alive instead of dead
       requestTiming: [{ requestId, acceptedAt: new Date(base - 45000).toISOString(), firstTextAt: null, settledAt: null }],
     });    // A long reasoning phase delivers no text at all, so the transcript itself stays empty: the live
     // wait and a usable stop control are the only honest signs that work is happening.
-    expect(root.querySelector<HTMLElement>('[data-zcr-request-timing]')!.hidden).toBe(false);
-    expect(root.querySelector<HTMLElement>('[data-zcr-request-timing-text]')!.textContent).toBe('Waiting 45s');
+    expect(root.querySelector<HTMLElement>('[data-zchatgpt-request-timing]')!.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-zchatgpt-request-timing-text]')!.textContent).toBe('Waiting 45s');
     expect(root.textContent).toContain('Responding…');
-    const stop = root.querySelector<HTMLButtonElement>('[data-zcr-action="stop"]')!;
+    const stop = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="stop"]')!;
     expect(stop.hidden).toBe(false);
     expect(stop.getAttribute('aria-label')).toBe('Stop');
-    expect(root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')!.hidden).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="send"]')!.hidden).toBe(true);
   } finally { vi.restoreAllMocks(); }
 });
 
 it('keeps the offline composer editable while preventing model submission', async () => {
   const f = await mountReadyChat(); f.updateRuntime({ runtime: 'error', error: 'Connection ended' });
-  expect(f.root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.disabled).toBe(false);
-  expect(f.root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')?.disabled).toBe(true);
+  expect(f.root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')?.disabled).toBe(false);
+  expect(f.root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="send"]')?.disabled).toBe(true);
 });
 
 it('does not show copy-diagnostics in the default sidebar', async () => {
   const { root } = await mountReadyChat();
-  expect(root.querySelector('[data-zcr-action="copy-diagnostics"]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-action="copy-diagnostics"]')).toBeNull();
   expect(root.textContent).not.toContain('复制诊断');
   expect(root.textContent).not.toContain('Copy diagnostics');
 });
 
 it('opens a custom model popover instead of three always-visible selects', async () => {
   const { root } = await mountReadyChat();
-  const picker = root.querySelector('[data-zcr-picker]');
-  const menu = root.querySelector('[data-zcr-picker-menu]');
+  const picker = root.querySelector('[data-zchatgpt-picker]');
+  const menu = root.querySelector('[data-zchatgpt-picker-menu]');
   expect(picker).toBeTruthy();
   expect(picker?.getAttribute('aria-expanded')).toBe('false');
   expect(menu?.hasAttribute('hidden')).toBe(true);
-  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
-  expect(root.querySelectorAll('[data-zcr-composer] > select, .zcr-settings > select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-picker-menu] select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-composer] > select, .zchatgpt-settings > select')).toHaveLength(0);
   (picker as HTMLButtonElement).click();
   expect(picker?.getAttribute('aria-expanded')).toBe('true');
   expect(menu?.hasAttribute('hidden')).toBe(false);
-  expect(menu?.querySelector('[data-zcr-picker-section="effort"]')?.textContent).toMatch(/Effort/u);
-  expect(menu?.querySelector('[data-zcr-setting="effort"][data-zcr-value="low"]')?.textContent).toMatch(/Low/u);
-  expect(menu?.querySelector('[data-zcr-setting="effort"][data-zcr-value="xhigh"]')?.textContent).toMatch(/Extra High/u);
-  expect(menu?.querySelector('[data-zcr-setting="effort"][data-zcr-value="medium"]')?.getAttribute('aria-checked')).toBe('true');
-  const fast = menu?.querySelector('[data-zcr-setting="speed"]');
+  expect(menu?.querySelector('[data-zchatgpt-picker-section="effort"]')?.textContent).toMatch(/Effort/u);
+  expect(menu?.querySelector('[data-zchatgpt-setting="effort"][data-zchatgpt-value="low"]')?.textContent).toMatch(/Low/u);
+  expect(menu?.querySelector('[data-zchatgpt-setting="effort"][data-zchatgpt-value="xhigh"]')?.textContent).toMatch(/Extra High/u);
+  expect(menu?.querySelector('[data-zchatgpt-setting="effort"][data-zchatgpt-value="medium"]')?.getAttribute('aria-checked')).toBe('true');
+  const fast = menu?.querySelector('[data-zchatgpt-setting="speed"]');
   expect(fast?.getAttribute('role')).toBe('switch');
   expect(fast?.getAttribute('aria-label')).toMatch(/Fast/u);
-  expect(menu?.querySelector('[data-zcr-picker-section="model"]')?.textContent).toMatch(/Model/u);
-  expect(menu?.querySelectorAll('[data-zcr-setting="model"]').length).toBeGreaterThan(0);
-  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
+  expect(menu?.querySelector('[data-zchatgpt-picker-section="model"]')?.textContent).toMatch(/Model/u);
+  expect(menu?.querySelectorAll('[data-zchatgpt-setting="model"]').length).toBeGreaterThan(0);
+  expect(root.querySelectorAll('[data-zchatgpt-picker-menu] select')).toHaveLength(0);
 });
 
 it('defaults visible sidebar copy to English', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  expect(root.querySelector('[data-zcr-action="new-conversation"]')?.getAttribute('aria-label')).toMatch(/New chat/u);
-  expect(root.querySelector('[data-zcr-action="history"]')?.getAttribute('aria-label')).toMatch(/Chat history/u);
-  expect(root.querySelector('[data-zcr-history]')?.getAttribute('aria-label')).toBe('Chat history');
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.placeholder).toBe('Ask a question…');
-  const send = root.querySelector('[data-zcr-action="send"]');
+  expect(root.querySelector('[data-zchatgpt-action="new-conversation"]')?.getAttribute('aria-label')).toMatch(/New chat/u);
+  expect(root.querySelector('[data-zchatgpt-action="history"]')?.getAttribute('aria-label')).toMatch(/Chat history/u);
+  expect(root.querySelector('[data-zchatgpt-history]')?.getAttribute('aria-label')).toBe('Chat history');
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')?.placeholder).toBe('Ask a question…');
+  const send = root.querySelector('[data-zchatgpt-action="send"]');
   expect(send?.getAttribute('aria-label')).toBe('Send');
   expect(send?.textContent?.trim()).toBe('');
   expect(root.textContent).not.toMatch(/Preview|preview|development preview/u);
@@ -912,14 +912,14 @@ it('keeps an attachment fallback title available in compact chrome without a her
   const body = doc.createElement('div');
   const root = renderReaderShell(body, { title: 'PDF', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   mountChatView(root, presenter);
-  const title = root.querySelector('[data-zcr-current-title]');
+  const title = root.querySelector('[data-zchatgpt-current-title]');
   expect(title?.textContent).toBe('PDF');
   expect(title?.getAttribute('title')).toBe('PDF');
   expect(root.querySelector('h1, h2')).toBeNull();
 });
 
 it('shows the New chat tab at first paint without creating a chat', async () => {
-  const title = 'ZCR current-PDF synthetic context and native interaction test';
+  const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
   const runtime: RuntimeSnapshot = {
     revision: 0, runtime: 'ready', account: { state: 'signedOut' }, login: null, models: [model], error: null,
   };
@@ -949,52 +949,52 @@ it('shows the New chat tab at first paint without creating a chat', async () => 
   const root = renderReaderShell(body, { title, key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   mountChatView(root, presenter);
   // Host `new-chat-tab-before-or-with-connection` fires as soon as the composer exists, before restore.
-  expect(root.querySelector('[data-zcr-input]')).toBeTruthy();
+  expect(root.querySelector('[data-zchatgpt-input]')).toBeTruthy();
   expect(presenter.snapshot().conversation).toBeNull();
   // The unsent tab is the New chat copy; paper identity is never carried by a tab label.
-  const tab = root.querySelector<HTMLElement>('[data-zcr-current-title]');
-  expect(tab?.dataset.zcrConversationId).toBe('new-chat');
+  const tab = root.querySelector<HTMLElement>('[data-zchatgpt-current-title]');
+  expect(tab?.dataset.zchatgptConversationId).toBe('new-chat');
   expect(tab?.textContent).toBe('New chat');
   expect(tab?.getAttribute('title')).toBe('New chat');
-  expect(tab?.querySelector('[data-zcr-pane-label]')?.classList.contains('zcr-pane-tab-new')).toBe(true);
+  expect(tab?.querySelector('[data-zchatgpt-pane-label]')?.classList.contains('zchatgpt-pane-tab-new')).toBe(true);
   await presenter.activate();
   expect(presenter.snapshot().conversation).toBeNull();
   expect(created).toEqual([]);
-  expect(root.querySelector('[data-zcr-current-title]')?.textContent).toBe('New chat');
+  expect(root.querySelector('[data-zchatgpt-current-title]')?.textContent).toBe('New chat');
 });
 
 it('keeps title, New chat, and history inside the sidebar pane below the native toolbar', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const chrome = root.querySelector('.zcr-chrome');
-  const historyButton = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]');
-  const panel = root.querySelector<HTMLElement>('[data-zcr-history]');
-  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]');
-  const title = root.querySelector('[data-zcr-current-title]');
+  const chrome = root.querySelector('.zchatgpt-chrome');
+  const historyButton = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]');
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]');
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="new-conversation"]');
+  const title = root.querySelector('[data-zchatgpt-current-title]');
   expect(root.contains(chrome)).toBe(true);
   expect(chrome?.contains(historyButton)).toBe(true);
   expect(chrome?.contains(fresh)).toBe(true);
   expect(chrome?.contains(title)).toBe(true);
-  expect(root.style.getPropertyValue('--zcr-reader-toolbar-height')).toBe('');
+  expect(root.style.getPropertyValue('--zchatgpt-reader-toolbar-height')).toBe('');
   expect(historyButton?.hidden).toBe(false);
   expect(fresh?.hidden).toBe(false);
   expect(fresh?.getAttribute('aria-label')).toMatch(/New chat/u);
   expect(fresh?.textContent?.trim()).toBe('');
   expect(chrome?.textContent).not.toMatch(/New chat/u);
   expect(panel?.tagName).not.toBe('SELECT');
-  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-picker-menu] select')).toHaveLength(0);
   expect(panel?.hasAttribute('hidden')).toBe(true);
   historyButton?.click();
   expect(panel?.hasAttribute('hidden')).toBe(false);
-  expect(panel?.querySelector('[data-zcr-history-search]')).toBeTruthy();
+  expect(panel?.querySelector('[data-zchatgpt-history-search]')).toBeTruthy();
 });
 
 it('renders an empty transcript as plain, scrollable space with no mark and a working composer', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   applySidebarStyles(root);
-  const transcript = root.querySelector<HTMLElement>('.zcr-transcript')!;
-  const messages = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  const transcript = root.querySelector<HTMLElement>('.zchatgpt-transcript')!;
+  const messages = root.querySelector<HTMLElement>('[data-zchatgpt-messages]')!;
   // The empty state carries no logo, icon or placeholder box: it is just empty.
-  expect(root.querySelector('[data-zcr-empty]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-empty]')).toBeNull();
   expect(transcript.querySelectorAll('svg')).toHaveLength(0);
   expect(root.textContent).not.toMatch(/Select text in the PDF|ask a question\./iu);
   expect(root.textContent).not.toMatch(/@ chats|\/ skills|highlight/iu);
@@ -1008,10 +1008,10 @@ it('renders an empty transcript as plain, scrollable space with no mark and a wo
   messages.dispatchEvent(new root.ownerDocument.defaultView!.Event('scroll'));
   expect(presenter.snapshot().scrollTop).toBe(500);
   // The composer still works from the empty state.
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   expect(input.placeholder).toBe('Ask a question…');
   expect(input.disabled).toBe(false);
-  expect(root.querySelector('[data-zcr-action="send"]')).not.toBeNull();
+  expect(root.querySelector('[data-zchatgpt-action="send"]')).not.toBeNull();
 });
 
 it('leaves the automatic-PDF preference to Zotero Preferences and off the chat surface', async () => {
@@ -1019,39 +1019,39 @@ it('leaves the automatic-PDF preference to Zotero Preferences and off the chat s
   const prepare = vi.fn(() => Promise.resolve(documentA));
   const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
   // The More menu is gone: the chrome carries no three-dot trigger, no menu node and no glyph.
-  expect(root.querySelector('[data-zcr-action="settings"]')).toBeNull();
-  expect(root.querySelector('[data-zcr-settings-menu]')).toBeNull();
-  expect(root.querySelector('.zcr-conversation-actions, .zcr-settings-content')).toBeNull();
-  expect([...root.querySelectorAll('.zcr-chrome button')].map(node => node.getAttribute('aria-label'))).not.toContain('More');
+  expect(root.querySelector('[data-zchatgpt-action="settings"]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-settings-menu]')).toBeNull();
+  expect(root.querySelector('.zchatgpt-conversation-actions, .zchatgpt-settings-content')).toBeNull();
+  expect([...root.querySelectorAll('.zchatgpt-chrome button')].map(node => node.getAttribute('aria-label'))).not.toContain('More');
   // The sidebar owns no preference or appearance control: the pane writes the same pref.
-  expect(root.querySelector('[data-zcr-automatic-pdf]')).toBeNull();
-  expect(root.querySelectorAll('[data-zcr-pref]')).toHaveLength(0);
-  expect(root.querySelectorAll('[data-zcr-picker-menu] input, [data-zcr-picker-menu] select')).toHaveLength(0);
+  expect(root.querySelector('[data-zchatgpt-automatic-pdf]')).toBeNull();
+  expect(root.querySelectorAll('[data-zchatgpt-pref]')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-picker-menu] input, [data-zchatgpt-picker-menu] select')).toHaveLength(0);
   expect(sent).toHaveLength(0);
   // The reader still applies the stored opt-out to background preparation, with no panel to show it.
   await vi.waitFor(() => expect(prepare).toHaveBeenCalled());
   await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
-  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-document-context]')).toBeNull();
   expect(sent).toHaveLength(0);
 });
 
 it('keeps account usage reachable in the model picker after the More menu is gone', async () => {
   const rateLimits = [{ label: 'Codex', usedPercent: 42, resetsAt: 1893456000, windowMinutes: 300 }];
   const { root } = await mountReadyChat({ messages: [], rateLimits });
-  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-action="picker"]')!;
+  const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="picker"]')!;
   picker.click();
-  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-picker-menu]')!;
   expect(menu.hidden).toBe(false);
-  const account = menu.querySelector<HTMLElement>('[data-zcr-picker-section="account"]')!;
-  expect(account.querySelector('.zcr-picker-heading')?.textContent).toBe('Account usage');
+  const account = menu.querySelector<HTMLElement>('[data-zchatgpt-picker-section="account"]')!;
+  expect(account.querySelector('.zchatgpt-picker-heading')?.textContent).toBe('Account usage');
   // The figures are the runtime's own report and are rendered verbatim, never as a menu row.
-  expect(account.querySelector('[data-zcr-account-usage]')?.textContent).toContain('Codex: 42% used');
+  expect(account.querySelector('[data-zchatgpt-account-usage]')?.textContent).toContain('Codex: 42% used');
   expect(account.querySelector('button')).toBeNull();
   // The section is not a chat setting: closing and reopening the picker keeps it non-interactive.
   picker.click();
   expect(menu.hidden).toBe(true);
   picker.click();
-  expect(menu.querySelector('[data-zcr-picker-section="account"]')).not.toBeNull();
+  expect(menu.querySelector('[data-zchatgpt-picker-section="account"]')).not.toBeNull();
 });
 
 it('keeps the whole PDF-context cluster off the chat surface while reading stays a background act', async () => {
@@ -1061,24 +1061,24 @@ it('keeps the whole PDF-context cluster off the chat surface while reading stays
   await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
   // Every piece of the old cluster is gone: the panel, its summary hook, the consent block, the
   // page-range inputs and both buttons, and the scope/context-window prose.
-  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
-  expect(root.querySelector('[data-zcr-context-summary]')).toBeNull();
-  expect(root.querySelector('.zcr-document-panel')).toBeNull();
-  expect(root.querySelector('.zcr-context-range')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-document-context]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-context-summary]')).toBeNull();
+  expect(root.querySelector('.zchatgpt-document-panel')).toBeNull();
+  expect(root.querySelector('.zchatgpt-context-range')).toBeNull();
   expect(root.querySelector('[aria-label="First PDF page"]')).toBeNull();
   expect(root.querySelector('[aria-label="Last PDF page"]')).toBeNull();
   expect([...root.querySelectorAll('button')].map(node => node.textContent)).not.toContain('Use pages');
   expect([...root.querySelectorAll('button')].map(node => node.textContent)).not.toContain('Whole PDF');
   expect(root.textContent).not.toMatch(/Model context window|not sent to Codex|Only this PDF is in scope/u);
   // The context-usage ring the owner asked to keep still renders in the composer row.
-  expect(root.querySelector('[data-zcr-context-usage]')).not.toBeNull();
+  expect(root.querySelector('[data-zchatgpt-context-usage]')).not.toBeNull();
   // The two survivors are bare siblings in the chat, not panel contents: the consent line stays
   // hidden until a request actually needs it, and the page indicator is no longer wrapped by any
   // removed container.
-  const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
+  const disclosure = root.querySelector<HTMLElement>('[data-zchatgpt-context-disclosure]')!;
   expect(disclosure.hasAttribute('hidden')).toBe(true);
-  expect(disclosure.closest('.zcr-document-panel')).toBeNull();
-  expect(root.querySelector<HTMLElement>('[data-zcr-context-source]')?.closest('.zcr-document-panel')).toBeNull();
+  expect(disclosure.closest('.zchatgpt-document-panel')).toBeNull();
+  expect(root.querySelector<HTMLElement>('[data-zchatgpt-context-source]')?.closest('.zchatgpt-document-panel')).toBeNull();
   // Reading the current PDF is still a local background act: it prepared without sending anything.
   expect(prepare).toHaveBeenCalled();
   expect(sent).toHaveLength(0);
@@ -1092,20 +1092,20 @@ it('prepares the current PDF locally in the background with no panel and no mode
   await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
   expect(sent).toHaveLength(0);
   // Nothing about that preparation is rendered: not even a collapsed summary line survives.
-  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
-  expect(root.querySelector('[data-zcr-context-summary]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-document-context]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-context-summary]')).toBeNull();
 });
 
 it('keeps the one-time PDF send consent reachable without the removed panel', async () => {
   const sent: SendInput[] = [];
   const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {}, needsDisclosure: () => true } });
-  const disclosure = root.querySelector<HTMLElement>('[data-zcr-context-disclosure]')!;
+  const disclosure = root.querySelector<HTMLElement>('[data-zchatgpt-context-disclosure]')!;
   expect(disclosure.hasAttribute('hidden')).toBe(true);
   // An explain with automatic PDF text on needs consent. The removed panel used to own that gate,
   // so without the surviving consent line the explain would be dropped with no signal at all.
   await presenter.explain(citationA);
   expect(disclosure.hasAttribute('hidden')).toBe(false);
-  const action = disclosure.querySelector<HTMLButtonElement>('[data-zcr-action="acknowledge-context"]')!;
+  const action = disclosure.querySelector<HTMLButtonElement>('[data-zchatgpt-action="acknowledge-context"]')!;
   expect(action.hidden).toBe(false);
   // Acknowledging re-runs the pending explain, so the request is not silently dropped.
   action.click();
@@ -1122,8 +1122,8 @@ it('surfaces the honest text-not-ready refusal now that no panel reports coverag
   // The panel that used to report "N/M pages with text" and "Text is not silently truncated" is gone,
   // so the request boundary itself has to stay honest: a document with no readable text must be
   // refused out loud rather than sent as an empty context.
-  expect(root.querySelector('[data-zcr-document-context]')).toBeNull();
-  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')!;
+  expect(root.querySelector('[data-zchatgpt-document-context]')).toBeNull();
+  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zchatgpt-view-error])')!;
   expect(alert.hidden).toBe(true);
   presenter.setQuestion('What does this paper claim?');
   await presenter.send();
@@ -1141,7 +1141,7 @@ it('shows a failed local PDF read in the composer alert, not only in document st
     prepare: () => Promise.reject(new ReaderError('INVALID_REQUEST', 'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.')),
     validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
   } });
-  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')!;
+  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zchatgpt-view-error])')!;
   await vi.waitFor(() => expect(alert.hidden).toBe(false));
   expect(alert.getAttribute('role')).toBe('alert');
   expect(alert.textContent).toMatch(/did not finish loading in time/iu);
@@ -1157,23 +1157,23 @@ it('renders the Codex-like body: no labelled author header, actions in an icon-o
     ],
   });
   // The labelled author row is gone: alignment and the body carry the role instead.
-  expect(root.querySelector('.zcr-message-header, .zcr-message-author')).toBeNull();
-  const assistant = root.querySelector<HTMLElement>('[data-zcr-message="a1"]')!;
-  const body = assistant.querySelector<HTMLElement>(':scope > .zcr-message-body')!;
+  expect(root.querySelector('.zchatgpt-message-header, .zchatgpt-message-author')).toBeNull();
+  const assistant = root.querySelector<HTMLElement>('[data-zchatgpt-message="a1"]')!;
+  const body = assistant.querySelector<HTMLElement>(':scope > .zchatgpt-message-body')!;
   expect(body).not.toBeNull();
-  expect(body.querySelector('[data-zcr-text]')?.textContent).toContain('definition');
+  expect(body.querySelector('[data-zchatgpt-text]')?.textContent).toContain('definition');
   // The copy control stays icon-only and accessible, inside the action strip anchored to the body.
-  const actions = body.querySelector<HTMLElement>(':scope > .zcr-message-actions')!;
-  const copy = actions.querySelector<HTMLButtonElement>('[data-zcr-action="copy-answer"]')!;
+  const actions = body.querySelector<HTMLElement>(':scope > .zchatgpt-message-actions')!;
+  const copy = actions.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-answer"]')!;
   expect(copy.getAttribute('aria-label')).toBe('Copy');
   // The only text is the visually-hidden feedback label, so the chip reads as an icon.
   expect(copy.textContent?.trim()).toBe('Copy');
-  expect(copy.querySelector('[data-zcr-copy-label]')?.textContent).toBe('Copy');
+  expect(copy.querySelector('[data-zchatgpt-copy-label]')?.textContent).toBe('Copy');
   expect(copy.querySelector('svg')).not.toBeNull();
   // The user bubble uses the same body wrapper, and its branch action lives in the strip too.
-  const user = root.querySelector<HTMLElement>('[data-zcr-message="u1"]')!;
-  expect(user.querySelector('.zcr-message-header, .zcr-message-author')).toBeNull();
-  expect(user.querySelector('.zcr-message-body [data-zcr-action="branch-message"]')).not.toBeNull();
+  const user = root.querySelector<HTMLElement>('[data-zchatgpt-message="u1"]')!;
+  expect(user.querySelector('.zchatgpt-message-header, .zchatgpt-message-author')).toBeNull();
+  expect(user.querySelector('.zchatgpt-message-body [data-zchatgpt-action="branch-message"]')).not.toBeNull();
 });
 
 it('renders centered timestamp dividers only from recorded request timings', async () => {
@@ -1189,16 +1189,16 @@ it('renders centered timestamp dividers only from recorded request timings', asy
       { id: 'u3', requestId: 'r2', role: 'user', phase: null, settings, text: 'Second day', citations: [], status: 'completed' },
     ],
   });
-  const dividers = [...root.querySelectorAll<HTMLElement>('[data-zcr-message-time]')];
+  const dividers = [...root.querySelectorAll<HTMLElement>('[data-zchatgpt-message-time]')];
   // One divider per calendar day, and none for the message whose request has no timing.
   expect(dividers).toHaveLength(2);
   expect(dividers[0]!.textContent).toBe(messageTimeLabel(dayOne, Date.now(), 'en'));
   expect(dividers[1]!.textContent).toBe(messageTimeLabel(dayTwo, Date.now(), 'en'));
-  expect(dividers[0]!.nextElementSibling?.getAttribute('data-zcr-message')).toBe('u1');
-  expect(dividers[1]!.nextElementSibling?.getAttribute('data-zcr-message')).toBe('u3');
+  expect(dividers[0]!.nextElementSibling?.getAttribute('data-zchatgpt-message')).toBe('u1');
+  expect(dividers[1]!.nextElementSibling?.getAttribute('data-zchatgpt-message')).toBe('u3');
   // A transcript with no recorded request timing renders no divider rather than a fabricated time.
   const none = await mountReadyChat({ messages: [{ id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'Untimed', citations: [], status: 'completed' }] });
-  expect(none.root.querySelectorAll('[data-zcr-message-time]')).toHaveLength(0);
+  expect(none.root.querySelectorAll('[data-zchatgpt-message-time]')).toHaveLength(0);
 });
 
 it('returns the stopped question, citations and images to the composer', async () => {
@@ -1224,7 +1224,7 @@ it('returns the stopped question, citations and images to the composer', async (
   expect(restored.question).toBe('What does this mean?');
   expect(restored.citations.map(citation => citation.id)).toEqual([citationA.id]);
   expect(restored.images.map(image => image.id)).toEqual([imageA.id]);
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('What does this mean?');
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toBe('What does this mean?');
   // A newer draft typed after sending is never clobbered by a second Stop.
   presenter.setQuestion('Newer question');
   await presenter.cancel();
@@ -1249,7 +1249,7 @@ it('degrades a legacy per-chat research profile to the global preferences, visib
   await vi.waitFor(() => expect(sent).toHaveLength(1));
   // The global preferences are authoritative: the dead reference is not applied, and the send happens.
   expect(sent[0]!.workflow?.profileId).toBeNull();
-  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zcr-view-error])')!;
+  const alert = root.querySelector<HTMLElement>('[role="alert"]:not([data-zchatgpt-view-error])')!;
   await vi.waitFor(() => expect(alert.hidden).toBe(false));
   expect(alert.textContent).toBe('The saved research profile is no longer available; global preferences apply.');
 });
@@ -1257,28 +1257,28 @@ it('degrades a legacy per-chat research profile to the global preferences, visib
 it('keeps the composer in document flow as its references grow, without reserving a fixed transcript height', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   applySidebarStyles(root);
-  const draft = root.querySelector<HTMLElement>('.zcr-draft')!;
-  const transcript = root.querySelector<HTMLElement>('.zcr-transcript')!;
-  const messages = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  const draft = root.querySelector<HTMLElement>('.zchatgpt-draft')!;
+  const transcript = root.querySelector<HTMLElement>('.zchatgpt-transcript')!;
+  const messages = root.querySelector<HTMLElement>('[data-zchatgpt-messages]')!;
   const styles = (node: HTMLElement) => root.ownerDocument.defaultView!.getComputedStyle(node);
   expect(['absolute', 'fixed']).not.toContain(styles(draft).position);
   expect(draft.previousElementSibling).toBe(transcript);
   expect(styles(messages).paddingBottom).toBe('12px');
   presenter.addCitation(citationA);
   presenter.addImage(imageA);
-  expect(draft.querySelectorAll('[data-zcr-citation], [data-zcr-draft-image]')).toHaveLength(2);
+  expect(draft.querySelectorAll('[data-zchatgpt-citation], [data-zchatgpt-draft-image]')).toHaveLength(2);
   expect(['absolute', 'fixed']).not.toContain(styles(draft).position);
-  expect(root.querySelector('[data-zcr-action="attach"]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-action="attach"]')).toBeNull();
 });
 
 it('keeps the composer as one card: textarea, footer chip, and circular arrow send', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const composer = root.querySelector('[data-zcr-composer]');
-  const draft = root.querySelector('.zcr-draft');
-  const input = root.querySelector('[data-zcr-input]');
-  const send = root.querySelector('[data-zcr-action="send"]');
-  const picker = root.querySelector('[data-zcr-picker]');
-  const bar = root.querySelector('.zcr-composer-bar');
+  const composer = root.querySelector('[data-zchatgpt-composer]');
+  const draft = root.querySelector('.zchatgpt-draft');
+  const input = root.querySelector('[data-zchatgpt-input]');
+  const send = root.querySelector('[data-zchatgpt-action="send"]');
+  const picker = root.querySelector('[data-zchatgpt-picker]');
+  const bar = root.querySelector('.zchatgpt-composer-bar');
   expect(draft && input && draft.contains(input)).toBe(true);
   expect(composer && send && composer.contains(send)).toBe(true);
   expect(composer && picker && composer.contains(picker)).toBe(true);
@@ -1286,10 +1286,10 @@ it('keeps the composer as one card: textarea, footer chip, and circular arrow se
   expect(bar && send && bar.contains(send)).toBe(true);
   expect(draft && composer && draft.contains(composer)).toBe(true);
   expect(picker?.textContent).toMatch(/Catalog Default/u);
-  expect(send?.classList.contains('zcr-send')).toBe(true);
-  expect(root.querySelector('.zcr-footnote')).toBeNull();
+  expect(send?.classList.contains('zchatgpt-send')).toBe(true);
+  expect(root.querySelector('.zchatgpt-footnote')).toBeNull();
   expect(root.getAttribute('aria-label')).toBe('Codex');
-  expect(root.querySelectorAll('[data-zcr-picker-menu] select')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-picker-menu] select')).toHaveLength(0);
 });
 
 it('uses icon-only New chat and history-row delete actions with accessible names', async () => {
@@ -1299,14 +1299,14 @@ it('uses icon-only New chat and history-row delete actions with accessible names
       { id: 'm2', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'It is a definition.', citations: [], status: 'completed' },
     ],
   });
-  const fresh = root.querySelector('[data-zcr-action="new-conversation"]');
+  const fresh = root.querySelector('[data-zchatgpt-action="new-conversation"]');
   expect(fresh?.getAttribute('aria-label')).toMatch(/New chat/u);
   expect(fresh?.textContent?.trim()).toBe('');
-  const copy = root.querySelector('[data-zcr-action="copy-answer"]');
+  const copy = root.querySelector('[data-zchatgpt-action="copy-answer"]');
   expect(copy?.getAttribute('aria-label')).toBe('Copy');
   // Copy is a labelled chip now: the visible "Copy" text is the discoverability affordance.
-  expect(copy?.querySelector('[data-zcr-copy-label]')?.textContent).toBe('Copy');
-  const removeChat = root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]');
+  expect(copy?.querySelector('[data-zchatgpt-copy-label]')?.textContent).toBe('Copy');
+  const removeChat = root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]');
   expect(removeChat?.getAttribute('aria-label')).toMatch(/Delete chat/u);
   expect(removeChat?.textContent?.trim()).toBe('');
   // History deletion is a cross, not a trash can.
@@ -1325,28 +1325,28 @@ it('closes the current chat from the selected tab cross without confirming, dele
   };
   const { root, presenter, client } = await mountReadyChat({ messages: [], conversations: [first, second] });
   const remove = vi.spyOn(client, 'deleteConversation');
-  const chrome = root.querySelector('.zcr-chrome')!;
+  const chrome = root.querySelector('.zchatgpt-chrome')!;
   // The selected tab owns the title and the close cross.
-  const pill = chrome.querySelector<HTMLElement>('[data-zcr-pane-tab][aria-selected="true"]')!;
-  const close = pill.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!;
-  expect(pill.contains(chrome.querySelector('[data-zcr-current-title]'))).toBe(true);
+  const pill = chrome.querySelector<HTMLElement>('[data-zchatgpt-pane-tab][aria-selected="true"]')!;
+  const close = pill.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!;
+  expect(pill.contains(chrome.querySelector('[data-zchatgpt-current-title]'))).toBe(true);
   // The accessible name says close, not delete; the glyph stays the calm cross.
   expect(close.getAttribute('aria-label')).toBe('Close chat');
   expect(close.textContent?.trim()).toBe('');
   expect(close.querySelector('svg path')?.getAttribute('d')).toBe('M4 4l8 8M12 4l-8 8');
   // The destructive action is gone from the chrome and there is no More menu to hide it in.
-  expect(chrome.querySelector('[data-zcr-action="delete-current-conversation"]')).toBeNull();
-  expect(root.querySelector('[data-zcr-settings-menu]')).toBeNull();
-  expect(chrome.querySelector('[data-zcr-action="delete-conversation"]')).toBeNull();
+  expect(chrome.querySelector('[data-zchatgpt-action="delete-current-conversation"]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-settings-menu]')).toBeNull();
+  expect(chrome.querySelector('[data-zchatgpt-action="delete-conversation"]')).toBeNull();
   // Renaming moved onto the chat's own title: the title button is the rename control, and it is
   // the only place that offers it now that the More menu is gone.
-  const rename = chrome.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!;
-  expect(rename.dataset.zcrAction).toBe('rename-conversation');
+  const rename = chrome.querySelector<HTMLButtonElement>('[data-zchatgpt-current-title]')!;
+  expect(rename.dataset.zchatgptAction).toBe('rename-conversation');
   expect(rename.getAttribute('aria-label')).toContain('Synthetic Paper A');
-  expect(chrome.querySelector('[data-zcr-action="rename-conversation"]:not([data-zcr-current-title])')).toBeNull();
+  expect(chrome.querySelector('[data-zchatgpt-action="rename-conversation"]:not([data-zchatgpt-current-title])')).toBeNull();
   // Switch to the second chat, then close it: no prompt, no delete, no data loss.
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button[data-zchatgpt-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   close.click();
   expect(remove).not.toHaveBeenCalled();
@@ -1356,11 +1356,11 @@ it('closes the current chat from the selected tab cross without confirming, dele
   expect(presenter.snapshot().openConversations.map(entry => entry.id)).toEqual([first.id]);
   expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(second.id);
   // The pane still belongs to a chat: the selected tab and its cross are both back on screen.
-  expect(chrome.querySelector('[data-zcr-pane-tab][aria-selected="true"]')).not.toBeNull();
-  expect(chrome.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.hidden).toBe(false);
+  expect(chrome.querySelector('[data-zchatgpt-pane-tab][aria-selected="true"]')).not.toBeNull();
+  expect(chrome.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.hidden).toBe(false);
   // The chat is still listed in history and re-opening it restores it.
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  const row = root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  const row = root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button[data-zchatgpt-conversation-id="${second.id}"]`);
   expect(row).not.toBeNull();
   row!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
@@ -1387,7 +1387,7 @@ async function mountTwoOpenChats() {
     messages: [
       { id: 'u1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What is defined?', citations: [citationA], status: 'completed', document: documentSummary(documentA) },
       { id: 'a1', requestId: 'r1', role: 'assistant', phase: 'final', settings, citations: [], status: 'completed',
-        text: `Definition [page](https://zcr.invalid/source/${documentA.id}/1) and [external](https://example.com/paper).` },
+        text: `Definition [page](https://zchatgpt.invalid/source/${documentA.id}/1) and [external](https://example.com/paper).` },
     ],
     conversations: [other],
   });
@@ -1395,7 +1395,7 @@ async function mountTwoOpenChats() {
   await mounted.presenter.openConversation(other.id);
   return {
     ...mounted, firstId, otherId: other.id,
-    activeMessages: mounted.root.querySelector<HTMLElement>('[data-zcr-messages]')!,
+    activeMessages: mounted.root.querySelector<HTMLElement>('[data-zchatgpt-messages]')!,
   };
 }
 
@@ -1406,30 +1406,30 @@ async function mountTwoOpenChats() {
 it('keeps the open chats as a pane strip and switches back to a chat with its own draft', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const first = presenter.snapshot().conversation!.id;
-  const strip = () => root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  const tabs = () => [...strip().querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
+  const strip = () => root.querySelector<HTMLElement>('[data-zchatgpt-panes]')!;
+  const tabs = () => [...strip().querySelectorAll<HTMLElement>('[data-zchatgpt-pane-tab]')];
   expect(strip().hidden).toBe(false);
-  expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first]);
+  expect(tabs().map(tab => tab.dataset.zchatgptConversationId)).toEqual([first]);
   presenter.setQuestion('第一问');
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!.click();
-  await vi.waitFor(() => expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first, 'new-chat']));
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="new-conversation"]')!.click();
+  await vi.waitFor(() => expect(tabs().map(tab => tab.dataset.zchatgptConversationId)).toEqual([first, 'new-chat']));
   expect(presenter.snapshot().conversation).toBeNull();
   expect(strip().hidden).toBe(false);
   expect(tabs()[0]!.textContent).toBe('Synthetic Paper A');
   expect(tabs()[1]!.textContent).toBe('New chat');
   expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true']);
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('');
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toBe('');
   // One click brings the first chat back, with its own draft: nothing was replaced or lost. The
   // strip keeps the chip node it already had, so the click target is still the one that was pressed.
   tabs()[0]!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first));
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('第一问');
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toBe('第一问');
   expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']);
-  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('Synthetic Paper A');
+  expect(root.querySelector('[data-zchatgpt-current-title]')!.textContent).toBe('Synthetic Paper A');
   // The New chat tab stayed in the strip; clicking it returns the unbound draft.
   tabs()[1]!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation).toBeNull());
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('');
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toBe('');
   expect(tabs().map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'true']);
 });
 
@@ -1437,8 +1437,8 @@ it('reaches every open chat from the arrow keys and keeps one chip in the tab or
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const first = presenter.snapshot().conversation!.id;
   await presenter.newConversation();
-  const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  const tabs = () => [...strip.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
+  const strip = root.querySelector<HTMLElement>('[data-zchatgpt-panes]')!;
+  const tabs = () => [...strip.querySelectorAll<HTMLElement>('[data-zchatgpt-pane-tab]')];
   // Roving tabindex: only the chat on screen is a stop for Tab; the arrows reach the others.
   expect(tabs().map(tab => tab.tabIndex)).toEqual(tabs().map(tab => (tab.getAttribute('aria-selected') === 'true' ? 0 : -1)));
   expect(tabs()[0]!.tabIndex).toBe(-1);
@@ -1450,7 +1450,7 @@ it('reaches every open chat from the arrow keys and keeps one chip in the tab or
   expect(root.ownerDocument.activeElement).toBe(tabs()[1]);
   // Moving the focus is not a switch: the chat on screen only changes when a chip is activated.
   expect(presenter.snapshot().conversation?.id).not.toBe(first);
-  expect(root.querySelector('[data-zcr-current-title]')!.textContent).toBe('New chat');
+  expect(root.querySelector('[data-zchatgpt-current-title]')!.textContent).toBe('New chat');
 });
 
 it('drops the chip of a closed chat and keeps the remaining tab on screen', async () => {
@@ -1458,17 +1458,17 @@ it('drops the chip of a closed chat and keeps the remaining tab on screen', asyn
   const first = presenter.snapshot().conversation!.id;
   presenter.setQuestion('第一问');
   await presenter.newConversation();
-  const strip = root.querySelector<HTMLElement>('[data-zcr-panes]')!;
-  const tabs = () => [...strip.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
+  const strip = root.querySelector<HTMLElement>('[data-zchatgpt-panes]')!;
+  const tabs = () => [...strip.querySelectorAll<HTMLElement>('[data-zchatgpt-pane-tab]')];
   expect(tabs()).toHaveLength(2);
   // Closing the New chat tab from the selected-tab cross leaves the other open chat on screen.
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first));
-  expect(tabs().map(tab => tab.dataset.zcrConversationId)).toEqual([first]);
+  expect(tabs().map(tab => tab.dataset.zchatgptConversationId)).toEqual([first]);
   expect(strip.hidden).toBe(false);
   // Closed, not deleted: the first chat is still listed for this attachment.
-  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(tabs()[0]!.dataset.zcrConversationId);
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('第一问');
+  expect(presenter.snapshot().conversations.map(entry => entry.id)).toContain(tabs()[0]!.dataset.zchatgptConversationId);
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toBe('第一问');
 });
 
 /**
@@ -1478,25 +1478,25 @@ it('never lays out a second transcript beside the chat being edited', async () =
   const { root, presenter, firstId, otherId, activeMessages } = await mountTwoOpenChats();
   expect(presenter.snapshot().conversation?.id).toBe(otherId);
   expect(presenter.snapshot().openConversations.map(chat => chat.id)).toEqual([firstId, otherId]);
-  expect(root.querySelector('[data-zcr-pane-preview]')).toBeNull();
-  expect(root.querySelectorAll('[data-zcr-messages]')).toHaveLength(1);
-  expect(root.querySelectorAll('[data-zcr-composer]')).toHaveLength(1);
-  const tabs = [...root.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
-  expect(tabs.map(tab => tab.dataset.zcrConversationId)).toEqual([firstId, otherId]);
-  expect(root.querySelector<HTMLElement>('[data-zcr-panes]')!.hidden).toBe(false);
+  expect(root.querySelector('[data-zchatgpt-pane-preview]')).toBeNull();
+  expect(root.querySelectorAll('[data-zchatgpt-messages]')).toHaveLength(1);
+  expect(root.querySelectorAll('[data-zchatgpt-composer]')).toHaveLength(1);
+  const tabs = [...root.querySelectorAll<HTMLElement>('[data-zchatgpt-pane-tab]')];
+  expect(tabs.map(tab => tab.dataset.zchatgptConversationId)).toEqual([firstId, otherId]);
+  expect(root.querySelector<HTMLElement>('[data-zchatgpt-panes]')!.hidden).toBe(false);
   expect(activeMessages.textContent).toContain('第二个回答');
   expect(activeMessages.textContent).not.toContain('Definition');
   tabs[0]!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(firstId));
-  expect(root.querySelectorAll('[data-zcr-composer]')).toHaveLength(1);
-  expect(root.querySelector('[data-zcr-messages]')!.textContent).toContain('Definition');
-  expect(root.querySelector('[data-zcr-messages]')!.textContent).not.toContain('第二个回答');
+  expect(root.querySelectorAll('[data-zchatgpt-composer]')).toHaveLength(1);
+  expect(root.querySelector('[data-zchatgpt-messages]')!.textContent).toContain('Definition');
+  expect(root.querySelector('[data-zchatgpt-messages]')!.textContent).not.toContain('第二个回答');
 });
 
 it('never moves focus out of the composer while the owner is typing, even when the other chat answers', async () => {
   const { root, presenter, firstId, emit, activeMessages } = await mountTwoOpenChats();
   const win = root.ownerDocument.defaultView!;
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   input.focus();
   input.value = '正在输入';
   input.dispatchEvent(new win.Event('input', { bubbles: true }));
@@ -1518,22 +1518,22 @@ it('never moves focus out of the composer while the owner is typing, even when t
 it('keeps the closed chat’s draft and starts a fresh chat from the empty state on the next send', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const closed = presenter.snapshot().conversation!.id;
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const type = (value: string) => { input.value = value; input.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true })); };
   type('Draft kept for the closed chat');
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
   // The empty state still carries a working composer.
   expect(input.disabled).toBe(false);
-  expect(root.querySelector('[data-zcr-action="send"]')).not.toBeNull();
+  expect(root.querySelector('[data-zchatgpt-action="send"]')).not.toBeNull();
   type('Fresh question');
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="send"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="send"]')!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).not.toBe(closed));
   // The closed chat keeps its own draft and is still restorable from history.
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${closed}"]`)!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button[data-zchatgpt-conversation-id="${closed}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(closed));
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.value).toBe('Draft kept for the closed chat');
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toBe('Draft kept for the closed chat');
 });
 
 /**
@@ -1544,9 +1544,9 @@ it('keeps the closed chat’s draft and starts a fresh chat from the empty state
  */
 it('keeps the New chat control available in the empty state after closing the current chat', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
-  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="new-conversation"]')!;
   expect(fresh.hidden).toBe(false);
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
   // Observable DOM state, not a stylesheet claim: the control is present and interactive, and it
   // still starts a chat from the empty state.
@@ -1556,14 +1556,14 @@ it('keeps the New chat control available in the empty state after closing the cu
   // Already on the New chat tab: pressing + again is a no-op, and the unbound tab stays selected.
   fresh.click();
   expect(presenter.snapshot().conversation).toBeNull();
-  expect(root.querySelector('[data-zcr-pane-tab][data-zcr-conversation-id="new-chat"][aria-selected="true"]')).not.toBeNull();
+  expect(root.querySelector('[data-zchatgpt-pane-tab][data-zchatgpt-conversation-id="new-chat"][aria-selected="true"]')).not.toBeNull();
 });
 
 it('collapses the dock when closing the last chat for the attachment', async () => {
   const closeDock = vi.fn();
   const { root, presenter } = await mountReadyChat({ messages: [], closeDock });
-  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="new-conversation"]')!;
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
   // Nothing is left to list for this attachment, so the reader's own close path runs exactly once.
   expect(closeDock).toHaveBeenCalledTimes(1);
@@ -1584,10 +1584,10 @@ it('does not collapse the dock while other chats for the attachment remain', asy
   };
   const closeDock = vi.fn();
   const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, second], closeDock });
-  const fresh = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-conversation"]')!;
-  const closeCurrent = () => root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
+  const fresh = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="new-conversation"]')!;
+  const closeCurrent = () => root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button[data-zchatgpt-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
   closeCurrent();
   // Closing a chat that is not the last open one leaves the reader on the other open chat.
@@ -1597,8 +1597,8 @@ it('does not collapse the dock while other chats for the attachment remain', asy
   expect(fresh.hidden).toBe(false);
   // Closing the first chat now is closing the last open pane: the reader returns to its empty state,
   // and the dock still must not collapse because the chat closed above is a history entry here.
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${first.id}"]`)!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button[data-zchatgpt-conversation-id="${first.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(first.id));
   closeCurrent();
   expect(presenter.snapshot().conversation).toBeNull();
@@ -1619,7 +1619,7 @@ it('keeps the dock open for a legacy archived record now that it is an ordinary 
   };
   const closeDock = vi.fn();
   const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, archived], closeDock });
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="close-conversation"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="close-conversation"]')!.click();
   expect(presenter.snapshot().conversation).toBeNull();
   // The record carries archivedAt but the sidebar has no archive surface: it is an ordinary chat the
   // owner can still open, so it is a reason to keep the dock open.
@@ -1633,11 +1633,11 @@ it('hides the More details prompt in the transcript while keeping the citation',
       text: 'tell me more about this', citations: [citationA], status: 'completed', action: 'explain',
     }],
   });
-  const user = root.querySelector('[data-zcr-message][data-role="user"]');
+  const user = root.querySelector('[data-zchatgpt-message][data-role="user"]');
   expect(user?.textContent).not.toContain('tell me more about this');
   expect(user?.textContent).not.toMatch(/请用中文解释/u);
-  expect(root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')?.value).not.toContain('tell me more about this');
-  expect(root.querySelector('[data-zcr-action="open-citation"]')).toBeTruthy();
+  expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')?.value).not.toContain('tell me more about this');
+  expect(root.querySelector('[data-zchatgpt-action="open-citation"]')).toBeTruthy();
 });
 
 it('lists history in a grouped panel by paper title and disambiguates a second chat', async () => {
@@ -1677,17 +1677,17 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
   const body = doc.createElement('div');
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId }, () => undefined);
   mountChatView(root, presenter);
-  const panel = root.querySelector('[data-zcr-history]');
+  const panel = root.querySelector('[data-zchatgpt-history]');
   expect(panel?.querySelector('select')).toBeNull();
-  expect(panel?.querySelector('[data-zcr-history-search]')).toBeTruthy();
+  expect(panel?.querySelector('[data-zchatgpt-history-search]')).toBeTruthy();
   expect(panel?.textContent).toMatch(/Today/u);
-  const labels = [...root.querySelectorAll('[data-zcr-history] [data-zcr-conversation-id]')].map(node => node.textContent?.trim());
+  const labels = [...root.querySelectorAll('[data-zchatgpt-history] [data-zchatgpt-conversation-id]')].map(node => node.textContent?.trim());
   expect(labels.join('\n')).not.toMatch(/Untitled|What does this mean/u);
   expect(labels.some(label => label?.includes('Synthetic Paper A'))).toBe(true);
   expect(labels.filter(label => label?.includes('Synthetic Paper A')).length).toBe(2);
   expect(labels.some(label => /Synthetic Paper A · 2|Synthetic Paper A · 09:00/u.test(label ?? ''))).toBe(true);
-  expect(root.querySelector('[data-zcr-history] [data-zcr-action="delete-conversation"]')).toBeTruthy();
-  expect(root.querySelector('[data-zcr-action="pin-conversation"]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]')).toBeTruthy();
+  expect(root.querySelector('[data-zchatgpt-action="pin-conversation"]')).toBeNull();
   } finally { now.mockRestore(); }
 });
 
@@ -1754,25 +1754,25 @@ it('groups workspace history entries single-line and keeps the PDF title and pre
     ];
     const { root } = await mountReadyChat({ workspace: historyWorkspace(history) });
     // This is the real runtime path: it must share the conversation path's buckets and row shape.
-    expect([...root.querySelectorAll<HTMLElement>('[data-zcr-history-group]')].map(node => node.dataset.zcrHistoryGroup))
+    expect([...root.querySelectorAll<HTMLElement>('[data-zchatgpt-history-group]')].map(node => node.dataset.zchatgptHistoryGroup))
       .toEqual(['Today', 'Yesterday', 'Previous 7 days', 'Older']);
-    const items = [...root.querySelectorAll<HTMLButtonElement>('[data-zcr-history] button.zcr-history-item')];
+    const items = [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-history] button.zchatgpt-history-item')];
     expect(items).toHaveLength(history.length);
-    expect(items.every(item => item.querySelectorAll('.zcr-history-title').length === 1 && !item.querySelector('.zcr-history-preview'))).toBe(true);
-    expect(root.querySelector('[data-zcr-history-status="draft"]')).not.toBeNull();
-    expect(root.querySelector('[data-zcr-history-status="active"]')).not.toBeNull();
-    expect(root.querySelector('[data-zcr-history-status="done"]')).not.toBeNull();
-    const done = items.find(item => item.querySelector('[data-zcr-history-status="done"]'))!;
+    expect(items.every(item => item.querySelectorAll('.zchatgpt-history-title').length === 1 && !item.querySelector('.zchatgpt-history-preview'))).toBe(true);
+    expect(root.querySelector('[data-zchatgpt-history-status="draft"]')).not.toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history-status="active"]')).not.toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history-status="done"]')).not.toBeNull();
+    const done = items.find(item => item.querySelector('[data-zchatgpt-history-status="done"]'))!;
     expect(done.getAttribute('aria-label')).toContain('Workspace Paper Title');
     expect(done.getAttribute('aria-label')).toContain('Workspace preview text');
     // The workspace port reaches the same delete path: every row carries a labelled cross, and no
     // archive mutation surface is invented.
-    const drops = [...root.querySelectorAll<HTMLButtonElement>('[data-zcr-history] [data-zcr-action="delete-conversation"]')];
+    const drops = [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]')];
     expect(drops).toHaveLength(history.length);
     expect(drops.every(node => /Delete chat/u.test(node.getAttribute('aria-label') ?? '') && node.textContent?.trim() === '')).toBe(true);
-    expect(root.querySelector('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toBeNull();
-    expect(root.querySelector('[data-zcr-history] [data-zcr-action="restore-conversation"]')).toBeNull();
-    expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="archive-conversation"]')).toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="restore-conversation"]')).toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-archived]')).toBeNull();
   } finally { clock.mockRestore(); }
 });
 
@@ -1797,14 +1797,14 @@ it('deletes a workspace history row directly without a prompt and keeps the open
     return Promise.resolve(conversationFor(removed!));
   });
   const { root } = await mountReadyChat({ workspace, deleteConversation: remove });
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-  const list = panel.querySelector<HTMLElement>('.zcr-history-list')!;
-  const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+  const list = panel.querySelector<HTMLElement>('.zchatgpt-history-list')!;
+  const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zchatgpt-history-list button.zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.dataset.zchatgptConversationId!);
   expect(listIds().sort()).toEqual([entries[0]!.id, entries[1]!.id].sort());
   // The owner is scrolled down and has a row's cross focused when they delete it.
   list.scrollTop = 48;
-  const drop = panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${entries[0]!.id}"]`)!;
+  const drop = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="delete-conversation"][data-zchatgpt-conversation-id="${entries[0]!.id}"]`)!;
   expect(drop).not.toBeNull();
   drop.focus();
   drop.click();
@@ -1854,16 +1854,16 @@ it('renders every conversation exactly once across the four buckets and never in
     ));
     const { root, presenter } = await mountReadyChat({ conversations });
     const expected = presenter.snapshot().conversations.map(entry => entry.id).sort();
-    const rendered = [...root.querySelectorAll<HTMLButtonElement>('[data-zcr-history] button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+    const rendered = [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-history] button.zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.dataset.zchatgptConversationId!);
     expect(rendered.sort()).toEqual(expected);
     expect(new Set(rendered).size).toBe(rendered.length);
-    const grouped = [...root.querySelectorAll<HTMLElement>('[data-zcr-history-group]')].map(node => node.dataset.zcrHistoryGroup);
+    const grouped = [...root.querySelectorAll<HTMLElement>('[data-zchatgpt-history-group]')].map(node => node.dataset.zchatgptHistoryGroup);
     expect(grouped).toEqual(['Today', 'Yesterday', 'Previous 7 days', 'Older']);
     // There is no archive concept in the sidebar any more: no section node is invented, no archive
     // action exists, and the word never appears.
-    expect(root.querySelector('[data-zcr-history] [data-zcr-archived]')).toBeNull();
-    expect(root.querySelector('[data-zcr-history] [data-zcr-action="archive-conversation"]')).toBeNull();
-    expect(root.querySelector('[data-zcr-history]')?.textContent).not.toMatch(/Archived|归档/u);
+    expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-archived]')).toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="archive-conversation"]')).toBeNull();
+    expect(root.querySelector('[data-zchatgpt-history]')?.textContent).not.toMatch(/Archived|归档/u);
   } finally { clock.mockRestore(); }
 });
 
@@ -1877,10 +1877,10 @@ it('renders single-line history rows with a per-status glyph and keeps the dropp
     const draft = agedConversation('2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', 'Draft chat', '2026-09-10T09:05:00.000Z', { messages: [] });
     const active = agedConversation('aaaaaaaa-0000-4000-8000-000000000013', 'Active chat', '2026-09-10T09:10:00.000Z', { activeRequestId: 'live-request' });
     const { root } = await mountReadyChat({ messages: [], conversations: [draft, done, active] });
-    const item = root.querySelector<HTMLButtonElement>(`[data-zcr-history] button.zcr-history-item[data-zcr-conversation-id="${done.id}"]`)!;
+    const item = root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button.zchatgpt-history-item[data-zchatgpt-conversation-id="${done.id}"]`)!;
     // One line: the title only, no preview line or other inline block.
-    expect(item.querySelectorAll('.zcr-history-title')).toHaveLength(1);
-    expect(item.querySelector('.zcr-history-preview')).toBeNull();
+    expect(item.querySelectorAll('.zchatgpt-history-title')).toHaveLength(1);
+    expect(item.querySelector('.zchatgpt-history-preview')).toBeNull();
     expect(item.querySelectorAll('small, br')).toHaveLength(0);
     expect(item.textContent?.trim()).toBe('Finished chat');
     // The PDF title and preview survive for assistive tech and hover instead of being deleted.
@@ -1888,14 +1888,14 @@ it('renders single-line history rows with a per-status glyph and keeps the dropp
     expect(item.getAttribute('aria-label')).toContain('A preview body that used to sit on a second line.');
     expect(item.title).toBe(item.getAttribute('aria-label'));
     // A calm, distinct glyph per status; the active mark carries no animation.
-    const status = (id: string) => root.querySelector<HTMLElement>(`[data-zcr-history] button.zcr-history-item[data-zcr-conversation-id="${id}"] .zcr-history-status`)!;
-    expect(status(done.id).dataset.zcrHistoryStatus).toBe('done');
-    expect(status(draft.id).dataset.zcrHistoryStatus).toBe('draft');
-    expect(status(active.id).dataset.zcrHistoryStatus).toBe('active');
+    const status = (id: string) => root.querySelector<HTMLElement>(`[data-zchatgpt-history] button.zchatgpt-history-item[data-zchatgpt-conversation-id="${id}"] .zchatgpt-history-status`)!;
+    expect(status(done.id).dataset.zchatgptHistoryStatus).toBe('done');
+    expect(status(draft.id).dataset.zchatgptHistoryStatus).toBe('draft');
+    expect(status(active.id).dataset.zchatgptHistoryStatus).toBe('active');
     const glyphs = [status(done.id), status(draft.id), status(active.id)].map(node => node.querySelector('svg path')?.getAttribute('d') ?? '');
     expect(glyphs.every(glyph => glyph.length > 0)).toBe(true);
     expect(new Set(glyphs).size).toBe(3);
-    expect(status(active.id).getAttribute('data-zcr-animated')).toBeNull();
+    expect(status(active.id).getAttribute('data-zchatgpt-animated')).toBeNull();
   } finally { clock.mockRestore(); }
 });
 
@@ -1905,21 +1905,21 @@ it('lists a workspace record carrying archivedAt as an ordinary chat in the one 
     const active = [historyEntry(1), historyEntry(2)];
     const archived = historyEntry(3, { archivedAt: '2026-09-10T09:00:00.000Z' });
     const { root } = await mountReadyChat({ workspace: historyWorkspace([...active, archived]) });
-    const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-    const ids = [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+    const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+    const ids = [...panel.querySelectorAll<HTMLButtonElement>('.zchatgpt-history-list button.zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.dataset.zchatgptConversationId!);
     // One ordinary listing: the record with archivedAt appears exactly once, beside the others.
     expect(ids.sort()).toEqual([...active, archived].map(entry => entry.id).sort());
     expect(ids.filter(id => id === archived.id)).toHaveLength(1);
     // It keeps the live row shape and the status glyph.
-    const item = panel.querySelector<HTMLElement>(`.zcr-history-list button.zcr-history-item[data-zcr-conversation-id="${archived.id}"]`)!;
-    const row = item.closest<HTMLElement>('.zcr-history-row')!;
-    expect(row.querySelectorAll('.zcr-history-title')).toHaveLength(1);
-    expect(row.querySelector('.zcr-history-status')?.getAttribute('data-zcr-history-status')).toBe('done');
+    const item = panel.querySelector<HTMLElement>(`.zchatgpt-history-list button.zchatgpt-history-item[data-zchatgpt-conversation-id="${archived.id}"]`)!;
+    const row = item.closest<HTMLElement>('.zchatgpt-history-row')!;
+    expect(row.querySelectorAll('.zchatgpt-history-title')).toHaveLength(1);
+    expect(row.querySelector('.zchatgpt-history-status')?.getAttribute('data-zchatgpt-history-status')).toBe('done');
     // No archive surface survives: no section, no toggle, no per-row action, not even the word.
-    expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
-    expect(panel.querySelector('[data-zcr-action="toggle-archived"]')).toBeNull();
-    expect(panel.querySelector('[data-zcr-action="archive-conversation"]')).toBeNull();
-    expect(panel.querySelector('[data-zcr-action="restore-conversation"]')).toBeNull();
+    expect(panel.querySelector('[data-zchatgpt-archived]')).toBeNull();
+    expect(panel.querySelector('[data-zchatgpt-action="toggle-archived"]')).toBeNull();
+    expect(panel.querySelector('[data-zchatgpt-action="archive-conversation"]')).toBeNull();
+    expect(panel.querySelector('[data-zchatgpt-action="restore-conversation"]')).toBeNull();
     expect(panel.textContent).not.toMatch(/Archived|归档/u);
   } finally { clock.mockRestore(); }
 });
@@ -1928,18 +1928,18 @@ it('shows a host-list record carrying archivedAt as an ordinary row and deletes 
   const first = agedConversation('aaaaaaaa-0000-4000-8000-000000000031', 'First chat', '2026-09-10T09:00:00.000Z');
   const second = agedConversation('aaaaaaaa-0000-4000-8000-000000000032', 'Second chat', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
   const { root } = await mountReadyChat({ conversations: [first, second] });
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-  const rowIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+  const rowIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zchatgpt-history-list button.zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.dataset.zchatgptConversationId!);
   // Both chats render in one list; the archivedAt record is not hidden, restyled or relocated.
   expect(rowIds()).toContain(first.id);
   expect(rowIds().filter(id => id === second.id)).toHaveLength(1);
-  expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
-  expect(panel.querySelector('[data-zcr-action="archive-conversation"]')).toBeNull();
-  expect(panel.querySelector('[data-zcr-action="restore-conversation"]')).toBeNull();
+  expect(panel.querySelector('[data-zchatgpt-archived]')).toBeNull();
+  expect(panel.querySelector('[data-zchatgpt-action="archive-conversation"]')).toBeNull();
+  expect(panel.querySelector('[data-zchatgpt-action="restore-conversation"]')).toBeNull();
   // Delete is the only removal path and it happens on the click itself: no prompt stands between
   // the owner and a row they asked to remove.
-  const drop = panel.querySelector<HTMLButtonElement>(`[data-zcr-action="delete-conversation"][data-zcr-conversation-id="${second.id}"]`)!;
+  const drop = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="delete-conversation"][data-zchatgpt-conversation-id="${second.id}"]`)!;
   expect(drop).not.toBeNull();
   expect(drop.textContent?.trim()).toBe('');
   expect(drop.getAttribute('aria-label')).toMatch(/Delete chat/u);
@@ -1957,16 +1957,16 @@ it('finds a chat that only the archived store scope holds, in the one listing', 
   const active = historyEntry(4, { title: 'Alpha notes' });
   const archived = historyEntry(5, { title: 'Beta notes', archivedAt: '2026-09-10T09:00:00.000Z' });
   const { root } = await mountReadyChat({ workspace: historyWorkspace([active, archived]) });
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-  const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
-  const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zcr-history-list button.zcr-history-item[data-zcr-conversation-id]')].map(node => node.dataset.zcrConversationId!);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+  const search = panel.querySelector<HTMLInputElement>('[data-zchatgpt-history-search]')!;
+  const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zchatgpt-history-list button.zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.dataset.zchatgptConversationId!);
   expect(listIds().sort()).toEqual([active.id, archived.id].sort());
   search.value = 'Beta';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
   // The only match lives in the archived store scope; losing it would be silent data loss.
   await vi.waitFor(() => expect(listIds()).toEqual([archived.id]));
-  expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
+  expect(panel.querySelector('[data-zchatgpt-archived]')).toBeNull();
   search.value = '';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
   await vi.waitFor(() => expect(listIds().sort()).toEqual([active.id, archived.id].sort()));
@@ -1976,16 +1976,16 @@ it('filters a fallback record carrying archivedAt in the same single listing', a
   const alpha = agedConversation('aaaaaaaa-0000-4000-8000-000000000041', 'Alpha notes', '2026-09-10T09:00:00.000Z');
   const beta = agedConversation('aaaaaaaa-0000-4000-8000-000000000042', 'Beta notes', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
   const { root } = await mountReadyChat({ conversations: [alpha, beta] });
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-  const search = panel.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
-  const visible = () => [...panel.querySelectorAll<HTMLElement>('.zcr-history-list .zcr-history-row')].filter(row => !row.hidden).map(row => row.querySelector<HTMLElement>('button.zcr-history-item')!.dataset.zcrConversationId);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+  const search = panel.querySelector<HTMLInputElement>('[data-zchatgpt-history-search]')!;
+  const visible = () => [...panel.querySelectorAll<HTMLElement>('.zchatgpt-history-list .zchatgpt-history-row')].filter(row => !row.hidden).map(row => row.querySelector<HTMLElement>('button.zchatgpt-history-item')!.dataset.zchatgptConversationId);
   expect(visible()).toContain(alpha.id);
   expect(visible()).toContain(beta.id);
   search.value = 'Beta';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
   expect(visible()).toEqual([beta.id]);
-  expect(panel.querySelector('[data-zcr-archived]')).toBeNull();
+  expect(panel.querySelector('[data-zchatgpt-archived]')).toBeNull();
   search.value = '';
   search.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
   expect(visible()).toContain(alpha.id);
@@ -1996,13 +1996,13 @@ it('keeps history search filtering and keyboard navigation working in the single
   const alpha = agedConversation('aaaaaaaa-0000-4000-8000-000000000021', 'Alpha notes', '2026-09-10T09:00:00.000Z');
   const beta = agedConversation('aaaaaaaa-0000-4000-8000-000000000022', 'Beta notes', '2026-09-10T09:01:00.000Z');
   const { root } = await mountReadyChat({ conversations: [alpha, beta] });
-  const trigger = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!;
-  const panel = root.querySelector<HTMLElement>('[data-zcr-history]')!;
-  const search = root.querySelector<HTMLInputElement>('[data-zcr-history-search]')!;
+  const trigger = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!;
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+  const search = root.querySelector<HTMLInputElement>('[data-zchatgpt-history-search]')!;
   trigger.click();
   expect(panel.hidden).toBe(false);
   const view = root.ownerDocument.defaultView!;
-  const rows = () => [...root.querySelectorAll<HTMLButtonElement>('[data-zcr-history] button.zcr-history-item')];
+  const rows = () => [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-history] button.zchatgpt-history-item')];
   search.focus();
   expect(root.ownerDocument.activeElement).toBe(search);
   // Home/End continue editing the search text instead of jumping the row cursor.
@@ -2019,7 +2019,7 @@ it('keeps history search filtering and keyboard navigation working in the single
   trigger.click();
   search.value = 'Beta';
   search.dispatchEvent(new view.Event('input', { bubbles: true }));
-  const rowOf = (title: string) => rows().find(row => row.textContent?.trim() === title)!.closest('.zcr-history-row');
+  const rowOf = (title: string) => rows().find(row => row.textContent?.trim() === title)!.closest('.zchatgpt-history-row');
   expect(rowOf('Alpha notes')?.hasAttribute('hidden')).toBe(true);
   expect(rowOf('Beta notes')?.hasAttribute('hidden')).toBe(false);
   search.value = '';
@@ -2029,8 +2029,8 @@ it('keeps history search filtering and keyboard navigation working in the single
 
 it('renames the open chat from its own title chip and closes the form on success', async () => {
   const { root, presenter } = await mountReadyChat();
-  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!;
-  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  const rename = root.querySelector<HTMLButtonElement>('[data-zchatgpt-current-title]')!;
+  const form = root.querySelector<HTMLElement>('.zchatgpt-rename-form')!;
   expect(form.hidden).toBe(true);
   expect(rename.getAttribute('aria-expanded')).toBe('false');
   rename.click();
@@ -2041,7 +2041,7 @@ it('renames the open chat from its own title chip and closes the form on success
   expect(input.value).toBe('Synthetic Paper A');
   expect(root.ownerDocument.activeElement).toBe(input);
   input.value = '  先验讨论  ';
-  form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  form.querySelector<HTMLButtonElement>('[data-zchatgpt-action="save-conversation-name"]')!.click();
   await vi.waitFor(() => expect(form.hidden).toBe(true));
   expect(presenter.snapshot().conversation?.title).toBe('先验讨论');
   // Focus returns to the control that opened the popover instead of dropping to the document.
@@ -2050,8 +2050,8 @@ it('renames the open chat from its own title chip and closes the form on success
 
 it('closes the rename popover on Escape and on an outside click without renaming', async () => {
   const { root, presenter } = await mountReadyChat();
-  const rename = root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!;
-  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
+  const rename = root.querySelector<HTMLButtonElement>('[data-zchatgpt-current-title]')!;
+  const form = root.querySelector<HTMLElement>('.zchatgpt-rename-form')!;
   rename.click();
   const input = form.querySelector<HTMLInputElement>('input')!;
   input.value = 'Discarded';
@@ -2062,17 +2062,17 @@ it('closes the rename popover on Escape and on an outside click without renaming
   // An outside click closes it too; the draft textarea is outside the popover.
   rename.click();
   expect(form.hidden).toBe(false);
-  root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.click();
+  root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.click();
   expect(form.hidden).toBe(true);
   expect(presenter.snapshot().conversation?.title).toBe('Synthetic Paper A');
 });
 
 it('reports a failed rename in the view error slot and keeps the form open', async () => {
   const { root } = await mountReadyChat({ rename: () => Promise.reject(new Error('/Users/somebody/private/state.json missing')) });
-  root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!.click();
-  const form = root.querySelector<HTMLElement>('.zcr-rename-form')!;
-  form.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
-  const slot = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-current-title]')!.click();
+  const form = root.querySelector<HTMLElement>('.zchatgpt-rename-form')!;
+  form.querySelector<HTMLButtonElement>('[data-zchatgpt-action="save-conversation-name"]')!.click();
+  const slot = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
   await vi.waitFor(() => expect(slot.hidden).toBe(false));
   expect(slot.textContent).not.toContain('/Users/somebody');
   expect(form.hidden).toBe(false);
@@ -2081,11 +2081,11 @@ it('reports a failed rename in the view error slot and keeps the form open', asy
 
 it('keeps the composer free of voice input and third-party chat branding', async () => {
   const { root } = await mountReadyChat();
-  const composer = root.querySelector<HTMLElement>('[data-zcr-composer]')!;
+  const composer = root.querySelector<HTMLElement>('[data-zchatgpt-composer]')!;
   const controls = [...composer.querySelectorAll('button')]
     .map(node => `${node.getAttribute('aria-label') ?? ''} ${node.getAttribute('title') ?? ''} ${node.textContent ?? ''}`).join('\n');
   expect(controls).not.toMatch(/voice|microphone|dictate|\bmic\b|ChatGPT/iu);
-  expect(composer.querySelector('[data-zcr-input]')?.getAttribute('placeholder')).toBe('Ask a question…');
+  expect(composer.querySelector('[data-zchatgpt-input]')?.getAttribute('placeholder')).toBe('Ask a question…');
 });
 
 
@@ -2094,7 +2094,7 @@ it('keeps the transcript pinned when an answer image finishes loading', async ()
   const { root } = await mountReadyChat({ messages: [
     { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
   ] });
-  const transcript = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  const transcript = root.querySelector<HTMLElement>('[data-zchatgpt-messages]')!;
   Object.defineProperty(transcript, 'scrollHeight', { get: () => 1000, configurable: true });
   Object.defineProperty(transcript, 'clientHeight', { get: () => 200, configurable: true });
   transcript.scrollTop = 900;
@@ -2108,7 +2108,7 @@ it('leaves the transcript alone when an image loads while the reader is scrolled
   const { root, presenter } = await mountReadyChat({ messages: [
     { id: 'image-output', requestId: 'r1', role: 'assistant', phase: 'final', settings, text: 'A generated explanation', citations: [], status: 'completed', generatedImages: [generated] },
   ] });
-  const transcript = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
+  const transcript = root.querySelector<HTMLElement>('[data-zchatgpt-messages]')!;
   Object.defineProperty(transcript, 'scrollHeight', { get: () => 1000, configurable: true });
   Object.defineProperty(transcript, 'clientHeight', { get: () => 200, configurable: true });
   transcript.scrollTop = 100;
@@ -2119,19 +2119,19 @@ it('leaves the transcript alone when an image loads while the reader is scrolled
 
 it('shows pending image thumbnails in the composer and can remove them', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [], draftImages: [imageA] });
-  const thumb = root.querySelector('[data-zcr-draft-image]');
+  const thumb = root.querySelector('[data-zchatgpt-draft-image]');
   expect(thumb?.querySelector('img')?.getAttribute('src')).toBe(imageA.dataUrl);
-  expect(root.querySelector('[data-zcr-action="remove-image"]')?.getAttribute('aria-label')).toMatch(/Remove/u);
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="remove-image"]')?.click();
+  expect(root.querySelector('[data-zchatgpt-action="remove-image"]')?.getAttribute('aria-label')).toMatch(/Remove/u);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="remove-image"]')?.click();
   expect(presenter.snapshot().draft.images).toHaveLength(0);
-  expect(root.querySelector('[data-zcr-draft-image]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-draft-image]')).toBeNull();
 });
 
 it('pastes a clipboard screenshot into the composer and includes it on send', async () => {
   const sent: SendInput[] = [];
   const { root, presenter } = await mountReadyChat({ messages: [], sent });
   const png = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
-  const composer = root.querySelector('[data-zcr-composer]')!;
+  const composer = root.querySelector('[data-zchatgpt-composer]')!;
   const view = root.ownerDocument.defaultView!;
   const file = new view.File([png], 'screenshot.png', { type: 'image/png' });
   const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
@@ -2151,7 +2151,7 @@ it('pastes a clipboard screenshot into the composer and includes it on send', as
     mime: 'image/png',
     dataUrl: TINY_PNG_DATA_URL,
   }]);
-  expect(root.querySelector('[data-zcr-draft-image] img')?.getAttribute('src')).toBe(TINY_PNG_DATA_URL);
+  expect(root.querySelector('[data-zchatgpt-draft-image] img')?.getAttribute('src')).toBe(TINY_PNG_DATA_URL);
   presenter.setQuestion('图里的符号是什么？');
   await presenter.send();
   expect(sent).toHaveLength(1);
@@ -2202,7 +2202,7 @@ it('pastes a screenshot from the reader chrome document only while the composer 
   Object.defineProperty(event, 'clipboardData', {
     value: { items: [], files: [], types: [] },
   });
-  root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!.focus();
+  root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.focus();
   root.ownerDocument.dispatchEvent(event);
   await vi.waitFor(() => {
     expect(presenter.snapshot().draft.images).toHaveLength(1);
@@ -2213,13 +2213,13 @@ it('pastes a screenshot from the reader chrome document only while the composer 
     mime: 'image/png',
     dataUrl: TINY_PNG_DATA_URL,
   });
-  expect(root.querySelector('[data-zcr-draft-image] img')?.getAttribute('src')).toBe(TINY_PNG_DATA_URL);
+  expect(root.querySelector('[data-zchatgpt-draft-image] img')?.getAttribute('src')).toBe(TINY_PNG_DATA_URL);
 });
 
 it('does not send on Enter while IME composition is active', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const send = vi.spyOn(presenter, 'send');
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   input.dispatchEvent(new view.Event('compositionstart', { bubbles: true }));
   input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
@@ -2228,21 +2228,21 @@ it('does not send on Enter while IME composition is active', async () => {
 
 it('surfaces the presenter’s own sentence for a coded view failure and keeps the constant otherwise', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
-  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
+  const viewError = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
+  const plus = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!;
   plus.click();
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="pick-file"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="pick-file"]')!.click();
   await vi.waitFor(() => expect(viewError.textContent).toBe('Attaching a file is unavailable.'));
   expect(viewError.hidden).toBe(false);
 });
 
 it('shows the constant sentence when a failed view action has no coded message', async () => {
   const { root } = await mountReadyChat({ messages: [], rename: () => Promise.reject(new Error('raw host detail')) });
-  const viewError = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
-  root.querySelector<HTMLButtonElement>('[data-zcr-current-title]')!.click();
-  const name = root.querySelector<HTMLInputElement>('.zcr-rename-form input')!;
+  const viewError = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-current-title]')!.click();
+  const name = root.querySelector<HTMLInputElement>('.zchatgpt-rename-form input')!;
   name.value = 'Renamed';
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="save-conversation-name"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="save-conversation-name"]')!.click();
   await vi.waitFor(() => expect(viewError.hidden).toBe(false));
   expect(viewError.textContent).toBe('This action could not be completed.');
 });
@@ -2250,7 +2250,7 @@ it('shows the constant sentence when a failed view action has no coded message',
 it('attaches a Cmd+V screenshot from the plugin clipboard when the reader paste carries no image', async () => {
   const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   input.focus();
   // A reader can deliver Cmd+V to its own chrome: no DOM paste data reaches this realm at all.
@@ -2261,13 +2261,13 @@ it('attaches a Cmd+V screenshot from the plugin clipboard when the reader paste 
   expect(event.defaultPrevented).toBe(true);
   await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
   expect(reads).toHaveBeenCalledTimes(1);
-  expect(root.querySelector('[data-zcr-draft-image] img')?.getAttribute('src')).toBe(imageA.dataUrl);
+  expect(root.querySelector('[data-zchatgpt-draft-image] img')?.getAttribute('src')).toBe(imageA.dataUrl);
 });
 
 it('never attaches the same Cmd+V screenshot twice when both clipboard routes see it', async () => {
   const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   const png = Uint8Array.from(atob(TINY_PNG_DATA_URL.split(',')[1]!), c => c.charCodeAt(0));
   const file = new view.File([png], 'screenshot.png', { type: 'image/png' });
@@ -2289,7 +2289,7 @@ it('falls back to the plugin clipboard when the reader realm claims an image but
   // nothing" symptom, so the plugin realm must still be consulted.
   const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView! as unknown as { Cc: unknown; Ci: unknown; Services: unknown; Event: typeof Event };
   const transferable = { flavors: [] as string[], init: () => undefined, addDataFlavor(flavor: string) { this.flavors.push(flavor); }, getTransferData() { throw new Error('flavor missing'); } };
   view.Cc = { '@mozilla.org/widget/transferable;1': { createInstance: () => transferable } };
@@ -2310,7 +2310,7 @@ it('falls back to the plugin clipboard when the reader realm claims an image but
 it('continues to the plugin clipboard when the reader-window clipboard route throws', async () => {
   const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView! as unknown as { Cc: unknown; Ci: unknown; Services: unknown; Event: typeof Event };
   view.Cc = { '@mozilla.org/widget/transferable;1': { createInstance: () => { throw new Error('nsIClipboard unavailable'); } } };
   view.Ci = { nsITransferable: {}, nsIClipboard: {} };
@@ -2323,7 +2323,7 @@ it('continues to the plugin clipboard when the reader-window clipboard route thr
     expect(event.defaultPrevented).toBe(true);
     await vi.waitFor(() => expect(presenter.snapshot().draft.images).toHaveLength(1));
     expect(reads).toHaveBeenCalledTimes(1);
-    expect(root.querySelector<HTMLElement>('[data-zcr-view-error]')!.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!.hidden).toBe(true);
   } finally {
     delete view.Cc; delete view.Ci; delete view.Services;
   }
@@ -2334,37 +2334,37 @@ it('says why a pasted image was refused instead of leaving the draft empty and s
   // rule refused it: a paste that appears to do nothing is indistinguishable from a broken paste.
   const reads = vi.fn(() => Promise.resolve({ images: [], refused: 'too-large' as const }));
   const { root } = await mountReadyChat({ messages: [], clipboardImages: reads });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   input.focus();
   const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
   Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: [] } });
   input.dispatchEvent(event);
-  const error = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  const error = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
   await vi.waitFor(() => expect(error.hidden).toBe(false));
   expect(error.textContent).toBe('That image is larger than the 2 MB limit, so it was not attached.');
-  expect(root.querySelectorAll('[data-zcr-draft-image]')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-draft-image]')).toHaveLength(0);
 });
 
 it('names an unsupported pasted image format when the DOM paste carries bytes it cannot attach', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   const file = new view.File([new TextEncoder().encode('%PDF-1.7')], 'screenshot.png', { type: 'image/png' });
   input.focus();
   const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
   Object.defineProperty(event, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], files: [file] } });
   input.dispatchEvent(event);
-  const error = root.querySelector<HTMLElement>('[data-zcr-view-error]')!;
+  const error = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]')!;
   await vi.waitFor(() => expect(error.hidden).toBe(false));
   expect(error.textContent).toBe('That image format cannot be attached. Use PNG, JPEG, GIF or WebP.');
-  expect(root.querySelectorAll('[data-zcr-draft-image]')).toHaveLength(0);
+  expect(root.querySelectorAll('[data-zchatgpt-draft-image]')).toHaveLength(0);
 });
 
 it('leaves a plain-text paste to the textarea and never reads the pasteboard image', async () => {
   const reads = vi.fn(() => Promise.resolve({ images: [imageA] }));
   const { root, presenter } = await mountReadyChat({ messages: [], clipboardImages: reads });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   const event = new view.Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
   Object.defineProperty(event, 'clipboardData', { value: { items: [], files: [], types: ['text/plain'] } });
@@ -2377,18 +2377,18 @@ it('leaves a plain-text paste to the textarea and never reads the pasteboard ima
 it('keeps dock type at 1 when the open PDF zooms', async () => {
   const readerZoom = { factor: 1, ins: 0, outs: 0, resets: 0 };
   const { root } = await mountReadyChat({ messages: [], readerZoom });
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   const zoom = (init: KeyboardEventInit) => input.dispatchEvent(new view.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
   zoom({ key: '=', code: 'Equal', metaKey: true });
   expect(readerZoom.ins).toBe(1);
-  expect(root.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(root.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
   zoom({ key: '-', code: 'Minus', metaKey: true });
   expect(readerZoom.outs).toBe(1);
-  expect(root.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(root.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
   zoom({ key: '0', code: 'Digit0', metaKey: true });
   expect(readerZoom.resets).toBe(1);
-  expect(root.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(root.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
 });
 
 it('shows one current title and keeps the chat switch reachable from history', async () => {
@@ -2402,42 +2402,42 @@ it('shows one current title and keeps the chat switch reachable from history', a
     createdAt: '2026-09-10T09:00:00.000Z', updatedAt: '2026-09-10T09:00:00.000Z',
   };
   const { root, presenter } = await mountReadyChat({ messages: [], conversations: [first, second] });
-  const chrome = root.querySelector('.zcr-chrome')!;
-  expect(chrome.querySelectorAll('[data-zcr-current-title]')).toHaveLength(1);
-  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A');
-  expect(chrome.querySelectorAll('[data-zcr-pane-tab][aria-selected="true"]')).toHaveLength(1);
-  expect(chrome.querySelector('[data-zcr-action="delete-conversation"], [data-zcr-action="delete-current-conversation"]')).toBeNull();
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!.click();
-  root.querySelector<HTMLButtonElement>(`[data-zcr-history] button[data-zcr-conversation-id="${second.id}"]`)!.click();
+  const chrome = root.querySelector('.zchatgpt-chrome')!;
+  expect(chrome.querySelectorAll('[data-zchatgpt-current-title]')).toHaveLength(1);
+  expect(chrome.querySelector('[data-zchatgpt-current-title]')?.textContent).toBe('Synthetic Paper A');
+  expect(chrome.querySelectorAll('[data-zchatgpt-pane-tab][aria-selected="true"]')).toHaveLength(1);
+  expect(chrome.querySelector('[data-zchatgpt-action="delete-conversation"], [data-zchatgpt-action="delete-current-conversation"]')).toBeNull();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button[data-zchatgpt-conversation-id="${second.id}"]`)!.click();
   await vi.waitFor(() => expect(presenter.snapshot().conversation?.id).toBe(second.id));
-  expect(chrome.querySelector('[data-zcr-current-title]')?.textContent).toBe('Synthetic Paper A · 2');
-  expect(chrome.querySelectorAll('[data-zcr-pane-tab][aria-selected="true"]')).toHaveLength(1);
+  expect(chrome.querySelector('[data-zchatgpt-current-title]')?.textContent).toBe('Synthetic Paper A · 2');
+  expect(chrome.querySelectorAll('[data-zchatgpt-pane-tab][aria-selected="true"]')).toHaveLength(1);
 });
 
 it('keeps local history reachable when the account signs out and the runtime becomes unavailable', async () => {
   const { root, updateRuntime } = await mountReadyChat();
   updateRuntime({ account: { state: 'signedOut' }, models: [], runtime: 'error' });
-  const history = root.querySelector<HTMLButtonElement>('[data-zcr-action="history"]')!;
+  const history = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!;
   expect(history.hidden).toBe(false);
   expect(history.disabled).toBe(false);
   history.click();
-  expect(root.querySelector<HTMLElement>('[data-zcr-history]')!.hidden).toBe(false);
-  expect(root.querySelector('[data-zcr-history]')!.textContent).toContain('Synthetic Paper A');
+  expect(root.querySelector<HTMLElement>('[data-zchatgpt-history]')!.hidden).toBe(false);
+  expect(root.querySelector('[data-zchatgpt-history]')!.textContent).toContain('Synthetic Paper A');
 });
 
 it('preserves existing message nodes and a persistent unread indicator across unrelated updates', async () => {
   const { root, presenter, emit } = await mountReadyChat();
-  const messages = root.querySelector<HTMLElement>('[data-zcr-messages]')!;
-  const originalMessage = messages.querySelector('[data-zcr-message="m1"]')!;
-  const originalText = originalMessage.querySelector('[data-zcr-text]')!;
+  const messages = root.querySelector<HTMLElement>('[data-zchatgpt-messages]')!;
+  const originalMessage = messages.querySelector('[data-zchatgpt-message="m1"]')!;
+  const originalText = originalMessage.querySelector('[data-zchatgpt-text]')!;
   Object.defineProperties(messages, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
   messages.scrollTop = 100;
   const event = { conversationId: presenter.snapshot().conversation!.id, requestId: 'r2', messageId: 'm2', at: '2026-09-12T00:00:00Z' };
   emit({ ...event, seq: 1, type: 'delta', text: 'A new answer' });
-  expect(messages.querySelector('[data-zcr-message="m1"]')).toBe(originalMessage);
-  expect(originalMessage.querySelector('[data-zcr-text]')).toBe(originalText);
+  expect(messages.querySelector('[data-zchatgpt-message="m1"]')).toBe(originalMessage);
+  expect(originalMessage.querySelector('[data-zchatgpt-text]')).toBe(originalText);
   expect(messages.scrollTop).toBe(100);
-  const unread = root.querySelector<HTMLButtonElement>('[data-zcr-action="new-content"]')!;
+  const unread = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="new-content"]')!;
   expect(unread.hidden).toBe(false);
   presenter.addImage(imageA);
   presenter.setSettings({ ...settings, effort: 'low' });
@@ -2472,9 +2472,9 @@ it('does not intercept a screenshot pasted into another editor in the reader doc
 it('navigates model options with the keyboard, returns focus, and ignores Escape during IME composition', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const view = root.ownerDocument.defaultView!;
-  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-picker]')!;
-  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-picker]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-picker-menu]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const send = vi.spyOn(presenter, 'send');
   picker.focus();
   picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
@@ -2487,12 +2487,12 @@ it('navigates model options with the keyboard, returns focus, and ignores Escape
   expect(menu.hidden).toBe(true);
   expect(root.ownerDocument.activeElement).toBe(picker);
   picker.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
-  root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="low"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="effort"][data-zchatgpt-value="low"]')!.click();
   expect(presenter.snapshot().draft.settings?.effort).toBe('low');
   // Choosing a value never closes the picker: effort, speed and model are set in one visit, and the
   // keyboard stays on the row that was just chosen.
   expect(menu.hidden).toBe(false);
-  const chosen = root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="low"]')!;
+  const chosen = root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="effort"][data-zchatgpt-value="low"]')!;
   expect(chosen.getAttribute('aria-checked')).toBe('true');
   expect(root.ownerDocument.activeElement).toBe(chosen);
   expect(send).not.toHaveBeenCalled();
@@ -2506,21 +2506,21 @@ it('navigates model options with the keyboard, returns focus, and ignores Escape
 
 it('keeps the picker open while effort, speed and model are configured in one visit', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
-  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-picker]')!;
-  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
+  const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-picker]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-picker-menu]')!;
   const view = root.ownerDocument.defaultView!;
   picker.click();
   expect(menu.hidden).toBe(false);
-  const effort = root.querySelector<HTMLButtonElement>('[data-zcr-setting="effort"][data-zcr-value="high"]')!;
+  const effort = root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="effort"][data-zchatgpt-value="high"]')!;
   effort.click();
   expect(presenter.snapshot().draft.settings?.effort).toBe('high');
   expect(menu.hidden).toBe(false);
-  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zcr-setting="effort"][data-zcr-value="high"]'));
-  const model = root.querySelector<HTMLButtonElement>('[data-zcr-setting="model"][data-zcr-value="catalog-default"]')!;
+  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zchatgpt-setting="effort"][data-zchatgpt-value="high"]'));
+  const model = root.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="model"][data-zchatgpt-value="catalog-default"]')!;
   model.click();
   expect(presenter.snapshot().draft.settings?.model).toBe('catalog-default');
   expect(menu.hidden).toBe(false);
-  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zcr-setting="model"][data-zcr-value="catalog-default"]'));
+  expect(root.ownerDocument.activeElement).toBe(root.querySelector('[data-zchatgpt-setting="model"][data-zchatgpt-value="catalog-default"]'));
   // Only the picker button, an outside click or Escape leaves the menu.
   picker.click();
   expect(menu.hidden).toBe(true);
@@ -2535,9 +2535,9 @@ it('keeps the picker open while effort, speed and model are configured in one vi
 
 it('closes the model popover on Escape and click outside', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const picker = root.querySelector<HTMLButtonElement>('[data-zcr-picker]')!;
-  const menu = root.querySelector<HTMLElement>('[data-zcr-picker-menu]')!;
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const picker = root.querySelector<HTMLButtonElement>('[data-zchatgpt-picker]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-picker-menu]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   const view = root.ownerDocument.defaultView!;
   picker.click();
   expect(menu.hidden).toBe(false);
@@ -2551,32 +2551,32 @@ it('closes the model popover on Escape and click outside', async () => {
 
 it('keeps the plus at the composer start and removes the attach and @ buttons', async () => {
   const { root } = await mountReadyChat();
-  const leading = root.querySelector<HTMLElement>('[data-zcr-composer-leading]')!;
+  const leading = root.querySelector<HTMLElement>('[data-zchatgpt-composer-leading]')!;
   const controls = [...leading.querySelectorAll<HTMLButtonElement>('button')];
-  expect(controls.map(node => node.dataset.zcrAction)).toEqual(['composer-plus']);
+  expect(controls.map(node => node.dataset.zchatgptAction)).toEqual(['composer-plus']);
   const plus = controls[0]!;
-  expect(plus.dataset.zcrPlus).toBe('');
+  expect(plus.dataset.zchatgptPlus).toBe('');
   expect(plus.getAttribute('aria-label')).toBe('Add images or context');
-  expect(root.querySelector('[data-zcr-action="capture-region"]')).toBeNull();
-  expect(root.querySelector('.zcr-attachment-menu, .zcr-input-actions')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-action="capture-region"]')).toBeNull();
+  expect(root.querySelector('.zchatgpt-attachment-menu, .zchatgpt-input-actions')).toBeNull();
   expect([...root.querySelectorAll('button')].filter(node => node.textContent?.trim() === '@')).toHaveLength(0);
 });
 
 it('groups the plus popover into titled sections with title and description rows', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
-  root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!.click();
-  const groups = [...menu.querySelectorAll<HTMLElement>('.zcr-plus-group')];
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-plus-menu]')!;
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!.click();
+  const groups = [...menu.querySelectorAll<HTMLElement>('.zchatgpt-plus-group')];
   expect(groups).toHaveLength(3);
-  expect(groups[0]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Attach');
-  expect(groups[1]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Reference');
-  expect(groups[2]!.querySelector('.zcr-plus-heading')?.textContent).toBe('Skill');
-  const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zcr-plus-row')];
-  expect(rows.map(row => row.dataset.zcrAction)).toEqual(['pick-file', 'composer-references', 'composer-skill']);
+  expect(groups[0]!.querySelector('.zchatgpt-plus-heading')?.textContent).toBe('Attach');
+  expect(groups[1]!.querySelector('.zchatgpt-plus-heading')?.textContent).toBe('Reference');
+  expect(groups[2]!.querySelector('.zchatgpt-plus-heading')?.textContent).toBe('Skill');
+  const rows = [...menu.querySelectorAll<HTMLButtonElement>('.zchatgpt-plus-row')];
+  expect(rows.map(row => row.dataset.zchatgptAction)).toEqual(['pick-file', 'composer-references', 'composer-skill']);
   for (const row of rows) {
     expect(row.tagName).toBe('BUTTON');
-    const title = row.querySelector('.zcr-plus-row-title')?.textContent ?? '';
-    const description = row.querySelector('.zcr-plus-row-description')?.textContent ?? '';
+    const title = row.querySelector('.zchatgpt-plus-row-title')?.textContent ?? '';
+    const description = row.querySelector('.zchatgpt-plus-row-description')?.textContent ?? '';
     expect(title.trim()).not.toBe('');
     expect(description.trim()).not.toBe('');
     // The accessible name is the title alone, never the concatenated row text.
@@ -2585,36 +2585,36 @@ it('groups the plus popover into titled sections with title and description rows
   // Capturing one PDF page and capturing the selected region both left the popover: the page-number
   // field is gone with the first, and the second is now a direct composer control.
   expect(menu.querySelector('input[type="number"]')).toBeNull();
-  expect(menu.querySelector('[data-zcr-action="capture-page"]')).toBeNull();
-  expect(menu.querySelector('[data-zcr-action="capture-region"]')).toBeNull();
+  expect(menu.querySelector('[data-zchatgpt-action="capture-page"]')).toBeNull();
+  expect(menu.querySelector('[data-zchatgpt-action="capture-region"]')).toBeNull();
   expect(menu.textContent).not.toMatch(/Capture page|Capture selected region/u);
 });
 
 it('separates the reference and skill rows into their own titled groups', async () => {
   const { root } = await mountReadyChat({ messages: [], workspace: historyWorkspace([]) });
   const view = root.ownerDocument.defaultView!;
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
-  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
-  const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
-  const reference = menu.querySelector<HTMLButtonElement>('[data-zcr-action="composer-references"]')!;
-  const skill = menu.querySelector<HTMLButtonElement>('[data-zcr-action="composer-skill"]')!;
-  expect(reference.querySelector('.zcr-plus-row-title')?.textContent).toBe('Add references');
-  expect(skill.querySelector('.zcr-plus-row-title')?.textContent).toBe('Add a skill');
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
+  const plus = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-plus-menu]')!;
+  const reference = menu.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-references"]')!;
+  const skill = menu.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-skill"]')!;
+  expect(reference.querySelector('.zchatgpt-plus-row-title')?.textContent).toBe('Add references');
+  expect(skill.querySelector('.zchatgpt-plus-row-title')?.textContent).toBe('Add a skill');
   // The reference row advertises no skills and the skill row advertises no references.
   expect(reference.textContent).not.toMatch(/skill/iu);
   expect(skill.textContent).not.toMatch(/reference/iu);
-  const commandMenu = root.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const commandMenu = root.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
   // Reference opens the '@' chooser, which is a reference-type chooser and says so.
   plus.click(); reference.click();
-  await vi.waitFor(() => expect(commandMenu.dataset.zcrCommandKind).toBe('references'));
-  expect(commandMenu.querySelector('.zcr-command-heading')?.textContent).toBe('References');
+  await vi.waitFor(() => expect(commandMenu.dataset.zchatgptCommandKind).toBe('references'));
+  expect(commandMenu.querySelector('.zchatgpt-command-heading')?.textContent).toBe('References');
   expect(menu.hidden).toBe(true);
   input.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   expect(commandMenu.hidden).toBe(true);
   // Skill opens the '/' chooser: the skill scope, not a reference search.
   plus.click(); skill.click();
-  await vi.waitFor(() => expect(commandMenu.dataset.zcrCommandKind).toBe('commands'));
-  expect(commandMenu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed skills');
+  await vi.waitFor(() => expect(commandMenu.dataset.zchatgptCommandKind).toBe('commands'));
+  expect(commandMenu.querySelector('.zchatgpt-command-heading')?.textContent).toBe('Installed skills');
   expect(commandMenu.querySelector('[role="listbox"]')).not.toBeNull();
   expect(menu.hidden).toBe(true);
   // Neither shortcut rewrites the draft.
@@ -2623,8 +2623,8 @@ it('separates the reference and skill rows into their own titled groups', async 
 
 it('labels the plus popover as a dialog that matches the field and rows it contains', async () => {
   const { root } = await mountReadyChat({ messages: [] });
-  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
-  const menu = root.querySelector<HTMLElement>('[data-zcr-plus-menu]')!;
+  const plus = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-plus-menu]')!;
   // `role="menu"` would be a lie: the popover holds plain action buttons and the page-number input.
   expect(menu.getAttribute('role')).toBe('dialog');
   expect(menu.getAttribute('aria-label')).toBe('Add images or context');
@@ -2641,15 +2641,15 @@ it('labels the plus popover as a dialog that matches the field and rows it conta
 it('opens every attachment route from the plus menu and closes it after a choice', async () => {
   const { root, presenter } = await mountReadyChat({ messages: [] });
   const view = root.ownerDocument.defaultView!;
-  const plus = root.querySelector<HTMLButtonElement>('[data-zcr-action="composer-plus"]')!;
-  const menuSelector = '[data-zcr-plus-menu]';
+  const plus = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="composer-plus"]')!;
+  const menuSelector = '[data-zchatgpt-plus-menu]';
   const menu = root.querySelector<HTMLElement>(menuSelector)!;
   expect(menu.hidden).toBe(true);
   expect(plus.getAttribute('aria-expanded')).toBe('false');
   plus.click();
   expect(menu.hidden).toBe(false);
   expect(plus.getAttribute('aria-expanded')).toBe('true');
-  const route = (action: string) => [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.dataset.zcrAction === action)!;
+  const route = (action: string) => [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.dataset.zchatgptAction === action)!;
 
   plus.click();
   // Images are files: the attach-file row is the only local-file route.
@@ -2670,7 +2670,7 @@ it('opens every attachment route from the plus menu and closes it after a choice
   plus.click();
   plus.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   expect(menu.hidden).toBe(true);
-  const input = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   input.focus(); plus.click();
   expect(menu.hidden).toBe(false);
   root.ownerDocument.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true }));

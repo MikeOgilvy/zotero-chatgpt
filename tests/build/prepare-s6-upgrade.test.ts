@@ -15,12 +15,12 @@ const temporaryDirectories: string[] = [];
 //   - the GitHub-URL case throws inside `requireLocalXpi` on the *upgrade* argument, and
 //   - the missing-pairing case throws on the `--upgrade-xpi`/`--rollback-xpi` check.
 // So the counterpart path is never stat'ed. It used to point at the real
-// `dist/zotero-codex-reader-0.3.0a1-dev.xpi`, which no longer exists (the a1 XPI bytes were deleted
+// `dist/zotero-chatgpt-0.3.0a1-dev.xpi`, which no longer exists (the a1 XPI bytes were deleted
 // and are only regenerable from the `v0.3.0a1` tag); the tests passed solely because the URL/pairing
 // rejection happened first. Using a clearly-synthetic path makes that intent explicit and removes
 // the hidden dependency on a deleted artifact. File-existence validation is still covered by the
 // different-versions case below, which builds two real fixture XPIs.
-const SYNTHETIC_MISSING_LOCAL_XPI = '/synthetic/zcr-s6-nonexistent-0.3.0a1-dev.xpi';
+const SYNTHETIC_MISSING_LOCAL_XPI = '/synthetic/zchatgpt-s6-nonexistent-0.3.0a1-dev.xpi';
 
 function failureMessage(error: unknown): string {
   if (error instanceof Error && 'stderr' in error && typeof error.stderr === 'string' && error.stderr.trim()) return error.stderr;
@@ -30,8 +30,8 @@ function failureMessage(error: unknown): string {
 }
 
 async function packageFixture(version: string): Promise<string> {
-  const source = await mkdtemp(path.join(tmpdir(), 'zcr-s6-upgrade-src-'));
-  const output = await mkdtemp(path.join(tmpdir(), 'zcr-s6-upgrade-xpi-'));
+  const source = await mkdtemp(path.join(tmpdir(), 'zchatgpt-s6-upgrade-src-'));
+  const output = await mkdtemp(path.join(tmpdir(), 'zchatgpt-s6-upgrade-xpi-'));
   temporaryDirectories.push(source, output);
   await execFileAsync(process.execPath, ['tests/runtime/package-fixture.mjs', 'build', '--outdir', source], { cwd: repositoryRoot });
   const manifestPath = path.join(source, 'manifest.json');
@@ -53,7 +53,7 @@ describe('S6 two-version host prepare', () => {
       prepare,
       '--s6',
       '--upgrade-xpi',
-      'https://github.com/example/zotero-codex-reader/releases/download/v0.1.0/plugin.xpi',
+      'https://github.com/example/zotero-chatgpt/releases/download/v0.1.0/plugin.xpi',
       '--rollback-xpi',
       SYNTHETIC_MISSING_LOCAL_XPI,
     ], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /GitHub Release download is not authorized/i.test(failureMessage(error)));
@@ -73,9 +73,9 @@ describe('S6 two-version host prepare', () => {
       prepare,
       '--s5',
       '--upgrade-xpi',
-      '/tmp/zcr-newer.xpi',
+      '/tmp/zchatgpt-newer.xpi',
       '--rollback-xpi',
-      '/tmp/zcr-older.xpi',
+      '/tmp/zchatgpt-older.xpi',
     ], { cwd: repositoryRoot })).rejects.toSatisfy((error: unknown) => /--upgrade-xpi is only valid with --s6/i.test(failureMessage(error)));
   });
 

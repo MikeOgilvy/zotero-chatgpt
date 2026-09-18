@@ -168,7 +168,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     if (options.watchTabSelection) return options.watchTabSelection(selected);
     const notifier = z.Notifier;
     if (!notifier) fail('Safe background reader ownership is unavailable in this Zotero version.', 'UNSUPPORTED_INTERACTION');
-    const id = notifier.registerObserver({ notify: (event, type, ids) => { if (event === 'select' && type === 'tab') for (const id of ids) selected(String(id)); } }, ['tab'], 'zcr-reference-reader');
+    const id = notifier.registerObserver({ notify: (event, type, ids) => { if (event === 'select' && type === 'tab') for (const id of ids) selected(String(id)); } }, ['tab'], 'zchatgpt-reference-reader');
     return () => notifier.unregisterObserver(id);
   };
   const withReader = async <T>(scope: PaperScope, signal: AbortSignal, work: (reader: LibraryReader, source: LibraryDocumentSource) => Promise<T>): Promise<T> => {
@@ -181,7 +181,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
         check(signal); return await work(existing, sourceOf(existing, scope));
       } finally { if (lease) dropLease(existing, lease); }
     }
-    const tabID = `zcr-reference-${options.uuid()}`;
+    const tabID = `zchatgpt-reference-${options.uuid()}`;
     const owner = window();
     if (!owner?.Zotero_Tabs?.getTabInfo || typeof owner.Zotero_Tabs.add !== 'function' || typeof owner.Zotero_Tabs.close !== 'function' || tabInfo(owner.Zotero_Tabs, tabID)?.id || z.Reader._readers.some(reader => reader.tabID === tabID)) fail('An isolated background reader could not be reserved.', 'UNSUPPORTED_INTERACTION');
     const ownerTabs = owner.Zotero_Tabs;

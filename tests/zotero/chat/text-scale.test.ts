@@ -8,7 +8,7 @@ import {
 } from '../../../packages/zotero/src/chat/text-scale.ts';
 
 function documentOf(): Document {
-  return new Window({ url: 'https://zcr.test/' }).document as unknown as Document;
+  return new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
 }
 
 it('defaults the dock type scale to 1 and never treats reader zoom as chat scale', () => {
@@ -16,13 +16,13 @@ it('defaults the dock type scale to 1 and never treats reader zoom as chat scale
   const doc = documentOf();
   const sidebar = doc.createElement('section');
   expect(applyChatTextScale(sidebar)).toBe(1);
-  expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(sidebar.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
 });
 
 it('forwards Command zoom from the dock to the reader without changing dock type', () => {
   const doc = documentOf();
   const sidebar = doc.createElement('section');
-  sidebar.dataset.zcrSidebar = '';
+  sidebar.dataset.zchatgptSidebar = '';
   const composer = doc.createElement('textarea');
   sidebar.append(composer);
   doc.body.append(sidebar);
@@ -33,7 +33,7 @@ it('forwards Command zoom from the dock to the reader without changing dock type
     zoomReset: () => { reader.resets += 1; reader.factor = 1; },
     readZoom: () => reader.factor,
   }, [doc]);
-  expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(sidebar.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
   const view = doc.defaultView!;
   const key = (init: KeyboardEventInit) => new view.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
   const fromDock = key({ key: '=', code: 'Equal', metaKey: true });
@@ -41,13 +41,13 @@ it('forwards Command zoom from the dock to the reader without changing dock type
   expect(fromDock.defaultPrevented).toBe(true);
   expect(reader.ins).toBe(1);
   expect(reader.factor).toBe(1.25);
-  expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(sidebar.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
   expect(composer.dispatchEvent(key({ key: '-', code: 'Minus', metaKey: true }))).toBe(false);
   expect(reader.outs).toBe(1);
-  expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(sidebar.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
   expect(doc.dispatchEvent(key({ key: '0', code: 'Digit0', metaKey: true }))).toBe(false);
   expect(reader.resets).toBe(1);
-  expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1');
+  expect(sidebar.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1');
 });
 it('keeps an explicit chat scale independent of native PDF zoom and clamps invalid preferences', () => {
   const doc = documentOf(); const sidebar = doc.createElement('section'); doc.body.append(sidebar);
@@ -55,7 +55,7 @@ it('keeps an explicit chat scale independent of native PDF zoom and clamps inval
   let zoomed = 0;
   const unbind = bindUnifiedReaderZoom(sidebar, { zoomIn: () => { zoomed++; }, zoomOut: () => {}, zoomReset: () => {}, readZoom: () => 4 }, [doc]);
   doc.dispatchEvent(new doc.defaultView!.KeyboardEvent('keydown', { key: '+', metaKey: true, cancelable: true }));
-  expect(zoomed).toBe(1); expect(sidebar.style.getPropertyValue('--zcr-chat-text-scale')).toBe('1.5');
+  expect(zoomed).toBe(1); expect(sidebar.style.getPropertyValue('--zchatgpt-chat-text-scale')).toBe('1.5');
   expect(clampChatTextScale(Number.NaN)).toBe(1); expect(clampChatTextScale(99)).toBe(3); expect(clampChatTextScale(0.1)).toBe(0.5);
   unbind();
 });

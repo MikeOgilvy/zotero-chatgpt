@@ -23,32 +23,32 @@ function setup(overrides: Partial<TaskViewActions> = {}) {
   const actions: TaskViewActions = { approveSelected: vi.fn().mockResolvedValue(undefined), cancel: vi.fn().mockResolvedValue(undefined), reconcile: vi.fn().mockResolvedValue(undefined), undo: vi.fn().mockResolvedValue(undefined), openSource: vi.fn().mockResolvedValue(undefined), openOutput: vi.fn().mockResolvedValue(undefined), collectionLabel: () => 'Research / Methods', cancelReading: vi.fn().mockResolvedValue(undefined), reconcileReading: vi.fn().mockResolvedValue(undefined), openReadingOutput: vi.fn().mockResolvedValue(undefined), ...overrides };
   const view = mountTaskView(container, actions);
   const change = (node: HTMLElement) => node.dispatchEvent(new document.defaultView!.Event('change', { bubbles: true }));
-  const action = (name: string) => container.querySelector<HTMLButtonElement>(`[data-zcr-task-action="${name}"]`)!;
+  const action = (name: string) => container.querySelector<HTMLButtonElement>(`[data-zchatgpt-task-action="${name}"]`)!;
   return { document, container, actions, view, change, action };
 }
 
 it('shows source-resolved annotation review and preserves checkbox state and focus across updates', async () => {
   const { container, view, actions, change, action, document } = setup(); const original = task(); view.update({ tasks: [original] });
   expect(container.textContent).toContain(original.question); expect(container.textContent).toContain('iv'); expect(container.textContent).toContain('Defines the central variable');
-  const second = container.querySelector<HTMLInputElement>('[data-zcr-task-select="two"]')!;
+  const second = container.querySelector<HTMLInputElement>('[data-zchatgpt-task-select="two"]')!;
   second.checked = false; change(second); second.focus();
   view.update({ tasks: [{ ...original, revision: 2, updatedAt: 'later' }] });
-  expect(container.querySelector('[data-zcr-task-select="two"]')).toBe(second);
+  expect(container.querySelector('[data-zchatgpt-task-select="two"]')).toBe(second);
   expect(second.checked).toBe(false); expect(document.activeElement).toBe(second);
-  expect(container.querySelector<HTMLInputElement>('[data-zcr-task-select="three"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLInputElement>('[data-zchatgpt-task-select="three"]')!.disabled).toBe(true);
   action('approve').click(); await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['one'], {}));
-  container.querySelector<HTMLButtonElement>('[data-zcr-task-item-id="one"] [data-zcr-task-action="source"]')!.click();
+  container.querySelector<HTMLButtonElement>('[data-zchatgpt-task-item-id="one"] [data-zchatgpt-task-action="source"]')!.click();
   await vi.waitFor(() => expect(actions.openSource).toHaveBeenCalledWith('task-one', 'one'));
 });
 
 it('requires explicit metadata and duplicate choices and sends the selected PDF preference', async () => {
   const { container, view, actions, change, action } = setup(); view.update({ tasks: [acquisition()] });
   expect(container.textContent).toContain('Research / Methods'); expect(action('approve').disabled).toBe(true);
-  const metadata = container.querySelector<HTMLSelectElement>('[data-zcr-metadata-choice]')!;
+  const metadata = container.querySelector<HTMLSelectElement>('[data-zchatgpt-metadata-choice]')!;
   metadata.value = '1'; change(metadata);
-  const duplicate = container.querySelector<HTMLSelectElement>('[data-zcr-duplicate-choice]')!;
+  const duplicate = container.querySelector<HTMLSelectElement>('[data-zchatgpt-duplicate-choice]')!;
   duplicate.value = 'EXIST002'; change(duplicate);
-  const pdf = container.querySelector<HTMLInputElement>('[data-zcr-download-pdf]')!; pdf.checked = false; change(pdf);
+  const pdf = container.querySelector<HTMLInputElement>('[data-zchatgpt-download-pdf]')!; pdf.checked = false; change(pdf);
   action('approve').click();
   await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['paper-one'], { 'paper-one': { metadataIndex: 1, duplicateKey: 'EXIST002', downloadPDF: false } }));
 });
@@ -59,7 +59,7 @@ it('keeps unconfirmed writes inspectable and requires reconciliation before safe
   original.approvedAt = 'approved'; original.state = 'uncertain'; original.items[0]!.status = 'uncertain';
   original.items[1]!.status = 'applied'; original.items[1]!.annotation = { paper: paperA, key: 'OUTPUT01', type: 'highlight', text: 'definition', comment: '', color: '#ffd400', pageLabel: 'iv', sortIndex: '00001', position: { pageIndex: 0, rects: [[10, 20, 80, 40]] }, authorName: '', isExternal: false, tags: [], dateModified: 'now' };
   view.update({ tasks: [original] });
-  expect(container.querySelector<HTMLDetailsElement>('[data-zcr-task-id]')!.open).toBe(true);
+  expect(container.querySelector<HTMLDetailsElement>('[data-zchatgpt-task-id]')!.open).toBe(true);
   expect(action('approve').hidden).toBe(true); expect(action('undo').disabled).toBe(true);
   action('reconcile').click(); await vi.waitFor(() => expect(actions.reconcile).toHaveBeenCalledWith('task-one'));
   view.update({ tasks: [{ ...original, revision: 2, state: 'conflict', items: original.items.map(item => ({ ...item, status: 'conflict' })) }] });
@@ -72,10 +72,10 @@ it('collapses completed metadata-only outcomes and only opens recorded outputs',
   if (original.kind !== 'acquisition') throw new Error();
   original.state = 'completed'; original.approvedAt = 'approved'; original.items[0]!.status = 'applied'; original.items[0]!.item = duplicate('OUTPUT01'); original.items[0]!.choice = { metadataIndex: 1, downloadPDF: false };
   view.update({ tasks: [original] });
-  const card = container.querySelector<HTMLDetailsElement>('[data-zcr-task-id]')!;
+  const card = container.querySelector<HTMLDetailsElement>('[data-zchatgpt-task-id]')!;
   expect(card.open).toBe(false); expect(card.querySelector('summary')!.textContent).toMatch(/metadata/iu);
   expect(container.textContent).toMatch(/PDF not requested/iu);
-  container.querySelector<HTMLButtonElement>('[data-zcr-task-action="output"]')!.click(); await vi.waitFor(() => expect(actions.openOutput).toHaveBeenCalledWith('task-one', 'paper-one'));
+  container.querySelector<HTMLButtonElement>('[data-zchatgpt-task-action="output"]')!.click(); await vi.waitFor(() => expect(actions.openOutput).toHaveBeenCalledWith('task-one', 'paper-one'));
   view.update({ tasks: [{ ...original, revision: 2, state: 'partial', items: [{ ...original.items[0]!, status: 'metadata-only', acquisition: { status: 'unavailable', reason: 'download-failed' } }] }] });
   expect(container.textContent).toMatch(/PDF unavailable/iu); expect(card.open).toBe(true);
 });
@@ -95,16 +95,16 @@ it('shows actual reading steps, supports cancellation/reconciliation, and opens 
   view.update({ tasks: [], readingJobs: [job] });
   await vi.waitFor(() => expect(container.textContent).toContain('Compare both chapters'));
   expect(container.textContent).toContain('1/2'); expect(container.textContent).toContain('Chapter one'); expect(container.textContent).toContain('i, ii');
-  const outputs = container.querySelectorAll<HTMLButtonElement>('[data-zcr-task-action="reading-output"]'); expect(outputs).toHaveLength(1); outputs[0]!.click();
-  container.querySelector<HTMLButtonElement>('[data-zcr-task-action="reading-cancel"]')!.click();
+  const outputs = container.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-task-action="reading-output"]'); expect(outputs).toHaveLength(1); outputs[0]!.click();
+  container.querySelector<HTMLButtonElement>('[data-zchatgpt-task-action="reading-cancel"]')!.click();
   await vi.waitFor(() => { expect(actions.openReadingOutput).toHaveBeenCalledWith('reading-one', 0); expect(actions.cancelReading).toHaveBeenCalledWith('reading-one'); });
   view.update({ tasks: [], readingJobs: [{ ...job, revision: 2, status: 'uncertain', persistence: 'unconfirmed', error: { code: 'storage', message: 'Persistence unconfirmed' } }] });
   expect(container.textContent).toContain('Persistence unconfirmed');
-  container.querySelector<HTMLButtonElement>('[data-zcr-task-action="reading-reconcile"]')!.click();
+  container.querySelector<HTMLButtonElement>('[data-zchatgpt-task-action="reading-reconcile"]')!.click();
   await vi.waitFor(() => expect(actions.reconcileReading).toHaveBeenCalledWith('reading-one'));
   view.update({ tasks: [], readingJobs: [{ ...job, revision: 3, status: 'completed', steps: [job.steps[0]!, { ...job.steps[1]!, status: 'completed', result: { text: 'Stored synthesis', messageIds: ['m2'], pages: [], pageLabels: [] } }] }] });
   expect(container.textContent).not.toContain('Persistence unconfirmed');
-  expect(container.querySelector<HTMLDetailsElement>('[data-zcr-reading-job]')!.open).toBe(false);
+  expect(container.querySelector<HTMLDetailsElement>('[data-zchatgpt-reading-job]')!.open).toBe(false);
 });
 
 it('retries an unavailable reading description once the job advances', async () => {
@@ -129,7 +129,7 @@ it('does not duplicate a pending approval and retains review state after a handl
   reject(new Error('Task revision changed'));
   await vi.waitFor(() => expect(container.textContent).toContain('Task revision changed'));
   expect(action('approve').disabled).toBe(false);
-  expect(container.querySelector<HTMLInputElement>('[data-zcr-task-select="one"]')!.checked).toBe(true);
+  expect(container.querySelector<HTMLInputElement>('[data-zchatgpt-task-select="one"]')!.checked).toBe(true);
   view.dispose(); expect(container.children).toHaveLength(0);
 });
 

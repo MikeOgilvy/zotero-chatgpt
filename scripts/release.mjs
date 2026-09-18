@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SUBJECT_ID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
+const SUBJECT_ID = '{90909501-7b5b-4985-9f55-566e9890746c}';
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 
 function requireNode24() {
@@ -28,7 +28,7 @@ export async function buildReleasePlan() {
   requireNode24();
   const manifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/zotero/manifest.json'), 'utf8'));
   const npmPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
-  const xpiName = `zotero-codex-reader-${manifest.version}-dev.xpi`;
+  const xpiName = `zotero-chatgpt-${manifest.version}-dev.xpi`;
   const xpiPath = path.join(repositoryRoot, 'dist', xpiName);
   let sha256 = null;
   try {
@@ -43,7 +43,7 @@ export async function buildReleasePlan() {
     published: false,
     githubRelease: null,
     githubOwner: null,
-    repository: 'zotero-codex-reader',
+    repository: 'zotero-chatgpt',
     tag: `v${manifest.version}-dev`,
     npmVersion: npmPackage.version,
     addonId: SUBJECT_ID,

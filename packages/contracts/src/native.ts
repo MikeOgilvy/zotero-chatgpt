@@ -14,7 +14,7 @@ import type { DocumentRevision, PaperScope, Rect } from './index.ts';
 export interface NativeItemRef { clientId: string; libraryId: number; key: string }
 export interface NativeCollectionTarget { clientId: string; libraryId: number; collectionKey: string }
 /** Persisted into real Zotero annotations; the historical product name stays literal. */
-export const NATIVE_ANNOTATION_PROVENANCE = '[AI · Zotero Codex Reader]';
+export const NATIVE_ANNOTATION_PROVENANCE = '[AI · Zotero ChatGPT]';
 export interface NativeCollectionAddition { before: NativeItemSnapshot; after: NativeItemSnapshot; collectionKey: string; added: boolean }
 export interface NativeQuoteInput {
   paper: PaperScope;

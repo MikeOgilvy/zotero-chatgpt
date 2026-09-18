@@ -11,15 +11,15 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const script = path.join(repositoryRoot, 'scripts/install-lifecycle.mjs');
-const subjectID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
+const subjectID = '{90909501-7b5b-4985-9f55-566e9890746c}';
 const currentManifest = JSON.parse(readFileSync(path.join(repositoryRoot, 'packages/zotero/manifest.json'), 'utf8')) as { version: string };
-const packagedXpi = path.join(repositoryRoot, `dist/zotero-codex-reader-${currentManifest.version}-dev.xpi`);
+const packagedXpi = path.join(repositoryRoot, `dist/zotero-chatgpt-${currentManifest.version}-dev.xpi`);
 const packagedXpiPresent = existsSync(packagedXpi);
 const temporaryDirectories: string[] = [];
 let fixtureSource = '';
 
 async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), 'zcr-install-test-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'zchatgpt-install-test-'));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -67,14 +67,14 @@ describe('clean-environment install layout', () => {
     await expect(run(['prepare', '--root', regular, '--xpi', path.join(fixtureSource, 'missing.xpi')])).rejects.toSatisfy((error: unknown) => /regular Zotero profile/i.test(failureMessage(error)));
   });
 
-  it('refuses the signed-in .zcr-dev/profile tree', async () => {
-    const signedIn = path.join(repositoryRoot, '.zcr-dev/profile');
+  it('refuses the signed-in .zotero-chatgpt-dev/profile tree', async () => {
+    const signedIn = path.join(repositoryRoot, '.zotero-chatgpt-dev/profile');
     await expect(run(['prepare', '--root', signedIn, '--xpi', path.join(fixtureSource, 'missing.xpi')])).rejects.toSatisfy((error: unknown) => /signed-in development profile/i.test(failureMessage(error)));
   });
 
   it('lets dedicated host restage write the signed-in tree while still refusing a regular profile', async () => {
     const lifecycle = pathToFileURL(script).href;
-    const signedIn = path.join(repositoryRoot, '.zcr-dev/profile');
+    const signedIn = path.join(repositoryRoot, '.zotero-chatgpt-dev/profile');
     const { stdout } = await execFileAsync(process.execPath, [
       '--input-type=module',
       '-e',
@@ -107,7 +107,7 @@ describe('clean-environment install layout', () => {
     const prefs = await readFile(path.join(root, 'profile/user.js'), 'utf8');
     expect(prefs).toContain(path.join(root, 'data'));
     expect(prefs).toContain('extensions.zotero.useDataDir');
-    await expect(readFile(path.join(root, 'profile/zotero-codex-reader/v1/records/conversations/none.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(path.join(root, 'profile/zotero-chatgpt/v1/records/conversations/none.json'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(result.records).toEqual([]);
     expect(result.nodeRuntimePresent).toBe(false);
   });
@@ -139,12 +139,12 @@ describe('upgrade and rollback without a GitHub download', () => {
     const profile = path.join(root, 'profile');
     await run(['prepare', '--root', profile, '--data', path.join(root, 'data'), '--xpi', older]);
     await run(['seed-records', '--root', profile, '--conversation', JSON.stringify(conversation)]);
-    const before = await readFile(path.join(profile, 'zotero-codex-reader/v1/records/conversations', `${conversation.id}.json`));
+    const before = await readFile(path.join(profile, 'zotero-chatgpt/v1/records/conversations', `${conversation.id}.json`));
     const upgraded = await run(['upgrade', '--root', profile, '--xpi', newer]);
     expect(upgraded.previousVersion).toBe('0.3.0a1');
     expect(upgraded.version).toBe('0.3.0a2');
     expect(upgraded.sameAddonId).toBe(true);
-    expect(await readFile(path.join(profile, 'zotero-codex-reader/v1/records/conversations', `${conversation.id}.json`))).toEqual(before);
+    expect(await readFile(path.join(profile, 'zotero-chatgpt/v1/records/conversations', `${conversation.id}.json`))).toEqual(before);
   });
 
   it('rolls the previous XPI back without deleting records', async () => {
@@ -169,8 +169,8 @@ describe('upgrade and rollback without a GitHub download', () => {
       '--input-type=module',
       '-e',
       `import { profileIsBusy } from ${JSON.stringify(pathToFileURL(script).href)};
-       const profile = '/tmp/zcr-clean/profile';
-       const busy = '123 /Applications/Zotero.app/Contents/MacOS/zotero -no-remote -profile /tmp/zcr-clean/profile -datadir /tmp/zcr-clean/data';
+       const profile = '/tmp/zchatgpt-clean/profile';
+       const busy = '123 /Applications/Zotero.app/Contents/MacOS/zotero -no-remote -profile /tmp/zchatgpt-clean/profile -datadir /tmp/zchatgpt-clean/data';
        const idle = '64338 /Applications/Zotero.app/Contents/MacOS/zotero';
        console.log(JSON.stringify({ busy: profileIsBusy(busy, profile), idle: profileIsBusy(idle, profile) }));`,
     ], { cwd: repositoryRoot });
@@ -197,15 +197,15 @@ describe('upgrade and rollback without a GitHub download', () => {
 });
 
 describe('isolated data directory and local-only XPI sources', () => {
-  it('refuses the signed-in .zcr-dev/data directory', async () => {
+  it('refuses the signed-in .zotero-chatgpt-dev/data directory', async () => {
     const root = await makeTemporaryDirectory();
     const archivePath = path.join(root, 'plugin.xpi');
     await packageFixture(fixtureSource, archivePath, '0.3.0a1');
-    await expect(run(['prepare', '--root', path.join(root, 'profile'), '--data', path.join(repositoryRoot, '.zcr-dev/data'), '--xpi', archivePath])).rejects.toSatisfy((error: unknown) => /signed-in development data directory/i.test(failureMessage(error)));
+    await expect(run(['prepare', '--root', path.join(root, 'profile'), '--data', path.join(repositoryRoot, '.zotero-chatgpt-dev/data'), '--xpi', archivePath])).rejects.toSatisfy((error: unknown) => /signed-in development data directory/i.test(failureMessage(error)));
   });
 
-  it('installs into a .zcr-dev/clean tree without touching the signed-in profile', async () => {
-    const clean = path.join(repositoryRoot, '.zcr-dev/clean', path.basename(await makeTemporaryDirectory()));
+  it('installs into a .zotero-chatgpt-dev/clean tree without touching the signed-in profile', async () => {
+    const clean = path.join(repositoryRoot, '.zotero-chatgpt-dev/clean', path.basename(await makeTemporaryDirectory()));
     temporaryDirectories.push(clean);
     const archivePath = path.join(clean, 'plugin.xpi');
     await mkdir(clean, { recursive: true });
@@ -218,7 +218,7 @@ describe('isolated data directory and local-only XPI sources', () => {
 
   it('refuses a GitHub Release download URL in place of a local XPI', async () => {
     const root = await makeTemporaryDirectory();
-    await expect(run(['prepare', '--root', path.join(root, 'profile'), '--xpi', 'https://github.com/example/zotero-codex-reader/releases/download/v0.1.0/plugin.xpi'])).rejects.toSatisfy((error: unknown) => /GitHub Release download is not authorized/i.test(failureMessage(error)));
+    await expect(run(['prepare', '--root', path.join(root, 'profile'), '--xpi', 'https://github.com/example/zotero-chatgpt/releases/download/v0.1.0/plugin.xpi'])).rejects.toSatisfy((error: unknown) => /GitHub Release download is not authorized/i.test(failureMessage(error)));
   });
 
   it('refuses a remote https XPI URL', async () => {
@@ -245,11 +245,11 @@ describe('path-safe extract and local updates.json', () => {
 
   it('writes updates.json from a local XPI and SHA256SUMS without a GitHub Release URL', async () => {
     const root = await makeTemporaryDirectory();
-    const archivePath = path.join(root, 'zotero-codex-reader-0.3.0a1-dev.xpi');
+    const archivePath = path.join(root, 'zotero-chatgpt-0.3.0a1-dev.xpi');
     await packageFixture(fixtureSource, archivePath, '0.3.0a1');
     const digest = createHash('sha256').update(await readFile(archivePath)).digest('hex');
     const sums = path.join(root, 'SHA256SUMS');
-    await writeFile(sums, `${digest}  zotero-codex-reader-0.3.0a1-dev.xpi\n`);
+    await writeFile(sums, `${digest}  zotero-chatgpt-0.3.0a1-dev.xpi\n`);
     const output = path.join(root, 'updates.json');
     const result = await run(['updates-json', '--xpi', archivePath, '--sums', sums, '--out', output]);
     expect(result.ok).toBe(true);
@@ -259,7 +259,7 @@ describe('path-safe extract and local updates.json', () => {
     const update = document.addons[subjectID]?.updates[0];
     expect(update).toEqual({
       version: '0.3.0a1',
-      update_link: 'https://zcr-dev.invalid/zotero-codex-reader-0.3.0a1-dev.xpi',
+      update_link: 'https://zotero-chatgpt-dev.invalid/zotero-chatgpt-0.3.0a1-dev.xpi',
       update_hash: `sha256:${digest}`,
       applications: { zotero: { strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
     });
@@ -269,7 +269,7 @@ describe('path-safe extract and local updates.json', () => {
 
   it('writes local build-info.json without a GitHub Release URL', async () => {
     const root = await makeTemporaryDirectory();
-    const archivePath = path.join(root, 'zotero-codex-reader-0.3.0a1-dev.xpi');
+    const archivePath = path.join(root, 'zotero-chatgpt-0.3.0a1-dev.xpi');
     await packageFixture(fixtureSource, archivePath, '0.3.0a1');
     const digest = createHash('sha256').update(await readFile(archivePath)).digest('hex');
     const output = path.join(root, 'build-info.json');

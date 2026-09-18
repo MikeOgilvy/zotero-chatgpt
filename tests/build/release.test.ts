@@ -28,7 +28,7 @@ describe('release dry-run without publishing', () => {
   });
 
   it('writes a local dry-run plan with no GitHub URL', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'zcr-release-'));
+    const directory = await mkdtemp(path.join(tmpdir(), 'zchatgpt-release-'));
     temporaryDirectories.push(directory);
     const output = path.join(directory, 'release-plan.json');
     const { stdout } = await execFileAsync(process.execPath, [script, '--dry-run', '--out', output, '--json'], { cwd: repositoryRoot });

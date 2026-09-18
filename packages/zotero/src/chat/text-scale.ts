@@ -1,7 +1,7 @@
 export const CHAT_TEXT_SCALE_MIN = 0.5;
 export const CHAT_TEXT_SCALE_MAX = 3;
 export const CHAT_TEXT_SCALE_DEFAULT = 1;
-export const CHAT_TEXT_SCALE_VAR = '--zcr-chat-text-scale';
+export const CHAT_TEXT_SCALE_VAR = '--zchatgpt-chat-text-scale';
 
 export interface ReaderZoomHost {
   zoomIn(): void;

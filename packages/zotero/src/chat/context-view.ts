@@ -79,13 +79,13 @@ let ringSerial = 0;
 export function mountContextRing(parent: HTMLElement): ContextRing {
   const doc = parent.ownerDocument;
   const element = doc.createElementNS(HTML_NS, 'span');
-  element.className = 'zcr-context-ring'; element.dataset.zcrContextUsage = ''; element.setAttribute('role', 'status');
+  element.className = 'zchatgpt-context-ring'; element.dataset.zchatgptContextUsage = ''; element.setAttribute('role', 'status');
   // Hover-only would exclude keyboard users, so the ring is a tab stop with the disclosure as its
   // description. The disclosure holds no interactive content: it is a tooltip, never a menu.
   element.tabIndex = 0;
   const details = doc.createElement('div');
-  details.className = 'zcr-context-details'; details.hidden = true; details.setAttribute('role', 'tooltip');
-  details.id = `zcr-context-details-${++ringSerial}`;
+  details.className = 'zchatgpt-context-details'; details.hidden = true; details.setAttribute('role', 'tooltip');
+  details.id = `zchatgpt-context-details-${++ringSerial}`;
   const svg = doc.createElementNS(SVG_NS, 'svg');
   for (const [name, value] of [['viewBox', '0 0 20 20'], ['width', '16'], ['height', '16'], ['aria-hidden', 'true'], ['focusable', 'false']] as const) svg.setAttribute(name, value);
   const circle = (className: string) => {
@@ -93,8 +93,8 @@ export function mountContextRing(parent: HTMLElement): ContextRing {
     node.setAttribute('class', className); node.setAttribute('cx', '10'); node.setAttribute('cy', '10'); node.setAttribute('r', String(RING_RADIUS)); node.setAttribute('fill', 'none');
     return node;
   };
-  const track = circle('zcr-context-ring-track');
-  const fill = circle('zcr-context-ring-fill');
+  const track = circle('zchatgpt-context-ring-track');
+  const fill = circle('zchatgpt-context-ring-fill');
   fill.setAttribute('transform', 'rotate(-90 10 10)');
   svg.append(track, fill); element.append(svg); parent.append(element);
   let usageTitle = contextUsageTitle(null);
@@ -117,7 +117,7 @@ export function mountContextRing(parent: HTMLElement): ContextRing {
   element.addEventListener('keydown', event => { if (event.key === 'Escape' && !details.hidden) hide(); });
   const update = (usage: ContextUsage | null) => {
     const ratio = contextRingRatio(usage);
-    element.dataset.zcrContextState = ratio === null ? 'unknown' : usage!.provenance;
+    element.dataset.zchatgptContextState = ratio === null ? 'unknown' : usage!.provenance;
     // Unknown has no proportion to draw, so the whole stroke stays whole: no dash pattern means no
     // gap, which reads as a deliberately solid "unknown" ring rather than an empty placeholder.
     if (ratio === null) fill.setAttribute('stroke-dasharray', 'none');

@@ -78,7 +78,7 @@ async function copyThirdPartyAssets(outputDirectory) {
   // from the repository root: `entities` resolves to a *nested* copy (4.5.0) under markdown-it,
   // while the hoisted root `node_modules/entities` is the unrelated happy-dom devDependency
   // (7.0.1). Resolve it from markdown-it's directory so the shipped notice matches the bytes
-  // esbuild actually bundles into content/zcr.js.
+  // esbuild actually bundles into content/zchatgpt.js.
   const markdownItRequire = createRequire(path.join(markdownItRoot, "package.json"));
   const entitiesRoot = packageRoot("entities", markdownItRequire);
   const katexDest = path.join(outputDirectory, "content/assets/katex");
@@ -90,7 +90,7 @@ async function copyThirdPartyAssets(outputDirectory) {
     cp(path.join(katexRoot, "LICENSE"), path.join(licenses, "katex.LICENSE")),
     cp(path.join(markdownItRoot, "LICENSE"), path.join(licenses, "markdown-it.LICENSE")),
     cp(path.join(packageRoot("dompurify"), "LICENSE"), path.join(licenses, "dompurify.LICENSE")),
-    // Notices for the remaining libraries bundled into content/zcr.js. Each package ships its
+    // Notices for the remaining libraries bundled into content/zchatgpt.js. Each package ships its
     // license under a different file name (LICENSE, LICENSE.txt, LICENSE-MIT.txt); the shipped
     // names below are uniform with the three above.
     cp(path.join(packageRoot("linkify-it"), "LICENSE"), path.join(licenses, "linkify-it.LICENSE")),
@@ -106,12 +106,12 @@ export function bundleOptions(outputDirectory) {
     bundle: true,
     entryPoints: [path.join(zoteroPackage, "src/index.ts")],
     format: "iife",
-    globalName: "ZoteroCodexReader",
-    outfile: path.join(outputDirectory, "content/zcr.js"),
+    globalName: "ZoteroChatGPT",
+    outfile: path.join(outputDirectory, "content/zchatgpt.js"),
     platform: "browser",
     target: ["firefox128"],
     define: {
-      __ZCR_SIDEBAR_CSS__: JSON.stringify(readFileSync(path.join(zoteroPackage, "assets/sidebar.css"), "utf8")),
+      __ZCHATGPT_SIDEBAR_CSS__: JSON.stringify(readFileSync(path.join(zoteroPackage, "assets/sidebar.css"), "utf8")),
     },
   };
 }

@@ -1,6 +1,6 @@
 /* global Zotero, ChromeUtils, PathUtils */
 // Dedicated live model-catalog measurement driver. Packaged only into the isolated
-// `.zcr-dev/live/` test addon; never part of the product XPI.
+// `.zotero-chatgpt-dev/live/` test addon; never part of the product XPI.
 //
 // Boundaries enforced here:
 //  - exactly one human-driven official login (this driver only waits; it never enters credentials);
@@ -53,7 +53,7 @@ async function runHostSmoke(config) {
     if (subject?.userDisabled) await subject.enable();
     await note('bundled-xpi-loaded', subject?.isActive && subject.version === config.subjectVersion, { installedVersion: subject?.version ?? null });
 
-    const parent = new Zotero.Item('book'); parent.setField('title', 'ZCR live model-catalog synthetic item');
+    const parent = new Zotero.Item('book'); parent.setField('title', 'ZCHATGPT live model-catalog synthetic item');
     const notifierQueue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue });
     const attachment = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Synthetic paper - no text sent', saveOptions: { notifierQueue } });
     await Promise.all([parent.loadAllData(), attachment.loadAllData()]);
@@ -68,20 +68,20 @@ async function runHostSmoke(config) {
       return current;
     };
     const doc = () => reader()._iframeWindow?.document ?? null;
-    const toggle = () => doc()?.querySelector('[data-zcr-toggle]') ?? null;
-    const panel = () => doc()?.querySelector('[data-zcr-chat]') ?? null;
-    const modelRows = () => [...(doc()?.querySelectorAll('[data-zcr-setting="model"]') ?? [])].map(row => ({
-      id: row.dataset.zcrValue ?? '',
-      label: row.querySelector('.zcr-picker-option-label')?.textContent ?? '',
+    const toggle = () => doc()?.querySelector('[data-zchatgpt-toggle]') ?? null;
+    const panel = () => doc()?.querySelector('[data-zchatgpt-chat]') ?? null;
+    const modelRows = () => [...(doc()?.querySelectorAll('[data-zchatgpt-setting="model"]') ?? [])].map(row => ({
+      id: row.dataset.zchatgptValue ?? '',
+      label: row.querySelector('.zchatgpt-picker-option-label')?.textContent ?? '',
       checked: row.getAttribute('aria-checked') === 'true',
       disabled: row.disabled === true,
     }));
     await until(toggle, 'reader toolbar');
     win.ZoteroContextPane.collapsed = true;
     click(toggle());
-    await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime ?? ''), 'native runtime initialization', 120000);
-    report.observation.runtimeState = panel()?.dataset.zcrRuntime ?? null;
-    report.observation.authState = panel()?.dataset.zcrAuth ?? null;
+    await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime ?? ''), 'native runtime initialization', 120000);
+    report.observation.runtimeState = panel()?.dataset.zchatgptRuntime ?? null;
+    report.observation.authState = panel()?.dataset.zchatgptAuth ?? null;
     await note('native-runtime-reached', report.observation.runtimeState === 'ready', {
       runtime: report.observation.runtimeState,
       auth: report.observation.authState,
@@ -99,7 +99,7 @@ async function runHostSmoke(config) {
       const loginWaitMs = Number.isFinite(config.loginWaitMs) ? config.loginWaitMs : 1800000;
       const deadline = Date.now() + loginWaitMs;
       for (;;) {
-        const auth = panel()?.dataset.zcrAuth ?? null;
+        const auth = panel()?.dataset.zchatgptAuth ?? null;
         if (auth !== report.observation.authState) { report.observation.authState = auth; await save(); }
         if (auth === 'signedIn') break;
         if (Date.now() >= deadline) break;
@@ -120,10 +120,10 @@ async function runHostSmoke(config) {
     report.observation.modelRows = modelRows();
     const checked = report.observation.modelRows.find(row => row.checked);
     report.observation.selectedModel = checked?.id ?? null;
-    const picker = doc()?.querySelector('[data-zcr-action="picker"]');
+    const picker = doc()?.querySelector('[data-zchatgpt-action="picker"]');
     report.observation.pickerSummary = picker?.dataset.summary ?? picker?.textContent ?? null;
     report.observation.pickerButtonText = picker?.textContent ?? null;
-    report.observation.conversationPresent = Boolean(panel()?.dataset.zcrConversation);
+    report.observation.conversationPresent = Boolean(panel()?.dataset.zchatgptConversation);
     await note('model-list-observed', report.observation.modelRows.length > 0, {
       rowCount: report.observation.modelRows.length,
       ids: report.observation.modelRows.map(row => row.id),
@@ -133,12 +133,12 @@ async function runHostSmoke(config) {
     // Per-model, non-identifying metadata: the picker only mounts effort/speed for the selected
     // model, so probe each visible model by selecting it (a local draft change only, no request).
     for (const entry of report.observation.modelRows) {
-      const row = [...(doc()?.querySelectorAll('[data-zcr-setting="model"]') ?? [])].find(candidate => candidate.dataset.zcrValue === entry.id);
+      const row = [...(doc()?.querySelectorAll('[data-zchatgpt-setting="model"]') ?? [])].find(candidate => candidate.dataset.zchatgptValue === entry.id);
       if (!row || row.disabled) { report.observation.perModel[entry.id] = { selectable: false }; await save(); continue; }
       row.click();
       await delay(120);
-      const efforts = [...(doc()?.querySelectorAll('[data-zcr-setting="effort"]') ?? [])].map(node => node.dataset.zcrValue ?? '').filter(Boolean);
-      const speed = doc()?.querySelector('[data-zcr-setting="speed"]');
+      const efforts = [...(doc()?.querySelectorAll('[data-zchatgpt-setting="effort"]') ?? [])].map(node => node.dataset.zchatgptValue ?? '').filter(Boolean);
+      const speed = doc()?.querySelector('[data-zchatgpt-setting="speed"]');
       report.observation.perModel[entry.id] = {
         selectable: true,
         reasoningEfforts: efforts,
@@ -148,7 +148,7 @@ async function runHostSmoke(config) {
     }
     // Restore the fresh-chat selection observed before probing, if it was selectable.
     const restore = report.observation.selectedModel
-      ? [...(doc()?.querySelectorAll('[data-zcr-setting="model"]') ?? [])].find(candidate => candidate.dataset.zcrValue === report.observation.selectedModel)
+      ? [...(doc()?.querySelectorAll('[data-zchatgpt-setting="model"]') ?? [])].find(candidate => candidate.dataset.zchatgptValue === report.observation.selectedModel)
       : null;
     if (restore && !restore.disabled) { restore.click(); await delay(120); }
     report.observation.selectedAfterProbe = modelRows().find(row => row.checked)?.id ?? null;

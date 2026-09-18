@@ -1,6 +1,6 @@
 # 架构与契约
 
-本文描述 **0.4.0a10 工作树实现**。产品行为由[产品规格](zotero-codex-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a11 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
@@ -13,7 +13,7 @@ Reader → Current Document Context → Chat Mode  → LLM → 回答
                                    → Agent Mode → 工具/动作 → 结果
 ```
 
-上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-codex-user-flow.md)。
+上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-chatgpt-user-flow.md)。
 
 ## 分层与依赖方向
 
@@ -75,7 +75,7 @@ core 只依赖 contracts。bootstrap/index 负责组装；视图借用服务端�
 
 ## 本地记录与兼容性
 
-基础目录是 Zotero profile 下的 `zotero-codex-reader/v1/`。目录中的 v1 是命名空间，不是所有文件的 schema 版本。
+基础目录是 Zotero profile 下的 `zotero-chatgpt/v1/`。目录中的 v1 是命名空间，不是所有文件的 schema 版本。
 
 | 路径（相对基础目录） | 内容 |
 | --- | --- |

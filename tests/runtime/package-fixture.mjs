@@ -7,7 +7,7 @@ const manifest = { ...PINNED_RUNTIME, size: 3, sha256: 'ba7816bf8f01cfea414140de
 const option = key => { const index = process.argv.indexOf(key); return index === -1 ? undefined : process.argv[index + 1]; };
 if (process.argv[2] === 'build') {
   const { buildDevelopmentExtension } = await import('../../scripts/build.mjs');
-  const cacheDirectory = await mkdtemp(path.join(tmpdir(), 'zcr-fixture-cache-'));
+  const cacheDirectory = await mkdtemp(path.join(tmpdir(), 'zchatgpt-fixture-cache-'));
   try { await writeFile(path.join(cacheDirectory, manifest.archive.entry), 'abc'); await buildDevelopmentExtension(option('--outdir'), { runtime: { manifest, cacheDirectory } }); }
   finally { await rm(cacheDirectory, { recursive: true, force: true }); }
 } else {

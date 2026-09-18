@@ -43,19 +43,19 @@ function placeChildren(parent: HTMLElement, nodes: HTMLElement[]): void {
 export function mountTaskView(container: HTMLElement, actions: TaskViewActions): { update(state: TaskViewState): void; dispose(): void } {
   const doc = container.ownerDocument;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
-  const root = create('section', '', 'zcr-task-view'); root.setAttribute('aria-label', 'Tasks'); container.append(root);
-  const button = (label: string, action: string, click: () => void) => { const node = create('button', label, 'zcr-task-button'); node.type = 'button'; node.dataset.zcrTaskAction = action; node.setAttribute('aria-label', label); node.addEventListener('click', click); return node; };
+  const root = create('section', '', 'zchatgpt-task-view'); root.setAttribute('aria-label', 'Tasks'); container.append(root);
+  const button = (label: string, action: string, click: () => void) => { const node = create('button', label, 'zchatgpt-task-button'); node.type = 'button'; node.dataset.zchatgptTaskAction = action; node.setAttribute('aria-label', label); node.addEventListener('click', click); return node; };
   const cards = new Map<string, { node: HTMLDetailsElement; update(task: ActionTaskRecord): void; dispose(): void }>();
   const readingCards = new Map<string, { node: HTMLDetailsElement; update(job: ReadingJob): void; dispose(): void }>();
   let disposed = false;
   const createTask = (initial: ActionTaskRecord) => {
     let task = initial; let previousState = initial.state; let userToggled = false; let removed = false;
-    const node = create('details', '', 'zcr-task-card'); node.dataset.zcrTaskId = task.id; node.open = !['completed', 'undone'].includes(task.state);
+    const node = create('details', '', 'zchatgpt-task-card'); node.dataset.zchatgptTaskId = task.id; node.open = !['completed', 'undone'].includes(task.state);
     const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
-    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-muted'); scope.dataset.zcrTaskScope = '';
-    const counts = create('p', '', 'zcr-task-muted zcr-task-counts'); counts.setAttribute('role', 'status');
-    const rows = create('div'); const guidance = create('p', '', 'zcr-task-muted'); const error = create('p', '', 'zcr-task-error'); error.setAttribute('role', 'alert'); error.hidden = true;
-    const controls = create('div', '', 'zcr-task-actions'); body.append(question, scope, counts, rows, guidance, error, controls); node.append(summary, body);
+    const body = create('div', '', 'zchatgpt-task-body'); const question = create('p', '', 'zchatgpt-task-question'); const scope = create('p', '', 'zchatgpt-task-muted'); scope.dataset.zchatgptTaskScope = '';
+    const counts = create('p', '', 'zchatgpt-task-muted zchatgpt-task-counts'); counts.setAttribute('role', 'status');
+    const rows = create('div'); const guidance = create('p', '', 'zchatgpt-task-muted'); const error = create('p', '', 'zchatgpt-task-error'); error.setAttribute('role', 'alert'); error.hidden = true;
+    const controls = create('div', '', 'zchatgpt-task-actions'); body.append(question, scope, counts, rows, guidance, error, controls); node.append(summary, body);
     const selected = new Map<string, boolean>(); const choices = new Map<string, AcquisitionChoice>(); const pending = new Set<string>();
     const rowViews = new Map<string, { node: HTMLElement; update(item: TaskItem): void }>();
     const mutating = () => ['approve', 'reconcile', 'undo'].some(name => pending.has(name));
@@ -94,17 +94,17 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
     const undo = button('Undo task', 'undo', () => execute('undo', () => actions.undo(task.id), undo)); controls.append(approve, cancel, reconcile, undo);
     const rowFor = (initialItem: TaskItem) => {
       let item = initialItem;
-      const row = create('article', '', 'zcr-task-row'); row.dataset.zcrTaskItemId = item.id;
-      const header = create('div', '', 'zcr-task-row-header'); const include = create('label', 'Include', 'zcr-task-check'); const check = create('input'); check.type = 'checkbox'; check.dataset.zcrTaskSelect = item.id; check.setAttribute('aria-label', 'Include this candidate'); include.prepend(check);
-      const itemStatus = create('span', '', 'zcr-task-muted'); header.append(include, itemStatus);
-      const quote = create('blockquote', '', 'zcr-task-quote'); const reason = create('p', '', 'zcr-task-muted'); const page = create('p', '', 'zcr-task-muted'); const itemError = create('p', '', 'zcr-task-muted');
+      const row = create('article', '', 'zchatgpt-task-row'); row.dataset.zchatgptTaskItemId = item.id;
+      const header = create('div', '', 'zchatgpt-task-row-header'); const include = create('label', 'Include', 'zchatgpt-task-check'); const check = create('input'); check.type = 'checkbox'; check.dataset.zchatgptTaskSelect = item.id; check.setAttribute('aria-label', 'Include this candidate'); include.prepend(check);
+      const itemStatus = create('span', '', 'zchatgpt-task-muted'); header.append(include, itemStatus);
+      const quote = create('blockquote', '', 'zchatgpt-task-quote'); const reason = create('p', '', 'zchatgpt-task-muted'); const page = create('p', '', 'zchatgpt-task-muted'); const itemError = create('p', '', 'zchatgpt-task-muted');
       const fields = create('div');
-      const field = (label: string, select: HTMLSelectElement) => { const node = create('label', label, 'zcr-task-field'); node.append(select); fields.append(node); return node; };
-      const metadata = create('select'); metadata.dataset.zcrMetadataChoice = item.id; field('Verified metadata', metadata);
-      const duplicate = create('select'); duplicate.dataset.zcrDuplicateChoice = item.id; const duplicateField = field('Existing item', duplicate);
-      const metadataDetail = create('p', '', 'zcr-task-muted'); fields.append(metadataDetail);
-      const pdfLabel = create('label', 'Obtain a verified PDF', 'zcr-task-check'); const pdf = create('input'); pdf.type = 'checkbox'; pdf.dataset.zcrDownloadPdf = item.id; pdfLabel.prepend(pdf); fields.append(pdfLabel);
-      const rowControls = create('div', '', 'zcr-task-actions');
+      const field = (label: string, select: HTMLSelectElement) => { const node = create('label', label, 'zchatgpt-task-field'); node.append(select); fields.append(node); return node; };
+      const metadata = create('select'); metadata.dataset.zchatgptMetadataChoice = item.id; field('Verified metadata', metadata);
+      const duplicate = create('select'); duplicate.dataset.zchatgptDuplicateChoice = item.id; const duplicateField = field('Existing item', duplicate);
+      const metadataDetail = create('p', '', 'zchatgpt-task-muted'); fields.append(metadataDetail);
+      const pdfLabel = create('label', 'Obtain a verified PDF', 'zchatgpt-task-check'); const pdf = create('input'); pdf.type = 'checkbox'; pdf.dataset.zchatgptDownloadPdf = item.id; pdfLabel.prepend(pdf); fields.append(pdfLabel);
+      const rowControls = create('div', '', 'zchatgpt-task-actions');
       const source = button('Open source', 'source', () => execute(`source:${item.id}`, () => actions.openSource(task.id, item.id), source));
       const output = button('Open saved output', 'output', () => execute(`output:${item.id}`, () => actions.openOutput(task.id, item.id), output)); rowControls.append(source, output);
       row.append(header, quote, reason, page, fields, itemError, rowControls);
@@ -179,10 +179,10 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
   };
   const createReading = (initial: ReadingJob) => {
     let job = initial; let removed = false; let userToggled = false; let previousStatus = job.status; let actionError: string | null = null;
-    const node = create('details', '', 'zcr-task-card'); node.dataset.zcrReadingJob = job.id; node.open = job.status !== 'completed';
+    const node = create('details', '', 'zchatgpt-task-card'); node.dataset.zchatgptReadingJob = job.id; node.open = job.status !== 'completed';
     const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
-    const body = create('div', '', 'zcr-task-body'); const question = create('p', '', 'zcr-task-question'); const scope = create('p', '', 'zcr-task-scope'); question.hidden = true; scope.hidden = true;
-    const steps = create('div'); const error = create('p', '', 'zcr-task-error'); error.setAttribute('role', 'status'); error.hidden = true; const controls = create('div', '', 'zcr-task-actions'); body.append(question, scope, steps, error, controls); node.append(summary, body);
+    const body = create('div', '', 'zchatgpt-task-body'); const question = create('p', '', 'zchatgpt-task-question'); const scope = create('p', '', 'zchatgpt-task-scope'); question.hidden = true; scope.hidden = true;
+    const steps = create('div'); const error = create('p', '', 'zchatgpt-task-error'); error.setAttribute('role', 'status'); error.hidden = true; const controls = create('div', '', 'zchatgpt-task-actions'); body.append(question, scope, steps, error, controls); node.append(summary, body);
     const pending = new Set<string>(); const stepViews = new Map<number, { row: HTMLElement; label: HTMLElement; excerpt: HTMLElement; scope: HTMLElement; output?: HTMLButtonElement }>();
     const execute = (name: string, run: () => Promise<unknown>, control: HTMLButtonElement) => {
       if (removed || control.disabled || pending.has(name)) return; pending.add(name); actionError = null; refresh();
@@ -207,7 +207,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       summary.textContent = `Reading · ${job.status} · ${job.steps.filter(step => step.status === 'completed').length}/${job.steps.length} passes`;
       const nodes = job.steps.map(step => {
         let view = stepViews.get(step.index);
-        if (!view) { const row = create('div', '', 'zcr-task-row'); const label = create('p'); const scope = create('p', '', 'zcr-task-muted'); const excerpt = create('p', '', 'zcr-task-quote'); row.append(label, scope, excerpt); view = { row, label, scope, excerpt }; stepViews.set(step.index, view); }
+        if (!view) { const row = create('div', '', 'zchatgpt-task-row'); const label = create('p'); const scope = create('p', '', 'zchatgpt-task-muted'); const excerpt = create('p', '', 'zchatgpt-task-quote'); row.append(label, scope, excerpt); view = { row, label, scope, excerpt }; stepViews.set(step.index, view); }
         view.label.textContent = `${step.phase === 'reduce' ? 'Synthesis' : step.phase === 'map' ? `Reading pass ${step.index + 1}` : 'Read selected sources'} · ${step.status}`;
         view.scope.textContent = step.result ? [step.result.title, step.result.pageLabels.length ? `p. ${step.result.pageLabels.join(', ')}` : ''].filter(Boolean).join(' · ') : '';
         view.excerpt.textContent = step.result?.text ? `${step.result.text.slice(0, 240)}${step.result.text.length > 240 ? '…' : ''}` : '';

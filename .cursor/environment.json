@@ -1,5 +1,5 @@
 {
-  "name": "Zotero Codex Reader",
+  "name": "Zotero ChatGPT",
   "user": "ubuntu",
   "install": "bash .cursor/install.sh"
 }

@@ -31,14 +31,14 @@ it('resizes the open dock from the keyboard through the layout controller and pe
   const zotero = {
     Prefs: {
       get: (key: string) => key === 'layout' ? 'standard' : 360,
-      set: (key: string, value: number) => { if (key === 'extensions.zcr.sidebarWidth') remembered.push(value); },
+      set: (key: string, value: number) => { if (key === 'extensions.zchatgpt.sidebarWidth') remembered.push(value); },
     },
     Items: { get: () => ({ key: 'PDFONE01', libraryID: 1, getField: () => 'Synthetic paper' }) },
   } as unknown as ZoteroHost;
   const pane = new NativeReaderPane(zotero, reader, 'codex-reader', new Set(), () => undefined);
   await pane.controller.toggle();
-  const dock = readerDoc.querySelector<HTMLElement>('[data-zcr-dock]')!;
-  const resizer = dock.querySelector<HTMLElement>('[data-zcr-resizer]')!;
+  const dock = readerDoc.querySelector<HTMLElement>('[data-zchatgpt-dock]')!;
+  const resizer = dock.querySelector<HTMLElement>('[data-zchatgpt-resizer]')!;
   expect(dock.style.width).toBe('360px');
   expect(resizer.getAttribute('role')).toBe('separator');
 

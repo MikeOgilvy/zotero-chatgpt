@@ -9,7 +9,7 @@ import { expect, it } from 'vitest';
  * depends on `var()`/`color-mix()` contrast needs a real host.
  */
 function stylesheetDom(): { doc: Document; cs: (node: Element) => CSSStyleDeclaration } {
-  const win = new Window({ url: 'https://zcr.test/' });
+  const win = new Window({ url: 'https://zchatgpt.test/' });
   const doc = win.document as unknown as Document;
   const style = doc.createElement('style');
   style.textContent = readFileSync(resolve(import.meta.dirname, '../../../packages/zotero/assets/sidebar.css'), 'utf8');
@@ -27,9 +27,9 @@ const make = (doc: Document) => <K extends keyof HTMLElementTagNameMap>(tag: K, 
 it('scales message actions to the 28px control scale instead of a fixed 10px label', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const chat = el('section', 'zcr-chat');
-  const message = el('article', 'zcr-message');
-  const action = el('button', 'zcr-button zcr-message-action', 'Regenerate in new chat');
+  const chat = el('section', 'zchatgpt-chat');
+  const message = el('article', 'zchatgpt-message');
+  const action = el('button', 'zchatgpt-button zchatgpt-message-action', 'Regenerate in new chat');
   message.append(action); chat.append(message); doc.body.append(chat);
   expect(cs(action).minHeight).toBe('28px');
   expect(cs(action).fontSize).not.toBe('10px');
@@ -38,7 +38,7 @@ it('scales message actions to the 28px control scale instead of a fixed 10px lab
 it('gives answer links real link affordances', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const text = el('div', 'zcr-message-text zcr-rendered');
+  const text = el('div', 'zchatgpt-message-text zchatgpt-rendered');
   const link = el('a', '', 'page');
   text.append(link); doc.body.append(text);
   expect(cs(link).textDecorationLine).toBe('underline');
@@ -48,7 +48,7 @@ it('gives answer links real link affordances', () => {
 it('renders fenced code with local scrolling and a monospace face', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const text = el('div', 'zcr-message-text zcr-rendered');
+  const text = el('div', 'zchatgpt-message-text zchatgpt-rendered');
   const pre = el('pre'); const code = el('code', '', 'const x = 1;');
   pre.append(code); text.append(pre); doc.body.append(text);
   expect(cs(pre).overflowX).toBe('auto');
@@ -59,7 +59,7 @@ it('renders fenced code with local scrolling and a monospace face', () => {
 it('styles tables and lists as readable prose instead of browser defaults', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const text = el('div', 'zcr-message-text zcr-rendered');
+  const text = el('div', 'zchatgpt-message-text zchatgpt-rendered');
   const table = el('table'); const th = el('th', '', 'a'); const td = el('td', '', '1');
   const row = el('tr'); row.append(th, td); table.append(row);
   const list = el('ul'); list.append(el('li', '', 'one'));
@@ -73,9 +73,9 @@ it('styles tables and lists as readable prose instead of browser defaults', () =
 it('anchors the code copy control to its own block wrapper', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const text = el('div', 'zcr-message-text zcr-rendered');
-  const wrapper = el('div', 'zcr-code-block');
-  const pre = el('pre'); const copy = el('button', 'zcr-button zcr-code-copy', 'Copy');
+  const text = el('div', 'zchatgpt-message-text zchatgpt-rendered');
+  const wrapper = el('div', 'zchatgpt-code-block');
+  const pre = el('pre'); const copy = el('button', 'zchatgpt-button zchatgpt-code-copy', 'Copy');
   wrapper.append(copy, pre); text.append(wrapper); doc.body.append(text);
   expect(cs(wrapper).position).toBe('relative');
   expect(cs(copy).position).toBe('absolute');
@@ -85,9 +85,9 @@ it('anchors the code copy control to its own block wrapper', () => {
 it('keeps the answer copy chip on the control scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const chat = el('section', 'zcr-chat');
-  const message = el('article', 'zcr-message');
-  const copy = el('button', 'zcr-button zcr-copy-answer', 'Copy');
+  const chat = el('section', 'zchatgpt-chat');
+  const message = el('article', 'zchatgpt-message');
+  const copy = el('button', 'zchatgpt-button zchatgpt-copy-answer', 'Copy');
   message.append(copy); chat.append(message); doc.body.append(chat);
   expect(cs(copy).minHeight).toBe('28px');
   expect(cs(copy).display).toBe('inline-flex');
@@ -96,7 +96,7 @@ it('keeps the answer copy chip on the control scale', () => {
 it('keeps the composer a rounded, evenly padded card on the documented scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const composer = el('div', 'zcr-composer');
+  const composer = el('div', 'zchatgpt-composer');
   doc.body.append(composer);
   const box = cs(composer);
   expect(Number.parseFloat(box.paddingTop)).toBeGreaterThanOrEqual(12);
@@ -106,8 +106,8 @@ it('keeps the composer a rounded, evenly padded card on the documented scale', (
 it('keeps the draft-image remove control inside its thumbnail bounds', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const chip = el('div', 'zcr-draft-image');
-  const remove = el('button', 'zcr-icon-button', 'Remove');
+  const chip = el('div', 'zchatgpt-draft-image');
+  const remove = el('button', 'zchatgpt-icon-button', 'Remove');
   chip.append(remove); doc.body.append(chip);
   const box = cs(remove);
   expect(box.position).toBe('absolute');
@@ -132,39 +132,39 @@ function shippedCss(): string {
 
 it('keeps composer focus neutral instead of painting an accent-colored selection bar', () => {
   const { doc, cs } = stylesheetDom();
-  const composer = make(doc)('div', 'zcr-composer');
+  const composer = make(doc)('div', 'zchatgpt-composer');
   doc.body.append(composer);
   // The resting card owns the border; focus must not add a colored outline anywhere.
   expect(cs(composer).outlineStyle === '' || cs(composer).outlineStyle === 'none').toBe(true);
-  const focused = shippedRule(doc, '.zcr-composer:focus-within');
+  const focused = shippedRule(doc, '.zchatgpt-composer:focus-within');
   expect(focused.cssText).not.toContain('outline');
   // The focus cue is a neutral border/ring, never the platform accent color.
   expect(focused.boxShadow).not.toBe('');
   const css = shippedCss();
-  expect(css).toMatch(/\.zcr-composer:focus-within\s*\{[^}]*border-color:[^}]*\}/u);
-  expect(css).not.toMatch(/\.zcr-composer:focus-within\s*\{[^}]*outline/u);
+  expect(css).toMatch(/\.zchatgpt-composer:focus-within\s*\{[^}]*border-color:[^}]*\}/u);
+  expect(css).not.toMatch(/\.zchatgpt-composer:focus-within\s*\{[^}]*outline/u);
 });
 
 it('gives the dock resizer a visible keyboard focus ring with a negative offset', () => {
   const { doc } = stylesheetDom();
   // happy-dom drops `outline: 2px solid AccentColor`, so the shipped declaration is asserted directly.
-  expect(shippedCss()).toMatch(/\.zcr-dock-resizer:focus-visible\s*\{\s*outline:\s*2px solid AccentColor;\s*outline-offset:\s*-2px;\s*\}/u);
-  expect(shippedRule(doc, '.zcr-dock-resizer:focus-visible').outlineOffset).toBe('-2px');
+  expect(shippedCss()).toMatch(/\.zchatgpt-dock-resizer:focus-visible\s*\{\s*outline:\s*2px solid AccentColor;\s*outline-offset:\s*-2px;\s*\}/u);
+  expect(shippedRule(doc, '.zchatgpt-dock-resizer:focus-visible').outlineOffset).toBe('-2px');
 });
 
 it('keeps the unknown context ring a solid neutral band instead of hiding the fill', () => {
   const { doc } = stylesheetDom();
-  const unknown = shippedRule(doc, '.zcr-context-ring[data-zcr-context-state="unknown"]');
+  const unknown = shippedRule(doc, '.zchatgpt-context-ring[data-zchatgpt-context-state="unknown"]');
   // A neutral/secondary tone, so the complete ring reads as a state rather than an empty slot.
   expect(unknown.color).not.toBe('');
   // Regression guard: the unknown state must never blank the fill stroke back to an empty ring.
-  expect(shippedCss()).not.toMatch(/\[data-zcr-context-state="unknown"\][^{}]*\.zcr-context-ring-fill\s*\{[^}]*stroke:\s*transparent/u);
+  expect(shippedCss()).not.toMatch(/\[data-zchatgpt-context-state="unknown"\][^{}]*\.zchatgpt-context-ring-fill\s*\{[^}]*stroke:\s*transparent/u);
 });
 
 it('bounds the history list so the popover scrolls inside the dock', () => {  const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const panel = el('div', 'zcr-history-panel');
-  const list = el('div', 'zcr-history-list');
+  const panel = el('div', 'zchatgpt-history-panel');
+  const list = el('div', 'zchatgpt-history-list');
   panel.append(list); doc.body.append(panel);
   // The list owns the only scrollbar and is bounded by the dock-sized panel.
   expect(cs(list).overflowY).toBe('auto');
@@ -175,20 +175,20 @@ it('bounds the history list so the popover scrolls inside the dock', () => {  co
 it('separates history groups with hairlines and keeps roomy single-line rows', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const list = el('div', 'zcr-history-list');
-  const first = el('div', 'zcr-history-group');
-  const second = el('div', 'zcr-history-group');
-  const heading = el('div', 'zcr-history-heading', 'Yesterday');
-  const row = el('div', 'zcr-history-row');
-  const item = el('button', 'zcr-history-item');
-  const title = el('span', 'zcr-history-title', 'A chat');
+  const list = el('div', 'zchatgpt-history-list');
+  const first = el('div', 'zchatgpt-history-group');
+  const second = el('div', 'zchatgpt-history-group');
+  const heading = el('div', 'zchatgpt-history-heading', 'Yesterday');
+  const row = el('div', 'zchatgpt-history-row');
+  const item = el('button', 'zchatgpt-history-item');
+  const title = el('span', 'zchatgpt-history-title', 'A chat');
   item.append(title); row.append(item); second.append(heading, row);
   list.append(first, second); doc.body.append(list);
   // The first section sits under the search field without a rule; later sections get a hairline.
   expect(cs(first).borderTopWidth).toBe('0px');
   expect(cs(second).borderTopWidth).toBe('1px');
   // Small and muted: the heading uses the secondary fill token, not a hardcoded color.
-  expect(shippedRule(doc, '.zcr-history-heading').color).toContain('var(--fill-secondary');
+  expect(shippedRule(doc, '.zchatgpt-history-heading').color).toContain('var(--fill-secondary');
   expect(Number.parseFloat(cs(item).minHeight)).toBeGreaterThanOrEqual(28);
   expect(cs(row).borderTopLeftRadius).not.toBe('');
   // Single-line rows truncate the title rather than wrapping into a second line.
@@ -198,41 +198,41 @@ it('separates history groups with hairlines and keeps roomy single-line rows', (
 
 it('gives history rows a neutral keyboard focus ring instead of the accent outline', () => {
   const { doc } = stylesheetDom();
-  const focused = shippedRule(doc, '.zcr-history-item:focus-visible');
+  const focused = shippedRule(doc, '.zchatgpt-history-item:focus-visible');
   expect(focused.outlineWidth).toBe('2px');
   expect(focused.outlineStyle).toBe('solid');
   expect(focused.outlineColor).not.toContain('AccentColor');
-  expect(shippedCss()).not.toMatch(/\.zcr-history-item:focus-visible\s*\{[^}]*AccentColor/u);
+  expect(shippedCss()).not.toMatch(/\.zchatgpt-history-item:focus-visible\s*\{[^}]*AccentColor/u);
 });
 
 it('shapes the selected chat tab with a small close cross', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const chrome = el('div', 'zcr-chrome');
-  const tab = el('div', 'zcr-pane-tab');
+  const chrome = el('div', 'zchatgpt-chrome');
+  const tab = el('div', 'zchatgpt-pane-tab');
   tab.setAttribute('aria-selected', 'true');
-  const title = el('span', 'zcr-pane-tab-label', 'A very long conversation name that must truncate');
-  const close = el('button', 'zcr-current-close');
+  const title = el('span', 'zchatgpt-pane-tab-label', 'A very long conversation name that must truncate');
+  const close = el('button', 'zchatgpt-current-close');
   close.setAttribute('aria-label', 'Close chat');
   tab.append(title, close); chrome.append(tab); doc.body.append(chrome);
   expect(cs(title).whiteSpace).toBe('nowrap');
   expect(cs(title).textOverflow).toBe('ellipsis');
   expect(cs(close).width).toBe('18px');
   expect(cs(close).borderTopLeftRadius).toBe('999px');
-  const focused = shippedRule(doc, '.zcr-current-close:focus-visible');
+  const focused = shippedRule(doc, '.zchatgpt-current-close:focus-visible');
   expect(focused.outlineWidth).toBe('2px');
   expect(focused.outlineStyle).toBe('solid');
   expect(focused.outlineColor).not.toContain('AccentColor');
-  expect(shippedCss()).not.toMatch(/\.zcr-current-close:focus-visible\s*\{[^}]*AccentColor/u);
+  expect(shippedCss()).not.toMatch(/\.zchatgpt-current-close:focus-visible\s*\{[^}]*AccentColor/u);
 });
 
 it('keeps history copy and rows on the chat text scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const sidebar = el('div', 'zcr-sidebar');
-  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
-  const item = el('button', 'zcr-history-item');
-  const heading = el('div', 'zcr-history-heading', 'Today');
+  const sidebar = el('div', 'zchatgpt-sidebar');
+  sidebar.style.setProperty('--zchatgpt-chat-text-scale', '1.5');
+  const item = el('button', 'zchatgpt-history-item');
+  const heading = el('div', 'zchatgpt-history-heading', 'Today');
   sidebar.append(item, heading); doc.body.append(sidebar);
   expect(cs(item).fontSize).toBe('calc(13px * 1.5)');
   expect(cs(heading).fontSize).toBe('calc(11px * 1.5)');
@@ -242,35 +242,35 @@ it('keeps a visible keyboard ring on the composer context controls that remain',
   // The per-chat research-profile select is gone from the composer row; the reference and workflow
   // chips that stay there must keep a real focus ring. happy-dom drops AccentColor declarations, so
   // the shipped declaration is asserted directly, as the other ring guards in this file do.
-  expect(shippedCss()).toMatch(/\.zcr-workspace-control:focus-visible\s*\{[^}]*outline:\s*2px solid\b/u);
+  expect(shippedCss()).toMatch(/\.zchatgpt-workspace-control:focus-visible\s*\{[^}]*outline:\s*2px solid\b/u);
 });
 
 it('paints the send control from the primary theme token, never the accent color', () => {
   const { doc } = stylesheetDom();
-  const send = shippedRule(doc, '.zcr-send');
+  const send = shippedRule(doc, '.zchatgpt-send');
   expect(send.cssText).toContain('var(--fill-primary');
   expect(send.cssText).not.toContain('AccentColor');
   // The disabled control keeps the same fill and dims through opacity, not transparency.
   const css = shippedCss();
-  expect(css).toMatch(/\.zcr-send:disabled\s*\{[^}]*var\(--fill-primary[^}]*opacity:\s*\.?35\b/u);
-  expect(css).not.toMatch(/\.zcr-send:disabled\s*\{[^}]*transparent/u);
+  expect(css).toMatch(/\.zchatgpt-send:disabled\s*\{[^}]*var\(--fill-primary[^}]*opacity:\s*\.?35\b/u);
+  expect(css).not.toMatch(/\.zchatgpt-send:disabled\s*\{[^}]*transparent/u);
   // Hover only shifts opacity; it never swaps the fill back to the accent color.
-  expect(shippedRule(doc, '.zcr-send:hover').cssText).not.toContain('AccentColor');
-  expect(css).not.toMatch(/\.zcr-send[^{},]*\{[^}]*AccentColor/u);
+  expect(shippedRule(doc, '.zchatgpt-send:hover').cssText).not.toContain('AccentColor');
+  expect(css).not.toMatch(/\.zchatgpt-send[^{},]*\{[^}]*AccentColor/u);
 });
 
 it('styles the user bubble with theme tokens and rounded corners instead of a raw black', () => {
   const { doc } = stylesheetDom();
   const css = shippedCss();
-  const bubble = shippedRule(doc, '.zcr-message[data-role="user"] .zcr-message-text');
+  const bubble = shippedRule(doc, '.zchatgpt-message[data-role="user"] .zchatgpt-message-text');
   expect(bubble.cssText).toContain('var(--fill-primary');
   expect(bubble.cssText).toContain('var(--material-background');
   expect(Number.parseFloat(bubble.borderRadius)).toBeGreaterThanOrEqual(16);
   // The bubble hugs the message side at a bounded width instead of stretching the column.
-  expect(css).toMatch(/\.zcr-message\[data-role="user"\]\s+\.zcr-message-body\s*\{[^}]*align-self:\s*flex-end/u);
-  expect(css).toMatch(/\.zcr-message\[data-role="user"\]\s+\.zcr-message-body\s*\{[^}]*max-width:\s*min\(92%/u);
+  expect(css).toMatch(/\.zchatgpt-message\[data-role="user"\]\s+\.zchatgpt-message-body\s*\{[^}]*align-self:\s*flex-end/u);
+  expect(css).toMatch(/\.zchatgpt-message\[data-role="user"\]\s+\.zchatgpt-message-body\s*\{[^}]*max-width:\s*min\(92%/u);
   // No raw hex in the bubble rules: a hardcoded black would break the dark theme.
-  expect(css).not.toMatch(/\.zcr-message\[data-role="user"\][^{]*\{[^}]*#[0-9a-fA-F]{3,8}/u);
+  expect(css).not.toMatch(/\.zchatgpt-message\[data-role="user"\][^{]*\{[^}]*#[0-9a-fA-F]{3,8}/u);
 });
 
 it('makes every composer popover an opaque, shadowed surface stacked above the transcript', () => {
@@ -278,7 +278,7 @@ it('makes every composer popover an opaque, shadowed surface stacked above the t
   const css = shippedCss();
   // happy-dom drops the `var()`/`Canvas` background declarations, so read the shipped block text.
   const block = (selector: string) => new RegExp(`${selector.replace(/\./gu, '\\.')}\\s*\\{([^}]*)\\}`, 'u').exec(css)?.[1] ?? '';
-  for (const selector of ['.zcr-plus-menu', '.zcr-picker-menu', '.zcr-command-menu', '.zcr-context-details']) {
+  for (const selector of ['.zchatgpt-plus-menu', '.zchatgpt-picker-menu', '.zchatgpt-command-menu', '.zchatgpt-context-details']) {
     const rule = shippedRule(doc, selector);
     // A see-through popover is the reported defect: the surface must carry the material token and
     // it must not be transparent anywhere.
@@ -296,41 +296,41 @@ it('makes every composer popover an opaque, shadowed surface stacked above the t
   }
   // The composer itself owns a layer above the transcript so nothing bleeds through it. It also must
   // not clip: the ring's disclosure is anchored above the card and would be cut off by an overflow.
-  const draft = shippedRule(doc, '.zcr-draft');
+  const draft = shippedRule(doc, '.zchatgpt-draft');
   expect(Number.parseInt(draft.zIndex, 10)).toBeGreaterThanOrEqual(1);
-  expect(css).not.toMatch(/\.zcr-composer\s*\{[^}]*overflow/u);
+  expect(css).not.toMatch(/\.zchatgpt-composer\s*\{[^}]*overflow/u);
 });
 
 it('no longer carries bridge rules for the labelled header or the flat plus rows', () => {
   const css = shippedCss();
   // The paired DOM patches landed, so these selectors can never match again: `messageNode` emits no
-  // author header and the plus popover emits only `.zcr-plus-row` groups.
-  expect(css).not.toMatch(/\.zcr-message-header\b/u);
-  expect(css).not.toMatch(/\.zcr-message-author\b/u);
-  expect(css).not.toMatch(/\.zcr-plus-menu\s*>\s*\.zcr-button/u);
+  // author header and the plus popover emits only `.zchatgpt-plus-row` groups.
+  expect(css).not.toMatch(/\.zchatgpt-message-header\b/u);
+  expect(css).not.toMatch(/\.zchatgpt-message-author\b/u);
+  expect(css).not.toMatch(/\.zchatgpt-plus-menu\s*>\s*\.zchatgpt-button/u);
 });
 
 it('shapes the plus popover as a grouped, hairline-separated list with title and description rows', () => {
   const { doc } = stylesheetDom();
   const css = shippedCss();
-  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*min-width:\s*240px/u);
-  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*max-width:\s*min\(320px/u);
-  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*padding:\s*4px/u);
-  expect(css).toMatch(/\.zcr-plus-menu\s*\{[^}]*border-radius:\s*10px/u);
+  expect(css).toMatch(/\.zchatgpt-plus-menu\s*\{[^}]*min-width:\s*240px/u);
+  expect(css).toMatch(/\.zchatgpt-plus-menu\s*\{[^}]*max-width:\s*min\(320px/u);
+  expect(css).toMatch(/\.zchatgpt-plus-menu\s*\{[^}]*padding:\s*4px/u);
+  expect(css).toMatch(/\.zchatgpt-plus-menu\s*\{[^}]*border-radius:\s*10px/u);
   // Groups are separated by a hairline; the first group must not draw a rule above itself.
-  expect(css).toMatch(/\.zcr-plus-group\s*\+\s*\.zcr-plus-group\s*\{[^}]*border-top:\s*1px solid/u);
-  const row = shippedRule(doc, '.zcr-plus-row');
+  expect(css).toMatch(/\.zchatgpt-plus-group\s*\+\s*\.zchatgpt-plus-group\s*\{[^}]*border-top:\s*1px solid/u);
+  const row = shippedRule(doc, '.zchatgpt-plus-row');
   expect(row.cssText).toContain('padding: 7px 12px');
   expect(row.cssText).toContain('border-radius: 6px');
   expect(row.cssText).toContain('text-align: left');
-  expect(css).toMatch(/\.zcr-plus-row:hover,\s*\.zcr-plus-row:focus-visible\s*\{[^}]*var\(--fill-quinary/u);
-  expect(shippedRule(doc, '.zcr-plus-heading').cssText).toContain('var(--fill-secondary');
-  expect(shippedRule(doc, '.zcr-plus-row-description').cssText).toContain('var(--fill-secondary');
+  expect(css).toMatch(/\.zchatgpt-plus-row:hover,\s*\.zchatgpt-plus-row:focus-visible\s*\{[^}]*var\(--fill-quinary/u);
+  expect(shippedRule(doc, '.zchatgpt-plus-heading').cssText).toContain('var(--fill-secondary');
+  expect(shippedRule(doc, '.zchatgpt-plus-row-description').cssText).toContain('var(--fill-secondary');
 });
 
 it('pushes the chrome actions to the row end so + and history stay on the trailing edge', () => {
   const { doc } = stylesheetDom();
-  const actions = shippedRule(doc, '.zcr-chrome-actions');
+  const actions = shippedRule(doc, '.zchatgpt-chrome-actions');
   expect(actions.marginInlineStart).toBe('auto');
   expect(actions.flexGrow).toBe('0');
   expect(actions.flexShrink).toBe('0');
@@ -339,78 +339,78 @@ it('pushes the chrome actions to the row end so + and history stay on the traili
 it('floats the rename popover under the chrome with the opaque menu treatment', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const chat = el('section', 'zcr-chat');
-  const form = el('div', 'zcr-rename-form');
+  const chat = el('section', 'zchatgpt-chat');
+  const form = el('div', 'zchatgpt-rename-form');
   const field = el('input');
   form.append(field); chat.append(form); doc.body.append(chat);
   // It is a popover, not an inline row: renaming hangs off the title without pushing the transcript.
   expect(cs(form).position).toBe('absolute');
-  const rule = shippedRule(doc, '.zcr-rename-form');
+  const rule = shippedRule(doc, '.zchatgpt-rename-form');
   // It hangs below the toolbar row rather than over it, so the title stays visible while renaming.
-  expect(rule.cssText).toContain('--zcr-toolbar-button-size');
-  expect(rule.cssText).toContain('var(--zcr-border');
+  expect(rule.cssText).toContain('--zchatgpt-toolbar-button-size');
+  expect(rule.cssText).toContain('var(--zchatgpt-border');
   // happy-dom drops the gradient, so the opaque menu base is pinned in the shipped text.
-  expect(shippedCss()).toMatch(/\.zcr-rename-form\s*\{[^}]*var\(--material-menu/u);
+  expect(shippedCss()).toMatch(/\.zchatgpt-rename-form\s*\{[^}]*var\(--material-menu/u);
   // The field takes the remaining width so a long title stays editable in a narrow dock.
   expect(Number.parseFloat(cs(field).flexGrow)).toBeGreaterThan(0);
   // The menu it replaced is gone, not merely hidden.
-  expect(shippedCss()).not.toMatch(/\.zcr-settings-menu/u);
-  expect(shippedCss()).not.toMatch(/\.zcr-conversation-actions/u);
+  expect(shippedCss()).not.toMatch(/\.zchatgpt-settings-menu/u);
+  expect(shippedCss()).not.toMatch(/\.zchatgpt-conversation-actions/u);
 });
 
 it('lays out the composer leading row as a non-wrapping plus control', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const leading = el('div', 'zcr-composer-leading');
-  const plus = el('button', 'zcr-icon-button zcr-plus');
+  const leading = el('div', 'zchatgpt-composer-leading');
+  const plus = el('button', 'zchatgpt-icon-button zchatgpt-plus');
   leading.append(plus); doc.body.append(leading);
   expect(cs(leading).display).toBe('flex');
   expect(cs(leading).flexWrap === '' || cs(leading).flexWrap === 'nowrap').toBe(true);
-  expect(shippedCss()).not.toMatch(/\.zcr-composer-leading\s*\{[^}]*flex-wrap:\s*wrap/u);
+  expect(shippedCss()).not.toMatch(/\.zchatgpt-composer-leading\s*\{[^}]*flex-wrap:\s*wrap/u);
 });
 
 it('reveals message actions with opacity alone so they stay keyboard reachable', () => {
   const { doc } = stylesheetDom();
   const css = shippedCss();
-  const actions = shippedRule(doc, '.zcr-message-actions');
+  const actions = shippedRule(doc, '.zchatgpt-message-actions');
   expect(actions.cssText).toContain('opacity: 0');
   expect(actions.cssText).toContain('display: flex');
-  expect(css).toMatch(/\.zcr-message:hover\s+\.zcr-message-actions,\s*\.zcr-message:focus-within\s+\.zcr-message-actions\s*\{[^}]*opacity:\s*1/u);
+  expect(css).toMatch(/\.zchatgpt-message:hover\s+\.zchatgpt-message-actions,\s*\.zchatgpt-message:focus-within\s+\.zchatgpt-message-actions\s*\{[^}]*opacity:\s*1/u);
   // display/visibility would drop the buttons from the tab order, so they must never be used here.
-  expect(css).not.toMatch(/\.zcr-message-actions[^{},]*\{[^}]*(display:\s*none|visibility:\s*hidden)/u);
+  expect(css).not.toMatch(/\.zchatgpt-message-actions[^{},]*\{[^}]*(display:\s*none|visibility:\s*hidden)/u);
 });
 
 it('uses neutral secondary-token rings on the transcript and popover controls', () => {
   const { doc } = stylesheetDom();
   const css = shippedCss();
-  for (const selector of ['.zcr-icon-button:focus-visible', '.zcr-plus-row:focus-visible', '.zcr-send:focus-visible', '.zcr-picker-option:focus-visible']) {
+  for (const selector of ['.zchatgpt-icon-button:focus-visible', '.zchatgpt-plus-row:focus-visible', '.zchatgpt-send:focus-visible', '.zchatgpt-picker-option:focus-visible']) {
     expect(shippedRule(doc, selector).cssText).toContain('var(--fill-secondary');
   }
-  expect(css).not.toMatch(/\.zcr-send:focus-visible\s*\{[^}]*AccentColor/u);
-  expect(css).not.toMatch(/\.zcr-plus-menu\s+:focus-visible\s*\{[^}]*AccentColor/u);
+  expect(css).not.toMatch(/\.zchatgpt-send:focus-visible\s*\{[^}]*AccentColor/u);
+  expect(css).not.toMatch(/\.zchatgpt-plus-menu\s+:focus-visible\s*\{[^}]*AccentColor/u);
 });
 
 it('scrolls the open-chat strip inside the dock and rings its chips neutrally', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const strip = el('div', 'zcr-panes');
-  const tab = el('div', 'zcr-pane-tab');
-  const label = el('span', 'zcr-pane-tab-label', 'A chat');
+  const strip = el('div', 'zchatgpt-panes');
+  const tab = el('div', 'zchatgpt-pane-tab');
+  const label = el('span', 'zchatgpt-pane-tab-label', 'A chat');
   tab.append(label);
-  const current = el('div', 'zcr-pane-tab');
+  const current = el('div', 'zchatgpt-pane-tab');
   current.setAttribute('aria-selected', 'true');
-  current.append(el('span', 'zcr-pane-tab-label', 'Current chat'));
+  current.append(el('span', 'zchatgpt-pane-tab-label', 'Current chat'));
   strip.append(tab, current); doc.body.append(strip);
   expect(cs(strip).overflowX).toBe('auto');
   expect(cs(strip).flexWrap === '' || cs(strip).flexWrap === 'nowrap').toBe(true);
   expect(cs(label).whiteSpace).toBe('nowrap');
   expect(cs(label).textOverflow).toBe('ellipsis');
-  expect(shippedRule(doc, '.zcr-pane-tab[aria-selected="true"]').cssText).toContain('var(--fill-quinary');
-  expect(shippedRule(doc, '.zcr-pane-tab:focus-visible').outlineColor).not.toContain('AccentColor');
-  expect(shippedCss()).not.toMatch(/\.zcr-pane-tab[^{},]*\{[^}]*AccentColor/u);
-  const sidebar = el('div', 'zcr-sidebar');
-  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
-  const scaled = el('span', 'zcr-pane-tab-label', 'A chat');
+  expect(shippedRule(doc, '.zchatgpt-pane-tab[aria-selected="true"]').cssText).toContain('var(--fill-quinary');
+  expect(shippedRule(doc, '.zchatgpt-pane-tab:focus-visible').outlineColor).not.toContain('AccentColor');
+  expect(shippedCss()).not.toMatch(/\.zchatgpt-pane-tab[^{},]*\{[^}]*AccentColor/u);
+  const sidebar = el('div', 'zchatgpt-sidebar');
+  sidebar.style.setProperty('--zchatgpt-chat-text-scale', '1.5');
+  const scaled = el('span', 'zchatgpt-pane-tab-label', 'A chat');
   sidebar.append(scaled); doc.body.append(sidebar);
   expect(cs(scaled).fontSize).toBe('calc(12px * 1.5)');
 });
@@ -418,25 +418,25 @@ it('scrolls the open-chat strip inside the dock and rings its chips neutrally', 
 it('keeps the transcript column as a single flex filler, never a side-by-side split', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const columns = el('div', 'zcr-columns');
-  const main = el('div', 'zcr-chat-main');
+  const columns = el('div', 'zchatgpt-columns');
+  const main = el('div', 'zchatgpt-chat-main');
   columns.append(main); doc.body.append(columns);
   const css = shippedCss();
   expect(cs(columns).flexDirection).toBe('column');
   expect(cs(columns).flexGrow).toBe('1');
   expect(Number.parseFloat(cs(columns).minHeight)).toBe(0);
-  expect(css).not.toMatch(/data-zcr-columns="two"/u);
-  expect(css).not.toMatch(/\.zcr-pane-preview/u);
+  expect(css).not.toMatch(/data-zchatgpt-columns="two"/u);
+  expect(css).not.toMatch(/\.zchatgpt-pane-preview/u);
 });
 
 it('centers a scaled muted timestamp divider and keeps transcript type on the chat scale', () => {
   const { doc, cs } = stylesheetDom();
   const el = make(doc);
-  const sidebar = el('div', 'zcr-sidebar');
-  sidebar.style.setProperty('--zcr-chat-text-scale', '1.5');
-  const time = el('div', 'zcr-message-time', '2:05 PM');
-  const reference = el('span', 'zcr-message-reference', '@article');
-  const card = el('figure', 'zcr-image-card');
+  const sidebar = el('div', 'zchatgpt-sidebar');
+  sidebar.style.setProperty('--zchatgpt-chat-text-scale', '1.5');
+  const time = el('div', 'zchatgpt-message-time', '2:05 PM');
+  const reference = el('span', 'zchatgpt-message-reference', '@article');
+  const card = el('figure', 'zchatgpt-image-card');
   const caption = el('figcaption', '', 'Screenshot');
   card.append(caption);
   sidebar.append(time, reference, card); doc.body.append(sidebar);
@@ -444,6 +444,6 @@ it('centers a scaled muted timestamp divider and keeps transcript type on the ch
   expect(cs(time).fontSize).toBe('calc(11px * 1.5)');
   expect(cs(reference).fontSize).toBe('calc(11px * 1.5)');
   expect(cs(caption).fontSize).toBe('calc(11px * 1.5)');
-  expect(shippedRule(doc, '.zcr-message-time').cssText).toContain('var(--fill-secondary');
+  expect(shippedRule(doc, '.zchatgpt-message-time').cssText).toContain('var(--fill-secondary');
 });
 

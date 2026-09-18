@@ -9,7 +9,7 @@ const sidebarCss = readFileSync(
 
 export default defineConfig({
   define: {
-    __ZCR_SIDEBAR_CSS__: JSON.stringify(sidebarCss),
+    __ZCHATGPT_SIDEBAR_CSS__: JSON.stringify(sidebarCss),
   },
   test: {
     include: ["tests/**/*.test.ts"],

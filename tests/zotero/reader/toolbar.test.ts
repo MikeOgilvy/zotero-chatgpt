@@ -4,7 +4,7 @@ import * as toolbar from '../../../packages/zotero/src/reader/toolbar.ts';
 import { createToolbarButton, insertToolbarButton, updateToolbarButton } from '../../../packages/zotero/src/reader/toolbar.ts';
 
 function documentOf(): Document {
-  return new Window({ url: 'https://zcr.test/' }).document as unknown as Document;
+  return new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
 }
 
 it('places a pressed toggle immediately before Find and never invents a second button', () => {
@@ -17,7 +17,7 @@ it('places a pressed toggle immediately before Find and never invents a second b
   const button = createToolbarButton(doc, () => undefined);
   insertToolbarButton({ doc, append: (...nodes) => { find.before(...nodes); } }, button);
   expect(host.firstElementChild).toBe(button);
-  expect(doc.querySelectorAll('[data-zcr-toggle]')).toHaveLength(1);
+  expect(doc.querySelectorAll('[data-zchatgpt-toggle]')).toHaveLength(1);
   expect(button.getAttribute('aria-pressed')).toBe('false');
   updateToolbarButton(button, true);
   expect(button.getAttribute('aria-pressed')).toBe('true');
@@ -37,10 +37,10 @@ it('hosts only a Codex sidebar toggle and never New chat, history, or a paper ti
   expect(button.className).toBe('toolbar-button');
   expect(button.getAttribute('aria-label')).toMatch(/Show Codex sidebar/u);
   expect(button.textContent).not.toMatch(/New chat|Chat history|p\./u);
-  expect(host.querySelector('[data-zcr-action="new-conversation"]')).toBeNull();
-  expect(host.querySelector('[data-zcr-action="history"]')).toBeNull();
-  expect(host.querySelector('[data-zcr-context-title]')).toBeNull();
-  expect(host.querySelector('.zcr-chrome')).toBeNull();
+  expect(host.querySelector('[data-zchatgpt-action="new-conversation"]')).toBeNull();
+  expect(host.querySelector('[data-zchatgpt-action="history"]')).toBeNull();
+  expect(host.querySelector('[data-zchatgpt-context-title]')).toBeNull();
+  expect(host.querySelector('.zchatgpt-chrome')).toBeNull();
   expect(host.children).toHaveLength(2);
   expect([...host.children]).toEqual([button, find]);
 });

@@ -14,7 +14,7 @@ describe('shareable diagnostics', () => {
       errorCode: 'RATE_LIMITED',
       requestCount: 3,
       states: { completed: 1, uncertain: 2 },
-      storageLocation: 'Zotero profile/zotero-codex-reader/v1/records',
+      storageLocation: 'Zotero profile/zotero-chatgpt/v1/records',
     });
     expect(JSON.stringify(report)).not.toMatch(/paper|token|@|\/Users|question|citation/i);
   });

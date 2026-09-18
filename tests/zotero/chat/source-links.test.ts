@@ -8,7 +8,7 @@ import { paperA } from '../../contracts/factories.ts';
 const sourceId = '11111111-2222-3333-4444-555555555555';
 const otherId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const source = (): AnswerSource => ({ id: sourceId, paper: { ...paperA }, revision: { fingerprint: 'synthetic', size: 200, modifiedAt: 1000, sha256: 'a'.repeat(64) }, pages: [{ pageIndex: 0, pageLabel: 'iv' }, { pageIndex: 7, pageLabel: '8' }] });
-const href = (id = sourceId, page: string | number = 0) => `https://zcr.invalid/source/${id}/${page}`;
+const href = (id = sourceId, page: string | number = 0) => `https://zchatgpt.invalid/source/${id}/${page}`;
 function setup(markdown: string) {
   const document = new HappyWindow({ url: 'https://test.invalid' }).document as unknown as Document;
   const fragment = renderAnswer(document, markdown); const container = document.createElement('div'); document.body.append(container);
@@ -22,23 +22,23 @@ it('binds only a supplied source and page, using the frozen page label and prese
   const descriptor = source(); const open = vi.fn<(_source: AnswerSource, _page: number, _quote: string | null) => Promise<void>>().mockResolvedValue(undefined);
   linkAnswerSources(fragment, [descriptor], open); container.append(fragment); anchor.focus();
   expect(container.querySelector('a')).toBe(anchor); expect(document.activeElement).toBe(anchor);
-  expect(anchor.textContent).toBe('p. iv'); expect(anchor.dataset.zcrSource).toBe(sourceId); expect(anchor.dataset.zcrPage).toBe('0');
+  expect(anchor.textContent).toBe('p. iv'); expect(anchor.dataset.zchatgptSource).toBe(sourceId); expect(anchor.dataset.zchatgptPage).toBe('0');
   const event = click(anchor); expect(event.defaultPrevented).toBe(true); expect(external).not.toHaveBeenCalled();
   await vi.waitFor(() => expect(open).toHaveBeenCalledWith(descriptor, 0, null)); expect(document.activeElement).toBe(anchor);
 });
 
-it.each([href(otherId), href(sourceId, 3), href(sourceId, '07'), href(sourceId, '-1'), href(sourceId, '9007199254740992'), `${href()}?next=https://example.com`, `${href()}#p=8`, 'https://zcr.invalid/not-a-source', `https://user@zcr.invalid/source/${sourceId}/0`, `https://zcr.invalid./source/${sourceId}/0`])('blocks unsupported internal references without allowing an external opener: %s', url => {
+it.each([href(otherId), href(sourceId, 3), href(sourceId, '07'), href(sourceId, '-1'), href(sourceId, '9007199254740992'), `${href()}?next=https://example.com`, `${href()}#p=8`, 'https://zchatgpt.invalid/not-a-source', `https://user@zchatgpt.invalid/source/${sourceId}/0`, `https://zchatgpt.invalid./source/${sourceId}/0`])('blocks unsupported internal references without allowing an external opener: %s', url => {
   const { fragment, container, external, click } = setup(`[fake label](${url})`); const open = vi.fn().mockResolvedValue(undefined);
   linkAnswerSources(fragment, [source()], open); const anchor = fragment.querySelector('a')!; container.append(fragment);
-  expect(anchor.hasAttribute('href')).toBe(false); expect(anchor.hasAttribute('data-zcr-source')).toBe(false); expect(anchor.getAttribute('aria-disabled')).toBe('true');
+  expect(anchor.hasAttribute('href')).toBe(false); expect(anchor.hasAttribute('data-zchatgpt-source')).toBe(false); expect(anchor.getAttribute('aria-disabled')).toBe('true');
   expect(container.textContent).toContain('This source is not available in this answer.'); const event = click(anchor);
   expect(event.defaultPrevented).toBe(true); expect(open).not.toHaveBeenCalled(); expect(external).not.toHaveBeenCalled();
 });
 
 it('leaves ordinary HTTPS links intact and does not infer source authority from supplied data attributes', () => {
   const { fragment, container, external, click } = setup('[ordinary](https://example.com/paper)'); const open = vi.fn().mockResolvedValue(undefined); const anchor = fragment.querySelector('a')!;
-  anchor.dataset.zcrSource = sourceId; anchor.dataset.zcrPage = '0'; linkAnswerSources(fragment, [source()], open); container.append(fragment);
-  expect(anchor.getAttribute('href')).toBe('https://example.com/paper'); expect(anchor.textContent).toBe('ordinary'); expect(anchor.hasAttribute('data-zcr-source')).toBe(false);
+  anchor.dataset.zchatgptSource = sourceId; anchor.dataset.zchatgptPage = '0'; linkAnswerSources(fragment, [source()], open); container.append(fragment);
+  expect(anchor.getAttribute('href')).toBe('https://example.com/paper'); expect(anchor.textContent).toBe('ordinary'); expect(anchor.hasAttribute('data-zchatgpt-source')).toBe(false);
   click(anchor); expect(open).not.toHaveBeenCalled(); expect(external).toHaveBeenCalledOnce();
 });
 
@@ -46,7 +46,7 @@ it('keeps click authority in its closure when DOM attributes or caller-owned sou
   const { fragment, container, click } = setup(`[page](${href(sourceId, 7)})`); const descriptor = source(); const expected = structuredClone(descriptor); const open = vi.fn().mockResolvedValue(undefined);
   linkAnswerSources(fragment, [descriptor], open); const anchor = fragment.querySelector('a')!; container.append(fragment);
   descriptor.paper.attachmentKey = 'CHANGED1'; descriptor.revision.fingerprint = 'changed'; descriptor.pages[1]!.pageLabel = '999';
-  anchor.dataset.zcrSource = otherId; anchor.dataset.zcrPage = '0'; click(anchor);
+  anchor.dataset.zchatgptSource = otherId; anchor.dataset.zchatgptPage = '0'; click(anchor);
   await vi.waitFor(() => expect(open).toHaveBeenCalledWith(expected, 7, null)); expect(anchor.textContent).toBe('p. 8');
   const passed = open.mock.calls[0]![0] as AnswerSource; expect(Object.isFrozen(passed)).toBe(true); expect(Object.isFrozen(passed.paper)).toBe(true); expect(Object.isFrozen(passed.pages)).toBe(true);
 });
@@ -80,8 +80,8 @@ it('links a resolvable citation when the host sandbox does not expose structured
     linkAnswerSources(fragment, [source()], open); container.append(fragment);
     const anchor = container.querySelector('a')!;
     expect(container.textContent).toContain('p. iv');
-    expect(anchor.dataset.zcrSource).toBe(sourceId);
-    expect(anchor.dataset.zcrPage).toBe('0');
+    expect(anchor.dataset.zchatgptSource).toBe(sourceId);
+    expect(anchor.dataset.zchatgptPage).toBe('0');
   } finally { vi.unstubAllGlobals(); }
 });
 
@@ -93,7 +93,7 @@ it('degrades one malformed source without blanking the rest of the answer', () =
   expect(() => linkAnswerSources(fragment, [hostile, good], open)).not.toThrow();
   container.append(fragment);
   const anchors = [...container.querySelectorAll<HTMLAnchorElement>('a')];
-  expect(anchors[1]?.dataset.zcrSource).toBe(otherId);
+  expect(anchors[1]?.dataset.zchatgptSource).toBe(otherId);
   expect(anchors[0]?.hasAttribute('href')).toBe(false);
   expect(container.textContent).not.toContain('/private');
 });
@@ -125,5 +125,5 @@ it('deduplicates a pending open and safely rebinds a reused fragment against the
   const { fragment, click } = setup(`[page](${href()})`); let finish!: () => void; const open = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
   linkAnswerSources(fragment, [source()], open); const anchor = fragment.querySelector('a')!; click(anchor); click(anchor); expect(open).toHaveBeenCalledOnce();
   finish(); await Promise.resolve(); await Promise.resolve(); linkAnswerSources(fragment, [], open); click(anchor);
-  expect(open).toHaveBeenCalledOnce(); expect(anchor.hasAttribute('data-zcr-source')).toBe(false); expect(fragment.querySelectorAll('[role="status"]')).toHaveLength(1);
+  expect(open).toHaveBeenCalledOnce(); expect(anchor.hasAttribute('data-zchatgpt-source')).toBe(false); expect(fragment.querySelectorAll('[role="status"]')).toHaveLength(1);
 });

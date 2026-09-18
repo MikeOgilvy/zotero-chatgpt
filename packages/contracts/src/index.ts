@@ -352,7 +352,7 @@ export interface Draft {
 }
 
 /** Generic location shown in shareable diagnostics. Never include a username or real path. */
-export const SHAREABLE_STORAGE_LOCATION = 'Zotero profile/zotero-codex-reader/v1/records' as const;
+export const SHAREABLE_STORAGE_LOCATION = 'Zotero profile/zotero-chatgpt/v1/records' as const;
 
 /** Whitelist-only report. Must never contain paper text, paths, tokens or account identifiers. */
 export interface ShareableDiagnostics {

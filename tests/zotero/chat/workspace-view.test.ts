@@ -10,7 +10,7 @@ const reference: ReaderReference = { id: 'paper-one', kind: 'article', label: 'S
 
 function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const document = new Window().document as unknown as Document;
-  const pane = document.createElement('section'); pane.dataset.zcrSidebar = '';
+  const pane = document.createElement('section'); pane.dataset.zchatgptSidebar = '';
   const context = document.createElement('div'); const input = document.createElement('textarea'); const leading = document.createElement('div');
   pane.append(context, input, leading); document.body.append(pane);
   const actions: WorkspaceViewActions = {
@@ -68,24 +68,24 @@ it('previews reference and skill chips as inert text and removes them through ca
 it('renders no per-chat research-profile control in the composer and points at the native Preferences window', () => {
   const { context, actions, pane } = setup();
   // The profile select, its visible "Profile" label and its scope row are gone from the composer.
-  expect(context.querySelector('[data-zcr-profile]')).toBeNull();
-  expect(context.querySelector('[data-zcr-chat-scope]')).toBeNull();
-  expect(context.querySelector('.zcr-chat-profile-label')).toBeNull();
+  expect(context.querySelector('[data-zchatgpt-profile]')).toBeNull();
+  expect(context.querySelector('[data-zchatgpt-chat-scope]')).toBeNull();
+  expect(context.querySelector('.zchatgpt-chat-profile-label')).toBeNull();
   expect(pane.textContent).not.toContain('Global preferences');
   expect(actions.selectProfile).not.toHaveBeenCalled();
   // The global controls live in Zotero's own Preferences window, not the sidebar; the old
   // in-pane hint at that window was redundant and is gone with the container it lived in.
   expect(pane.querySelector('[name="background"]')).toBeNull();
   expect(pane.querySelector('[name="profile-name"]')).toBeNull();
-  expect(pane.querySelector('[data-zcr-global-hint]')).toBeNull();
+  expect(pane.querySelector('[data-zchatgpt-global-hint]')).toBeNull();
   expect(pane.textContent).not.toMatch(/Zotero's Preferences window/u);
 });
 
 it('keeps the / workflow chooser and its installed-skill heading after the profile control is removed', async () => {
   const { pane, context, type, key, actions } = setup();
-  expect(context.querySelector('[data-zcr-profile]')).toBeNull();
+  expect(context.querySelector('[data-zchatgpt-profile]')).toBeNull();
   type('/Der');
-  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const menu = pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
   expect(menu.hidden).toBe(false);
     expect(menu.textContent).toContain('Installed skills');
   key('Enter');
@@ -103,8 +103,8 @@ it('offers no skill authoring, import or export in the sidebar', () => {
   for (const label of ['Create skill', 'Import skill', 'Save skill', 'Cancel editing', 'Duplicate', 'Export', 'Try in draft', 'Edit', 'Delete']) {
     expect(pane.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`), label).toBeNull();
   }
-  expect(pane.querySelector('[data-zcr-skill-id]')).toBeNull();
-  expect(pane.querySelector('[data-zcr-skill-editor]')).toBeNull();
+  expect(pane.querySelector('[data-zchatgpt-skill-id]')).toBeNull();
+  expect(pane.querySelector('[data-zchatgpt-skill-editor]')).toBeNull();
   expect(pane.textContent).not.toMatch(/Installed skills|SKILL\.md content|No skills installed/u);
   expect(pane.querySelector('[name="workflow"]')).toBeNull();
 });
@@ -115,9 +115,9 @@ it('offers no global preference, research-profile or workflow-availability contr
   // mount that used to hold a global language override is gone too, so the pane itself is searched.
   for (const label of ['Save preferences', 'Save as new profile', 'Update selected profile', 'Delete selected profile']) expect(button(label), label).toBeUndefined();
   expect(pane.querySelector('[name="language"]')).toBeNull();
-  expect(pane.querySelector('[data-zcr-skill-enabled="derive"]')).toBeNull();
+  expect(pane.querySelector('[data-zchatgpt-skill-enabled="derive"]')).toBeNull();
   // Workflow availability is a native Preferences checkbox; the sidebar only selects one for the chat.
-  expect(pane.querySelector('[data-zcr-skill-id="derive"]')).toBeNull();
+  expect(pane.querySelector('[data-zchatgpt-skill-id="derive"]')).toBeNull();
   expect(pane.querySelector<HTMLInputElement>('input[type="checkbox"]')).toBeNull();
 });
 
@@ -126,9 +126,9 @@ it('reports a refused removal beside the composer controls instead of inside Mor
   view.update({ ...state, draft: { ...state.draft, references: [reference] } });
   button('Remove Shared title').click();
   await vi.waitFor(() => expect(pane.textContent).toContain('Reference unavailable'));
-  const status = pane.querySelector<HTMLElement>('.zcr-workspace-status')!;
+  const status = pane.querySelector<HTMLElement>('.zchatgpt-workspace-status')!;
   expect(context.contains(status)).toBe(true);
-  expect(pane.querySelector('.zcr-workspace-settings')).toBeNull();
+  expect(pane.querySelector('.zchatgpt-workspace-settings')).toBeNull();
 });
 
 
@@ -136,12 +136,12 @@ it('loads a chat with a legacy persisted per-chat profile value without a profil
   const { context, pane, view, state } = setup();
   expect(() => view.update({ ...state, draft: { ...state.draft, profileId: 'math' } })).not.toThrow();
   // The legacy value stays in the draft (the presenter still applies it) but exposes no UI here.
-  expect(context.querySelector('[data-zcr-profile]')).toBeNull();
-  expect(context.querySelector('[data-zcr-chat-scope]')).toBeNull();
-  expect(pane.querySelector('[data-zcr-workspace-chips]')?.children).toHaveLength(0);
+  expect(context.querySelector('[data-zchatgpt-profile]')).toBeNull();
+  expect(context.querySelector('[data-zchatgpt-chat-scope]')).toBeNull();
+  expect(pane.querySelector('[data-zchatgpt-workspace-chips]')?.children).toHaveLength(0);
   expect(pane.textContent).not.toContain('Mathematics');
   // The status slot that reports refusals from the remaining scoped controls still exists.
-  expect(context.contains(pane.querySelector<HTMLElement>('.zcr-workspace-status'))).toBe(true);
+  expect(context.contains(pane.querySelector<HTMLElement>('.zchatgpt-workspace-status'))).toBe(true);
 });
 
 it('leaves a newer query and its open menu intact when an earlier selection finishes', async () => {
@@ -153,7 +153,7 @@ it('leaves a newer query and its open menu intact when an earlier selection fini
   await vi.waitFor(() => expect(pane.querySelector('[role="option"]')).not.toBeNull());
   release(); await pending; await Promise.resolve(); await Promise.resolve();
   expect(input.value).toBe('@next');
-  expect(pane.querySelector<HTMLElement>('.zcr-command-menu')!.hidden).toBe(false);
+  expect(pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!.hidden).toBe(false);
 });
 
 it('keeps preview controls and focus stable as asynchronous source text arrives', async () => {
@@ -177,11 +177,11 @@ it('does not select a disabled or unsupported installed workflow', () => {
 it('opens the skill chooser from the composer shortcut as well as the slash trigger', async () => {
   const { pane, input, view, actions } = setup();
   view.openSkills();
-  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const menu = pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
   expect(menu.hidden).toBe(false);
   // The shortcut lands on the '/'-scope: a skill chooser, never a reference search.
-  expect(menu.dataset.zcrCommandKind).toBe('commands');
-  expect(menu.querySelector('.zcr-command-heading')?.textContent).toBe('Installed skills');
+  expect(menu.dataset.zchatgptCommandKind).toBe('commands');
+  expect(menu.querySelector('.zchatgpt-command-heading')?.textContent).toBe('Installed skills');
   expect([...menu.querySelectorAll('[role="option"]')].map(node => node.textContent).join(' ')).toContain('/Derive');
   expect(actions.searchReferences).not.toHaveBeenCalled();
   // Like the reference shortcut it only picks a scope: the draft and the caret are untouched.
@@ -207,12 +207,12 @@ it('opens the reference chooser from the composer plus shortcut without a visibl
   expect([...pane.querySelectorAll('button')].some(node => node.textContent?.trim() === '@')).toBe(false);
   view.openCommands();
   await vi.waitFor(() => expect(actions.searchReferences).toHaveBeenCalledWith('', 'all', expect.any(AbortSignal)));
-  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const menu = pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
   expect(menu.hidden).toBe(false);
   expect(menu.textContent).toContain('References');
   // The chooser carries its own search field, so opening it from the popover puts the caret where
   // the query is typed instead of showing an empty query as though the library had no matches.
-  const search = pane.querySelector<HTMLInputElement>('.zcr-workspace-search')!;
+  const search = pane.querySelector<HTMLInputElement>('.zchatgpt-workspace-search')!;
   expect(search.hidden).toBe(false);
   expect(search.type).toBe('search');
   expect(input.ownerDocument.activeElement).toBe(search);
@@ -224,7 +224,7 @@ it('settles the chooser on empty results, an honest failure or a late abandoned 
   const searches: Array<{ resolve: (value: ReaderReference[]) => void; reject: (error: unknown) => void }> = [];
   const search = vi.fn(() => new Promise<ReaderReference[]>((resolve, reject) => { searches.push({ resolve, reject }); }));
   const { pane, view, input, key } = setup({ searchReferences: search });
-  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const menu = pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
 
   // An empty query asks for a query instead of claiming the library holds no matches.
   view.openCommands();
@@ -256,7 +256,7 @@ it('settles the chooser on empty results, an honest failure or a late abandoned 
 it('keeps the reopened chooser on its own request when an abandoned search settles late', async () => {
   const searches: Array<(value: ReaderReference[]) => void> = [];
   const { pane, view, input, key } = setup({ searchReferences: vi.fn(() => new Promise<ReaderReference[]>(resolve => { searches.push(resolve); })) });
-  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
+  const menu = pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
   view.openCommands();
   key('Escape');
   expect(menu.hidden).toBe(true);
@@ -271,8 +271,8 @@ it('keeps the reopened chooser on its own request when an abandoned search settl
 
 it('searches from the chooser field itself and never lets it fight the composer', async () => {
   const { document, pane, input, actions, type, view } = setup();
-  const menu = pane.querySelector<HTMLElement>('.zcr-command-menu')!;
-  const search = pane.querySelector<HTMLInputElement>('.zcr-workspace-search')!;
+  const menu = pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
+  const search = pane.querySelector<HTMLInputElement>('.zchatgpt-workspace-search')!;
   const searchType = (value: string) => { search.value = value; search.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
   const searchKey = (value: string) => search.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
 
@@ -292,8 +292,8 @@ it('searches from the chooser field itself and never lets it fight the composer'
 
   // A query that matched nothing keeps the reference chooser's own empty state, unchanged.
   const empty = setup({ searchReferences: vi.fn().mockResolvedValue([]) });
-  const emptyMenu = empty.pane.querySelector<HTMLElement>('.zcr-command-menu')!;
-  const emptySearch = empty.pane.querySelector<HTMLInputElement>('.zcr-workspace-search')!;
+  const emptyMenu = empty.pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
+  const emptySearch = empty.pane.querySelector<HTMLInputElement>('.zchatgpt-workspace-search')!;
   empty.view.openCommands();
   emptySearch.value = 'nothing';
   emptySearch.dispatchEvent(new empty.document.defaultView!.Event('input', { bubbles: true }));

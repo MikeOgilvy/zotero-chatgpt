@@ -103,7 +103,7 @@ function tabInfo(window: SmokeWindow, id: string) { try { return window.Zotero_T
 export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmokeReport> {
   await Zotero.initializationPromise;
   const profile = safePath(config.profile); const dataDir = safePath(config.dataDir);
-  requireCheck(profile.endsWith('/.zcr-dev/context/profile') && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
+  requireCheck(profile.endsWith('/.zotero-chatgpt-dev/context/profile') && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
   const contextRoot = profile.slice(0, -'/profile'.length);
   requireCheck(dataDir === PathUtils.join(contextRoot, 'data') && Zotero.DataDirectory.dir === dataDir, 'DATA_GUARD_REJECTED');
   const reportPath = safePath(config.reportPath); const pdfPath = safePath(config.pdfPath); const supplementPath = safePath(config.supplementPdfPath);
@@ -189,17 +189,17 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     if (opened._initPromise) await opened._initPromise;
     await until(() => (opened._internalReader?._primaryView ?? opened._internalReader?._lastView)?._iframeWindow?.PDFViewerApplication?.pdfDocument, 'SYNTHETIC_PDF_NOT_READY');
     currentStage = 'profile-client-identity';
-    const configuredClient = Zotero.Prefs.get('extensions.zcr.clientId', true);
+    const configuredClient = Zotero.Prefs.get('extensions.zchatgpt.clientId', true);
     requireCheck(configuredClient === undefined || configuredClient === null || configuredClient === '' || (typeof configuredClient === 'string' && /^[0-9a-f-]{36}$/u.test(configuredClient)), 'PROFILE_CLIENT_ID_INVALID');
     const clientId = typeof configuredClient === 'string' && configuredClient ? configuredClient : host.uuid();
-    if (!configuredClient) { guard(); Zotero.Prefs.set('extensions.zcr.clientId', clientId, true); }
+    if (!configuredClient) { guard(); Zotero.Prefs.set('extensions.zchatgpt.clientId', clientId, true); }
     const paper: PaperScope = { clientId, libraryId: libraryID, attachmentKey: fixture.main.key };
     const supplementPaper: PaperScope = { ...paper, attachmentKey: fixture.supplement.key };
     currentStage = 'construct-production-adapters';
     const cache = new ReaderDocumentCache({ yield: () => Zotero.Promise.delay(0), maxEntries: 3 });
     const source = nativeDocumentSource(Zotero as unknown as ZoteroHost, () => opened, paper);
     const native: NativeActionPort = createNativeActionPortFrom({ clientId, zotero: Zotero });
-    const ledgerName = `zotero-codex-reader/native-agent-smoke/${report.runId}`;
+    const ledgerName = `zotero-chatgpt/native-agent-smoke/${report.runId}`;
     currentStage = 'create-isolated-gecko-ledger';
     const ledger = await privateDirectory(host, profile, ledgerName);
     currentStage = 'construct-task-controller';
@@ -378,10 +378,10 @@ async function verifyReferenceImagesAndReaders(options: {
     const observer = Zotero.Notifier.registerObserver({ notify(event, type, ids) {
       if (type !== 'tab') return;
       for (const value of ids) {
-        const id = String(value); if (!id.startsWith('zcr-reference-')) continue;
+        const id = String(value); if (!id.startsWith('zchatgpt-reference-')) continue;
         if (event === 'add') added.add(id); if (event === 'close') closed.add(id); if (event === 'select') selectedBackground.add(id);
       }
-    } }, ['tab'], `zcr-native-smoke-${options.report.runId}`);
+    } }, ['tab'], `zchatgpt-native-smoke-${options.report.runId}`);
     try {
       const value = await referencePort.read(supplement, new AbortController().signal);
       requireCheck(value.document?.paper.attachmentKey === fixture.supplement.key && value.document.pages.some(page => page.text.includes('BAMBOO-19')) && value.document.pages.every(page => !page.text.includes('ORCHID-72')), 'ARTICLE_REFERENCE_READ_WRONG_PDF');

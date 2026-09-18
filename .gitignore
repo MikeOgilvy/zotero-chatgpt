@@ -4,7 +4,7 @@ node_modules/
 coverage/
 .worktrees/
 .superpowers/
-.zcr-dev/
+.zotero-chatgpt-dev/
 .DS_Store
 *.log
 .env

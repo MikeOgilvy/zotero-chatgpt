@@ -17,7 +17,7 @@ function readerDocument(): Document {
 function setup(options: { width?: number; available?: number } = {}) {
   const doc = readerDocument();
   const { dock } = mountReaderDock(doc)!;
-  const resizer = dock.querySelector<HTMLElement>('[data-zcr-resizer]')!;
+  const resizer = dock.querySelector<HTMLElement>('[data-zchatgpt-resizer]')!;
   let width = options.width ?? 400;
   let available = options.available ?? 1440;
   applyDockWidth(doc, width);

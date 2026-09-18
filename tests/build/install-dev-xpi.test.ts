@@ -28,7 +28,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
-const SUBJECT_ID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
+const SUBJECT_ID = '{90909501-7b5b-4985-9f55-566e9890746c}';
 const temporaryDirectories: string[] = [];
 let fixtureSource = '';
 
@@ -44,7 +44,7 @@ function makeDeps(
 }
 
 async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), 'zcr-dev-xpi-test-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'zotero-chatgpt-dev-xpi-test-'));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -185,7 +185,9 @@ describe('process and open-file parsing', () => {
   });
 
   it('finds a running profile from ps only for zotero lines naming that profile', () => {
-    const profile = '/tmp/zcr-dev/profile';
+    // The parser treats the substring "zotero" anywhere in a `ps` line as the Zotero signal, so this
+    // synthetic profile path must not contain it; otherwise the "other app" line below would match.
+    const profile = '/tmp/zchatgpt-dev/profile';
     const output = [
       '    1 /sbin/launchd',
       '123 /Applications/Zotero.app/Contents/MacOS/zotero',
@@ -228,7 +230,7 @@ describe('local plan and install against a temporary profile', () => {
     expect(planned.lever.state).toBe('armed');
     expect(await readFile(installedPath)).toEqual(await readFile(previousXpi));
     await expect(stat(path.join(profile, 'user.js'))).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(stat(`${installedPath}.zcr-install.json`)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(`${installedPath}.zchatgpt-install.json`)).rejects.toMatchObject({ code: 'ENOENT' });
 
     const installed = ok(await run(['install', '--profile', profile, '--xpi', artifactXpi], makeDeps()));
     expect(installed.ok).toBe(true);
@@ -243,7 +245,7 @@ describe('local plan and install against a temporary profile', () => {
       'user_pref("extensions.startupScanScopes", 1);',
     );
 
-    const record = JSON.parse(await readFile(`${installedPath}.zcr-install.json`, 'utf8')) as {
+    const record = JSON.parse(await readFile(`${installedPath}.zchatgpt-install.json`, 'utf8')) as {
       addonId: string;
       artifactVersion: string;
       previous: { version: string; sha256: string } | null;
@@ -401,7 +403,7 @@ describe('measurement and rollback on a temporary profile', () => {
     expect(await sha256(installedPath)).toBe(await sha256(previousXpi));
     expect(rolled.installedSha256).toBe(await sha256(previousXpi));
 
-    const backups = (await readdir(path.join(profile, 'extensions'))).filter((name) => name.includes('.zcr-bak-'));
+    const backups = (await readdir(path.join(profile, 'extensions'))).filter((name) => name.includes('.zchatgpt-bak-'));
     expect(backups).toHaveLength(2);
     const outgoingBackup = backups.find((name) => name.endsWith('-0.4.0a4'));
     expect(outgoingBackup).toBeDefined();

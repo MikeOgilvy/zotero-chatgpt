@@ -115,7 +115,7 @@ const COPY = {
   sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
   continueWithPdf: 'Continue with current PDF',
   // Context coverage disclosure on the composer ring. Every string here is user-facing copy awaiting
-  // unification into `ui-locale.ts`; the static ones carry `data-zcr-ui="true"` so `mountUILocale`
+  // unification into `ui-locale.ts`; the static ones carry `data-zchatgpt-ui="true"` so `mountUILocale`
   // picks them up the moment the keys exist. The dynamic ones are listed for the coordinator too.
   contextDetail: 'Context supplied to the last request',
   contextDetailMode: 'Mode',
@@ -278,7 +278,7 @@ function pageSetLabel(indexes: number[]): string {
  * The last request's concrete context report, rendered for the ring's hover/focus disclosure. Every
  * field comes from {@link ContextReport} exactly as the planner recorded it: nothing is re-derived,
  * and a field the report leaves unknown is shown as unknown rather than guessed. Every label and
- * value carries `data-zcr-ui="true"` so `mountUILocale` translates the phrasing: the labels have
+ * value carries `data-zchatgpt-ui="true"` so `mountUILocale` translates the phrasing: the labels have
  * `ui-locale.ts` keys, and the value templates that embed counts have `progress()` patterns that
  * carry the numbers through verbatim. The reason line is deliberately unmarked — it is the planner's
  * recorded explanation, i.e. data, and is never rewritten on screen.
@@ -290,14 +290,14 @@ function contextDetailNodes(doc: Document, report: ContextReport): HTMLElement {
     return element;
   };
   const line = (label: string, value: string) => {
-    const row = node('p', 'zcr-context-detail');
-    const name = node('span', 'zcr-context-detail-label', label); name.setAttribute('data-zcr-ui', 'true');
-    const text = node('span', 'zcr-context-detail-value', value); text.setAttribute('data-zcr-ui', 'true');
+    const row = node('p', 'zchatgpt-context-detail');
+    const name = node('span', 'zchatgpt-context-detail-label', label); name.setAttribute('data-zchatgpt-ui', 'true');
+    const text = node('span', 'zchatgpt-context-detail-value', value); text.setAttribute('data-zchatgpt-ui', 'true');
     row.append(name, doc.createTextNode(' '), text);
     return row;
   };
-  const body = node('div', 'zcr-context-details-body');
-  const title = node('p', 'zcr-context-details-title', COPY.contextDetail); title.setAttribute('data-zcr-ui', 'true');
+  const body = node('div', 'zchatgpt-context-details-body');
+  const title = node('p', 'zchatgpt-context-details-title', COPY.contextDetail); title.setAttribute('data-zchatgpt-ui', 'true');
   const mode = report.mode === 'full' ? COPY.contextDetailModeFull : report.mode === 'focused' ? COPY.contextDetailModeFocused : COPY.contextDetailModeMultiPass;
   const windowKnown = report.capacity !== null;
   const allowanceKnown = report.textBudgetTokens !== null;
@@ -306,9 +306,9 @@ function contextDetailNodes(doc: Document, report: ContextReport): HTMLElement {
   if (report.selectedPages.length < report.totalPages) body.append(line(COPY.contextDetailPageSet, pageSetLabel(report.selectedPages)));
   body.append(line(COPY.contextDetailWindow, windowKnown ? COPY.contextDetailWindowValue(report.capacity!, report.provenance === 'pinned-catalog' ? 'pinned-catalog' : 'runtime-reported') : COPY.contextDetailWindowUnknown));
   body.append(line(COPY.contextDetailAllowance, allowanceKnown ? COPY.contextDetailAllowanceValue(report.textBudgetTokens!) : COPY.contextDetailAllowanceUnknown));
-  if (!allowanceKnown || report.provenance === 'unknown') { const noFit = node('p', 'zcr-context-detail zcr-context-detail-nofit', COPY.contextDetailNoFit); noFit.setAttribute('data-zcr-ui', 'true'); body.append(noFit); }
-  const coverage = node('p', 'zcr-context-detail-label', COPY.contextDetailCoverage); coverage.setAttribute('data-zcr-ui', 'true');
-  body.append(coverage, node('p', 'zcr-context-detail-reason', report.reason));
+  if (!allowanceKnown || report.provenance === 'unknown') { const noFit = node('p', 'zchatgpt-context-detail zchatgpt-context-detail-nofit', COPY.contextDetailNoFit); noFit.setAttribute('data-zchatgpt-ui', 'true'); body.append(noFit); }
+  const coverage = node('p', 'zchatgpt-context-detail-label', COPY.contextDetailCoverage); coverage.setAttribute('data-zchatgpt-ui', 'true');
+  body.append(coverage, node('p', 'zchatgpt-context-detail-reason', report.reason));
   return body;
 }
 interface HistoryRowSource {
@@ -332,8 +332,8 @@ export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentit
     if (className) node.className = className;
     return node;
   };
-  const root = element('section', '', 'zcr-sidebar zcr-paper');
-  root.dataset.zcrSidebar = '';
+  const root = element('section', '', 'zchatgpt-sidebar zchatgpt-paper');
+  root.dataset.zchatgptSidebar = '';
   root.setAttribute('aria-label', COPY.paneLabel);
   root.dataset.attachmentKey = identity.key;
   root.dataset.libraryId = String(identity.libraryID);
@@ -349,7 +349,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   // View actions own a slot separate from `state.message`: a presenter update must not erase a
   // view failure, and a view failure must never be reported as conversation state.
   const reportViewMessage = (message: string) => {
-    const status = root.querySelector<HTMLElement>('[data-zcr-view-error]');
+    const status = root.querySelector<HTMLElement>('[data-zchatgpt-view-error]');
     if (status) { status.textContent = message; status.hidden = false; }
   };
   /**
@@ -366,7 +366,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     return VIEW_ACTION_FAILED;
   };
   const reportViewError = (error?: unknown) => reportViewMessage(actionFailure(error));
-  const viewId = `zcr-chat-${++viewSerial}`;
+  const viewId = `zchatgpt-chat-${++viewSerial}`;
   // A cited page re-opens through the same frozen-revision navigation as the PDF context panel.
   // Without an opener, bound citations stay inert (no external launch) and surface a constant status.
   const openAnswerSource = async (source: AnswerSource, pageIndex: number, quote: string | null): Promise<SourceOpenOutcome> => {
@@ -388,9 +388,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     svg.append(path);
     return svg;
   };
-  const button = (label: string, action: string, onClick: () => void, glyph?: keyof typeof ICONS, className = 'zcr-icon-button') => {
-    const node = el('button', glyph ? className : 'zcr-button', glyph ? '' : label);
-    node.type = 'button'; node.dataset.zcrAction = action;
+  const button = (label: string, action: string, onClick: () => void, glyph?: keyof typeof ICONS, className = 'zchatgpt-icon-button') => {
+    const node = el('button', glyph ? className : 'zchatgpt-button', glyph ? '' : label);
+    node.type = 'button'; node.dataset.zchatgptAction = action;
     node.setAttribute('aria-label', label); node.title = label;
     if (glyph) node.append(icon(glyph));
     node.addEventListener('click', onClick);
@@ -402,14 +402,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const view = doc.defaultView;
     const previous = copyTimers.get(trigger);
     if (previous !== undefined) view?.clearTimeout(previous);
-    trigger.dataset.zcrCopied = 'true';
+    trigger.dataset.zchatgptCopied = 'true';
     trigger.setAttribute('aria-label', COPY.copied); trigger.title = COPY.copied;
-    const label = trigger.querySelector<HTMLElement>('[data-zcr-copy-label]');
+    const label = trigger.querySelector<HTMLElement>('[data-zchatgpt-copy-label]');
     if (label) label.textContent = COPY.copied;
     if (!view) return;
     copyTimers.set(trigger, view.setTimeout(() => {
       copyTimers.delete(trigger);
-      delete trigger.dataset.zcrCopied;
+      delete trigger.dataset.zchatgptCopied;
       trigger.setAttribute('aria-label', COPY.copy); trigger.title = COPY.copy;
       if (label) label.textContent = COPY.copy;
     }, 1600));
@@ -423,22 +423,22 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   // copy affordance never scrolls away with the code.
   const enhanceCodeBlocks = (host: HTMLElement) => {
     for (const pre of [...host.querySelectorAll('pre')]) {
-      const wrapper = el('div', 'zcr-code-block');
+      const wrapper = el('div', 'zchatgpt-code-block');
       pre.replaceWith(wrapper); wrapper.append(pre);
       const source = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
       const copy = button(COPY.copy, 'copy-code', () => copyText(source, copy));
-      copy.classList.add('zcr-code-copy');
+      copy.classList.add('zchatgpt-code-copy');
       wrapper.prepend(copy);
     }
     for (const table of [...host.querySelectorAll('table')]) {
-      if (table.parentElement?.classList.contains('zcr-table-block')) continue;
-      const wrapper = el('div', 'zcr-table-block');
+      if (table.parentElement?.classList.contains('zchatgpt-table-block')) continue;
+      const wrapper = el('div', 'zchatgpt-table-block');
       table.replaceWith(wrapper); wrapper.append(table);
     }
   };
-  root.querySelector('[data-zcr-chat]')?.remove();
-  const chat = el('section', 'zcr-chat'); chat.dataset.zcrChat = '';
-  const chrome = el('div', 'zcr-chrome');
+  root.querySelector('[data-zchatgpt-chat]')?.remove();
+  const chat = el('section', 'zchatgpt-chat'); chat.dataset.zchatgptChat = '';
+  const chrome = el('div', 'zchatgpt-chrome');
   /**
    * Cursor-style agent tabs live in the chrome: every open chat is a named tab, the unbound composer
    * is a tab, and the selected tab carries the close cross. On first open — no named tab yet — that
@@ -448,32 +448,32 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    * destructive remove lives on the history rows. When the close leaves no chat at all for this
    * attachment, the reader collapses its whole dock through the reader's own close path.
    */
-  const panes = el('div', 'zcr-panes');
-  panes.dataset.zcrPanes = '';
+  const panes = el('div', 'zchatgpt-panes');
+  panes.dataset.zchatgptPanes = '';
   panes.setAttribute('role', 'tablist');
   panes.setAttribute('aria-label', COPY.openChats);
   const paneNodes = new Map<string, HTMLElement>();
   /** The selected tab's title control; the rename popover hangs off it. */
   let renameTrigger: HTMLElement | null = null;
-  const contextSource = el('div', 'zcr-chrome-source');
-  contextSource.dataset.zcrContextSource = '';
+  const contextSource = el('div', 'zchatgpt-chrome-source');
+  contextSource.dataset.zchatgptContextSource = '';
   // The paper's declared metadata is still read in the background and frozen into every request
   // (`presenter.paperIdentity()`), but it is deliberately not written out on screen: the owner asked
   // for a silent read, not a card above the transcript.
   // The local read of this PDF is the only on-screen evidence that the article was read at all, so it
   // reports counts from the prepared document rather than a spinner.
-  const documentStatus = el('p', 'zcr-document-status');
-  documentStatus.dataset.zcrDocumentStatus = '';
+  const documentStatus = el('p', 'zchatgpt-document-status');
+  documentStatus.dataset.zchatgptDocumentStatus = '';
   documentStatus.hidden = true;
   // The first outbound scope notice stays even though the PDF coverage panel is gone: it is the only
   // way to acknowledge the disclosure, and without it an explain that needs consent can never send.
-  const scopeNotice = el('div', 'zcr-context-disclosure');
-  scopeNotice.dataset.zcrContextDisclosure = '';
+  const scopeNotice = el('div', 'zchatgpt-context-disclosure');
+  scopeNotice.dataset.zchatgptContextDisclosure = '';
   const scopeNoticeCopy = el('p', '', COPY.sendScope);
   const acknowledgeScope = button(COPY.continueWithPdf, 'acknowledge-context', () => { presenter.acknowledgeContext(); });
   scopeNotice.append(scopeNoticeCopy, acknowledgeScope);
   scopeNotice.hidden = true; acknowledgeScope.hidden = true;
-  const actions = el('div', 'zcr-chrome-actions');
+  const actions = el('div', 'zchatgpt-chrome-actions');
   const fresh = button(COPY.newChat, 'new-conversation', () => { void presenter.newConversation(); }, 'plus');
   const historyBtn = button(COPY.history, 'history', () => { toggleHistory(); }, 'clock');
   historyBtn.setAttribute('aria-haspopup', 'dialog');
@@ -483,7 +483,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   chrome.append(panes, actions);
   // Renaming hangs off the selected tab's title, the same place the owner already looks for the
   // chat's name. The form is a small popover under the chrome.
-  const renameForm = el('div', 'zcr-rename-form'); renameForm.dataset.zcrRenameForm = ''; renameForm.hidden = true;
+  const renameForm = el('div', 'zchatgpt-rename-form'); renameForm.dataset.zchatgptRenameForm = ''; renameForm.hidden = true;
   renameForm.id = `${viewId}-rename`;
   renameForm.setAttribute('role', 'dialog');
   renameForm.setAttribute('aria-label', COPY.renameChat);
@@ -496,28 +496,28 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   });
   renameForm.append(renameInput, saveName);
   renameForm.append(renameInput, saveName);
-  const historyPanel = el('div', 'zcr-history-panel');
+  const historyPanel = el('div', 'zchatgpt-history-panel');
   historyPanel.id = `${viewId}-history`;
-  historyPanel.dataset.zcrHistory = '';
+  historyPanel.dataset.zchatgptHistory = '';
   historyPanel.hidden = true;
   historyPanel.setAttribute('role', 'dialog');
   historyPanel.setAttribute('aria-label', COPY.history);
-  const historySearch = el('input', 'zcr-history-search');
+  const historySearch = el('input', 'zchatgpt-history-search');
   historySearch.type = 'search';
-  historySearch.dataset.zcrHistorySearch = '';
+  historySearch.dataset.zchatgptHistorySearch = '';
   historySearch.placeholder = COPY.searchChats;
   historySearch.setAttribute('aria-label', COPY.history);
-  const historyList = el('div', 'zcr-history-list');
+  const historyList = el('div', 'zchatgpt-history-list');
   historyList.setAttribute('role', 'list');
   historyPanel.append(historySearch, historyList);
-  const status = el('p', 'zcr-status-line'); status.setAttribute('role', 'status');
+  const status = el('p', 'zchatgpt-status-line'); status.setAttribute('role', 'status');
   // Honest elapsed time. The counter ticks only while a request is unsettled, freezes at the first
   // delivered text, and stops at the settle stamp. Missing timing shows an explicit unknown rather
   // than an invented duration: an idle local counter would wrongly imply this app is the wait when
   // the real delay can be upstream quota or queueing.
-  const requestTiming = el('p', 'zcr-request-timing'); requestTiming.dataset.zcrRequestTiming = ''; requestTiming.setAttribute('role', 'status'); requestTiming.hidden = true;
-  const requestTimingGlyph = el('span', 'zcr-request-timing-glyph'); requestTimingGlyph.setAttribute('aria-hidden', 'true'); requestTimingGlyph.append(icon('clock'));
-  const requestTimingText = el('span', 'zcr-request-timing-text'); requestTimingText.dataset.zcrRequestTimingText = '';
+  const requestTiming = el('p', 'zchatgpt-request-timing'); requestTiming.dataset.zchatgptRequestTiming = ''; requestTiming.setAttribute('role', 'status'); requestTiming.hidden = true;
+  const requestTimingGlyph = el('span', 'zchatgpt-request-timing-glyph'); requestTimingGlyph.setAttribute('aria-hidden', 'true'); requestTimingGlyph.append(icon('clock'));
+  const requestTimingText = el('span', 'zchatgpt-request-timing-text'); requestTimingText.dataset.zchatgptRequestTimingText = '';
   requestTiming.append(requestTimingGlyph, requestTimingText);
   let timingInterval: number | null = null;
   let paintedTiming = '';
@@ -550,17 +550,17 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (described.ticking) { if (timingInterval === null) timingInterval = doc.defaultView?.setInterval(() => paintTiming(latestViewState), 1000) ?? null; }
     else clearTimingInterval();
   };
-  const auth = el('div', 'zcr-auth');
+  const auth = el('div', 'zchatgpt-auth');
   const login = button(COPY.login, 'login', () => { void presenter.login(); });
   const cancelLogin = button(COPY.cancelLogin, 'cancel-login', () => { void presenter.cancelLogin(); });
   const retry = button(COPY.retry, 'retry', () => { void presenter.retry(); });
   auth.append(login, cancelLogin, retry);
-  const alert = el('p', 'zcr-error'); alert.setAttribute('role', 'alert'); alert.hidden = true;
-  const viewError = el('p', 'zcr-error zcr-view-error'); viewError.dataset.zcrViewError = ''; viewError.setAttribute('role', 'alert'); viewError.hidden = true;
-  const transcript = el('div', 'zcr-transcript');
-  transcript.dataset.zcrTranscript = '';
-  const messages = el('div', 'zcr-messages'); messages.dataset.zcrMessages = '';
-  const taskPanel = el('div', 'zcr-tasks'); taskPanel.dataset.zcrTasks = '';
+  const alert = el('p', 'zchatgpt-error'); alert.setAttribute('role', 'alert'); alert.hidden = true;
+  const viewError = el('p', 'zchatgpt-error zchatgpt-view-error'); viewError.dataset.zchatgptViewError = ''; viewError.setAttribute('role', 'alert'); viewError.hidden = true;
+  const transcript = el('div', 'zchatgpt-transcript');
+  transcript.dataset.zchatgptTranscript = '';
+  const messages = el('div', 'zchatgpt-messages'); messages.dataset.zchatgptMessages = '';
+  const taskPanel = el('div', 'zchatgpt-tasks'); taskPanel.dataset.zchatgptTasks = '';
   const taskView = mountTaskView(taskPanel, {
     approveSelected: (id, selected, choices) => presenter.approveTask(id, selected, choices),
     cancel: id => presenter.cancelTask(id), reconcile: id => presenter.reconcileTask(id), undo: id => presenter.undoTask(id),
@@ -575,51 +575,51 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let sticking = true;
   const newContent = button(COPY.newContent, 'new-content', () => { hasNewContent = false; messages.scrollTop = messages.scrollHeight; newContent.hidden = true; });
   newContent.hidden = true;
-  newContent.classList.add('zcr-new-content');
+  newContent.classList.add('zchatgpt-new-content');
   messages.addEventListener('scroll', () => {
     if (isNearBottom()) { hasNewContent = false; newContent.hidden = true; }
     presenter.setScrollTop(messages.scrollTop);
   });
   transcript.append(messages, newContent);
-  const draft = el('div', 'zcr-draft');
-  const draftCitations = el('div', 'zcr-draft-citations'); draftCitations.dataset.zcrDraftCitations = '';
-  const draftImages = el('div', 'zcr-draft-images'); draftImages.dataset.zcrDraftImages = '';
-  const composer = el('div', 'zcr-composer'); composer.dataset.zcrComposer = '';
-  const composerContext = el('div', 'zcr-composer-context'); composerContext.dataset.zcrComposerContext = '';
+  const draft = el('div', 'zchatgpt-draft');
+  const draftCitations = el('div', 'zchatgpt-draft-citations'); draftCitations.dataset.zchatgptDraftCitations = '';
+  const draftImages = el('div', 'zchatgpt-draft-images'); draftImages.dataset.zchatgptDraftImages = '';
+  const composer = el('div', 'zchatgpt-composer'); composer.dataset.zchatgptComposer = '';
+  const composerContext = el('div', 'zchatgpt-composer-context'); composerContext.dataset.zchatgptComposerContext = '';
   composerContext.append(draftCitations, draftImages);
-  const input = el('textarea', 'zcr-input'); input.rows = 2; input.placeholder = COPY.askPlaceholder; input.setAttribute('aria-label', COPY.question); input.dataset.zcrInput = '';
-  const bar = el('div', 'zcr-composer-bar');
-  const leading = el('div', 'zcr-composer-leading'); leading.dataset.zcrComposerLeading = '';
-  const trailing = el('div', 'zcr-composer-trailing');
-  const picker = el('button', 'zcr-picker');
+  const input = el('textarea', 'zchatgpt-input'); input.rows = 2; input.placeholder = COPY.askPlaceholder; input.setAttribute('aria-label', COPY.question); input.dataset.zchatgptInput = '';
+  const bar = el('div', 'zchatgpt-composer-bar');
+  const leading = el('div', 'zchatgpt-composer-leading'); leading.dataset.zchatgptComposerLeading = '';
+  const trailing = el('div', 'zchatgpt-composer-trailing');
+  const picker = el('button', 'zchatgpt-picker');
   picker.type = 'button';
-  picker.dataset.zcrAction = 'picker';
-  picker.dataset.zcrPicker = '';
+  picker.dataset.zchatgptAction = 'picker';
+  picker.dataset.zchatgptPicker = '';
   picker.setAttribute('aria-label', COPY.settings);
   picker.title = COPY.settings;
   picker.setAttribute('aria-haspopup', 'menu');
   picker.setAttribute('aria-expanded', 'false');
   picker.setAttribute('aria-controls', `${viewId}-models`);
   picker.addEventListener('click', () => { togglePicker(); });
-  const send = button(COPY.send, 'send', () => { void presenter.send(); }, 'send', 'zcr-icon-button zcr-send');
-  const stop = button(COPY.stop, 'stop', () => { void presenter.cancel(); }, 'stop', 'zcr-icon-button zcr-send');
+  const send = button(COPY.send, 'send', () => { void presenter.send(); }, 'send', 'zchatgpt-icon-button zchatgpt-send');
+  const stop = button(COPY.stop, 'stop', () => { void presenter.cancel(); }, 'stop', 'zchatgpt-icon-button zchatgpt-send');
   const queue = button('Queue question', 'queue', () => { void presenter.queueDraft(); }, 'plus'); queue.hidden = true;
   const contextRing = mountContextRing(trailing);
   trailing.append(picker, queue, send, stop);
   bar.append(leading, trailing);
-  const menu = el('div', 'zcr-picker-menu'); menu.dataset.zcrPickerMenu = ''; menu.hidden = true; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', COPY.settings);
+  const menu = el('div', 'zchatgpt-picker-menu'); menu.dataset.zchatgptPickerMenu = ''; menu.hidden = true; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', COPY.settings);
   menu.id = `${viewId}-models`;
   // The ring's coverage disclosure sits with the other composer popovers: anchored above the card,
   // hidden until hover or focus, and carrying no interactive content.
   composer.append(composerContext, input, bar, menu, contextRing.details);
   draft.append(composer);
-  const main = el('div', 'zcr-chat-main');
+  const main = el('div', 'zchatgpt-chat-main');
   main.append(historyPanel, status, requestTiming, auth, alert, viewError, transcript, draft);
   /**
    * One transcript fills the remaining dock height. Cursor-style tabs switch chats; the dock never
    * splits into two transcripts side by side.
    */
-  const columns = el('div', 'zcr-columns');
+  const columns = el('div', 'zchatgpt-columns');
   columns.append(main);
   chat.append(chrome, renameForm, contextSource, documentStatus, scopeNotice, columns); root.append(chat);
   const localizer = mountUILocale(root);
@@ -630,56 +630,56 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   let lastWorkspace: PresenterState['workspace'] = null; let workspaceDraftKey = ''; let tasksKey = '';
   // Codex keeps exactly one plus button at the composer's bottom-left. Every attachment route
   // lives behind it; the reference/skill chooser stays reachable by typing '@' or '/'.
-  const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zcr-icon-button zcr-plus');
-  plus.dataset.zcrPlus = '';
+  const plus = button(COPY.attach, 'composer-plus', () => { togglePlus(); }, 'plus', 'zchatgpt-icon-button zchatgpt-plus');
+  plus.dataset.zchatgptPlus = '';
   plus.setAttribute('aria-haspopup', 'dialog'); plus.setAttribute('aria-expanded', 'false'); plus.setAttribute('aria-controls', `${viewId}-plus`);
   // A labelled, non-modal dialog rather than `role="menu"`: the popover holds plain action rows, and
   // neither plain buttons nor an `<input>` are valid children of a menu.
-  const plusMenu = el('div', 'zcr-plus-menu'); plusMenu.dataset.zcrPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'dialog'); plusMenu.setAttribute('aria-label', COPY.attach);
+  const plusMenu = el('div', 'zchatgpt-plus-menu'); plusMenu.dataset.zchatgptPlusMenu = ''; plusMenu.id = `${viewId}-plus`; plusMenu.hidden = true; plusMenu.setAttribute('role', 'dialog'); plusMenu.setAttribute('aria-label', COPY.attach);
   // Codex-style grouped rows: a small heading, a title and a supporting description. The accessible
   // name stays the title, never the description.
   const plusRow = (title: string, description: string, action: string, onClick: () => void) => {
-    const row = el('button', 'zcr-plus-row');
-    row.type = 'button'; row.dataset.zcrAction = action;
-    row.append(el('span', 'zcr-plus-row-title', title), el('span', 'zcr-plus-row-description', description));
+    const row = el('button', 'zchatgpt-plus-row');
+    row.type = 'button'; row.dataset.zchatgptAction = action;
+    row.append(el('span', 'zchatgpt-plus-row-title', title), el('span', 'zchatgpt-plus-row-description', description));
     row.setAttribute('aria-label', title); row.title = title;
     row.addEventListener('click', onClick);
     return row;
   };
   // The dialog holds plain action rows only: a page-number field would be an invalid child, and the
   // owner removed the one-page capture route that needed it.
-  const attachGroup = el('div', 'zcr-plus-group');
+  const attachGroup = el('div', 'zchatgpt-plus-group');
   attachGroup.append(
-    el('div', 'zcr-plus-heading', COPY.attachHeading),
+    el('div', 'zchatgpt-plus-heading', COPY.attachHeading),
     plusRow(COPY.attachFile, COPY.attachFileHint, 'pick-file', () => { togglePlus(false); void presenter.pickFile().catch(reportViewError); }),
   );
-  const referenceGroup = el('div', 'zcr-plus-group');
+  const referenceGroup = el('div', 'zchatgpt-plus-group');
   referenceGroup.append(
-    el('div', 'zcr-plus-heading', COPY.referenceHeading),
+    el('div', 'zchatgpt-plus-heading', COPY.referenceHeading),
     plusRow(COPY.addReference, COPY.addReferenceHint, 'composer-references', () => { togglePlus(false); workspaceView?.openCommands(); }),
   );
   // References and skills are two different affordances, so they get two headings and two rows: the
   // reference row opens the '@' chooser and the skill row opens the '/' chooser.
-  const skillGroup = el('div', 'zcr-plus-group');
+  const skillGroup = el('div', 'zchatgpt-plus-group');
   skillGroup.append(
-    el('div', 'zcr-plus-heading', COPY.skillHeading),
+    el('div', 'zchatgpt-plus-heading', COPY.skillHeading),
     plusRow(COPY.addSkill, COPY.addSkillHint, 'composer-skill', () => { togglePlus(false); workspaceView?.openSkills(); }),
   );
   plusMenu.append(attachGroup, referenceGroup, skillGroup);
   composer.append(plusMenu);
   leading.append(plus);
-  const acquisition = el('label', 'zcr-acquisition-target', 'Save literature to'); acquisition.hidden = true;
-  const collection = el('select'); collection.dataset.zcrCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
+  const acquisition = el('label', 'zchatgpt-acquisition-target', 'Save literature to'); acquisition.hidden = true;
+  const collection = el('select'); collection.dataset.zchatgptCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
   collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });
   let requestedCollections = false;
-  const imagePreview = el('div', 'zcr-image-preview'); imagePreview.dataset.zcrImagePreview = ''; imagePreview.hidden = true;
+  const imagePreview = el('div', 'zchatgpt-image-preview'); imagePreview.dataset.zchatgptImagePreview = ''; imagePreview.hidden = true;
   imagePreview.setAttribute('role', 'dialog'); imagePreview.setAttribute('aria-modal', 'true'); imagePreview.setAttribute('aria-label', 'Image preview');
   chat.append(imagePreview);
   let imageTrigger: HTMLElement | null = null;
   const closeImage = () => { imagePreview.hidden = true; imagePreview.replaceChildren(); imageTrigger?.focus(); };
   const previewImage = (image: ImageAttachment, trigger?: HTMLElement) => {
     imageTrigger = trigger ?? doc.activeElement as HTMLElement | null;
-    const header = el('div', 'zcr-image-preview-header');
+    const header = el('div', 'zchatgpt-image-preview-header');
     const caption = image.origin?.kind === 'generated' ? `Generated image${image.origin.model ? ` · requested with ${image.origin.model}` : ''}` : image.name;
     const close = button('Close image preview', 'close-image-preview', closeImage, 'remove');
     header.append(el('span', '', caption), close);
@@ -700,7 +700,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
   });
   const imageCard = (image: ImageAttachment) => {
-    const card = el('figure', 'zcr-image-card'); card.dataset.zcrImage = image.id;
+    const card = el('figure', 'zchatgpt-image-card'); card.dataset.zchatgptImage = image.id;
     const thumbnail = el('img'); thumbnail.src = image.dataUrl; thumbnail.alt = image.name; thumbnail.loading = 'lazy';
     const open = button('Preview image', 'preview-image', () => previewImage(image, open));
     // An image grows the transcript after the last render already scrolled: re-pin only if it was pinned.
@@ -932,7 +932,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   // composer is editing. Enter or Space activates the focused chip through the same path as a click.
   panes.addEventListener('keydown', event => {
     if (isComposing(event)) return;
-    const items = [...panes.querySelectorAll<HTMLElement>('[data-zcr-pane-tab]')];
+    const items = [...panes.querySelectorAll<HTMLElement>('[data-zchatgpt-pane-tab]')];
     if (!items.length) return;
     const current = items.findIndex(tab => tab === doc.activeElement || tab.contains(doc.activeElement));
     if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -942,7 +942,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       return;
     }
     if (event.key !== 'Enter' && event.key !== ' ') return;
-    if ((event.target as Element | null)?.closest?.('[data-zcr-pane-close]')) return;
+    if ((event.target as Element | null)?.closest?.('[data-zchatgpt-pane-close]')) return;
     const tab = items[Math.max(current, 0)];
     if (!tab) return;
     event.preventDefault();
@@ -975,21 +975,21 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const filterRows = (rows: Iterable<HTMLElement>) => {
       let visible = 0;
       for (const row of rows) {
-        const hay = row.dataset.zcrHistoryLabel ?? '';
+        const hay = row.dataset.zchatgptHistoryLabel ?? '';
         const show = !query || hay.toLowerCase().includes(query);
         row.hidden = !show;
         if (show) visible++;
       }
       return visible;
     };
-    for (const group of historyList.querySelectorAll<HTMLElement>('[data-zcr-history-group]')) {
-      group.hidden = filterRows(group.querySelectorAll<HTMLElement>('.zcr-history-row')) === 0;
+    for (const group of historyList.querySelectorAll<HTMLElement>('[data-zchatgpt-history-group]')) {
+      group.hidden = filterRows(group.querySelectorAll<HTMLElement>('.zchatgpt-history-row')) === 0;
     }
   };
   const citationCard = (citation: Citation, removable: boolean) => {
-    const card = el('div', 'zcr-citation'); card.dataset.zcrCitation = citation.id;
-    const quote = el('blockquote', 'zcr-citation-text', citation.text.length > 240 ? `${[...citation.text].slice(0, 240).join('')}…` : citation.text);
-    const meta = el('div', 'zcr-citation-meta');
+    const card = el('div', 'zchatgpt-citation'); card.dataset.zchatgptCitation = citation.id;
+    const quote = el('blockquote', 'zchatgpt-citation-text', citation.text.length > 240 ? `${[...citation.text].slice(0, 240).join('')}…` : citation.text);
+    const meta = el('div', 'zchatgpt-citation-meta');
     meta.append(el('span', '', COPY.page(pageLabel(citation))));
     if (hooks.openCitation) meta.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(() => reportViewMessage(COPY.sourceOpenFailed)); }, 'source'));
     if (removable) meta.append(button(COPY.remove, 'remove-citation', () => { presenter.removeCitation(citation.id); }, 'remove'));
@@ -997,12 +997,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   /** One transcript message: text, attachments, and the hover/focus actions for the chat on screen. */
   const messageNode = (message: Message) => {
-    const article = el('article', 'zcr-message'); article.dataset.zcrMessage = message.id; article.dataset.role = message.role;
+    const article = el('article', 'zchatgpt-message'); article.dataset.zchatgptMessage = message.id; article.dataset.role = message.role;
     if (message.action) article.dataset.action = message.action;
     // Codex-like shape: the body holds the text bubble, the attachments and the hover/focus actions;
     // the author is implied by alignment, so there is no labelled header row.
-    const body = el('div', 'zcr-message-body');
-    const text = el('div', 'zcr-message-text'); text.dataset.zcrText = '';
+    const body = el('div', 'zchatgpt-message-body');
+    const text = el('div', 'zchatgpt-message-text'); text.dataset.zchatgptText = '';
     text.addEventListener('click', event => {
       const target = event.target as Element | null;
       const link = target?.closest?.('a[href]');
@@ -1010,21 +1010,21 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       event.preventDefault();
       const href = link.getAttribute('href'); if (href) hooks.openLink?.(href);
     });
-    const attachments = el('div', 'zcr-message-attachments'); attachments.dataset.zcrMessageAttachments = '';
+    const attachments = el('div', 'zchatgpt-message-attachments'); attachments.dataset.zchatgptMessageAttachments = '';
     const taskSummary = button('Review annotation suggestions', 'review-annotations', () => {
       const task = latestViewState.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId);
-      const card = task && [...taskPanel.querySelectorAll<HTMLDetailsElement>('[data-zcr-task-id]')].find(card => card.dataset.zcrTaskId === task.id);
+      const card = task && [...taskPanel.querySelectorAll<HTMLDetailsElement>('[data-zchatgpt-task-id]')].find(card => card.dataset.zchatgptTaskId === task.id);
       if (card) { card.open = true; card.scrollIntoView?.({ block: 'nearest' }); }
     }); taskSummary.hidden = true;
-    const actions = el('div', 'zcr-message-actions');
+    const actions = el('div', 'zchatgpt-message-actions');
     if (message.role === 'assistant') {
       const copyAnswer = button(COPY.copy, 'copy-answer', () => {
         const latest = presenter.snapshot().conversation?.messages.find(entry => entry.id === message.id);
         copyText(copyableAnswerText(latest?.text ?? message.text), copyAnswer);
       });
-      copyAnswer.classList.add('zcr-copy-answer');
-      const copyLabel = el('span', 'zcr-copy-label', COPY.copy);
-      copyLabel.dataset.zcrCopyLabel = '';
+      copyAnswer.classList.add('zchatgpt-copy-answer');
+      const copyLabel = el('span', 'zchatgpt-copy-label', COPY.copy);
+      copyLabel.dataset.zchatgptCopyLabel = '';
       copyAnswer.replaceChildren(icon('copy'), copyLabel);
       actions.append(copyAnswer);
     }
@@ -1034,10 +1034,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         if (message.role === 'assistant' && presenter.snapshot().conversation?.id !== previous) await presenter.send();
       }).catch(reportViewError);
     });
-    branch.classList.add('zcr-message-action'); actions.append(branch);
+    branch.classList.add('zchatgpt-message-action'); actions.append(branch);
     if (message.role === 'user') { const cancelQueued = button('Cancel queued question', 'cancel-queued', () => { void presenter.cancelQueuedRequest(message.requestId).catch(reportViewError); }); cancelQueued.hidden = true; actions.append(cancelQueued); }
     body.append(text, taskSummary, attachments, actions);
-    const meta = el('div', 'zcr-message-meta'); meta.dataset.zcrMeta = '';
+    const meta = el('div', 'zchatgpt-message-meta'); meta.dataset.zchatgptMeta = '';
     article.append(body, meta); return article;
   };
   let renderedConversationId: string | null = null;
@@ -1056,34 +1056,34 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   /** The text and attachments of one message in the chat on screen. */
   const paintBody = (node: HTMLElement, message: Message, rendered: RenderRecord, view: RenderView) => {
     const annotationTask = message.role === 'assistant' ? view.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId) : undefined;
-    const text = node.querySelector<HTMLElement>('[data-zcr-text]')!;
+    const text = node.querySelector<HTMLElement>('[data-zchatgpt-text]')!;
     const previous = rendered.get(message.id);
     if (!previous || previous.text !== message.text || previous.status !== message.status || previous.action !== message.action) {
       rendered.set(message.id, { text: message.text, status: message.status, action: message.action });
       if (message.role === 'assistant' && message.text) {
-        text.classList.add('zcr-rendered');
+        text.classList.add('zchatgpt-rendered');
         const fragment = renderAnswer(doc, message.text, { deferMath: message.status === 'streaming' || message.status === 'pending' });
         // Always run the pass, even with no sources: reserved citation links must be neutralized
-        // rather than left as external `zcr.invalid` URLs for the generic link handler to launch.
+        // rather than left as external `zchatgpt.invalid` URLs for the generic link handler to launch.
         linkAnswerSources(fragment, view.conversation ? answerSources(view.conversation, message) : [], openAnswerSource);
         text.replaceChildren(fragment);
         enhanceCodeBlocks(text);
       } else if (hiddenExplainText(message)) {
-        text.classList.remove('zcr-rendered');
+        text.classList.remove('zchatgpt-rendered');
         text.textContent = '';
       } else {
-        text.classList.remove('zcr-rendered');
+        text.classList.remove('zchatgpt-rendered');
         text.textContent = message.text;
       }
     }
     text.hidden = hiddenExplainText(message) || !!annotationTask;
-    const attachments = node.querySelector<HTMLElement>('[data-zcr-message-attachments]')!;
+    const attachments = node.querySelector<HTMLElement>('[data-zchatgpt-message-attachments]')!;
     const attachmentKey = [...message.citations.map(citation => citation.id), ...(message.images ?? []).map(image => image.id), ...(message.generatedImages ?? []).map(image => image.id), message.workflow?.skill?.revision ?? '', ...(message.references ?? []).map(reference => reference.id)].join(':');
     if (attachments.dataset.rendered !== attachmentKey) {
       attachments.dataset.rendered = attachmentKey;
       attachments.replaceChildren(...message.citations.map(citation => citationCard(citation, false)), ...[...(message.images ?? []), ...(message.generatedImages ?? [])].map(image => imageCard(image)));
-      if (message.workflow?.skill) attachments.append(el('span', 'zcr-message-reference', `/${message.workflow.skill.name} · v${message.workflow.skill.version}`));
-      for (const reference of message.references ?? []) attachments.append(el('span', 'zcr-message-reference', `${reference.kind === 'chat' ? '@chat' : reference.kind === 'file' ? '@file' : '@article'} · ${reference.label}`));
+      if (message.workflow?.skill) attachments.append(el('span', 'zchatgpt-message-reference', `/${message.workflow.skill.name} · v${message.workflow.skill.version}`));
+      for (const reference of message.references ?? []) attachments.append(el('span', 'zchatgpt-message-reference', `${reference.kind === 'chat' ? '@chat' : reference.kind === 'file' ? '@file' : '@article'} · ${reference.label}`));
     }
   };
   /**
@@ -1093,14 +1093,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    */
   const paintActions = (node: HTMLElement, message: Message, view: RenderView) => {
     const queued = view.queued?.has(message.requestId) === true;
-    const cancelQueued = node.querySelector<HTMLButtonElement>('[data-zcr-action="cancel-queued"]'); if (cancelQueued) cancelQueued.hidden = !queued;
+    const cancelQueued = node.querySelector<HTMLButtonElement>('[data-zchatgpt-action="cancel-queued"]'); if (cancelQueued) cancelQueued.hidden = !queued;
     const annotationTask = message.role === 'assistant' ? view.tasks.find(task => task.kind === 'annotations' && task.modelRequestId === message.requestId) : undefined;
-    const taskSummary = node.querySelector<HTMLButtonElement>('[data-zcr-action="review-annotations"]');
+    const taskSummary = node.querySelector<HTMLButtonElement>('[data-zchatgpt-action="review-annotations"]');
     if (taskSummary) {
       taskSummary.hidden = !annotationTask;
       if (annotationTask) taskSummary.textContent = `Review ${annotationTask.items.length} annotation suggestions`;
     }
-    const meta = node.querySelector<HTMLElement>('[data-zcr-meta]'); if (!meta) return;
+    const meta = node.querySelector<HTMLElement>('[data-zchatgpt-meta]'); if (!meta) return;
     const statusLabel = queued ? 'Queued' : message.role === 'assistant' ? STATUS_LABEL[message.status] : message.status === 'cancelled' ? 'Cancelled before sending' : '';
     const caption = settingsCaption(message.settings, view.models);
     const label = [statusLabel, caption].filter(Boolean).join(' · ');
@@ -1145,7 +1145,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       contextSource.dataset.rendered = sourceKey;
       if (!citation) contextSource.replaceChildren();
       else {
-        const line = el('div', 'zcr-context-citation');
+        const line = el('div', 'zchatgpt-context-citation');
         line.append(el('span', '', COPY.page(pageLabel(citation))));
         if (hooks.openCitation) line.append(button(COPY.returnToSource, 'open-citation', () => { void hooks.openCitation?.(citation).catch(() => reportViewMessage(COPY.sourceOpenFailed)); }, 'source'));
         contextSource.replaceChildren(line);
@@ -1181,21 +1181,21 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     for (const model of models) {
       let tab = paneNodes.get(model.id);
       if (!tab) {
-        tab = el('div', 'zcr-pane-tab');
+        tab = el('div', 'zchatgpt-pane-tab');
         tab.setAttribute('role', 'tab');
-        tab.dataset.zcrPaneTab = '';
-        tab.dataset.zcrConversationId = model.id;
+        tab.dataset.zchatgptPaneTab = '';
+        tab.dataset.zchatgptConversationId = model.id;
         tab.id = `${viewId}-pane-${model.id}`;
-        const label = el('span', model.localize ? 'zcr-pane-tab-new' : 'zcr-pane-tab-label');
-        label.dataset.zcrPaneLabel = '';
+        const label = el('span', model.localize ? 'zchatgpt-pane-tab-new' : 'zchatgpt-pane-tab-label');
+        label.dataset.zchatgptPaneLabel = '';
         const close = button(COPY.closeChat, 'close-conversation', () => {
           if (presenter.closeConversation()) hooks.closeDock?.();
-        }, 'remove', 'zcr-current-close');
-        close.dataset.zcrPaneClose = '';
+        }, 'remove', 'zchatgpt-current-close');
+        close.dataset.zchatgptPaneClose = '';
         tab.append(label, close);
         tab.addEventListener('click', event => {
-          if ((event.target as Element | null)?.closest?.('[data-zcr-pane-close]')) return;
-          const id = tab!.dataset.zcrConversationId ?? '';
+          if ((event.target as Element | null)?.closest?.('[data-zchatgpt-pane-close]')) return;
+          const id = tab!.dataset.zchatgptConversationId ?? '';
           const active = tab!.getAttribute('aria-selected') === 'true';
           if (id === NEW_CHAT_TAB_ID) {
             if (!active) void presenter.newConversation();
@@ -1207,14 +1207,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         paneNodes.set(model.id, tab);
       }
       const active = model.id === (state.conversation?.id ?? NEW_CHAT_TAB_ID);
-      const label = tab.querySelector<HTMLElement>('[data-zcr-pane-label]')!;
-      const close = tab.querySelector<HTMLButtonElement>('[data-zcr-pane-close]')!;
-      label.className = model.localize ? 'zcr-pane-tab-new' : 'zcr-pane-tab-label';
-      label.dataset.zcrPaneLabel = '';
+      const label = tab.querySelector<HTMLElement>('[data-zchatgpt-pane-label]')!;
+      const close = tab.querySelector<HTMLButtonElement>('[data-zchatgpt-pane-close]')!;
+      label.className = model.localize ? 'zchatgpt-pane-tab-new' : 'zchatgpt-pane-tab-label';
+      label.dataset.zchatgptPaneLabel = '';
       if (model.localize) {
-        if (label.dataset.zcrUiCopy !== COPY.newChat) { label.dataset.zcrUiCopy = COPY.newChat; label.textContent = COPY.newChat; }
+        if (label.dataset.zchatgptUiCopy !== COPY.newChat) { label.dataset.zchatgptUiCopy = COPY.newChat; label.textContent = COPY.newChat; }
       } else {
-        delete label.dataset.zcrUiCopy;
+        delete label.dataset.zchatgptUiCopy;
         if (label.textContent !== model.label) label.textContent = model.label;
       }
       if (tab.title !== model.title) tab.title = model.title;
@@ -1224,16 +1224,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       if (tab.tabIndex !== stop) tab.tabIndex = stop;
       close.hidden = !active;
       if (active) {
-        tab.dataset.zcrCurrentTitle = '';
+        tab.dataset.zchatgptCurrentTitle = '';
         if (model.conversation) {
-          tab.dataset.zcrAction = 'rename-conversation';
+          tab.dataset.zchatgptAction = 'rename-conversation';
           tab.setAttribute('aria-haspopup', 'dialog');
           tab.setAttribute('aria-expanded', renameForm.hidden ? 'false' : 'true');
           tab.setAttribute('aria-controls', `${viewId}-rename`);
           tab.setAttribute('aria-label', `${COPY.renameChat}: ${model.label}`);
           selected = tab;
         } else {
-          delete tab.dataset.zcrAction;
+          delete tab.dataset.zchatgptAction;
           tab.removeAttribute('aria-haspopup');
           tab.removeAttribute('aria-expanded');
           tab.removeAttribute('aria-controls');
@@ -1241,8 +1241,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
           selected = tab;
         }
       } else {
-        delete tab.dataset.zcrCurrentTitle;
-        tab.dataset.zcrAction = 'select-pane';
+        delete tab.dataset.zchatgptCurrentTitle;
+        tab.dataset.zchatgptAction = 'select-pane';
         tab.removeAttribute('aria-haspopup');
         tab.removeAttribute('aria-expanded');
         tab.removeAttribute('aria-controls');
@@ -1257,21 +1257,21 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     else { transcript.removeAttribute('role'); transcript.removeAttribute('aria-labelledby'); }
   };
   const historyRow = (source: HistoryRowSource) => {
-    const row = el('div', 'zcr-history-row');
+    const row = el('div', 'zchatgpt-history-row');
     row.setAttribute('role', 'listitem');
     // The local search fallback hides rows by this label, so it keeps title + paper + preview.
-    row.dataset.zcrHistoryLabel = [source.title, source.paperTitle, source.preview].filter(Boolean).join(' ');
+    row.dataset.zchatgptHistoryLabel = [source.title, source.paperTitle, source.preview].filter(Boolean).join(' ');
     if (source.current) row.dataset.current = '';
-    const choice = el('button', 'zcr-history-item');
+    const choice = el('button', 'zchatgpt-history-item');
     choice.type = 'button';
-    choice.dataset.zcrConversationId = source.id;
-    const mark = el('span', `zcr-history-status zcr-history-status-${source.status}`);
-    mark.dataset.zcrHistoryStatus = source.status;
+    choice.dataset.zchatgptConversationId = source.id;
+    const mark = el('span', `zchatgpt-history-status zchatgpt-history-status-${source.status}`);
+    mark.dataset.zchatgptHistoryStatus = source.status;
     mark.setAttribute('aria-hidden', 'true');
     // A calm glyph, not an animation: done is a checked ring, a draft is a pencil, a live request
     // is the same clock the timing line uses.
     mark.append(icon(source.status === 'done' ? 'historyDone' : source.status === 'draft' ? 'historyDraft' : 'clock'));
-    const title = el('span', 'zcr-history-title', source.title);
+    const title = el('span', 'zchatgpt-history-title', source.title);
     choice.append(mark, title);
     const description = historyRowDescription({ title: source.title, paperTitle: source.paperTitle, preview: source.preview });
     choice.setAttribute('aria-label', description);
@@ -1280,7 +1280,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     row.append(choice);
     if (source.remove) {
       const drop = button(`${COPY.deleteChat}: ${source.title}`, 'delete-conversation', source.remove, 'remove');
-      drop.dataset.zcrConversationId = source.id;
+      drop.dataset.zchatgptConversationId = source.id;
       row.append(drop);
     }
     return row;
@@ -1320,15 +1320,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const historyFocusSnapshot = (): { index: number; action: string | null } | null => {
     const active = doc.activeElement as HTMLElement | null;
     if (!active || !historyList.contains(active)) return null;
-    const index = [...historyList.querySelectorAll<HTMLElement>('.zcr-history-row')].findIndex(row => row.contains(active));
-    return index < 0 ? null : { index, action: active.dataset.zcrAction ?? null };
+    const index = [...historyList.querySelectorAll<HTMLElement>('.zchatgpt-history-row')].findIndex(row => row.contains(active));
+    return index < 0 ? null : { index, action: active.dataset.zchatgptAction ?? null };
   };
   const restoreHistoryFocus = (snapshot: { index: number; action: string | null }) => {
-    const rows = [...historyList.querySelectorAll<HTMLElement>('.zcr-history-row')];
+    const rows = [...historyList.querySelectorAll<HTMLElement>('.zchatgpt-history-row')];
     const row = rows[Math.min(snapshot.index, rows.length - 1)];
     const control = snapshot.action
-      ? row?.querySelector<HTMLElement>(`[data-zcr-action="${snapshot.action}"]`)
-      : row?.querySelector<HTMLElement>('.zcr-history-item');
+      ? row?.querySelector<HTMLElement>(`[data-zchatgpt-action="${snapshot.action}"]`)
+      : row?.querySelector<HTMLElement>('.zchatgpt-history-item');
     (control ?? row ?? historySearch).focus();
   };
   const renderHistory = (state: PresenterState) => {
@@ -1340,13 +1340,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const sections = groupHistory(rows, row => row.updatedAt);
     const nodes: HTMLElement[] = [];
     for (const { bucket, items } of sections) {
-      const group = el('div', 'zcr-history-group');
-      group.dataset.zcrHistoryGroup = bucket;
-      group.append(el('div', 'zcr-history-heading', HISTORY_BUCKET_LABELS[bucket]));
+      const group = el('div', 'zchatgpt-history-group');
+      group.dataset.zchatgptHistoryGroup = bucket;
+      group.append(el('div', 'zchatgpt-history-heading', HISTORY_BUCKET_LABELS[bucket]));
       for (const row of items) group.append(historyRow(row));
       nodes.push(group);
     }
-    historyList.replaceChildren(...(nodes.length ? nodes : [el('p', 'zcr-history-empty', COPY.noSavedChats)]));
+    historyList.replaceChildren(...(nodes.length ? nodes : [el('p', 'zchatgpt-history-empty', COPY.noSavedChats)]));
     // The presenter already filtered a workspace search (it also matches message text), so the
     // local row-label filter only runs for the host-list fallback.
     if (!state.workspace) applyHistoryFilter();
@@ -1365,25 +1365,25 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
      * chosen row is focused again to keep keyboard navigation where the owner left it.
      */
     const keepPicker = (field: string, value: string) => {
-      const rows = [...menu.querySelectorAll<HTMLButtonElement>(`[data-zcr-setting="${field}"]`)];
-      rows.find(row => row.dataset.zcrValue === value)?.focus();
+      const rows = [...menu.querySelectorAll<HTMLButtonElement>(`[data-zchatgpt-setting="${field}"]`)];
+      rows.find(row => row.dataset.zchatgptValue === value)?.focus();
     };
     const effortCtl = controls.find(entry => entry.field === 'effort');
     const modelCtl = controls.find(entry => entry.field === 'model');
     const effortValue = current?.effort || selected?.defaultReasoningEffort || '';
     const sections: HTMLElement[] = [];
-    const effortSection = el('div', 'zcr-picker-section');
-    effortSection.dataset.zcrPickerSection = 'effort';
-    effortSection.append(el('div', 'zcr-picker-heading', COPY.effort));
+    const effortSection = el('div', 'zchatgpt-picker-section');
+    effortSection.dataset.zchatgptPickerSection = 'effort';
+    effortSection.append(el('div', 'zchatgpt-picker-heading', COPY.effort));
     for (const option of effortCtl?.options.filter(entry => entry.value) ?? []) {
-      const row = el('button', 'zcr-picker-option');
+      const row = el('button', 'zchatgpt-picker-option');
       row.type = 'button';
-      row.dataset.zcrSetting = 'effort';
-      row.dataset.zcrValue = option.value;
+      row.dataset.zchatgptSetting = 'effort';
+      row.dataset.zchatgptValue = option.value;
       row.setAttribute('role', 'menuitemradio');
       const checked = option.value === effortValue;
       row.setAttribute('aria-checked', String(checked));
-      row.append(el('span', 'zcr-picker-option-label', effortLabel(option.value)));
+      row.append(el('span', 'zchatgpt-picker-option-label', effortLabel(option.value)));
       if (checked) row.append(icon('check'));
       row.disabled = !signedIn || !!effortCtl?.disabled;
       row.addEventListener('click', () => {
@@ -1397,14 +1397,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     sections.push(effortSection);
     if (fast) {
-      const optionsSection = el('div', 'zcr-picker-section');
-      optionsSection.dataset.zcrPickerSection = 'options';
-      optionsSection.append(el('div', 'zcr-picker-heading', COPY.options));
-      const row = el('div', 'zcr-picker-toggle-row');
-      row.append(el('span', 'zcr-picker-option-label', COPY.fast));
-      const toggle = el('button', 'zcr-switch');
+      const optionsSection = el('div', 'zchatgpt-picker-section');
+      optionsSection.dataset.zchatgptPickerSection = 'options';
+      optionsSection.append(el('div', 'zchatgpt-picker-heading', COPY.options));
+      const row = el('div', 'zchatgpt-picker-toggle-row');
+      row.append(el('span', 'zchatgpt-picker-option-label', COPY.fast));
+      const toggle = el('button', 'zchatgpt-switch');
       toggle.type = 'button';
-      toggle.dataset.zcrSetting = 'speed';
+      toggle.dataset.zchatgptSetting = 'speed';
       toggle.setAttribute('role', 'switch');
       toggle.setAttribute('aria-label', COPY.fast);
       const on = current?.serviceTier === fast.id;
@@ -1416,24 +1416,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         const settings = latest.draft.settings ?? latest.conversation?.settings;
         if (!settings) return;
         presenter.setSettings(applyComposerChoice(latest.runtime?.models ?? [], settings, 'speed', on ? '' : fast.id));
-        menu.querySelector<HTMLButtonElement>('[data-zcr-setting="speed"]')?.focus();
+        menu.querySelector<HTMLButtonElement>('[data-zchatgpt-setting="speed"]')?.focus();
       });
       row.append(toggle);
       optionsSection.append(row);
       sections.push(optionsSection);
     }
-    const modelSection = el('div', 'zcr-picker-section');
-    modelSection.dataset.zcrPickerSection = 'model';
-    modelSection.append(el('div', 'zcr-picker-heading', COPY.model));
+    const modelSection = el('div', 'zchatgpt-picker-section');
+    modelSection.dataset.zchatgptPickerSection = 'model';
+    modelSection.append(el('div', 'zchatgpt-picker-heading', COPY.model));
     for (const option of modelCtl?.options ?? []) {
-      const row = el('button', 'zcr-picker-option');
+      const row = el('button', 'zchatgpt-picker-option');
       row.type = 'button';
-      row.dataset.zcrSetting = 'model';
-      row.dataset.zcrValue = option.value;
+      row.dataset.zchatgptSetting = 'model';
+      row.dataset.zchatgptValue = option.value;
       row.setAttribute('role', 'menuitemradio');
       const checked = option.value === (current?.model ?? '');
       row.setAttribute('aria-checked', String(checked));
-      row.append(el('span', 'zcr-picker-option-label', option.label));
+      row.append(el('span', 'zchatgpt-picker-option-label', option.label));
       if (checked) row.append(icon('check'));
       row.disabled = !signedIn || !!modelCtl?.disabled;
       row.addEventListener('click', () => {
@@ -1450,11 +1450,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // account's own allowances, and rate limits are account data, not a chat setting. It renders as
     // its own section so it stays readable and is announced as text, never as a menu row.
     const quotas = state.runtime?.rateLimits;
-    const accountSection = el('div', 'zcr-picker-section');
-    accountSection.dataset.zcrPickerSection = 'account';
-    accountSection.append(el('div', 'zcr-picker-heading', COPY.accountUsage));
-    const usage = el('p', 'zcr-account-usage');
-    usage.dataset.zcrAccountUsage = '';
+    const accountSection = el('div', 'zchatgpt-picker-section');
+    accountSection.dataset.zchatgptPickerSection = 'account';
+    accountSection.append(el('div', 'zchatgpt-picker-heading', COPY.accountUsage));
+    const usage = el('p', 'zchatgpt-account-usage');
+    usage.dataset.zchatgptAccountUsage = '';
     usage.textContent = quotas ? quotas.map(quota => `${quota.label}: ${quota.usedPercent === null ? 'usage unknown' : `${quota.usedPercent}% used`}${quota.resetsAt === null ? '' : ` · resets ${new Date(quota.resetsAt * 1000).toLocaleString()}`}`).join('\n') || 'Account usage: no limits reported.' : 'Account usage: unavailable.';
     accountSection.append(usage);
     sections.push(accountSection);
@@ -1512,8 +1512,8 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     chromeKey = nextChrome;
     const account = state.runtime?.account.state ?? 'signedOut';
     const pendingLogin = state.runtime?.login?.state === 'pending';
-    chat.dataset.zcrRuntime = state.connection; chat.dataset.zcrAuth = account; chat.dataset.zcrGenerating = String(state.generating);
-    chat.dataset.zcrConversation = state.conversation?.id ?? ''; chat.dataset.zcrActiveRequest = state.conversation?.activeRequestId ?? '';
+    chat.dataset.zchatgptRuntime = state.connection; chat.dataset.zchatgptAuth = account; chat.dataset.zchatgptGenerating = String(state.generating);
+    chat.dataset.zchatgptConversation = state.conversation?.id ?? ''; chat.dataset.zchatgptActiveRequest = state.conversation?.activeRequestId ?? '';
     status.textContent = state.connection === 'idle' ? STATUS_LINE.idle : state.connection === 'starting' ? STATUS_LINE.starting : state.connection === 'error' ? STATUS_LINE.error
       : pendingLogin ? STATUS_LINE.pendingLogin : account === 'signedIn' ? (state.generating ? STATUS_LINE.generating : '') : STATUS_LINE.signedOut;
     status.hidden = !status.textContent;
@@ -1571,12 +1571,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const dividerKey = `${timeLocale}\n${dividers.map(entry => `${entry.before}:${entry.label}`).join('\n')}`;
     if (conversationChanged || dividerKey !== messageTimeKey) {
       messageTimeKey = dividerKey;
-      for (const node of [...messages.querySelectorAll<HTMLElement>('[data-zcr-message-time]')]) node.remove();
+      for (const node of [...messages.querySelectorAll<HTMLElement>('[data-zchatgpt-message-time]')]) node.remove();
       for (const divider of dividers) {
         const target = messageNodes.get(divider.before);
         if (!target) continue;
-        const node = el('div', 'zcr-message-time', divider.label);
-        node.dataset.zcrMessageTime = '';
+        const node = el('div', 'zchatgpt-message-time', divider.label);
+        node.dataset.zchatgptMessageTime = '';
         messages.insertBefore(node, target);
       }
     }
@@ -1610,9 +1610,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (draftImages.dataset.rendered !== imageIds) {
       draftImages.dataset.rendered = imageIds;
       draftImages.replaceChildren(...state.draft.images.map(image => {
-        const chip = el('div', 'zcr-draft-image');
-        chip.dataset.zcrDraftImage = image.id;
-        const thumb = el('img', 'zcr-draft-thumb');
+        const chip = el('div', 'zchatgpt-draft-image');
+        chip.dataset.zchatgptDraftImage = image.id;
+        const thumb = el('img', 'zchatgpt-draft-thumb');
         thumb.setAttribute('src', image.dataUrl);
         thumb.setAttribute('alt', image.name);
         const open = button('Preview image', 'preview-image', () => previewImage(image, open)); open.replaceChildren(thumb);

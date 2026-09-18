@@ -1,3 +1,3 @@
-zcr-pane-title =
+zchatgpt-pane-title =
     .label = Codex
     .tooltiptext = Codex

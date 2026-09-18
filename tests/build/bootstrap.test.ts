@@ -51,7 +51,7 @@ async function loadBootstrap(): Promise<LoadedBootstrap> {
   const loadSubScript = vi.fn(
     (_url: string, moduleScope: Record<string, unknown>) => {
       expect(moduleScope.Zotero).toBe(zotero);
-      moduleScope.ZoteroCodexReader = api;
+      moduleScope.ZoteroChatGPT = api;
     },
   );
   const services = { scriptloader: { loadSubScript } };
@@ -88,7 +88,7 @@ describe("Zotero bootstrap lifecycle", () => {
   it("passes native runtime capabilities and UTF8 codecs to the bundled scope", async () => {
     const loaded = await loadBootstrap(); loaded.resolveInitialization();
     const startup = lifecycleFunction<(context: { id: string; rootURI: string }) => Promise<void>>(loaded.scope, "startup");
-    await startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    await startup({ id: "extension-id", rootURI: "resource://zchatgpt/" });
     const bundle = loaded.loadSubScript.mock.calls[0]![1];
     expect(bundle.ChromeUtils).toBe(loaded.scope.ChromeUtils);
     expect(bundle.IOUtils).toBe(loaded.scope.IOUtils);
@@ -109,7 +109,7 @@ describe("Zotero bootstrap lifecycle", () => {
 
     const started = startup({
       id: "extension-id",
-      rootURI: "resource://zcr/",
+      rootURI: "resource://zchatgpt/",
     });
     await Promise.resolve();
     expect(loaded.loadSubScript).not.toHaveBeenCalled();
@@ -119,11 +119,11 @@ describe("Zotero bootstrap lifecycle", () => {
 
     expect(loaded.loadSubScript).toHaveBeenCalledOnce();
     expect(loaded.loadSubScript.mock.calls[0]?.[0]).toBe(
-      "resource://zcr/content/zcr.js",
+      "resource://zchatgpt/content/zchatgpt.js",
     );
     expect(loaded.api.startup).toHaveBeenCalledWith({
       pluginID: "extension-id",
-      rootURI: "resource://zcr/",
+      rootURI: "resource://zchatgpt/",
     });
     expect(
       loaded.api.onMainWindowLoad.mock.calls.map(([window]) => window),
@@ -136,7 +136,7 @@ describe("Zotero bootstrap lifecycle", () => {
     const startup = lifecycleFunction<
       (context: { id: string; rootURI: string }) => Promise<void>
     >(loaded.scope, "startup");
-    await startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    await startup({ id: "extension-id", rootURI: "resource://zchatgpt/" });
     loaded.api.onMainWindowLoad.mockClear();
 
     const futureWindow = { name: "future" };
@@ -174,7 +174,7 @@ describe("Zotero bootstrap lifecycle", () => {
       (data: { window: object }) => Promise<void>
     >(loaded.scope, "onMainWindowLoad");
 
-    const started = startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    const started = startup({ id: "extension-id", rootURI: "resource://zchatgpt/" });
     const hookOutcome = onMainWindowLoad({ window: arrivingWindow }).then(
       () => "resolved",
       (error: unknown) =>
@@ -199,7 +199,7 @@ describe("Zotero bootstrap lifecycle", () => {
       "shutdown",
     );
 
-    const started = startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    const started = startup({ id: "extension-id", rootURI: "resource://zchatgpt/" });
     const stopped = shutdown();
     loaded.resolveInitialization();
     await Promise.all([started, stopped]);
@@ -219,7 +219,7 @@ describe("Zotero bootstrap lifecycle", () => {
       "shutdown",
     );
 
-    await startup({ id: "extension-id", rootURI: "resource://zcr/" });
+    await startup({ id: "extension-id", rootURI: "resource://zchatgpt/" });
     await shutdown();
 
     expect(loaded.scope.Services).toBe(loaded.services);

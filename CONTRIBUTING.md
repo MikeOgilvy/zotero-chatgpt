@@ -1,4 +1,4 @@
-# Contributing to Zotero GPT Reader
+# Contributing to Zotero ChatGPT
 
 This is a community Zotero plugin. It is not affiliated with Zotero or OpenAI.
 
@@ -13,9 +13,9 @@ npm run lint
 npm run test:unit
 ```
 
-Node 24 is for build and tests only. Do not add live Codex calls to default CI. Do not commit `.zcr-dev/`, authentication files, paper text, or conversation logs.
+Node 24 is for build and tests only. Do not add live Codex calls to default CI. Do not commit `.zotero-chatgpt-dev/`, authentication files, paper text, or conversation logs.
 
-Host checks use an ignored dedicated profile under `.zcr-dev/` and synthetic PDFs. Never use a regular Zotero profile.
+Host checks use an ignored dedicated profile under `.zotero-chatgpt-dev/` and synthetic PDFs. Never use a regular Zotero profile.
 
 ## Pull requests
 

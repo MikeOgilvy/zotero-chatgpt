@@ -1,5 +1,5 @@
 /* The Codex ItemPane section must not occupy a column beside the reader toolbar. */
-item-pane-custom-section[data-zcr-section],
+item-pane-custom-section[data-zchatgpt-section],
 #zotero-context-pane-sidenav .btn[data-pane="codex-reader"] {
   display: none !important;
 }
@@ -7,14 +7,14 @@ item-pane-custom-section[data-zcr-section],
 /*
  * Reader iframe isolation. Zotero's reader chrome uses `button { all: unset }`
  * and can apply writing-mode / flex-shrink to aside/section. :where() keeps
- * this reset at zero extra specificity so later .zcr-* rules still win.
+ * this reset at zero extra specificity so later .zchatgpt-* rules still win.
  */
-.zcr-dock {
-  --zcr-dock-inset: 12px;
-  --zcr-toolbar-button-size: 28px;
-  --zcr-toolbar-icon-size: 20px;
-  --zcr-toolbar-button-radius: 5px;
-  --zcr-chat-text-scale: 1;
+.zchatgpt-dock {
+  --zchatgpt-dock-inset: 12px;
+  --zchatgpt-toolbar-button-size: 28px;
+  --zchatgpt-toolbar-icon-size: 20px;
+  --zchatgpt-toolbar-button-radius: 5px;
+  --zchatgpt-chat-text-scale: 1;
   writing-mode: horizontal-tb !important;
   direction: ltr !important;
   unicode-bidi: isolate;
@@ -25,12 +25,12 @@ item-pane-custom-section[data-zcr-section],
   color: var(--fill-primary, CanvasText);
   background: var(--material-background, var(--color-background, Canvas));
 }
-.zcr-dock :where(*) {
+.zchatgpt-dock :where(*) {
   writing-mode: horizontal-tb !important;
   direction: ltr !important;
   unicode-bidi: isolate;
 }
-.zcr-dock :where(button, select, textarea, input, p, section, aside, article, blockquote) {
+.zchatgpt-dock :where(button, select, textarea, input, p, section, aside, article, blockquote) {
   all: revert;
   writing-mode: horizontal-tb !important;
   direction: ltr !important;
@@ -39,16 +39,16 @@ item-pane-custom-section[data-zcr-section],
 }
 
 /* In-reader dock: a right-hand column inside #split-view, below .toolbar. */
-#split-view > .zcr-dock,
-#split-view .zcr-dock {
+#split-view > .zchatgpt-dock,
+#split-view .zchatgpt-dock {
   position: relative;
   z-index: 20;
   display: flex;
   flex-direction: row;
-  flex: 0 0 var(--zcr-dock-width, 360px) !important;
+  flex: 0 0 var(--zchatgpt-dock-width, 360px) !important;
   flex-grow: 0 !important;
   flex-shrink: 0 !important;
-  width: var(--zcr-dock-width, 360px) !important;
+  width: var(--zchatgpt-dock-width, 360px) !important;
   min-width: 320px !important;
   writing-mode: horizontal-tb !important;
   height: 100%;
@@ -57,19 +57,19 @@ item-pane-custom-section[data-zcr-section],
   overflow: hidden;
   background: var(--material-background, var(--color-background, Canvas));
 }
-html.zcr-dock-open #split-view,
-body.zcr-dock-open #split-view,
-#split-view.zcr-dock-open {
+html.zchatgpt-dock-open #split-view,
+body.zchatgpt-dock-open #split-view,
+#split-view.zchatgpt-dock-open {
   display: flex;
   flex-direction: row;
 }
-html.zcr-dock-open #split-view .primary-view,
-body.zcr-dock-open #split-view .primary-view,
-#split-view.zcr-dock-open .primary-view {
+html.zchatgpt-dock-open #split-view .primary-view,
+body.zchatgpt-dock-open #split-view .primary-view,
+#split-view.zchatgpt-dock-open .primary-view {
   min-width: 0;
   flex: 1 1 auto;
 }
-.zcr-dock-resizer {
+.zchatgpt-dock-resizer {
   flex: 0 0 8px;
   margin-inline-end: -3px;
   cursor: ew-resize;
@@ -77,33 +77,33 @@ body.zcr-dock-open #split-view .primary-view,
   touch-action: none;
   z-index: 2;
 }
-.zcr-dock-resizer:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
-.zcr-dock-body {
+.zchatgpt-dock-resizer:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+.zchatgpt-dock-body {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  padding: var(--zcr-dock-inset, 12px);
+  padding: var(--zchatgpt-dock-inset, 12px);
   box-sizing: border-box;
 }
 
-.zcr-paper,
-.zcr-paper .zcr-chrome,
-.zcr-paper .zcr-history-panel,
-.zcr-paper .zcr-chat,
-.zcr-paper .zcr-transcript {
+.zchatgpt-paper,
+.zchatgpt-paper .zchatgpt-chrome,
+.zchatgpt-paper .zchatgpt-history-panel,
+.zchatgpt-paper .zchatgpt-chat,
+.zchatgpt-paper .zchatgpt-transcript {
   background: var(--material-background, var(--color-background, Canvas));
 }
 
-.zcr-sidebar {
-  --zcr-chat-text-scale: 1;
-  --zcr-dock-inset: 12px;
-  --zcr-toolbar-button-size: 28px;
-  --zcr-toolbar-icon-size: 20px;
-  --zcr-toolbar-button-radius: 5px;
-  --zcr-border: var(--color-panedivider, color-mix(in srgb, CanvasText 14%, transparent));
-  --zcr-control-font-size: 12px;
+.zchatgpt-sidebar {
+  --zchatgpt-chat-text-scale: 1;
+  --zchatgpt-dock-inset: 12px;
+  --zchatgpt-toolbar-button-size: 28px;
+  --zchatgpt-toolbar-icon-size: 20px;
+  --zchatgpt-toolbar-button-radius: 5px;
+  --zchatgpt-border: var(--color-panedivider, color-mix(in srgb, CanvasText 14%, transparent));
+  --zchatgpt-control-font-size: 12px;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -118,10 +118,10 @@ body.zcr-dock-open #split-view .primary-view,
   overflow: hidden;
 }
 
-.zcr-chat { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 0; }
-.zcr-chat [hidden] { display: none !important; }
-.zcr-chat p { margin: 0; line-height: 1.45; }
-.zcr-chat-main {
+.zchatgpt-chat { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 0; }
+.zchatgpt-chat [hidden] { display: none !important; }
+.zchatgpt-chat p { margin: 0; line-height: 1.45; }
+.zchatgpt-chat-main {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -130,7 +130,7 @@ body.zcr-dock-open #split-view .primary-view,
   min-width: 0;
 }
 
-.zcr-chrome {
+.zchatgpt-chrome {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -140,7 +140,7 @@ body.zcr-dock-open #split-view .primary-view,
   box-sizing: border-box;
   background: var(--material-background, var(--color-background, Canvas));
 }
-.zcr-chrome-source, .zcr-context-citation {
+.zchatgpt-chrome-source, .zchatgpt-context-citation {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -150,7 +150,7 @@ body.zcr-dock-open #split-view .primary-view,
   color: var(--fill-secondary, GrayText);
   font-size: 11px;
 }
-.zcr-chrome-actions {
+.zchatgpt-chrome-actions {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -159,36 +159,36 @@ body.zcr-dock-open #split-view .primary-view,
   /* The tab strip grows; this auto margin keeps + and history pinned to the trailing edge. */
   margin-inline-start: auto;
 }
-.zcr-chrome .zcr-icon-button {
-  width: var(--zcr-toolbar-button-size, 28px);
-  min-width: var(--zcr-toolbar-button-size, 28px);
-  height: var(--zcr-toolbar-button-size, 28px);
-  min-height: var(--zcr-toolbar-button-size, 28px);
+.zchatgpt-chrome .zchatgpt-icon-button {
+  width: var(--zchatgpt-toolbar-button-size, 28px);
+  min-width: var(--zchatgpt-toolbar-button-size, 28px);
+  height: var(--zchatgpt-toolbar-button-size, 28px);
+  min-height: var(--zchatgpt-toolbar-button-size, 28px);
 }
 
-.zcr-icon-button {
+.zchatgpt-icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--zcr-toolbar-button-size, 28px);
-  min-width: var(--zcr-toolbar-button-size, 28px);
-  min-height: var(--zcr-toolbar-button-size, 28px);
-  height: var(--zcr-toolbar-button-size, 28px);
+  width: var(--zchatgpt-toolbar-button-size, 28px);
+  min-width: var(--zchatgpt-toolbar-button-size, 28px);
+  min-height: var(--zchatgpt-toolbar-button-size, 28px);
+  height: var(--zchatgpt-toolbar-button-size, 28px);
   padding: 0;
   border: 0;
-  border-radius: var(--zcr-toolbar-button-radius, 5px);
+  border-radius: var(--zchatgpt-toolbar-button-radius, 5px);
   background: transparent;
   color: inherit;
   cursor: pointer;
 }
-.zcr-icon-button svg { display: block; width: var(--zcr-toolbar-icon-size, 20px); height: var(--zcr-toolbar-icon-size, 20px); }
-.zcr-icon-button:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-icon-button:active { background: var(--fill-quaternary, ButtonFace); }
-.zcr-icon-button:disabled { opacity: .45; cursor: default; }
+.zchatgpt-icon-button svg { display: block; width: var(--zchatgpt-toolbar-icon-size, 20px); height: var(--zchatgpt-toolbar-icon-size, 20px); }
+.zchatgpt-icon-button:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-icon-button:active { background: var(--fill-quaternary, ButtonFace); }
+.zchatgpt-icon-button:disabled { opacity: .45; cursor: default; }
 /* Neutral rings on the transcript/composer controls the owner rejected the accent outline on. */
-.zcr-icon-button:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
+.zchatgpt-icon-button:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 
-.zcr-current-close {
+.zchatgpt-current-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -204,10 +204,10 @@ body.zcr-dock-open #split-view .primary-view,
   color: var(--fill-secondary, GrayText);
   cursor: pointer;
 }
-.zcr-current-close svg { display: block; width: 12px; height: 12px; }
-.zcr-current-close:hover { background: var(--fill-quaternary, ButtonFace); color: var(--fill-primary, CanvasText); }
+.zchatgpt-current-close svg { display: block; width: 12px; height: 12px; }
+.zchatgpt-current-close:hover { background: var(--fill-quaternary, ButtonFace); color: var(--fill-primary, CanvasText); }
 /* A neutral ring, not the accent outline the owner rejected. */
-.zcr-current-close:focus-visible {
+.zchatgpt-current-close:focus-visible {
   outline-width: 2px;
   outline-style: solid;
   outline-color: var(--fill-secondary, GrayText);
@@ -216,7 +216,7 @@ body.zcr-dock-open #split-view .primary-view,
 
 /* Cursor-style agent tabs in the chrome: named chats plus the unbound New chat tab, always visible.
    A narrow dock scrolls the strip inside itself instead of pushing chips past the edge. */
-.zcr-panes {
+.zchatgpt-panes {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -227,7 +227,7 @@ body.zcr-dock-open #split-view .primary-view,
   overflow-y: hidden;
   scrollbar-width: thin;
 }
-.zcr-pane-tab {
+.zchatgpt-pane-tab {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -243,26 +243,26 @@ body.zcr-dock-open #split-view .primary-view,
   font: inherit;
   cursor: pointer;
 }
-.zcr-pane-tab-label, .zcr-pane-tab-new {
+.zchatgpt-pane-tab-label, .zchatgpt-pane-tab-new {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font: inherit;
-  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1));
   font-weight: 500;
   line-height: 18px;
   color: inherit;
 }
-.zcr-pane-tab:hover { background: var(--fill-quinary, ButtonFace); color: var(--fill-primary, CanvasText); }
-.zcr-pane-tab[aria-selected="true"] {
+.zchatgpt-pane-tab:hover { background: var(--fill-quinary, ButtonFace); color: var(--fill-primary, CanvasText); }
+.zchatgpt-pane-tab[aria-selected="true"] {
   background: var(--fill-quinary, var(--material-toolbar, color-mix(in srgb, CanvasText 7%, transparent)));
   color: var(--fill-primary, CanvasText);
 }
-.zcr-pane-tab:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
+.zchatgpt-pane-tab:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 
 /* One transcript fills remaining dock height. Tabs switch chats; there is never a second column. */
-.zcr-columns {
+.zchatgpt-columns {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -270,30 +270,30 @@ body.zcr-dock-open #split-view .primary-view,
   min-width: 0;
 }
 
-.zcr-button {
+.zchatgpt-button {
   font: inherit;
-  font-size: var(--zcr-control-font-size, 12px);
+  font-size: var(--zchatgpt-control-font-size, 12px);
   color: inherit;
   background: transparent;
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   padding: 4px 8px;
   border-radius: 5px;
   cursor: pointer;
   line-height: 1.3;
   min-height: 28px;
 }
-.zcr-button:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-button:disabled { opacity: .5; cursor: default; }
-.zcr-button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-button:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-button:disabled { opacity: .5; cursor: default; }
+.zchatgpt-button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
 
-.zcr-status-line { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); padding: 6px 0 0; }
-.zcr-request-timing { display: flex; align-items: center; gap: 4px; color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zcr-chat-text-scale, 1)); padding: 4px 0 0; }
-.zcr-request-timing-glyph { display: inline-flex; }
-.zcr-request-timing-glyph svg { width: 14px; height: 14px; }
-.zcr-auth { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 0; }
-.zcr-error { color: var(--fill-primary, CanvasText); margin: 6px 0 0; padding-left: 0; overflow-wrap: anywhere; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
+.zchatgpt-status-line { color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); padding: 6px 0 0; }
+.zchatgpt-request-timing { display: flex; align-items: center; gap: 4px; color: var(--fill-secondary, GrayText); font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); padding: 4px 0 0; }
+.zchatgpt-request-timing-glyph { display: inline-flex; }
+.zchatgpt-request-timing-glyph svg { width: 14px; height: 14px; }
+.zchatgpt-auth { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 0; }
+.zchatgpt-error { color: var(--fill-primary, CanvasText); margin: 6px 0 0; padding-left: 0; overflow-wrap: anywhere; font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); }
 
-.zcr-transcript {
+.zchatgpt-transcript {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
@@ -301,33 +301,33 @@ body.zcr-dock-open #split-view .primary-view,
   display: flex;
   flex-direction: column;
 }
-.zcr-messages { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 0 12px; scrollbar-gutter: stable; }
-.zcr-new-content { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 1; background: var(--material-menu, Canvas); border-radius: 14px; white-space: nowrap; }
+.zchatgpt-messages { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 0 12px; scrollbar-gutter: stable; }
+.zchatgpt-new-content { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 1; background: var(--material-menu, Canvas); border-radius: 14px; white-space: nowrap; }
 /* No labelled author header exists any more: role is carried by alignment, so there is nothing to
    style here beyond the body wrapper and the icon-only action strip below. */
-.zcr-message { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.zchatgpt-message { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* Timestamp divider: centered, muted and scaled. The time comes from that request's own
    `acceptedAt`, and it is the only place the time appears, so it stays readable to assistive
    technology rather than being hidden as decoration. */
-.zcr-message-time { align-self: center; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); padding: 2px 0; }
+.zchatgpt-message-time { align-self: center; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); padding: 2px 0; }
 /* Body holds the text bubble, the attachments and the hover actions, and anchors the actions. */
-.zcr-message-body { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.zchatgpt-message-body { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 /* Actions reveal by opacity alone: they stay in layout and remain keyboard-reachable in both roles. */
-.zcr-message-actions { position: absolute; inset-block-end: 0; inset-inline-end: 0; display: flex; gap: 4px; opacity: 0; }
-.zcr-message:hover .zcr-message-actions, .zcr-message:focus-within .zcr-message-actions { opacity: 1; }
-.zcr-message-action { font-size: calc(11px * var(--zcr-chat-text-scale, 1)); opacity: 0; min-height: 28px; }
-.zcr-message:hover .zcr-message-action, .zcr-message:focus-within .zcr-message-action { opacity: 1; }
-.zcr-copy-answer { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); }
-.zcr-copy-answer svg { display: block; width: 14px; height: 14px; }
-.zcr-copy-answer:hover { color: var(--fill-primary, CanvasText); background: var(--fill-quinary, ButtonFace); }
-.zcr-copy-answer[data-zcr-copied="true"] { color: var(--fill-primary, CanvasText); }
+.zchatgpt-message-actions { position: absolute; inset-block-end: 0; inset-inline-end: 0; display: flex; gap: 4px; opacity: 0; }
+.zchatgpt-message:hover .zchatgpt-message-actions, .zchatgpt-message:focus-within .zchatgpt-message-actions { opacity: 1; }
+.zchatgpt-message-action { font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); opacity: 0; min-height: 28px; }
+.zchatgpt-message:hover .zchatgpt-message-action, .zchatgpt-message:focus-within .zchatgpt-message-action { opacity: 1; }
+.zchatgpt-copy-answer { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); }
+.zchatgpt-copy-answer svg { display: block; width: 14px; height: 14px; }
+.zchatgpt-copy-answer:hover { color: var(--fill-primary, CanvasText); background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-copy-answer[data-zchatgpt-copied="true"] { color: var(--fill-primary, CanvasText); }
 /* Copy is icon-only; the labelled feedback node stays in the DOM but is visually hidden. */
-.zcr-copy-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.zchatgpt-copy-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The composer keeps exactly one control at its start: a plus menu with every attachment route. */
-.zcr-plus { color: var(--fill-secondary, GrayText); }
-.zcr-plus:hover, .zcr-plus[aria-expanded="true"] { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-plus { color: var(--fill-secondary, GrayText); }
+.zchatgpt-plus:hover, .zchatgpt-plus[aria-expanded="true"] { background: var(--fill-quinary, ButtonFace); }
 /* One opaque, shadowed surface stacked above the transcript and every composer sibling. */
-.zcr-plus-menu {
+.zchatgpt-plus-menu {
   position: absolute;
   inset-inline-start: 8px;
   bottom: calc(100% + 6px);
@@ -339,7 +339,7 @@ body.zcr-dock-open #split-view .primary-view,
   max-width: min(320px, calc(100% - 16px));
   padding: 4px;
   box-sizing: border-box;
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   border-radius: 10px;
   /* `--material-menu` is a translucent material in the host theme, which is what let the transcript
      read through this popover. Paint it over an opaque Canvas base so the surface always occludes
@@ -348,98 +348,98 @@ body.zcr-dock-open #split-view .primary-view,
   background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
   box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
 }
-.zcr-plus-menu[hidden] { display: none; }
+.zchatgpt-plus-menu[hidden] { display: none; }
 /* Grouped sections are plain divs: the dock resets `section`/`button`, not these wrappers. */
-.zcr-plus-group { display: flex; flex-direction: column; padding: 2px 0; }
-.zcr-plus-group + .zcr-plus-group { border-top: 1px solid var(--zcr-border); margin-top: 2px; padding-top: 4px; }
-.zcr-plus-heading { padding: 4px 8px 2px; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); }
-.zcr-plus-row { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 12px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; }
-.zcr-plus-row:hover, .zcr-plus-row:focus-visible { background: var(--fill-quinary, ButtonFace); }
-.zcr-plus-row:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
-.zcr-plus-row-title { color: var(--fill-primary, CanvasText); font-size: calc(13px * var(--zcr-chat-text-scale, 1)); }
-.zcr-plus-row-description { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); line-height: 15px; }
-.zcr-plus-menu input { width: calc(100% - 24px); min-width: 0; max-width: 100%; margin: 2px 12px 4px; padding: 4px 6px; box-sizing: border-box; color: inherit; background: Field; border: 1px solid var(--zcr-border); border-radius: 5px; }
-.zcr-plus-menu input:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
-.zcr-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); min-width: 0; }
-.zcr-acquisition-target select { min-width: 0; width: 100%; max-width: 100%; min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 5px; }
-.zcr-tasks { min-width: 0; }
-.zcr-message-actions .zcr-icon-button,
-.zcr-citation-meta .zcr-icon-button,
-.zcr-chrome-source .zcr-icon-button {
-  width: var(--zcr-toolbar-button-size, 28px);
-  min-width: var(--zcr-toolbar-button-size, 28px);
-  height: var(--zcr-toolbar-button-size, 28px);
-  min-height: var(--zcr-toolbar-button-size, 28px);
+.zchatgpt-plus-group { display: flex; flex-direction: column; padding: 2px 0; }
+.zchatgpt-plus-group + .zchatgpt-plus-group { border-top: 1px solid var(--zchatgpt-border); margin-top: 2px; padding-top: 4px; }
+.zchatgpt-plus-heading { padding: 4px 8px 2px; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); }
+.zchatgpt-plus-row { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 12px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; }
+.zchatgpt-plus-row:hover, .zchatgpt-plus-row:focus-visible { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-plus-row:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
+.zchatgpt-plus-row-title { color: var(--fill-primary, CanvasText); font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1)); }
+.zchatgpt-plus-row-description { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); line-height: 15px; }
+.zchatgpt-plus-menu input { width: calc(100% - 24px); min-width: 0; max-width: 100%; margin: 2px 12px 4px; padding: 4px 6px; box-sizing: border-box; color: inherit; background: Field; border: 1px solid var(--zchatgpt-border); border-radius: 5px; }
+.zchatgpt-plus-menu input:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
+.zchatgpt-acquisition-target { display: flex; flex-direction: column; gap: 4px; font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); min-width: 0; }
+.zchatgpt-acquisition-target select { min-width: 0; width: 100%; max-width: 100%; min-height: 28px; color: inherit; background: var(--material-background, Canvas); border: 1px solid var(--zchatgpt-border); border-radius: 5px; }
+.zchatgpt-tasks { min-width: 0; }
+.zchatgpt-message-actions .zchatgpt-icon-button,
+.zchatgpt-citation-meta .zchatgpt-icon-button,
+.zchatgpt-chrome-source .zchatgpt-icon-button {
+  width: var(--zchatgpt-toolbar-button-size, 28px);
+  min-width: var(--zchatgpt-toolbar-button-size, 28px);
+  height: var(--zchatgpt-toolbar-button-size, 28px);
+  min-height: var(--zchatgpt-toolbar-button-size, 28px);
   opacity: .75;
 }
 /* Local reading status. Quiet by default: it states a fact about this PDF, not an alert. */
-.zcr-document-status {
+.zchatgpt-document-status {
   flex: 0 0 auto;
   margin: 0 10px 6px;
   color: var(--fill-secondary, GrayText);
-  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1));
   line-height: 1.4;
 }
-.zcr-document-status[hidden] { display: none; }
-.zcr-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: calc(13px * var(--zcr-chat-text-scale, 1)); }
-.zcr-message-text.zcr-rendered { white-space: normal; }
-.zcr-message-text.zcr-rendered p { margin: 0 0 .55em; }
-.zcr-message-text.zcr-rendered p:last-child { margin-bottom: 0; }
-.zcr-message-text a { color: var(--color-accent, AccentColor); text-decoration-line: underline; text-decoration-style: solid; text-underline-offset: 2px; cursor: pointer; }
-.zcr-message-text a:hover { text-decoration-thickness: 2px; }
-.zcr-message-text a:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; border-radius: 2px; }
-.zcr-message-text h1, .zcr-message-text h2, .zcr-message-text h3, .zcr-message-text h4 { margin: .8em 0 .4em; font-size: 1.12em; font-weight: 600; line-height: 1.3; }
-.zcr-message-text h1:first-child, .zcr-message-text h2:first-child, .zcr-message-text h3:first-child, .zcr-message-text h4:first-child { margin-top: 0; }
-.zcr-message-text :where(ul, ol) { margin: 8px 0; padding-inline-start: 1.4em; }
-.zcr-message-text li { margin: 2px 0; }
-.zcr-message-text li > p { margin: 0; }
-.zcr-message-text blockquote { margin: 8px 0; padding: 2px 0 2px 10px; border-inline-start: 2px solid var(--zcr-border); color: var(--fill-secondary, GrayText); }
-.zcr-message-text hr { margin: 12px 0; border: 0; border-top: 1px solid var(--zcr-border); }
+.zchatgpt-document-status[hidden] { display: none; }
+.zchatgpt-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1)); }
+.zchatgpt-message-text.zchatgpt-rendered { white-space: normal; }
+.zchatgpt-message-text.zchatgpt-rendered p { margin: 0 0 .55em; }
+.zchatgpt-message-text.zchatgpt-rendered p:last-child { margin-bottom: 0; }
+.zchatgpt-message-text a { color: var(--color-accent, AccentColor); text-decoration-line: underline; text-decoration-style: solid; text-underline-offset: 2px; cursor: pointer; }
+.zchatgpt-message-text a:hover { text-decoration-thickness: 2px; }
+.zchatgpt-message-text a:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; border-radius: 2px; }
+.zchatgpt-message-text h1, .zchatgpt-message-text h2, .zchatgpt-message-text h3, .zchatgpt-message-text h4 { margin: .8em 0 .4em; font-size: 1.12em; font-weight: 600; line-height: 1.3; }
+.zchatgpt-message-text h1:first-child, .zchatgpt-message-text h2:first-child, .zchatgpt-message-text h3:first-child, .zchatgpt-message-text h4:first-child { margin-top: 0; }
+.zchatgpt-message-text :where(ul, ol) { margin: 8px 0; padding-inline-start: 1.4em; }
+.zchatgpt-message-text li { margin: 2px 0; }
+.zchatgpt-message-text li > p { margin: 0; }
+.zchatgpt-message-text blockquote { margin: 8px 0; padding: 2px 0 2px 10px; border-inline-start: 2px solid var(--zchatgpt-border); color: var(--fill-secondary, GrayText); }
+.zchatgpt-message-text hr { margin: 12px 0; border: 0; border-top: 1px solid var(--zchatgpt-border); }
 /* Wide tables scroll locally instead of stretching the sidebar. */
-.zcr-table-block { max-width: 100%; overflow-x: auto; margin: 8px 0; }
-.zcr-message-text table { border-collapse: collapse; max-width: 100%; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); }
-.zcr-message-text th, .zcr-message-text td { border-width: 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--zcr-border); padding: 4px 8px; text-align: start; vertical-align: top; }
-.zcr-message-text thead th { border-bottom-width: 2px; }
+.zchatgpt-table-block { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+.zchatgpt-message-text table { border-collapse: collapse; max-width: 100%; font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); }
+.zchatgpt-message-text th, .zchatgpt-message-text td { border-width: 0; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--zchatgpt-border); padding: 4px 8px; text-align: start; vertical-align: top; }
+.zchatgpt-message-text thead th { border-bottom-width: 2px; }
 /* Fenced code scrolls locally and keeps its own copy affordance. */
-.zcr-code-block { position: relative; max-width: 100%; }
-.zcr-message-text pre { margin: 8px 0; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; max-width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); line-height: 1.45; background: color-mix(in srgb, CanvasText 5%, transparent); border: 1px solid var(--zcr-border); border-radius: 6px; }
-.zcr-message-text code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
-.zcr-message-text :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, CanvasText 7%, transparent); }
-.zcr-code-copy { position: absolute; top: 4px; inset-inline-end: 4px; z-index: 1; min-height: 24px; padding: 2px 6px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); background: var(--material-menu, Canvas); border-color: transparent; }
-.zcr-code-copy:hover { color: var(--fill-primary, CanvasText); background: var(--fill-quinary, ButtonFace); }
-.zcr-code-copy[data-zcr-copied="true"] { color: AccentColor; }
-.zcr-message-text .katex-display, .zcr-message-text .zcr-math-fallback { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+.zchatgpt-code-block { position: relative; max-width: 100%; }
+.zchatgpt-message-text pre { margin: 8px 0; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; max-width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); line-height: 1.45; background: color-mix(in srgb, CanvasText 5%, transparent); border: 1px solid var(--zchatgpt-border); border-radius: 6px; }
+.zchatgpt-message-text code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+.zchatgpt-message-text :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, CanvasText 7%, transparent); }
+.zchatgpt-code-copy { position: absolute; top: 4px; inset-inline-end: 4px; z-index: 1; min-height: 24px; padding: 2px 6px; font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); background: var(--material-menu, Canvas); border-color: transparent; }
+.zchatgpt-code-copy:hover { color: var(--fill-primary, CanvasText); background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-code-copy[data-zchatgpt-copied="true"] { color: AccentColor; }
+.zchatgpt-message-text .katex-display, .zchatgpt-message-text .zchatgpt-math-fallback { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
 /* The user bubble reads near-black in light mode and inverts with the theme in dark mode through
    the tokens; no raw hex, so the bubble is never a hardcoded black. Assistant stays plain prose. */
-.zcr-message[data-role="user"] { align-items: flex-end; align-self: flex-end; max-width: 92%; }
-.zcr-message[data-role="user"] .zcr-message-body { align-self: flex-end; align-items: flex-end; max-width: min(92%, 640px); }
-.zcr-message[data-role="user"] .zcr-message-text {
+.zchatgpt-message[data-role="user"] { align-items: flex-end; align-self: flex-end; max-width: 92%; }
+.zchatgpt-message[data-role="user"] .zchatgpt-message-body { align-self: flex-end; align-items: flex-end; max-width: min(92%, 640px); }
+.zchatgpt-message[data-role="user"] .zchatgpt-message-text {
   background: var(--fill-primary, CanvasText);
   color: var(--material-background, var(--color-background, Canvas));
   border-radius: 20px;
   padding: 10px 14px;
 }
-.zcr-message-meta { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); }
-.zcr-message[data-role="user"] .zcr-message-meta { text-align: end; }
-.zcr-message-attachments { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.zcr-message-reference { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); overflow-wrap: anywhere; }
-.zcr-image-card { margin: 4px 0; min-width: 0; }
-.zcr-image-card > button { display: block; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--zcr-border); border-radius: 8px; }
-.zcr-image-card img { display: block; width: 100%; max-height: 240px; object-fit: contain; background: var(--fill-quinary, Canvas); }
-.zcr-image-card figcaption { margin-top: 4px; font-size: calc(11px * var(--zcr-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); overflow-wrap: anywhere; }
-.zcr-image-preview { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; padding: 12px; box-sizing: border-box; background: var(--material-background, Canvas); border: 1px solid var(--zcr-border); border-radius: 8px; }
-.zcr-image-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); overflow-wrap: anywhere; }
-.zcr-image-preview > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
-.zcr-image-preview > button { align-self: flex-end; }
-.zcr-draft-image > .zcr-button { padding: 0; border: 0; min-width: 0; }
-.zcr-message[data-status="failed"] .zcr-message-meta, .zcr-message[data-status="uncertain"] .zcr-message-meta { color: var(--fill-primary, CanvasText); }
-.zcr-draft-citations { display: flex; flex-direction: column; gap: 6px; }
-.zcr-citation { border-left: 2px solid var(--color-panedivider, GrayText); padding: 2px 0 2px 8px; }
-.zcr-citation-text { margin: 0; font-size: calc(12px * var(--zcr-chat-text-scale, 1)); line-height: 1.45; overflow-wrap: anywhere; color: var(--fill-primary, CanvasText); }
-.zcr-citation-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zcr-chat-text-scale, 1)); margin-top: 2px; }
+.zchatgpt-message-meta { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); }
+.zchatgpt-message[data-role="user"] .zchatgpt-message-meta { text-align: end; }
+.zchatgpt-message-attachments { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.zchatgpt-message-reference { color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); overflow-wrap: anywhere; }
+.zchatgpt-image-card { margin: 4px 0; min-width: 0; }
+.zchatgpt-image-card > button { display: block; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--zchatgpt-border); border-radius: 8px; }
+.zchatgpt-image-card img { display: block; width: 100%; max-height: 240px; object-fit: contain; background: var(--fill-quinary, Canvas); }
+.zchatgpt-image-card figcaption { margin-top: 4px; font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); color: var(--fill-secondary, GrayText); overflow-wrap: anywhere; }
+.zchatgpt-image-preview { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; gap: 12px; padding: 12px; box-sizing: border-box; background: var(--material-background, Canvas); border: 1px solid var(--zchatgpt-border); border-radius: 8px; }
+.zchatgpt-image-preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); overflow-wrap: anywhere; }
+.zchatgpt-image-preview > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
+.zchatgpt-image-preview > button { align-self: flex-end; }
+.zchatgpt-draft-image > .zchatgpt-button { padding: 0; border: 0; min-width: 0; }
+.zchatgpt-message[data-status="failed"] .zchatgpt-message-meta, .zchatgpt-message[data-status="uncertain"] .zchatgpt-message-meta { color: var(--fill-primary, CanvasText); }
+.zchatgpt-draft-citations { display: flex; flex-direction: column; gap: 6px; }
+.zchatgpt-citation { border-left: 2px solid var(--color-panedivider, GrayText); padding: 2px 0 2px 8px; }
+.zchatgpt-citation-text { margin: 0; font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); line-height: 1.45; overflow-wrap: anywhere; color: var(--fill-primary, CanvasText); }
+.zchatgpt-citation-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); margin-top: 2px; }
 
 /* One composer layer above the transcript: every popover inside it stacks over the answer text. */
-.zcr-draft {
+.zchatgpt-draft {
   position: relative;
   z-index: 2;
   display: flex;
@@ -449,31 +449,31 @@ body.zcr-dock-open #split-view .primary-view,
   padding: 8px 0 0;
   background: transparent;
 }
-.zcr-composer {
-  --zcr-toolbar-icon-size: 16px;
+.zchatgpt-composer {
+  --zchatgpt-toolbar-icon-size: 16px;
   position: relative;
   box-shadow: 0 2px 8px color-mix(in srgb, var(--fill-primary, CanvasText) 5%, transparent);
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   border-radius: 12px;
   background: var(--material-background, Field);
   padding: 12px;
   box-sizing: border-box;
 }
-.zcr-input::placeholder { color: var(--fill-secondary, GrayText); opacity: 1; }
+.zchatgpt-input::placeholder { color: var(--fill-secondary, GrayText); opacity: 1; }
 /* One neutral card. Focus is a quiet border/ring, never a colored bar in the user's accent color. */
-.zcr-composer:focus-within {
-  border-color: color-mix(in srgb, CanvasText 38%, var(--zcr-border));
+.zchatgpt-composer:focus-within {
+  border-color: color-mix(in srgb, CanvasText 38%, var(--zchatgpt-border));
   box-shadow: 0 2px 8px color-mix(in srgb, CanvasText 5%, transparent), inset 0 0 0 1px color-mix(in srgb, CanvasText 10%, transparent);
 }
-.zcr-composer-context { max-height: 112px; overflow: auto; }
-.zcr-composer-context:empty { display: none; }
-.zcr-composer-context > :not(:empty) { margin: 4px 4px 8px; }
-.zcr-input {
+.zchatgpt-composer-context { max-height: 112px; overflow: auto; }
+.zchatgpt-composer-context:empty { display: none; }
+.zchatgpt-composer-context > :not(:empty) { margin: 4px 4px 8px; }
+.zchatgpt-input {
   font: inherit;
-  font-size: calc(13px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1));
   color: inherit;
   background: transparent;
   border: 0;
@@ -487,23 +487,23 @@ body.zcr-dock-open #split-view .primary-view,
   box-sizing: border-box;
   width: 100%;
 }
-.zcr-input:focus,
-.zcr-input:focus-visible { outline: none; }
-.zcr-draft-images { display: flex; flex-wrap: wrap; gap: 6px; }
-.zcr-draft-image {
+.zchatgpt-input:focus,
+.zchatgpt-input:focus-visible { outline: none; }
+.zchatgpt-draft-images { display: flex; flex-wrap: wrap; gap: 6px; }
+.zchatgpt-draft-image {
   position: relative;
   display: flex;
   width: 44px;
   height: 44px;
 }
-.zcr-draft-thumb {
+.zchatgpt-draft-thumb {
   width: 44px;
   height: 44px;
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--color-panedivider, GrayText);
 }
-.zcr-draft-image .zcr-icon-button {
+.zchatgpt-draft-image .zchatgpt-icon-button {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -511,19 +511,19 @@ body.zcr-dock-open #split-view .primary-view,
   height: 18px;
   min-width: 18px;
   min-height: 18px;
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   border-radius: 50%;
   background: color-mix(in srgb, Canvas 82%, transparent);
   opacity: .85;
 }
-.zcr-draft-image .zcr-icon-button svg { width: 12px; height: 12px; }
-.zcr-draft-image .zcr-icon-button:hover, .zcr-draft-image .zcr-icon-button:focus-visible { opacity: 1; background: var(--material-menu, Canvas); }
+.zchatgpt-draft-image .zchatgpt-icon-button svg { width: 12px; height: 12px; }
+.zchatgpt-draft-image .zchatgpt-icon-button:hover, .zchatgpt-draft-image .zchatgpt-icon-button:focus-visible { opacity: 1; background: var(--material-menu, Canvas); }
 /* The rename popover hangs under the chrome, anchored to the right edge where the title chip sits.
    It replaces the old More menu's rename row, so it carries the same opaque-base treatment and the
    same top offset the toolbar-height variable defines. */
-.zcr-rename-form {
+.zchatgpt-rename-form {
   position: absolute;
-  top: calc(var(--zcr-toolbar-button-size, 28px) + 8px);
+  top: calc(var(--zchatgpt-toolbar-button-size, 28px) + 8px);
   right: 0;
   z-index: 7;
   width: min(280px, 100%);
@@ -533,13 +533,13 @@ body.zcr-dock-open #split-view .primary-view,
   padding: 8px;
   background-color: Canvas;
   background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--fill-primary, CanvasText) 12%, transparent);
 }
-.zcr-rename-form input { min-width: 0; flex: 1; padding: 5px; border: 1px solid var(--zcr-border); border-radius: 5px; background: Field; color: FieldText; }
+.zchatgpt-rename-form input { min-width: 0; flex: 1; padding: 5px; border: 1px solid var(--zchatgpt-border); border-radius: 5px; background: Field; color: FieldText; }
 
-.zcr-composer-bar {
+.zchatgpt-composer-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -547,11 +547,11 @@ body.zcr-dock-open #split-view .primary-view,
   min-height: 28px;
 }
 /* Codex-like restraint: one rounded card, a quiet chip for the model name, no accent chrome. */
-.zcr-composer { gap: 2px; }
-.zcr-composer .zcr-picker { border-radius: 999px; }
-.zcr-composer .zcr-picker:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-composer-leading { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.zcr-composer-trailing {
+.zchatgpt-composer { gap: 2px; }
+.zchatgpt-composer .zchatgpt-picker { border-radius: 999px; }
+.zchatgpt-composer .zchatgpt-picker:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-composer-leading { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.zchatgpt-composer-trailing {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -559,14 +559,14 @@ body.zcr-dock-open #split-view .primary-view,
   min-width: 0;
   max-width: 100%;
 }
-.zcr-picker {
+.zchatgpt-picker {
   appearance: none;
   max-width: 14rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font: inherit;
-  font-size: var(--zcr-control-font-size, 12px);
+  font-size: var(--zchatgpt-control-font-size, 12px);
   line-height: 1.2;
   color: var(--fill-secondary, GrayText);
   background: transparent;
@@ -576,21 +576,21 @@ body.zcr-dock-open #split-view .primary-view,
   min-height: 28px;
   cursor: pointer;
 }
-.zcr-picker:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-picker:disabled { opacity: .5; cursor: default; }
-.zcr-picker:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
-.zcr-context-ring { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 16px; height: 16px; color: var(--fill-secondary, GrayText); }
-.zcr-context-ring svg { display: block; }
-.zcr-context-ring-track { stroke: color-mix(in srgb, CanvasText 18%, transparent); stroke-width: 2; }
-.zcr-context-ring-fill { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.zcr-context-ring[data-zcr-context-state="runtime-reported"] { color: var(--fill-primary, CanvasText); }
-.zcr-context-ring[data-zcr-context-state="pinned-catalog"] { color: var(--fill-secondary, GrayText); }
+.zchatgpt-picker:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-picker:disabled { opacity: .5; cursor: default; }
+.zchatgpt-picker:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-context-ring { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 16px; height: 16px; color: var(--fill-secondary, GrayText); }
+.zchatgpt-context-ring svg { display: block; }
+.zchatgpt-context-ring-track { stroke: color-mix(in srgb, CanvasText 18%, transparent); stroke-width: 2; }
+.zchatgpt-context-ring-fill { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.zchatgpt-context-ring[data-zchatgpt-context-state="runtime-reported"] { color: var(--fill-primary, CanvasText); }
+.zchatgpt-context-ring[data-zchatgpt-context-state="pinned-catalog"] { color: var(--fill-secondary, GrayText); }
 /* Unknown context is a complete, closed ring in a neutral tone: a state, not a loading placeholder. */
-.zcr-context-ring[data-zcr-context-state="unknown"] { color: var(--fill-secondary, GrayText); }
-.zcr-context-ring:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; border-radius: 4px; }
+.zchatgpt-context-ring[data-zchatgpt-context-state="unknown"] { color: var(--fill-secondary, GrayText); }
+.zchatgpt-context-ring:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; border-radius: 4px; }
 /* Ring coverage disclosure: anchored above the composer card like the other composer popovers, and
    opaque for the same reason — it must not let the transcript collide with its text. */
-.zcr-context-details {
+.zchatgpt-context-details {
   position: absolute;
   right: 8px;
   bottom: calc(100% + 6px);
@@ -600,38 +600,38 @@ body.zcr-dock-open #split-view .primary-view,
   overflow: auto;
   padding: 8px 10px;
   box-sizing: border-box;
-  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1));
   line-height: 16px;
   color: var(--fill-primary, CanvasText);
   background-color: Canvas;
   background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
 }
-.zcr-context-details[hidden] { display: none; }
-.zcr-context-details-body { display: flex; flex-direction: column; gap: 2px; }
-.zcr-context-details-title { margin: 0 0 4px; color: var(--fill-primary, CanvasText); font-weight: 600; overflow-wrap: anywhere; }
-.zcr-context-detail { margin: 0; overflow-wrap: anywhere; }
-.zcr-context-detail-label { color: var(--fill-secondary, GrayText); }
-.zcr-context-detail-nofit { margin-top: 2px; color: var(--fill-secondary, GrayText); }
-.zcr-context-detail-reason { margin: 2px 0 0; color: var(--fill-secondary, GrayText); overflow-wrap: anywhere; }
+.zchatgpt-context-details[hidden] { display: none; }
+.zchatgpt-context-details-body { display: flex; flex-direction: column; gap: 2px; }
+.zchatgpt-context-details-title { margin: 0 0 4px; color: var(--fill-primary, CanvasText); font-weight: 600; overflow-wrap: anywhere; }
+.zchatgpt-context-detail { margin: 0; overflow-wrap: anywhere; }
+.zchatgpt-context-detail-label { color: var(--fill-secondary, GrayText); }
+.zchatgpt-context-detail-nofit { margin-top: 2px; color: var(--fill-secondary, GrayText); }
+.zchatgpt-context-detail-reason { margin: 2px 0 0; color: var(--fill-secondary, GrayText); overflow-wrap: anywhere; }
 /* Theme-token fill, never a raw hex and never the accent color: near-black in light mode, inverted
    in dark. Disabled keeps the same non-transparent fill and only dims through opacity. */
-.zcr-send {
-  width: var(--zcr-toolbar-button-size, 28px);
-  min-width: var(--zcr-toolbar-button-size, 28px);
-  height: var(--zcr-toolbar-button-size, 28px);
-  min-height: var(--zcr-toolbar-button-size, 28px);
+.zchatgpt-send {
+  width: var(--zchatgpt-toolbar-button-size, 28px);
+  min-width: var(--zchatgpt-toolbar-button-size, 28px);
+  height: var(--zchatgpt-toolbar-button-size, 28px);
+  min-height: var(--zchatgpt-toolbar-button-size, 28px);
   border-radius: 50%;
   background: var(--fill-primary, CanvasText);
   color: var(--material-background, var(--color-background, Canvas));
 }
-.zcr-send:hover { opacity: .88; }
-.zcr-send:disabled { background: var(--fill-primary, CanvasText); opacity: .35; }
-.zcr-send:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--fill-secondary, GrayText); }
+.zchatgpt-send:hover { opacity: .88; }
+.zchatgpt-send:disabled { background: var(--fill-primary, CanvasText); opacity: .35; }
+.zchatgpt-send:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--fill-secondary, GrayText); }
 
-.zcr-picker-menu {
+.zchatgpt-picker-menu {
   position: absolute;
   right: 8px;
   bottom: calc(100% + 6px);
@@ -644,30 +644,30 @@ body.zcr-dock-open #split-view .primary-view,
   box-sizing: border-box;
   background-color: Canvas;
   background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
-  border: 1px solid var(--zcr-border);
+  border: 1px solid var(--zchatgpt-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
 }
-.zcr-picker-section + .zcr-picker-section {
+.zchatgpt-picker-section + .zchatgpt-picker-section {
   border-top: 1px solid var(--color-panedivider, GrayText);
   margin-top: 4px;
   padding-top: 4px;
 }
-.zcr-picker-heading {
+.zchatgpt-picker-heading {
   padding: 6px 12px 4px;
-  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1));
   color: var(--fill-secondary, GrayText);
 }
 /* Account usage lives in the picker's own section: it is read-only account data, so it is plain
    wrapped text at the sidebar's chat scale rather than a row the owner could activate. */
-.zcr-picker-section .zcr-account-usage {
+.zchatgpt-picker-section .zchatgpt-account-usage {
   margin: 0;
   padding: 2px 12px 8px;
   white-space: pre-line;
   color: var(--fill-secondary, GrayText);
-  font-size: calc(12px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1));
 }
-.zcr-picker-option {
+.zchatgpt-picker-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -678,24 +678,24 @@ body.zcr-dock-open #split-view .primary-view,
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: calc(13px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1));
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
-.zcr-picker-option:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-picker-option:disabled { opacity: .5; cursor: default; }
-.zcr-picker-option:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
-.zcr-picker-option svg { flex: 0 0 auto; width: 14px; height: 14px; }
-.zcr-picker-toggle-row {
+.zchatgpt-picker-option:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-picker-option:disabled { opacity: .5; cursor: default; }
+.zchatgpt-picker-option:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
+.zchatgpt-picker-option svg { flex: 0 0 auto; width: 14px; height: 14px; }
+.zchatgpt-picker-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 6px 12px;
-  font-size: calc(13px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1));
 }
-.zcr-switch {
+.zchatgpt-switch {
   position: relative;
   width: 32px;
   height: 18px;
@@ -705,7 +705,7 @@ body.zcr-dock-open #split-view .primary-view,
   background: var(--fill-quinary, ButtonFace);
   cursor: pointer;
 }
-.zcr-switch::after {
+.zchatgpt-switch::after {
   content: '';
   position: absolute;
   top: 2px;
@@ -715,12 +715,12 @@ body.zcr-dock-open #split-view .primary-view,
   border-radius: 50%;
   background: var(--material-background, Canvas);
 }
-.zcr-switch[aria-checked="true"] { background: AccentColor; }
-.zcr-switch[aria-checked="true"]::after { left: 16px; }
-.zcr-switch:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
-.zcr-switch:disabled { opacity: .5; cursor: default; }
+.zchatgpt-switch[aria-checked="true"] { background: AccentColor; }
+.zchatgpt-switch[aria-checked="true"]::after { left: 16px; }
+.zchatgpt-switch:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-switch:disabled { opacity: .5; cursor: default; }
 
-.zcr-history-panel {
+.zchatgpt-history-panel {
   position: absolute;
   inset: 0;
   z-index: 5;
@@ -731,20 +731,20 @@ body.zcr-dock-open #split-view .primary-view,
   background: var(--material-background, var(--color-background, Canvas));
   border-bottom: 0;
 }
-.zcr-history-search {
+.zchatgpt-history-search {
   flex: 0 0 auto;
   margin: 8px 10px 6px;
   padding: 6px 8px;
   font: inherit;
-  font-size: calc(13px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1));
   color: inherit;
   background: var(--material-background, Field);
   border: 1px solid var(--color-panedivider, GrayText);
   border-radius: 6px;
 }
-.zcr-history-search:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-history-search:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
 /* The list owns the only scrollbar; bounded by the dock-sized panel so the popover cannot grow. */
-.zcr-history-list {
+.zchatgpt-history-list {
   flex: 1 1 auto;
   min-height: 0;
   max-height: 100%;
@@ -753,15 +753,15 @@ body.zcr-dock-open #split-view .primary-view,
   padding: 0 0 10px;
 }
 /* Thin hairlines separate the time groups; there are no per-row separators. */
-.zcr-history-group { border-top-width: 1px; border-top-style: solid; border-top-color: var(--zcr-border); }
-.zcr-history-group:first-child { border-top-width: 0; }
-.zcr-history-heading {
+.zchatgpt-history-group { border-top-width: 1px; border-top-style: solid; border-top-color: var(--zchatgpt-border); }
+.zchatgpt-history-group:first-child { border-top-width: 0; }
+.zchatgpt-history-heading {
   padding: 10px 12px 4px;
-  font-size: calc(11px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1));
   font-weight: 500;
   color: var(--fill-secondary, GrayText);
 }
-.zcr-history-row {
+.zchatgpt-history-row {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -769,8 +769,8 @@ body.zcr-dock-open #split-view .primary-view,
   margin: 1px 6px;
   border-radius: 6px;
 }
-.zcr-history-row[data-current], .zcr-history-row:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-history-status {
+.zchatgpt-history-row[data-current], .zchatgpt-history-row:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-history-status {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -779,8 +779,8 @@ body.zcr-dock-open #split-view .primary-view,
   height: 16px;
   color: var(--fill-secondary, GrayText);
 }
-.zcr-history-status svg { display: block; width: 16px; height: 16px; }
-.zcr-history-item {
+.zchatgpt-history-status svg { display: block; width: 16px; height: 16px; }
+.zchatgpt-history-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -790,7 +790,7 @@ body.zcr-dock-open #split-view .primary-view,
   padding: 4px 8px;
   overflow: hidden;
   font: inherit;
-  font-size: calc(13px * var(--zcr-chat-text-scale, 1));
+  font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1));
   color: inherit;
   background: transparent;
   border: 0;
@@ -799,84 +799,84 @@ body.zcr-dock-open #split-view .primary-view,
   cursor: pointer;
 }
 /* Single-line title: truncate rather than wrap into a second line. */
-.zcr-history-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zchatgpt-history-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A neutral ring, not the accent outline the owner rejected. */
-.zcr-history-item:focus-visible {
+.zchatgpt-history-item:focus-visible {
   outline-width: 2px;
   outline-style: solid;
   outline-color: var(--fill-secondary, GrayText);
   outline-offset: -2px;
 }
-.zcr-history-row .zcr-icon-button { opacity: .7; }
+.zchatgpt-history-row .zchatgpt-icon-button { opacity: .7; }
 
 /* The first outbound scope notice. Compact and inline: it is a consent state above the transcript,
    not a permanent banner, and it follows the same native spacing and colors as the chrome. */
-.zcr-sidebar .zcr-context-disclosure { margin: 0 8px 8px; padding: 8px; background: var(--material-toolbar, ButtonFace); border-radius: 5px; }
-.zcr-sidebar .zcr-context-disclosure[hidden] { display: none; }
-.zcr-sidebar .zcr-context-disclosure p { margin: 0 0 6px; }
+.zchatgpt-sidebar .zchatgpt-context-disclosure { margin: 0 8px 8px; padding: 8px; background: var(--material-toolbar, ButtonFace); border-radius: 5px; }
+.zchatgpt-sidebar .zchatgpt-context-disclosure[hidden] { display: none; }
+.zchatgpt-sidebar .zchatgpt-context-disclosure p { margin: 0 0 6px; }
 /* Task ledgers: one stylesheet for every mounted view instead of a copy per mount. */
-.zcr-task-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font: inherit; font-size: 12px; }
-.zcr-task-view [hidden] { display: none !important; }
-.zcr-task-card { min-width: 0; border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; background: var(--material-background, Canvas); }
-.zcr-task-card > summary { min-height: 28px; padding: 6px 8px; box-sizing: border-box; cursor: pointer; font-size: 12px; overflow-wrap: anywhere; }
-.zcr-task-body { padding: 0 8px 8px; min-width: 0; }
-.zcr-task-question { margin: 4px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45; }
-.zcr-task-muted, .zcr-task-scope { margin: 4px 0; color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
-.zcr-task-row { padding: 8px 0; border-top: 1px solid var(--zcr-border, GrayText); min-width: 0; }
-.zcr-task-row-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.zcr-task-check { display: flex; align-items: center; gap: 6px; min-height: 28px; font: inherit; }
-.zcr-task-check input { flex: 0 0 auto; }
-.zcr-task-quote { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.5; }
-.zcr-task-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
-.zcr-task-button { appearance: none; min-height: 28px; padding: 4px 8px; border: 1px solid var(--zcr-border, GrayText); border-radius: 5px; background: transparent; color: inherit; font: inherit; line-height: 18px; cursor: pointer; box-sizing: border-box; }
-.zcr-task-button:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-task-button:disabled { opacity: .5; cursor: default; }
-.zcr-task-view :focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
-.zcr-task-field { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin: 6px 0; }
-.zcr-task-field select { max-width: 100%; min-width: 0; min-height: 28px; padding: 4px; border: 1px solid var(--zcr-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; }
-.zcr-task-error { margin: 6px 0; overflow-wrap: anywhere; font-size: 12px; }
-.zcr-task-counts { font-variant-numeric: tabular-nums; }
+.zchatgpt-task-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; font: inherit; font-size: 12px; }
+.zchatgpt-task-view [hidden] { display: none !important; }
+.zchatgpt-task-card { min-width: 0; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 8px; background: var(--material-background, Canvas); }
+.zchatgpt-task-card > summary { min-height: 28px; padding: 6px 8px; box-sizing: border-box; cursor: pointer; font-size: 12px; overflow-wrap: anywhere; }
+.zchatgpt-task-body { padding: 0 8px 8px; min-width: 0; }
+.zchatgpt-task-question { margin: 4px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45; }
+.zchatgpt-task-muted, .zchatgpt-task-scope { margin: 4px 0; color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+.zchatgpt-task-row { padding: 8px 0; border-top: 1px solid var(--zchatgpt-border, GrayText); min-width: 0; }
+.zchatgpt-task-row-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.zchatgpt-task-check { display: flex; align-items: center; gap: 6px; min-height: 28px; font: inherit; }
+.zchatgpt-task-check input { flex: 0 0 auto; }
+.zchatgpt-task-quote { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.5; }
+.zchatgpt-task-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.zchatgpt-task-button { appearance: none; min-height: 28px; padding: 4px 8px; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 5px; background: transparent; color: inherit; font: inherit; line-height: 18px; cursor: pointer; box-sizing: border-box; }
+.zchatgpt-task-button:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-task-button:disabled { opacity: .5; cursor: default; }
+.zchatgpt-task-view :focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-task-field { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin: 6px 0; }
+.zchatgpt-task-field select { max-width: 100%; min-width: 0; min-height: 28px; padding: 4px; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; }
+.zchatgpt-task-error { margin: 6px 0; overflow-wrap: anywhere; font-size: 12px; }
+.zchatgpt-task-counts { font-variant-numeric: tabular-nums; }
 
 /* Workspace chips, settings and previews. */
-.zcr-workspace-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.zcr-workspace-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; border: 1px solid var(--zcr-border, GrayText); border-radius: 6px; background: var(--fill-quinary, ButtonFace); }
-.zcr-workspace-control { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 5px; color: inherit; background: transparent; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; box-sizing: border-box; }
-.zcr-workspace-control:hover, .zcr-workspace-control[aria-pressed=true] { background: var(--fill-quinary, ButtonFace); }
-.zcr-workspace-control:disabled { opacity: .5; cursor: default; }
-.zcr-workspace-control:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
-.zcr-workspace-chip > .zcr-workspace-control:first-child { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.zcr-workspace-chip > .zcr-workspace-control:last-child { flex: 0 0 28px; padding: 0; }
-.zcr-workspace-settings { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
-.zcr-workspace-settings details { border-top: 1px solid var(--zcr-border, GrayText); padding-top: 8px; }
-.zcr-workspace-settings summary { cursor: pointer; min-height: 24px; }
-.zcr-workspace-settings label { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin: 8px 0; }
-.zcr-workspace-settings input, .zcr-workspace-settings textarea, .zcr-workspace-settings select { width: 100%; min-width: 0; max-width: 100%; min-height: 28px; padding: 4px 6px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; }
-.zcr-workspace-settings textarea { resize: vertical; min-height: 52px; max-height: 220px; }
-.zcr-workspace-settings input[type=checkbox] { width: auto; min-height: 0; }
-.zcr-workspace-settings :focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
-.zcr-workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-.zcr-workspace-muted { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
-.zcr-workspace-status { margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
-.zcr-workspace-preview { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 26; max-width: 100%; max-height: 280px; overflow: auto; padding: 12px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); color: inherit; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
-.zcr-workspace-preview[hidden], .zcr-workspace-status[hidden] { display: none; }
-.zcr-workspace-preview pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; user-select: text; }
-.zcr-workspace-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.zcr-workspace-editor { margin-top: 8px; }
+.zchatgpt-workspace-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.zchatgpt-workspace-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 6px; background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-workspace-control { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 5px; color: inherit; background: transparent; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; box-sizing: border-box; }
+.zchatgpt-workspace-control:hover, .zchatgpt-workspace-control[aria-pressed=true] { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-workspace-control:disabled { opacity: .5; cursor: default; }
+.zchatgpt-workspace-control:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+.zchatgpt-workspace-chip > .zchatgpt-workspace-control:first-child { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.zchatgpt-workspace-chip > .zchatgpt-workspace-control:last-child { flex: 0 0 28px; padding: 0; }
+.zchatgpt-workspace-settings { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.zchatgpt-workspace-settings details { border-top: 1px solid var(--zchatgpt-border, GrayText); padding-top: 8px; }
+.zchatgpt-workspace-settings summary { cursor: pointer; min-height: 24px; }
+.zchatgpt-workspace-settings label { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin: 8px 0; }
+.zchatgpt-workspace-settings input, .zchatgpt-workspace-settings textarea, .zchatgpt-workspace-settings select { width: 100%; min-width: 0; max-width: 100%; min-height: 28px; padding: 4px 6px; box-sizing: border-box; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; }
+.zchatgpt-workspace-settings textarea { resize: vertical; min-height: 52px; max-height: 220px; }
+.zchatgpt-workspace-settings input[type=checkbox] { width: auto; min-height: 0; }
+.zchatgpt-workspace-settings :focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-workspace-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.zchatgpt-workspace-muted { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+.zchatgpt-workspace-status { margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
+.zchatgpt-workspace-preview { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 26; max-width: 100%; max-height: 280px; overflow: auto; padding: 12px; box-sizing: border-box; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 8px; background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); color: inherit; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
+.zchatgpt-workspace-preview[hidden], .zchatgpt-workspace-status[hidden] { display: none; }
+.zchatgpt-workspace-preview pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; user-select: text; }
+.zchatgpt-workspace-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.zchatgpt-workspace-editor { margin-top: 8px; }
 
 /* One keyboard-owned command menu shared by every composer chooser. */
-.zcr-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); border: 1px solid var(--zcr-border, GrayText); border-radius: 8px; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
-.zcr-command-menu[hidden] { display: none; }
-.zcr-command-heading { margin: 4px 8px; color: var(--fill-secondary, GrayText); font-size: 11px; }
-.zcr-command-toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
+.zchatgpt-command-menu { position: absolute; inset-inline: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; min-width: 0; max-width: 100%; max-height: 280px; padding: 4px; box-sizing: border-box; overflow: hidden; font: inherit; font-size: 12px; color: var(--fill-primary, CanvasText); background-color: Canvas; background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas))); border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 8px; box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent); }
+.zchatgpt-command-menu[hidden] { display: none; }
+.zchatgpt-command-heading { margin: 4px 8px; color: var(--fill-secondary, GrayText); font-size: 11px; }
+.zchatgpt-command-toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
 /* The reference chooser's own search field: it shares the toolbar row with the kind filters but
    takes the whole row, so a long query is readable at any sidebar width or text scale. */
-.zcr-workspace-search { flex: 1 1 100%; min-width: 0; min-height: 28px; padding: 4px 8px; box-sizing: border-box; border: 1px solid var(--zcr-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; font-size: 12px; }
-.zcr-workspace-search:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
-.zcr-command-list { min-height: 0; overflow: auto; }
-.zcr-command-option { display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 28px; padding: 6px 8px; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; border-radius: 5px; cursor: pointer; box-sizing: border-box; }
-.zcr-command-option[aria-selected=true], .zcr-command-option:hover { background: var(--fill-quinary, ButtonFace); }
-.zcr-command-option:disabled { opacity: .55; cursor: default; }
-.zcr-command-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.zcr-command-description { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
-.zcr-command-status { margin: 4px 8px; font-size: 12px; overflow-wrap: anywhere; }
-.zcr-command-menu :focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+.zchatgpt-workspace-search { flex: 1 1 100%; min-width: 0; min-height: 28px; padding: 4px 8px; box-sizing: border-box; border: 1px solid var(--zchatgpt-border, GrayText); border-radius: 5px; background: var(--material-background, Field); color: inherit; font: inherit; font-size: 12px; }
+.zchatgpt-workspace-search:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+.zchatgpt-command-list { min-height: 0; overflow: auto; }
+.zchatgpt-command-option { display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 28px; padding: 6px 8px; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; border-radius: 5px; cursor: pointer; box-sizing: border-box; }
+.zchatgpt-command-option[aria-selected=true], .zchatgpt-command-option:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-command-option:disabled { opacity: .55; cursor: default; }
+.zchatgpt-command-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.zchatgpt-command-description { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+.zchatgpt-command-status { margin: 4px 8px; font-size: 12px; overflow-wrap: anywhere; }
+.zchatgpt-command-menu :focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }

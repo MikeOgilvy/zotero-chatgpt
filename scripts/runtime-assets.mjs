@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PINNED_RUNTIME } from '../runtime/manifest.ts';
-export const runtimeCache = path.resolve(import.meta.dirname, '../.zcr-dev/runtime-cache');
+export const runtimeCache = path.resolve(import.meta.dirname, '../.zotero-chatgpt-dev/runtime-cache');
 const licenseDirectory = path.resolve(import.meta.dirname, '../runtime/licenses');
 export async function verifyRuntimeFile(file, expected) {
   try {

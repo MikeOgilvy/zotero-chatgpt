@@ -27,9 +27,9 @@ function referenceDetail(reference: ReaderReference): string {
 export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceViewActions): { openCommands(): void; openSkills(): void; update(state: WorkspaceViewState): void; dispose(): void } {
   const { input } = mounts; const doc = input.ownerDocument; const container = input.parentElement ?? mounts.context;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
-  const chips = create('div', '', 'zcr-workspace-chips'); chips.dataset.zcrWorkspaceChips = ''; mounts.context.append(chips);
-  const status = create('p', '', 'zcr-workspace-status'); status.setAttribute('role', 'status'); status.hidden = true;
-  const preview = create('div', '', 'zcr-workspace-preview'); preview.setAttribute('role', 'dialog'); preview.setAttribute('aria-label', 'Reference preview'); preview.hidden = true; container.append(preview);
+  const chips = create('div', '', 'zchatgpt-workspace-chips'); chips.dataset.zchatgptWorkspaceChips = ''; mounts.context.append(chips);
+  const status = create('p', '', 'zchatgpt-workspace-status'); status.setAttribute('role', 'status'); status.hidden = true;
+  const preview = create('div', '', 'zchatgpt-workspace-preview'); preview.setAttribute('role', 'dialog'); preview.setAttribute('aria-label', 'Reference preview'); preview.hidden = true; container.append(preview);
   let state: WorkspaceViewState | null = null; let disposed = false; let composing = false;
   let searchController: AbortController | null = null; let previewController: AbortController | null = null; let querySerial = 0;
   let filter: ReferenceFilter = 'all'; let mode: 'references' | 'skills' = 'references'; let query = '';
@@ -44,7 +44,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     finally { if (control?.isConnected) control.disabled = false; }
   };
   const button = (label: string, action: () => void, text = label) => {
-    const node = create('button', text, 'zcr-workspace-control'); node.type = 'button'; node.setAttribute('aria-label', label); node.title = label;
+    const node = create('button', text, 'zchatgpt-workspace-control'); node.type = 'button'; node.setAttribute('aria-label', label); node.title = label;
     node.addEventListener('click', action); return node;
   };
   const clearTrigger = (selected: typeof trigger, original: string) => {
@@ -108,7 +108,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
    * the composer owns the caret, so the two routes never fight over the same text, and the menu's own
    * key handling already covers Arrow/Enter/Escape for anything focused inside it.
    */
-  const searchField = create('input', '', 'zcr-workspace-search');
+  const searchField = create('input', '', 'zchatgpt-workspace-search');
   searchField.type = 'search'; searchField.hidden = true;
   searchField.placeholder = 'Search references…'; searchField.setAttribute('aria-label', 'Search references');
   searchField.addEventListener('input', () => {
@@ -145,10 +145,10 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
   input.addEventListener('input', onInput); input.addEventListener('click', onInput); input.addEventListener('keyup', onCaretKey); input.addEventListener('compositionstart', onStart); input.addEventListener('compositionend', onEnd);
 
   const closePreview = () => { previewController?.abort(); preview.hidden = true; input.focus(); };
-  const previewRow = create('div', '', 'zcr-workspace-preview-title');
-  const previewHeading = create('strong'); const previewDetail = create('p', '', 'zcr-workspace-muted'); const previewBody = create('pre');
+  const previewRow = create('div', '', 'zchatgpt-workspace-preview-title');
+  const previewHeading = create('strong'); const previewDetail = create('p', '', 'zchatgpt-workspace-muted'); const previewBody = create('pre');
   const previewClose = button('Close preview', closePreview, '×');
-  const previewRange = create('div', '', 'zcr-workspace-actions'); previewRange.hidden = true;
+  const previewRange = create('div', '', 'zchatgpt-workspace-actions'); previewRange.hidden = true;
   previewRow.append(previewHeading, previewClose); preview.append(previewRow, previewDetail, previewRange, previewBody);
   const showPreview = (title: string, text: string, detail = '') => {
     const opening = preview.hidden;
@@ -158,7 +158,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     preview.hidden = false;
     menu.close();
     if (opening) previewClose.focus();
-    const pane = input.closest<HTMLElement>('[data-zcr-sidebar]');
+    const pane = input.closest<HTMLElement>('[data-zchatgpt-sidebar]');
     const bounds = pane?.getBoundingClientRect(); const anchor = container.getBoundingClientRect();
     if (bounds?.height && anchor.height) preview.style.maxHeight = `${Math.max(0, Math.min(280, anchor.top - bounds.top - 6))}px`;
   };
@@ -187,7 +187,7 @@ export function mountWorkspaceView(mounts: WorkspaceMounts, actions: WorkspaceVi
     if (!state) return;
     const nodes: HTMLElement[] = [];
     const chip = (label: string, previewLabel: string, open: () => void, removeLabel: string, remove: () => Promise<void>) => {
-      const row = create('div', '', 'zcr-workspace-chip');
+      const row = create('div', '', 'zchatgpt-workspace-chip');
       const removeButton = button(removeLabel, () => { void run(async () => { await remove(); if (!disposed) input.focus(); }, removeButton); }, '×');
       row.append(button(previewLabel, open, label), removeButton); nodes.push(row);
     };

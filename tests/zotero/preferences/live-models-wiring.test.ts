@@ -53,9 +53,9 @@ it('forwards the runtime live list to the pane so a Spark id composes end to end
   const service = createPreferencesService({ ...serviceHost(), liveModels: () => Promise.resolve(['gpt-6-astra', 'gpt-5.3-codex-spark', 'gpt-5.5']) });
   const { ready, root, find } = mountPane(service);
   await ready;
-  expect(find<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull();
-  expect(root.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/running runtime's report/u);
+  expect(find<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull();
+  expect(root.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
+  expect(find('[data-zchatgpt-pref="models-note"]').textContent).toMatch(/running runtime's report/u);
 });
 
 it('keeps the bundled families and honest copy when the service has no live model port', async () => {
@@ -63,6 +63,6 @@ it('keeps the bundled families and honest copy when the service has no live mode
   expect('readLiveModels' in service).toBe(false);
   const { ready, root, find } = mountPane(service);
   await ready;
-  expect(root.querySelector('[data-zcr-model^="gpt-5.3"]')).toBeNull();
-  expect(find('[data-zcr-pref="models-note"]').textContent).toMatch(/bundled catalog, not your account/u);
+  expect(root.querySelector('[data-zchatgpt-model^="gpt-5.3"]')).toBeNull();
+  expect(find('[data-zchatgpt-pref="models-note"]').textContent).toMatch(/bundled catalog, not your account/u);
 });

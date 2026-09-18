@@ -27,7 +27,7 @@ interface ArchiveEntry {
 }
 
 async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "zcr-package-test-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "zchatgpt-package-test-"));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -63,7 +63,7 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
     mkdir(path.join(sourceDirectory, "docs"), { recursive: true }),
   ]);
 
-  const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json", "LICENSE"];
+  const requiredFiles = ["bootstrap.js", "content/zchatgpt.js", "manifest.json", "LICENSE"];
   await cp(path.join(builtExtension, "content/runtime"), path.join(sourceDirectory, "content/runtime"), { recursive: true });
   await Promise.all(
     requiredFiles.map(async (file) => {
@@ -87,7 +87,7 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
   const packagedFiles = [
     "bootstrap.js",
     "content/assets/example.css",
-    "content/zcr.js",
+    "content/zchatgpt.js",
     "content/runtime/codex-aarch64-apple-darwin",
     "content/runtime/manifest.json",
     "content/runtime/licenses/LICENSE",
@@ -256,9 +256,9 @@ describe("development XPI packaging", () => {
 
     expect(await readdir(path.join(testDirectory, "dist"))).toEqual([
       "SHA256SUMS",
-      "zotero-codex-reader-0.1.0a42-dev.xpi",
+      "zotero-chatgpt-0.1.0a42-dev.xpi",
     ]);
-    const archiveName = "zotero-codex-reader-0.1.0a42-dev.xpi";
+    const archiveName = "zotero-chatgpt-0.1.0a42-dev.xpi";
     const digest = createHash("sha256")
       .update(await readFile(path.join(testDirectory, "dist", archiveName)))
       .digest("hex");

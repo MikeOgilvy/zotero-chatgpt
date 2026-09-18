@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { copyableAnswerText, followAnswerScroll, renderAnswer } from '../../../packages/zotero/src/chat/render-answer.ts';
 
 function documentOf(): Document {
-  return new Window({ url: 'https://zcr.test/' }).document as unknown as Document;
+  return new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
 }
 
 it('strips raw HTML, images and non-https links so untrusted answers cannot run script', () => {
@@ -78,7 +78,7 @@ it('leaves currency amounts as text instead of merging them into one formula', (
 it('renders Unicode math that KaTeX only warns about instead of dropping to raw TeX', () => {
   const fragment = renderAnswer(documentOf(), '$T_{误差}$ 表示温度');
   expect(fragment.querySelector('.katex')).not.toBeNull();
-  expect(fragment.querySelector('.zcr-math-fallback')).toBeNull();
+  expect(fragment.querySelector('.zchatgpt-math-fallback')).toBeNull();
 });
 
 it('copies readable source with formula notation, not rendered DOM', () => {

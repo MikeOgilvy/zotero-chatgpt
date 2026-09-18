@@ -75,9 +75,9 @@ it('exempts the reader composer, history search and splitter from Zotero FocusMa
   // The whole dock is explicitly marked non-editable; form controls inside keep native editing.
   expect(dock.getAttribute('contenteditable')).toBe('false');
 
-  const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]');
-  const historySearch = root.querySelector<HTMLInputElement>('[data-zcr-history-search]');
-  const resizer = dock.querySelector<HTMLElement>('[data-zcr-resizer]');
+  const composer = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]');
+  const historySearch = root.querySelector<HTMLInputElement>('[data-zchatgpt-history-search]');
+  const resizer = dock.querySelector<HTMLElement>('[data-zchatgpt-resizer]');
   expect(composer?.tagName).toBe('TEXTAREA');
   expect(historySearch?.type).toBe('search');
   expect(resizer).toBeTruthy();
@@ -120,7 +120,7 @@ it('exempts the reader composer, history search and splitter from Zotero FocusMa
 
 it('keeps the FocusManager exemption across dock reuse and drops the dock on unmount', async () => {
   const { doc, mounted, root, teardown } = await mountDockWithChat();
-  const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const composer = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
 
   const reused = mountReaderDock(doc)!;
   expect(reused.dock).toBe(mounted.dock);
@@ -129,7 +129,7 @@ it('keeps the FocusManager exemption across dock reuse and drops the dock on unm
   expect(zoteroFocusManagerExemptsArrowKeys(composer)).toBe(true);
 
   unmountReaderDock(doc);
-  expect(doc.querySelector('[data-zcr-dock]')).toBeNull();
+  expect(doc.querySelector('[data-zchatgpt-dock]')).toBeNull();
   expect(doc.getElementById('split-view')?.contains(composer)).toBe(false);
 
   teardown();

@@ -9,7 +9,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwM
 const codec: GeneratedImageCodec = { decode: value => new Uint8Array(Buffer.from(value, 'base64')), encode: bytes => Buffer.from(bytes).toString('base64') };
 const roots: string[] = [];
 async function setup() {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'zcr-image-output-'))); roots.push(root);
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'zchatgpt-image-output-'))); roots.push(root);
   const allowed = path.join(root, 'scratch'); await mkdir(allowed);
   const host = nodeFiles(); const reads: string[] = []; const read = host.io.read.bind(host.io);
   host.io.read = value => { reads.push(value); return read(value); };

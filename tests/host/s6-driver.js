@@ -58,14 +58,14 @@ async function runHostSmoke(config) {
   try {
     await Zotero.initializationPromise;
     await check('isolated-data-directory', Zotero.DataDirectory.dir === config.dataDir, { dataDir: Zotero.DataDirectory.dir });
-    await check('virgin-profile-tree', PathUtils.profileDir === config.profile && /\.zcr-dev\/s6-(virgin|upgrade)\//.test(String(config.profile)), { profile: PathUtils.profileDir });
+    await check('virgin-profile-tree', PathUtils.profileDir === config.profile && /\.zotero-chatgpt-dev\/s6-(virgin|upgrade)\//.test(String(config.profile)), { profile: PathUtils.profileDir });
     const win = await until(() => Zotero.getMainWindow(), 'main window');
     await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library view');
     await Zotero.Libraries.get(Zotero.Libraries.userLibraryID).waitForDataLoad('item');
     let subject = await AddonManager.getAddonByID(config.subjectID);
     if (subject?.userDisabled) await subject.enable();
     await check('bundled-xpi-loaded', subject?.isActive && subject.version === config.subjectVersion, { version: subject?.version });
-    const parent = new Zotero.Item('book'); parent.setField('title', 'ZCR S6 virgin install test');
+    const parent = new Zotero.Item('book'); parent.setField('title', 'ZCHATGPT S6 virgin install test');
     const notifierQueue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue });
     const attachment = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Synthetic paper A', saveOptions: { notifierQueue } });
     await Promise.all([parent.loadAllData(), attachment.loadAllData()]);
@@ -77,13 +77,13 @@ async function runHostSmoke(config) {
     const reader = () => Zotero.Reader.getByTabID(tabID);
     const toggle = () => {
       try {
-        return reader()?._iframeWindow?.document.querySelector('[data-zcr-toggle]') ?? null;
+        return reader()?._iframeWindow?.document.querySelector('[data-zchatgpt-toggle]') ?? null;
       } catch (error) {
         if (String(error).includes('dead object')) return null;
         throw error;
       }
     };
-    const panel = () => { try { return reader()._iframeWindow?.document.querySelector('[data-zcr-chat]'); } catch { return null; } };
+    const panel = () => { try { return reader()._iframeWindow?.document.querySelector('[data-zchatgpt-chat]'); } catch { return null; } };
     await until(() => toggle(), 'reader toolbar');
     const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
     const ownProcesses = async () => {
@@ -93,17 +93,17 @@ async function runHostSmoke(config) {
       return output.split('\n').filter(line => line.includes(PathUtils.profileDir + '/') && line.includes(' app-server')).map(line => Number(line.trim().split(/\s+/, 1)[0])).filter(pid => Number.isInteger(pid) && pid > 0);
     };
     win.ZoteroContextPane.collapsed = true; click(toggle());
-    await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'native runtime initialization', 90000);
-    await check('native-runtime-handshake-ready', panel()?.dataset.zcrRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
+    await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'native runtime initialization', 90000);
+    await check('native-runtime-handshake-ready', panel()?.dataset.zchatgptRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
     await check('one-owned-codex-process', (await ownProcesses()).length === 1, { count: (await ownProcesses()).length });
-    const auth = panel()?.dataset.zcrAuth;
+    const auth = panel()?.dataset.zchatgptAuth;
     report.account = { state: auth };
     await check('virgin-profile-signed-out', auth === 'signedOut', { auth });
-    await check('login-control-visible', !!panel()?.querySelector('[data-zcr-action="login"]'));
-    await check('not-generating', panel()?.dataset.zcrGenerating !== 'true' && !panel()?.dataset.zcrActiveRequest);
+    await check('login-control-visible', !!panel()?.querySelector('[data-zchatgpt-action="login"]'));
+    await check('not-generating', panel()?.dataset.zchatgptGenerating !== 'true' && !panel()?.dataset.zchatgptActiveRequest);
     await skip('live-model-send', 'quota blocks live Codex until 2026-09-15; this driver does not send');
     const conversationId = '11111111-0000-4000-8000-000000000006';
-    const recordsDir = PathUtils.join(PathUtils.profileDir, 'zotero-codex-reader', 'v1', 'records', 'conversations');
+    const recordsDir = PathUtils.join(PathUtils.profileDir, 'zotero-chatgpt', 'v1', 'records', 'conversations');
     const recordPath = PathUtils.join(recordsDir, `${conversationId}.json`);
     if (typeof IOUtils?.writeUTF8 === 'function') {
       await IOUtils.makeDirectory(recordsDir, { createAncestors: true, ignoreExisting: true });
@@ -138,14 +138,14 @@ async function runHostSmoke(config) {
       if (subject?.userDisabled) await subject.enable();
       await until(() => toggle(), 'toolbar after version-bump upgrade', 30000);
       if (toggle()?.getAttribute('aria-pressed') !== 'true') click(toggle());
-      await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'runtime after version-bump upgrade', 90000);
+      await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'runtime after version-bump upgrade', 90000);
       subject = await AddonManager.getAddonByID(config.subjectID);
       report.upgrade = { installedVersion: subject?.version ?? null };
       await save();
       await check('version-bump-upgrade', subject?.isActive && subject.version === config.upgradeVersion, { version: subject?.version, expected: config.upgradeVersion });
-      await check('handshake-ready-after-xpi-replace', panel()?.dataset.zcrRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
-      await check('still-signed-out-after-replace', panel()?.dataset.zcrAuth === 'signedOut', { auth: panel()?.dataset.zcrAuth });
-      await check('not-generating-after-replace', panel()?.dataset.zcrGenerating !== 'true' && !panel()?.dataset.zcrActiveRequest);
+      await check('handshake-ready-after-xpi-replace', panel()?.dataset.zchatgptRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
+      await check('still-signed-out-after-replace', panel()?.dataset.zchatgptAuth === 'signedOut', { auth: panel()?.dataset.zchatgptAuth });
+      await check('not-generating-after-replace', panel()?.dataset.zchatgptGenerating !== 'true' && !panel()?.dataset.zchatgptActiveRequest);
       if (typeof IOUtils?.exists === 'function') {
         await check('records-kept-after-xpi-replace', (await IOUtils.exists(recordPath)) === true);
       } else {
@@ -158,13 +158,13 @@ async function runHostSmoke(config) {
       if (subject?.userDisabled) await subject.enable();
       await until(() => toggle(), 'toolbar after rollback', 30000);
       if (toggle()?.getAttribute('aria-pressed') !== 'true') click(toggle());
-      await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'runtime after rollback', 90000);
+      await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'runtime after rollback', 90000);
       subject = await AddonManager.getAddonByID(config.subjectID);
       report.rollback = { installedVersion: subject?.version ?? null };
       await save();
       await check('rollback-restores-previous-version', subject?.isActive && subject.version === config.rollbackVersion, { version: subject?.version, expected: config.rollbackVersion });
-      await check('handshake-ready-after-rollback', panel()?.dataset.zcrRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
-      await check('still-signed-out-after-rollback', panel()?.dataset.zcrAuth === 'signedOut', { auth: panel()?.dataset.zcrAuth });
+      await check('handshake-ready-after-rollback', panel()?.dataset.zchatgptRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
+      await check('still-signed-out-after-rollback', panel()?.dataset.zchatgptAuth === 'signedOut', { auth: panel()?.dataset.zchatgptAuth });
       if (typeof IOUtils?.exists === 'function') {
         await check('records-kept-after-rollback', (await IOUtils.exists(recordPath)) === true);
       } else {
@@ -174,7 +174,7 @@ async function runHostSmoke(config) {
       // original meaning: the older build must refuse a conversation written in the newer schema
       // with an honest message and must leave the record bytes untouched. A newly opened reader has
       // no cached conversation to reuse, so it must consult the paper index for this attachment.
-      const profileClientId = Zotero.Prefs.get('extensions.zcr.clientId', true);
+      const profileClientId = Zotero.Prefs.get('extensions.zchatgpt.clientId', true);
       if (typeof IOUtils?.writeUTF8 === 'function' && typeof profileClientId === 'string' && /^[0-9a-f-]{36}$/u.test(profileClientId)) {
         const downgradeId = '33333333-0000-4000-8000-000000000003';
         const probeAttachment = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Synthetic downgrade probe PDF' });
@@ -192,7 +192,7 @@ async function runHostSmoke(config) {
         };
         const seededBytes = `${JSON.stringify(seededDowngrade)}\n`;
         await IOUtils.writeUTF8(probeRecordPath, seededBytes);
-        const papersDir = PathUtils.join(PathUtils.profileDir, 'zotero-codex-reader', 'v1', 'records', 'papers');
+        const papersDir = PathUtils.join(PathUtils.profileDir, 'zotero-chatgpt', 'v1', 'records', 'papers');
         await IOUtils.makeDirectory(papersDir, { createAncestors: true, ignoreExisting: true });
         const probeIndexPath = PathUtils.join(papersDir, `${profileClientId}-${Zotero.Libraries.userLibraryID}-${probeAttachment.key}.json`);
         let priorIndex = null;
@@ -200,8 +200,8 @@ async function runHostSmoke(config) {
         await IOUtils.writeUTF8(probeIndexPath, `${JSON.stringify({ schemaVersion: 1, conversations: [downgradeId], current: downgradeId })}\n`);
         const probeOpened = await Zotero.Reader.open(probeAttachment.id);
         const probeReader = () => Zotero.Reader.getByTabID(probeOpened.tabID);
-        const probeToggle = () => { try { return probeReader()?._iframeWindow?.document.querySelector('[data-zcr-toggle]') ?? null; } catch { return null; } };
-        const probePanel = () => { try { return probeReader()?._iframeWindow?.document.querySelector('[data-zcr-chat]'); } catch { return null; } };
+        const probeToggle = () => { try { return probeReader()?._iframeWindow?.document.querySelector('[data-zchatgpt-toggle]') ?? null; } catch { return null; } };
+        const probePanel = () => { try { return probeReader()?._iframeWindow?.document.querySelector('[data-zchatgpt-chat]'); } catch { return null; } };
         await until(() => probeToggle(), 'downgrade probe toolbar', 30000);
         if (probeToggle()?.getAttribute('aria-pressed') !== 'true') click(probeToggle());
         const probeAlert = () => probePanel()?.querySelector('[role="alert"]')?.textContent || '';
@@ -224,7 +224,7 @@ async function runHostSmoke(config) {
       await skip('version-bump-upgrade', 'IOUtils.copy was not available');
       await skip('rollback-restores-previous-version', 'IOUtils.copy was not available');
     } else {
-      const staging = PathUtils.join(PathUtils.profileDir, 'zcr-s6-upgrade-staging.xpi');
+      const staging = PathUtils.join(PathUtils.profileDir, 'zchatgpt-s6-upgrade-staging.xpi');
       await IOUtils.copy(config.installedXpi, staging, { noOverwrite: false });
       await IOUtils.copy(staging, config.installedXpi, { noOverwrite: false });
       await IOUtils.remove(staging);
@@ -237,10 +237,10 @@ async function runHostSmoke(config) {
       await subject.enable();
       await until(() => toggle(), 'toolbar after reenable');
       if (toggle()?.getAttribute('aria-pressed') !== 'true') click(toggle());
-      await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'runtime after addon reload', 90000);
-      await check('handshake-ready-after-xpi-replace', panel()?.dataset.zcrRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
-      await check('still-signed-out-after-replace', panel()?.dataset.zcrAuth === 'signedOut', { auth: panel()?.dataset.zcrAuth });
-      await check('not-generating-after-replace', panel()?.dataset.zcrGenerating !== 'true' && !panel()?.dataset.zcrActiveRequest);
+      await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'runtime after addon reload', 90000);
+      await check('handshake-ready-after-xpi-replace', panel()?.dataset.zchatgptRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
+      await check('still-signed-out-after-replace', panel()?.dataset.zchatgptAuth === 'signedOut', { auth: panel()?.dataset.zchatgptAuth });
+      await check('not-generating-after-replace', panel()?.dataset.zchatgptGenerating !== 'true' && !panel()?.dataset.zchatgptActiveRequest);
       if (typeof IOUtils?.exists === 'function') {
         await check('records-kept-after-xpi-replace', (await IOUtils.exists(recordPath)) === true);
       } else {

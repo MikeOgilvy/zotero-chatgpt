@@ -102,15 +102,15 @@ it('searches every readable library and disambiguates same-title articles by aut
 it('uses an isolated background tab even when an unloaded tab already exists, then closes only its own', async () => {
   const f = setup(); f.tabs.set('unloaded-user-tab', { id: 'unloaded-user-tab', data: { itemID: 2 } });
   const result = await f.port.read(reference, new AbortController().signal);
-  expect(f.host.Reader.open).toHaveBeenCalledWith(2, undefined, expect.objectContaining({ openInBackground: true, allowDuplicate: true, tabID: `zcr-reference-${uuid}` }));
+  expect(f.host.Reader.open).toHaveBeenCalledWith(2, undefined, expect.objectContaining({ openInBackground: true, allowDuplicate: true, tabID: `zchatgpt-reference-${uuid}` }));
   expect(result.document?.paper).toEqual(paperA); expect(result.document?.revision).toEqual(f.pdf.revision);
   expect(result.document?.pages).toHaveLength(2); expect(f.source.validate).toHaveBeenCalled();
-  expect(f.closes).toHaveBeenCalledWith(`zcr-reference-${uuid}`); expect(f.tabs.has('unloaded-user-tab')).toBe(true);
+  expect(f.closes).toHaveBeenCalledWith(`zchatgpt-reference-${uuid}`); expect(f.tabs.has('unloaded-user-tab')).toBe(true);
   expect(f.nativeTabs.selectedID).toBe('user-tab'); expect(f.unwatch).toHaveBeenCalledTimes(1);
 });
 it('creates the reserved native tab container before passing its id to Reader.open', async () => {
   const f = setup(); const result = await f.port.read(reference, new AbortController().signal);
-  expect(result.document?.pages).toHaveLength(2); expect(f.tabs.has(`zcr-reference-${uuid}`)).toBe(false); expect(f.nativeTabs.selectedID).toBe('user-tab');
+  expect(result.document?.pages).toHaveLength(2); expect(f.tabs.has(`zchatgpt-reference-${uuid}`)).toBe(false); expect(f.nativeTabs.selectedID).toBe('user-tab');
 });
 
 it('reuses a loaded reader without selecting or closing it', async () => {
@@ -122,7 +122,7 @@ it('reuses a loaded reader without selecting or closing it', async () => {
 
 it('retains a background reader once the user selects it, even after selecting another tab', async () => {
   const f = setup();
-  vi.mocked(f.source.validate).mockImplementation(() => { f.select(`zcr-reference-${uuid}`); f.select('other-user-tab'); return Promise.resolve(); });
+  vi.mocked(f.source.validate).mockImplementation(() => { f.select(`zchatgpt-reference-${uuid}`); f.select('other-user-tab'); return Promise.resolve(); });
   await f.port.read(reference, new AbortController().signal);
   expect(f.closes).not.toHaveBeenCalled(); expect(f.nativeTabs.selectedID).toBe('other-user-tab');
 });

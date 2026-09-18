@@ -25,8 +25,8 @@ interface PreferencesPaneGlobal {
 
 const shared = globalThis as unknown as {
   Zotero?: {
-    ZoteroCodexReaderPreferencesHost?: PreferencesBridge;
-    ZoteroCodexReaderPreferencesPane?: PreferencesPaneGlobal;
+    ZoteroChatGPTPreferencesHost?: PreferencesBridge;
+    ZoteroChatGPTPreferencesPane?: PreferencesPaneGlobal;
     logError?(error: unknown): void;
   };
 };
@@ -40,7 +40,7 @@ const bridge: PreferencesBridge = {
   readAutomaticPdfText: () => true,
   writeAutomaticPdfText: () => undefined,
 };
-shared.Zotero = { ZoteroCodexReaderPreferencesHost: bridge, logError: error => failures.push(error) };
+shared.Zotero = { ZoteroChatGPTPreferencesHost: bridge, logError: error => failures.push(error) };
 // Import once: Zotero evaluates this script once per Preferences window and then reuses the pane.
 await import('../../../packages/zotero/src/preferences/entry.ts');
 
@@ -51,7 +51,7 @@ function root(html = '<vbox/>') {
   return document.body.firstElementChild!;
 }
 function pane(): PreferencesPaneGlobal {
-  const published = shared.Zotero?.ZoteroCodexReaderPreferencesPane;
+  const published = shared.Zotero?.ZoteroChatGPTPreferencesPane;
   if (!published) throw new Error('The pane script did not publish itself on the shared Zotero object.');
   return published;
 }
@@ -59,27 +59,27 @@ function pane(): PreferencesPaneGlobal {
 it('publishes the pane on the shared preferences global and renders the real stored settings', async () => {
   const element = root();
   pane().mount(element);
-  await vi.waitFor(() => expect(element.querySelector<HTMLInputElement>('[data-zcr-pref="textScale"]')?.value).toBe('1'));
-  const language = element.querySelector<HTMLSelectElement>('[data-zcr-pref="uiLanguage"]');
-  const scale = element.querySelector<HTMLInputElement>('[data-zcr-pref="textScale"]');
+  await vi.waitFor(() => expect(element.querySelector<HTMLInputElement>('[data-zchatgpt-pref="textScale"]')?.value).toBe('1'));
+  const language = element.querySelector<HTMLSelectElement>('[data-zchatgpt-pref="uiLanguage"]');
+  const scale = element.querySelector<HTMLInputElement>('[data-zchatgpt-pref="textScale"]');
   expect(language).not.toBeNull();
   expect(language!.value).toBe('en');
   expect(scale!.value).toBe('1');
   expect(failures).toEqual([]);
   pane().unmount(element);
-  expect(element.querySelector('[data-zcr-pref="form"]')).toBeNull();
+  expect(element.querySelector('[data-zchatgpt-pref="form"]')).toBeNull();
 });
 
 it('reports an honest message instead of throwing when the plugin host is not running', () => {
   const element = root();
-  const host = shared.Zotero!.ZoteroCodexReaderPreferencesHost;
-  delete shared.Zotero!.ZoteroCodexReaderPreferencesHost;
+  const host = shared.Zotero!.ZoteroChatGPTPreferencesHost;
+  delete shared.Zotero!.ZoteroChatGPTPreferencesHost;
   try {
     expect(() => pane().mount(element)).not.toThrow();
     const alert = element.querySelector('[role="alert"]');
     expect(alert?.textContent).toMatch(/not running/u);
   } finally {
-    if (host) shared.Zotero!.ZoteroCodexReaderPreferencesHost = host;
+    if (host) shared.Zotero!.ZoteroChatGPTPreferencesHost = host;
   }
   pane().unmount(element);
 });
@@ -90,9 +90,9 @@ it('reports the store\'s own failure and no half-rendered form when the settings
   bridge.readSettings = () => Promise.reject(new Error('The workspace is stopping.'));
   try {
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelector('[data-zcr-pref="error"]')?.textContent).toBe('The workspace is stopping.'));
-    expect(element.querySelector('[data-zcr-pref="error"]')!.getAttribute('role')).toBe('alert');
-    expect(element.querySelector('[data-zcr-pref="form"]')).toBeNull();
+    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-pref="error"]')?.textContent).toBe('The workspace is stopping.'));
+    expect(element.querySelector('[data-zchatgpt-pref="error"]')!.getAttribute('role')).toBe('alert');
+    expect(element.querySelector('[data-zchatgpt-pref="form"]')).toBeNull();
     expect(failures).toEqual([]);
   } finally {
     bridge.readSettings = readSettings;
@@ -108,8 +108,8 @@ it('writes the automatic-PDF pref through the published bridge and never through
   bridge.writeSettings = writeSettings;
   try {
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelector<HTMLInputElement>('[data-zcr-pref="automatic-pdf-text"]')?.checked).toBe(true));
-    const toggle = element.querySelector<HTMLInputElement>('[data-zcr-pref="automatic-pdf-text"]')!;
+    await vi.waitFor(() => expect(element.querySelector<HTMLInputElement>('[data-zchatgpt-pref="automatic-pdf-text"]')?.checked).toBe(true));
+    const toggle = element.querySelector<HTMLInputElement>('[data-zchatgpt-pref="automatic-pdf-text"]')!;
     toggle.checked = false;
     toggle.dispatchEvent(new (element.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
     expect(writes).toEqual([false]);
@@ -130,10 +130,10 @@ it('mounts one form when Zotero fires load twice and stops listening after unloa
   try {
     pane().mount(element);
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelectorAll('[data-zcr-pref="form"]')).toHaveLength(1));
+    await vi.waitFor(() => expect(element.querySelectorAll('[data-zchatgpt-pref="form"]')).toHaveLength(1));
     pane().unmount(element);
     // After unload the detached controls must not keep writing to the store.
-    const save = element.querySelector<HTMLButtonElement>('[data-zcr-pref="save-preferences"]');
+    const save = element.querySelector<HTMLButtonElement>('[data-zchatgpt-pref="save-preferences"]');
     save?.dispatchEvent(new (element.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('click', { bubbles: true }));
     await Promise.resolve();
     expect(writeSettings).not.toHaveBeenCalled();
@@ -151,8 +151,8 @@ it('carries the model allowlist across the pane bridge and writes it as JSON', a
   bridge.writeSettings = json => { writes.push(json); };
   try {
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelector('[data-zcr-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
-    const luna = element.querySelector<HTMLInputElement>('[data-zcr-model-allowed="gpt-5.6-luna"]')!;
+    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
+    const luna = element.querySelector<HTMLInputElement>('[data-zchatgpt-model-allowed="gpt-5.6-luna"]')!;
     luna.checked = false;
     luna.dispatchEvent(new (element.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('change', { bubbles: true }));
     await vi.waitFor(() => expect(writes).toHaveLength(1));
@@ -169,10 +169,10 @@ it('carries the runtime live model list across the bridge so a Spark model becom
   bridge.readLiveModels = () => JSON.stringify(['gpt-6-astra', 'gpt-5.3-codex-spark', 'gpt-5.5']);
   try {
     pane().mount(element);
-    await vi.waitFor(() => expect(element.querySelector('[data-zcr-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull());
+    await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-5.3-codex-spark"]')).not.toBeNull());
     // Only the offerable family joins; the excluded GPT-5.5 the runtime also reported does not.
-    expect(element.querySelector('[data-zcr-model="gpt-5.5"]')).toBeNull();
-    expect(element.querySelector('[data-zcr-pref="models-note"]')?.textContent).toMatch(/running runtime's report/u);
+    expect(element.querySelector('[data-zchatgpt-model="gpt-5.5"]')).toBeNull();
+    expect(element.querySelector('[data-zchatgpt-pref="models-note"]')?.textContent).toMatch(/running runtime's report/u);
   } finally {
     delete bridge.readLiveModels;
     pane().unmount(element);
@@ -182,8 +182,8 @@ it('carries the runtime live model list across the bridge so a Spark model becom
 it('mounts the bundled families with honest copy when the bridge has no live model port', async () => {
   const element = root();
   pane().mount(element);
-  await vi.waitFor(() => expect(element.querySelector('[data-zcr-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
-  expect(element.querySelector('[data-zcr-model^="gpt-5.3"]')).toBeNull();
-  expect(element.querySelector('[data-zcr-pref="models-note"]')?.textContent).toMatch(/bundled catalog, not your account/u);
+  await vi.waitFor(() => expect(element.querySelector('[data-zchatgpt-model-allowed="gpt-5.6-luna"]')).not.toBeNull());
+  expect(element.querySelector('[data-zchatgpt-model^="gpt-5.3"]')).toBeNull();
+  expect(element.querySelector('[data-zchatgpt-pref="models-note"]')?.textContent).toMatch(/bundled catalog, not your account/u);
   pane().unmount(element);
 });

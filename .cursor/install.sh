@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent Cloud Agent bootstrap for Zotero Codex Reader.
+# Idempotent Cloud Agent bootstrap for Zotero ChatGPT.
 # Prepares the pinned Node 24 toolchain, installs dependencies from the committed
 # lockfile, and fetches the SHA-256-verified bundled Codex runtime so the packaging
 # and verification commands documented in docs/development.md work out of the box.
@@ -40,9 +40,9 @@ fi
 # Deterministic dependency install from package-lock.json.
 npm ci
 
-# Fetch + verify the pinned Codex 0.154.0 archive into the ignored .zcr-dev/runtime-cache/.
+# Fetch + verify the pinned Codex 0.154.0 archive into the ignored .zotero-chatgpt-dev/runtime-cache/.
 # This is idempotent: it skips the download when the archive is already present and its
 # SHA-256 matches runtime/manifest.ts. Required by `npm run package:dev`.
 node scripts/runtime-prepare.mjs
 
-echo "Zotero Codex Reader environment ready."
+echo "Zotero ChatGPT environment ready."

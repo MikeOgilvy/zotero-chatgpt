@@ -51,14 +51,14 @@ export function barPosition(selection: Box, bar: { width: number; height: number
   return { left: centerLeft, top: clampTop(belowTop) };
 }
 export interface SelectionActionHandlers { explain(citation: Citation): void; ask(citation: Citation): void }
-const STYLE_ID = 'zcr-selection-style';
+const STYLE_ID = 'zchatgpt-selection-style';
 const STYLE = `
-.zcr-selection-bar { position: absolute; z-index: 100; display: flex; gap: 2px; padding: 3px; border-radius: 6px; color-scheme: inherit; background: var(--material-toolbar, var(--material-background, Canvas)); border: 1px solid var(--color-panedivider, GrayText); box-shadow: 0 2px 8px rgba(0,0,0,.12); font: -apple-system-body; font-size: 12px; color: var(--fill-primary, CanvasText); }
-.zcr-selection-bar button { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
-.zcr-selection-bar button:hover { background: var(--fill-quinary, rgba(0,0,0,.06)); }
-.zcr-selection-bar button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
-.zcr-selection-bar .zcr-separator { width: 1px; background: var(--color-panedivider, GrayText); margin: 2px 0; }
-.selection-popup .custom-sections .section:has(> [data-zcr-sentinel]) { display: none; }
+.zchatgpt-selection-bar { position: absolute; z-index: 100; display: flex; gap: 2px; padding: 3px; border-radius: 6px; color-scheme: inherit; background: var(--material-toolbar, var(--material-background, Canvas)); border: 1px solid var(--color-panedivider, GrayText); box-shadow: 0 2px 8px rgba(0,0,0,.12); font: -apple-system-body; font-size: 12px; color: var(--fill-primary, CanvasText); }
+.zchatgpt-selection-bar button { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+.zchatgpt-selection-bar button:hover { background: var(--fill-quinary, rgba(0,0,0,.06)); }
+.zchatgpt-selection-bar button:focus-visible { outline: 2px solid AccentColor; outline-offset: 1px; }
+.zchatgpt-selection-bar .zchatgpt-separator { width: 1px; background: var(--color-panedivider, GrayText); margin: 2px 0; }
+.selection-popup .custom-sections .section:has(> [data-zchatgpt-sentinel]) { display: none; }
 `;
 /**
  * The compact action bar above a text selection. It lives in the reader document, never inside or over
@@ -78,17 +78,17 @@ export class SelectionActionBar {
     this.citation = citation;
     this.ensureStyle(doc);
     // A hidden node inside the native popup mirrors its lifetime: no dismissal event exists.
-    const sentinel = doc.createElement('span'); sentinel.dataset.zcrSentinel = ''; sentinel.hidden = true;
+    const sentinel = doc.createElement('span'); sentinel.dataset.zchatgptSentinel = ''; sentinel.hidden = true;
     try { event.append(sentinel); } catch { return; }
     this.sentinel = sentinel;
-    const bar = doc.createElement('div'); bar.className = 'zcr-selection-bar'; bar.dataset.zcrSelectionBar = ''; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Codex');
+    const bar = doc.createElement('div'); bar.className = 'zchatgpt-selection-bar'; bar.dataset.zchatgptSelectionBar = ''; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Codex');
     const make = (label: string, action: string, run: () => void) => {
-      const button = doc.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.zcrAction = action;
+      const button = doc.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.zchatgptAction = action;
       // The citation was copied before this click; blur or resizing cannot swap it.
       button.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const current = this.citation; if (current && current.id === citation.id) run(); });
       return button;
     };
-    const separator = doc.createElement('span'); separator.className = 'zcr-separator';
+    const separator = doc.createElement('span'); separator.className = 'zchatgpt-separator';
     bar.append(make('More details', 'explain', () => this.handlers.explain(citation)), separator, make('Ask in sidechat', 'ask', () => this.handlers.ask(citation)));
     bar.style.visibility = 'hidden'; doc.body.append(bar); this.bar = bar;
     this.position(event.reader, doc, citation);
@@ -123,7 +123,7 @@ export class SelectionActionBar {
   /** A limit notice (for example a cross-page selection) inside the native popup's plugin area; no buttons. */
   showNotice(event: SelectionPopupEvent, text: string): void {
     this.hide();
-    const note = event.doc.createElement('div'); note.dataset.zcrSelectionNotice = ''; note.textContent = text;
+    const note = event.doc.createElement('div'); note.dataset.zchatgptSelectionNotice = ''; note.textContent = text;
     note.style.fontSize = '11px'; note.style.color = 'var(--fill-secondary, GrayText)'; note.style.lineHeight = '1.4';
     try { event.append(note); } catch { /* the popup may already be gone */ }
   }

@@ -126,48 +126,48 @@ const COPY: Readonly<Record<string, string>> = {
 
 // Content areas are never localized, including controls embedded in rendered Markdown.
 const CONTENT = [
-  '.zcr-message-text', '.zcr-rendered', '.zcr-citation-text', '.zcr-current-title', '.zcr-initial-title',
+  '.zchatgpt-message-text', '.zchatgpt-rendered', '.zchatgpt-citation-text', '.zchatgpt-current-title', '.zchatgpt-initial-title',
   // An open-chat chip shows the chat's own title: a chat named "Send" must not be renamed on screen.
-  '.zcr-pane-tab-label',
-  '.zcr-history-item', '.zcr-message-reference', '.zcr-command-option', '.zcr-command-label', '.zcr-command-description',
-  '.zcr-task-question', '.zcr-task-quote', '.zcr-task-scope', '.zcr-workspace-preview pre', '.zcr-workspace-preview-title strong',
-  'script', 'style', 'svg', 'math', '[data-zcr-ui="false"]',
+  '.zchatgpt-pane-tab-label',
+  '.zchatgpt-history-item', '.zchatgpt-message-reference', '.zchatgpt-command-option', '.zchatgpt-command-label', '.zchatgpt-command-description',
+  '.zchatgpt-task-question', '.zchatgpt-task-quote', '.zchatgpt-task-scope', '.zchatgpt-workspace-preview pre', '.zchatgpt-workspace-preview-title strong',
+  'script', 'style', 'svg', 'math', '[data-zchatgpt-ui="false"]',
 ].join(',');
-const BUTTONS = 'button[data-zcr-action],.zcr-button,.zcr-icon-button,.zcr-task-button,.zcr-workspace-control,.zcr-preferences button';
+const BUTTONS = 'button[data-zchatgpt-action],.zchatgpt-button,.zchatgpt-icon-button,.zchatgpt-task-button,.zchatgpt-workspace-control,.zchatgpt-preferences button';
 const TEXT = [
-  BUTTONS, '.zcr-picker-heading', '[data-zcr-setting="effort"] .zcr-picker-option-label', '.zcr-picker-toggle-row > span',
-  '.zcr-history-heading', '.zcr-history-empty', '.zcr-status-line', '.zcr-message-meta',
-  '.zcr-context-disclosure > p', '.zcr-error',
-  '.zcr-workspace-settings label', '.zcr-workspace-settings > details > summary', '.zcr-workspace-status', '.zcr-workspace-editor > strong',
-  '.zcr-workspace-settings > details > div > p.zcr-workspace-muted', '.zcr-workspace-editor > p.zcr-workspace-muted', '.zcr-workspace-actions > span',
-  '.zcr-workspace-settings select[name="detail"] option', '.zcr-workspace-settings select[name="mathematics"] option',
-  '.zcr-workspace-settings select[name="workflow"] option',
-  '[data-zcr-collection-target] option[value=""]', '.zcr-plus-menu', '.zcr-plus-heading', '.zcr-plus-row-title', '.zcr-plus-row-description', '.zcr-acquisition-target', '.zcr-command-heading', '.zcr-command-status',
-  '.zcr-task-card > summary', '.zcr-task-row-header > .zcr-task-muted', '.zcr-task-check', '.zcr-task-field',
-  '.zcr-task-field option[value=""]', '.zcr-task-counts', '.zcr-task-body > .zcr-task-muted',
-  '[data-zcr-reading-job] .zcr-task-row > p:first-child', '[data-zcr-ui="true"]', '.zcr-context-ring', '.zcr-request-timing-text',
+  BUTTONS, '.zchatgpt-picker-heading', '[data-zchatgpt-setting="effort"] .zchatgpt-picker-option-label', '.zchatgpt-picker-toggle-row > span',
+  '.zchatgpt-history-heading', '.zchatgpt-history-empty', '.zchatgpt-status-line', '.zchatgpt-message-meta',
+  '.zchatgpt-context-disclosure > p', '.zchatgpt-error',
+  '.zchatgpt-workspace-settings label', '.zchatgpt-workspace-settings > details > summary', '.zchatgpt-workspace-status', '.zchatgpt-workspace-editor > strong',
+  '.zchatgpt-workspace-settings > details > div > p.zchatgpt-workspace-muted', '.zchatgpt-workspace-editor > p.zchatgpt-workspace-muted', '.zchatgpt-workspace-actions > span',
+  '.zchatgpt-workspace-settings select[name="detail"] option', '.zchatgpt-workspace-settings select[name="mathematics"] option',
+  '.zchatgpt-workspace-settings select[name="workflow"] option',
+  '[data-zchatgpt-collection-target] option[value=""]', '.zchatgpt-plus-menu', '.zchatgpt-plus-heading', '.zchatgpt-plus-row-title', '.zchatgpt-plus-row-description', '.zchatgpt-acquisition-target', '.zchatgpt-command-heading', '.zchatgpt-command-status',
+  '.zchatgpt-task-card > summary', '.zchatgpt-task-row-header > .zchatgpt-task-muted', '.zchatgpt-task-check', '.zchatgpt-task-field',
+  '.zchatgpt-task-field option[value=""]', '.zchatgpt-task-counts', '.zchatgpt-task-body > .zchatgpt-task-muted',
+  '[data-zchatgpt-reading-job] .zchatgpt-task-row > p:first-child', '[data-zchatgpt-ui="true"]', '.zchatgpt-context-ring', '.zchatgpt-request-timing-text',
   // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
-  '.zcr-document-status',
+  '.zchatgpt-document-status',
   // The unbound New chat tab is copy, unlike named chat titles.
-  '.zcr-pane-tab-new',
+  '.zchatgpt-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
-  '.zcr-preferences legend', '.zcr-preferences label', '.zcr-preferences [data-zcr-pref="uiLanguage"] option',
-  '.zcr-preferences [data-zcr-pref="status"]', '.zcr-preferences [data-zcr-pref="error"]', '.zcr-preferences .zcr-preferences-muted',
+  '.zchatgpt-preferences legend', '.zchatgpt-preferences label', '.zchatgpt-preferences [data-zchatgpt-pref="uiLanguage"] option',
+  '.zchatgpt-preferences [data-zchatgpt-pref="status"]', '.zchatgpt-preferences [data-zchatgpt-pref="error"]', '.zchatgpt-preferences .zchatgpt-preferences-muted',
   // History management section: its own status, select-all count, confirmation lines, paper options.
-  '.zcr-preferences [data-zcr-history="error"]', '.zcr-preferences [data-zcr-history="status"]',
-  '.zcr-preferences [data-zcr-history="confirm-text"]', '.zcr-preferences [data-zcr-history="selected-count"]',
-  '.zcr-preferences [data-zcr-history="paper"] option',
+  '.zchatgpt-preferences [data-zchatgpt-history="error"]', '.zchatgpt-preferences [data-zchatgpt-history="status"]',
+  '.zchatgpt-preferences [data-zchatgpt-history="confirm-text"]', '.zchatgpt-preferences [data-zchatgpt-history="selected-count"]',
+  '.zchatgpt-preferences [data-zchatgpt-history="paper"] option',
 ].join(',');
 const ATTRIBUTES = [
-  BUTTONS, '.zcr-input', '.zcr-history-panel', '.zcr-history-search', '.zcr-picker-menu', '[data-zcr-picker]', '[data-zcr-setting="speed"]',
+  BUTTONS, '.zchatgpt-input', '.zchatgpt-history-panel', '.zchatgpt-history-search', '.zchatgpt-picker-menu', '[data-zchatgpt-picker]', '[data-zchatgpt-setting="speed"]',
   // The open-chat strip's own name is copy; the chat titles inside it are data and stay verbatim.
-  '.zcr-panes',
-  '[data-zcr-pane-tab][data-zcr-conversation-id="new-chat"]',
-  '.zcr-pane-tab-new',
-  '.zcr-plus-menu input', '.zcr-rename-form input', '[data-zcr-collection-target]', '.zcr-workspace-preview',
-  '.zcr-workspace-preview input', '.zcr-workspace-search', '.zcr-image-preview', '.zcr-command-list', '.zcr-task-view', '.zcr-task-check input', '[data-zcr-ui="true"]', '.zcr-context-ring',
+  '.zchatgpt-panes',
+  '[data-zchatgpt-pane-tab][data-zchatgpt-conversation-id="new-chat"]',
+  '.zchatgpt-pane-tab-new',
+  '.zchatgpt-plus-menu input', '.zchatgpt-rename-form input', '[data-zchatgpt-collection-target]', '.zchatgpt-workspace-preview',
+  '.zchatgpt-workspace-preview input', '.zchatgpt-workspace-search', '.zchatgpt-image-preview', '.zchatgpt-command-list', '.zchatgpt-task-view', '.zchatgpt-task-check input', '[data-zchatgpt-ui="true"]', '.zchatgpt-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.
-  '.zcr-preferences [data-zcr-history="search"]',
+  '.zchatgpt-preferences [data-zchatgpt-history="search"]',
 ].join(',');
 const STATUS: Readonly<Record<string, string>> = {
   queued: '已排队', reserved: '待开始', running: '运行中', completed: '已完成', paused: '已暂停', uncertain: '未确认', cancelled: '已取消', failed: '失败',
@@ -296,8 +296,8 @@ export function mountUILocale(root: Element): { update(language: UILanguage): vo
     if (language === 'en') return source;
     const text = source.trim(); let translated: string;
     if (attribute) translated = actionLabel(text);
-    else if (node.matches('.zcr-workspace-editor > strong')) translated = actionLabel(text);
-    else if (node.matches('.zcr-message-meta')) {
+    else if (node.matches('.zchatgpt-workspace-editor > strong')) translated = actionLabel(text);
+    else if (node.matches('.zchatgpt-message-meta')) {
       const status = /^(Recorded|Responding…|Stopped|Failed|Queued|Cancelled before sending|Unconfirmed: the connection was interrupted\. The request was not sent again\.)( · .+)?$/u.exec(text);
       translated = status ? COPY[status[1]!]! + (status[2] ?? '') : text;
     } else translated = COPY[text] ?? progress(text);
@@ -307,7 +307,7 @@ export function mountUILocale(root: Element): { update(language: UILanguage): vo
   const apply = (scope: Element) => {
     if (protectedContent(scope)) return;
     for (const node of candidates(scope, TEXT)) {
-      if (protectedContent(node) || node.closest('.zcr-workspace-chip') || node.matches('[data-zcr-picker],[data-zcr-setting="model"]')) continue;
+      if (protectedContent(node) || node.closest('.zchatgpt-workspace-chip') || node.matches('[data-zchatgpt-picker],[data-zchatgpt-setting="model"]')) continue;
       for (const child of node.childNodes) {
         if (child.nodeType !== 3) continue;
         const text = child as Text; const source = original(text.data, texts.get(text)); const rendered = localize(source, node, false);
@@ -315,7 +315,7 @@ export function mountUILocale(root: Element): { update(language: UILanguage): vo
       }
     }
     for (const node of candidates(scope, ATTRIBUTES)) {
-      if (protectedContent(node) || node.matches('[data-zcr-setting="model"]')) continue;
+      if (protectedContent(node) || node.matches('[data-zchatgpt-setting="model"]')) continue;
       const saved = attributes.get(node) ?? new Map<string, Original>(); attributes.set(node, saved);
       for (const name of ['aria-label', 'title', 'placeholder']) {
         const current = node.getAttribute(name); if (current === null) { saved.delete(name); continue; }

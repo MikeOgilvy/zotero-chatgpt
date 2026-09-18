@@ -10,7 +10,7 @@ import { HistoryManager } from '../../../core/src/workspace/history.ts';
  */
 export interface PreferencesServiceHost {
   workspace(): Promise<ReaderWorkspace>;
-  /** The plugin preference `extensions.zcr.automaticPdfText`; not part of the workspace store. */
+  /** The plugin preference `extensions.zchatgpt.automaticPdfText`; not part of the workspace store. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /**

@@ -9,7 +9,7 @@ import { nodeFiles } from './files-fixture.ts';
 const roots: string[] = [];
 // Keep the pinned version from production so the manifest gate is exercised, not bypassed.
 const manifest: RuntimeManifest = { codexVersion: PINNED_RUNTIME.codexVersion, platform: 'darwin', architecture: 'arm64', entry: 'content/runtime/codex-aarch64-apple-darwin', size: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' };
-async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zcr-bundle-')); roots.push(root); const host: AssetHost = { ...nodeFiles(), os: 'Darwin', abi: 'aarch64-gcc3', load: vi.fn(() => Promise.resolve(new TextEncoder().encode('abc'))) }; return { root, host }; }
+async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zchatgpt-bundle-')); roots.push(root); const host: AssetHost = { ...nodeFiles(), os: 'Darwin', abi: 'aarch64-gcc3', load: vi.fn(() => Promise.resolve(new TextEncoder().encode('abc'))) }; return { root, host }; }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 it('extracts verified bytes from only the fixed packaged resource and rechecks the cached executable', async () => {
   const { root, host } = await setup(); const target = await ensureBundledRuntime(host, 'jar:file:///extension.xpi!/', root, manifest);

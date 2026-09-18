@@ -5,7 +5,7 @@ import path from 'node:path';
 import { GeckoStorage, privateDirectory } from '../../packages/zotero/src/runtime/storage.ts';
 import { nodeFiles } from './files-fixture.ts';
 const roots: string[] = [];
-async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zcr-storage-')); roots.push(root); const host = nodeFiles(); return { root, host, storage: new GeckoStorage(host, root) }; }
+async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zchatgpt-storage-')); roots.push(root); const host = nodeFiles(); return { root, host, storage: new GeckoStorage(host, root) }; }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 describe('private Gecko storage', () => {
   it('lists only direct regular files and rejects traversal or symlink directories', async () => {
@@ -41,7 +41,7 @@ describe('private Gecko storage', () => {
     }
   });
   it('rejects directory and leaf symlinks and refuses to write outside the root', async () => {
-    const { root, storage } = await setup(); const outside = await mkdtemp(path.join(tmpdir(), 'zcr-outside-')); roots.push(outside);
+    const { root, storage } = await setup(); const outside = await mkdtemp(path.join(tmpdir(), 'zchatgpt-outside-')); roots.push(outside);
     await symlink(outside, path.join(root, 'escape'));
     await symlink(path.join(outside, 'missing'), path.join(root, 'leaf'));
     await expect(storage.writeAtomic('escape/leak', new Uint8Array([1]))).rejects.toThrow();
@@ -62,7 +62,7 @@ describe('private Gecko storage', () => {
     await expect(storage.remove('../escape')).rejects.toThrow();
   });
   it('creates separate private service directories', async () => {
-    const { host, root } = await setup(); const result = await privateDirectory(host, root, 'zotero-codex-reader/v1/account');
-    expect(result).toBe(path.join(root, 'zotero-codex-reader/v1/account')); expect((await stat(result)).mode & 0o777).toBe(0o700);
+    const { host, root } = await setup(); const result = await privateDirectory(host, root, 'zotero-chatgpt/v1/account');
+    expect(result).toBe(path.join(root, 'zotero-chatgpt/v1/account')); expect((await stat(result)).mode & 0o777).toBe(0o700);
   });
 });

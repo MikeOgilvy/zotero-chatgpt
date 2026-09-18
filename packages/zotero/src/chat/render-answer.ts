@@ -31,11 +31,11 @@ function renderMath(source: string, display: boolean): string {
     // $T_{误差}$) renderable; `throwOnError` still turns genuinely broken TeX into escaped text.
     return katex.renderToString(source, { output: 'html', displayMode: display, throwOnError: true, trust: false, maxSize: 10, maxExpand: 1000, strict: 'ignore' });
   } catch {
-    return `<span class="zcr-math-fallback">${escapeHtml(source)}</span>`;
+    return `<span class="zchatgpt-math-fallback">${escapeHtml(source)}</span>`;
   }
 }
 function mathPlugin(md: MarkdownIt): void {
-  md.inline.ruler.before('escape', 'zcr_math', (state, silent) => {
+  md.inline.ruler.before('escape', 'zchatgpt_math', (state, silent) => {
     const src = state.src;
     const pos = state.pos;
     const take = (open: string, close: string, display: boolean, accept?: (content: string, after: string) => boolean): boolean => {
@@ -46,7 +46,7 @@ function mathPlugin(md: MarkdownIt): void {
       if (!display && content.includes('\n')) return false;
       if (accept && !accept(content, src.slice(end + close.length, end + close.length + 1))) return false;
       if (!silent) {
-        const token = state.push('zcr_math', display ? 'div' : 'span', 0);
+        const token = state.push('zchatgpt_math', display ? 'div' : 'span', 0);
         token.content = content;
         token.markup = open;
         token.meta = { display };
@@ -64,7 +64,7 @@ function mathPlugin(md: MarkdownIt): void {
       || take('\\(', '\\)', false, content => content.trim().length > 0)
       || take('$', '$', false, inlineDollar);
   });
-  md.renderer.rules.zcr_math = (tokens, idx) => {
+  md.renderer.rules.zchatgpt_math = (tokens, idx) => {
     const token = tokens[idx]!;
     return renderMath(token.content, Boolean((token.meta as { display?: boolean } | undefined)?.display));
   };

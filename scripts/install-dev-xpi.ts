@@ -42,9 +42,9 @@ const SCOPE_PROFILE = 1;
 /** Compiled default of `extensions.startupScanScopes` in the shipped Zotero build. */
 const DEFAULT_SCAN_SCOPES = 0;
 const SCAN_SCOPES_PREF = 'extensions.startupScanScopes';
-const RECORD_SUFFIX = '.zcr-install.json';
-const BACKUP_INFIX = '.zcr-bak-';
-const LEVER_MARKER = '// Managed by the Zotero Codex Reader development install tool';
+const RECORD_SUFFIX = '.zchatgpt-install.json';
+const BACKUP_INFIX = '.zchatgpt-bak-';
+const LEVER_MARKER = '// Managed by the Zotero ChatGPT development install tool';
 const DEFAULT_PROFILES_ROOT = path.join(homedir(), 'Library/Application Support/Zotero/Profiles');
 const RECORD_VERSION = 1;
 
@@ -93,7 +93,7 @@ export interface LeverPlan {
 }
 
 export interface InstallRecord {
-  tool: 'zcr-install-dev-xpi';
+  tool: 'zchatgpt-install-dev-xpi';
   recordVersion: number;
   addonId: string;
   profile: string;
@@ -603,7 +603,7 @@ async function installCommand(
   }
 
   const record: InstallRecord = {
-    tool: 'zcr-install-dev-xpi',
+    tool: 'zchatgpt-install-dev-xpi',
     recordVersion: RECORD_VERSION,
     addonId,
     profile: profileDir,
@@ -930,7 +930,7 @@ async function rollbackCommand(
   }
   if (leverValue !== null) await writeFile(userJsPath, leverText(leverValue));
   const record: InstallRecord = {
-    tool: 'zcr-install-dev-xpi',
+    tool: 'zchatgpt-install-dev-xpi',
     recordVersion: RECORD_VERSION,
     addonId,
     profile: profileDir,

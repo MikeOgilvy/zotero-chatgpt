@@ -37,9 +37,9 @@ it('instructs the model to cite the supplied frozen document page in the reserve
   };
   const text = readingInput({ requestId: 'r', conversationId: 'c', action: 'ask', question: 'q', citations: [], settings: { model: 'm', serviceTier: null, effort: null }, document });
   const [instruction] = text.split('\n\n');
-  expect(instruction).toContain('https://zcr.invalid/source/');
+  expect(instruction).toContain('https://zchatgpt.invalid/source/');
   expect(instruction).toContain(document.id);
-  expect(text).not.toContain('https://zcr.invalid/source//');
+  expect(text).not.toContain('https://zchatgpt.invalid/source//');
 });
 it('asks for a short verbatim quote in the citation link title so the cited passage can be located', () => {
   const document: DocumentContext = {

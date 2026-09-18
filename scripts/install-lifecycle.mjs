@@ -9,8 +9,8 @@ import yauzl from 'yauzl';
 
 // Exported so the real-profile development install tool (`scripts/install-dev-xpi.ts`) shares one
 // add-on id literal with this isolated-tree lifecycle tool instead of copying it.
-export const SUBJECT_ID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
-const RECORDS_RELATIVE = 'zotero-codex-reader/v1/records';
+export const SUBJECT_ID = '{90909501-7b5b-4985-9f55-566e9890746c}';
+const RECORDS_RELATIVE = 'zotero-chatgpt/v1/records';
 
 function requireNode24() {
   if (process.versions.node.split('.')[0] !== '24') {
@@ -41,7 +41,7 @@ export function requireLocalXpi(xpi) {
   return path.resolve(xpi);
 }
 
-/** Refuse the user's regular Zotero profile/library. Dedicated `.zcr-dev/` trees are allowed. */
+/** Refuse the user's regular Zotero profile/library. Dedicated `.zotero-chatgpt-dev/` trees are allowed. */
 export function assertNotRegularProfile(root) {
   const resolved = path.resolve(root);
   if (/\/Application Support\/Zotero(\/|$)/u.test(resolved) || /\/Zotero\/Profiles\//u.test(resolved)) {
@@ -50,13 +50,13 @@ export function assertNotRegularProfile(root) {
   return resolved;
 }
 
-/** S6 / install-lifecycle only: also refuse the signed-in `.zcr-dev/profile` and `.zcr-dev/data`. */
+/** S6 / install-lifecycle only: also refuse the signed-in `.zotero-chatgpt-dev/profile` and `.zotero-chatgpt-dev/data`. */
 export function assertIsolatedRoot(root) {
   const resolved = assertNotRegularProfile(root);
-  if (resolved.endsWith(`${path.sep}.zcr-dev${path.sep}profile`) || resolved.includes(`${path.sep}.zcr-dev${path.sep}profile${path.sep}`)) {
+  if (resolved.endsWith(`${path.sep}.zotero-chatgpt-dev${path.sep}profile`) || resolved.includes(`${path.sep}.zotero-chatgpt-dev${path.sep}profile${path.sep}`)) {
     throw new Error('Refusing to overwrite the signed-in development profile');
   }
-  if (resolved.endsWith(`${path.sep}.zcr-dev${path.sep}data`) || resolved.includes(`${path.sep}.zcr-dev${path.sep}data${path.sep}`)) {
+  if (resolved.endsWith(`${path.sep}.zotero-chatgpt-dev${path.sep}data`) || resolved.includes(`${path.sep}.zotero-chatgpt-dev${path.sep}data${path.sep}`)) {
     throw new Error('Refusing to overwrite the signed-in development data directory');
   }
   return resolved;
@@ -83,7 +83,7 @@ async function readManifest(archivePath) {
   const raw = JSON.parse((await readArchiveEntry(archivePath, 'manifest.json')).toString('utf8'));
   const id = raw?.applications?.zotero?.id;
   const version = raw?.version;
-  if (id !== SUBJECT_ID || typeof version !== 'string' || !version) throw new Error('XPI is not Zotero Codex Reader');
+  if (id !== SUBJECT_ID || typeof version !== 'string' || !version) throw new Error('XPI is not Zotero ChatGPT');
   return { id, version, updateUrl: raw.applications.zotero.update_url ?? null, min: raw.applications.zotero.strict_min_version ?? null, max: raw.applications.zotero.strict_max_version ?? null };
 }
 
@@ -269,7 +269,7 @@ export async function writeUpdatesJson(archivePath, sumsPath, outputPath) {
   const digest = await sha256File(local);
   const expected = await digestFromSums(path.resolve(sumsPath), path.basename(local));
   if (digest !== expected) throw new Error('SHA256SUMS mismatch for updates.json');
-  const updateLink = `https://zcr-dev.invalid/${path.basename(local)}`;
+  const updateLink = `https://zotero-chatgpt-dev.invalid/${path.basename(local)}`;
   if (/github\.com/iu.test(updateLink) || /\/releases\//iu.test(updateLink)) {
     throw new Error('GitHub Release download is not authorized; pass a local XPI path');
   }

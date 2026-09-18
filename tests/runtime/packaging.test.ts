@@ -8,7 +8,7 @@ const execute = promisify(execFile); const roots: string[] = [];
 const manifest = { codexVersion: '0.144.1', platform: 'darwin', architecture: 'arm64', entry: 'content/runtime/codex-aarch64-apple-darwin', size: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', archive: { entry: 'codex-aarch64-apple-darwin' }, licenses: ['LICENSE', 'NOTICE', 'RATATUI-LICENSE', 'WEZTERM-LICENSE'] };
 const moduleURL = new URL('../../scripts/runtime-assets.mjs', import.meta.url).href;
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
-async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zcr-runtime-build-')); roots.push(root); return root; }
+async function setup() { const root = await mkdtemp(path.join(tmpdir(), 'zchatgpt-runtime-build-')); roots.push(root); return root; }
 function run(code: string) { return execute(process.execPath, ['--input-type=module', '-e', `import { copyBundledRuntime, validatePackagedRuntime } from ${JSON.stringify(moduleURL)}; const manifest = ${JSON.stringify(manifest)}; ${code}`]); }
 it('build copies only a hash-verified runtime and declared licenses then packaging revalidates it', async () => {
   const root = await setup(); const cache = path.join(root, 'cache'); const out = path.join(root, 'out'); await mkdir(cache); await writeFile(path.join(cache, manifest.archive.entry), 'abc');

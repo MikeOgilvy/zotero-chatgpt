@@ -28,8 +28,8 @@ interface PreferencesBridge {
   deleteHistory?(ids: string): Promise<string> | string;
 }
 interface ZoteroGlobal {
-  ZoteroCodexReaderPreferencesHost?: PreferencesBridge;
-  ZoteroCodexReaderPreferencesPane?: { mount(root: Element): void; unmount(root: Element): void };
+  ZoteroChatGPTPreferencesHost?: PreferencesBridge;
+  ZoteroChatGPTPreferencesPane?: { mount(root: Element): void; unmount(root: Element): void };
   logError?(error: unknown): void;
 }
 
@@ -49,9 +49,9 @@ function mount(root: Element): void {
     // Zotero dispatches one load event per pane root, but a second one must never stack a second form.
     if (panes.has(root)) return;
     const zotero = scope.Zotero;
-    const bridge = zotero?.ZoteroCodexReaderPreferencesHost;
+    const bridge = zotero?.ZoteroChatGPTPreferencesHost;
     if (!zotero || !bridge) {
-      unavailable(root, 'Zotero GPT Reader preferences are unavailable because the plugin is not running.');
+      unavailable(root, 'Zotero ChatGPT preferences are unavailable because the plugin is not running.');
       return;
     }
     // History methods cross as JSON text too. A host that has not published them yet gets a pane with
@@ -93,4 +93,4 @@ function unmount(root: Element): void {
   panes.delete(root);
 }
 
-if (scope.Zotero) scope.Zotero.ZoteroCodexReaderPreferencesPane = { mount, unmount };
+if (scope.Zotero) scope.Zotero.ZoteroChatGPTPreferencesPane = { mount, unmount };

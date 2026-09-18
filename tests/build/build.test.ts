@@ -12,7 +12,7 @@ const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const temporaryDirectories: string[] = [];
 
 async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "zcr-build-test-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "zchatgpt-build-test-"));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -37,7 +37,7 @@ describe("development build", () => {
 
     expect(await readFile(path.join(outputDirectory, "content/runtime/codex-aarch64-apple-darwin"), "utf8")).toBe("abc");
     const [bundle, manifest, bootstrap] = await Promise.all([
-      readFile(path.join(outputDirectory, "content/zcr.js"), "utf8"),
+      readFile(path.join(outputDirectory, "content/zchatgpt.js"), "utf8"),
       readFile(path.join(outputDirectory, "manifest.json"), "utf8"),
       readFile(path.join(outputDirectory, "bootstrap.js"), "utf8"),
     ]);
@@ -45,8 +45,8 @@ describe("development build", () => {
     vm.createContext(moduleScope);
     vm.runInContext(bundle, moduleScope);
 
-    expect(moduleScope.ZoteroCodexReader).toBeTypeOf("object");
-    const api = moduleScope.ZoteroCodexReader as Record<string, unknown>;
+    expect(moduleScope.ZoteroChatGPT).toBeTypeOf("object");
+    const api = moduleScope.ZoteroChatGPT as Record<string, unknown>;
     for (const method of [
       "onMainWindowLoad",
       "onMainWindowUnload",
@@ -66,12 +66,12 @@ describe("development build", () => {
     expect(parsedManifest).toMatchObject({
       applications: {
         zotero: {
-          id: "{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}",
+          id: "{90909501-7b5b-4985-9f55-566e9890746c}",
           strict_max_version: "9.0.*",
           strict_min_version: "9.0.6",
         },
       },
-      name: "Zotero GPT Reader (Development)",
+      name: "Zotero ChatGPT (Development)",
     });
     expect(parsedManifest.version).toBe(sourceManifest.version);
     expect(bootstrap.length).toBeGreaterThan(0);

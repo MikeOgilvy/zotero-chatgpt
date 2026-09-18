@@ -1,4 +1,4 @@
-# Zotero GPT Reader
+# Zotero ChatGPT
 
 独立社区项目：融入 Zotero 的 GPT 式文献阅读与问答插件，定位是一个 **ChatGPT 式的论文阅读侧栏**。**Chat Mode** 自动以当前打开的 PDF 为上下文做只读问答；**Agent Mode** 在同一上下文上叠加标注、笔记、文献库整理与多步动作能力。保留公式、图表、引用与历史。与 Zotero、OpenAI 无官方隶属或背书关系。
 
@@ -10,14 +10,14 @@
 
 目标是一个包含运行组件的平台 XPI，经 Zotero 插件管理器安装后点击 **Sign in with ChatGPT**。普通用户不需要 Node、CLI、终端、token 或 companion。当前只有本地开发 XPI；下载来源的系统安全检查、无 Node 机器和完整升级验收尚未完成，不提供虚构的 Release 链接。
 
-开发者从本仓库构建和试用的命令见 [开发与发行](docs/development.md)。测试仅使用 `.zcr-dev/` 专用 profile/data 和合成 PDF，保留正常文献库。
+开发者从本仓库构建和试用的命令见 [开发与发行](docs/development.md)。测试仅使用 `.zotero-chatgpt-dev/` 专用 profile/data 和合成 PDF，保留正常文献库。
 
 PDF 工具栏搜索左侧的助手开关打开会话；**Ask in sidechat** 加入选区等待发送，**More details** 请求解释。打开侧栏本身不发送。默认全文背景的外发范围、关闭方式和提取状态必须在界面明确显示；历史回答不是文献证据。
 
 ## 开发入口
 
 - [AGENTS.md](AGENTS.md)：可执行规则与安全边界。
-- [唯一产品规格](docs/zotero-codex-user-flow.md)：目标功能、体验与验收要求。
+- [唯一产品规格](docs/zotero-chatgpt-user-flow.md)：目标功能、体验与验收要求。
 - [架构与契约](docs/module-design.md)：实际模块、状态、协议与存储。
 - [开发、测试与发行](docs/development.md)：复现与安装命令。
 - [进度、差距与证据](docs/progress.md)：当前执行计划、实测边界及剩余工作。

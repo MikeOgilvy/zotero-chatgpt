@@ -28,7 +28,7 @@ describe('dedicated host-test stage selection', () => {
   it('isolates full-PDF host validation from every existing profile', async () => {
     await expect(select(['--context'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/context-driver.js' });
     const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', `import { selectHostTree } from ${JSON.stringify(stageModule)}; console.log(JSON.stringify(selectHostTree(['--context'], ${JSON.stringify(repositoryRoot)})));`]);
-    expect((JSON.parse(stdout) as { profile: string }).profile).toBe(path.join(repositoryRoot, '.zcr-dev/context/profile'));
+    expect((JSON.parse(stdout) as { profile: string }).profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/context/profile'));
   });
   it('can stage the context profile for human use without auto-running tests', async () => {
     await expect(select(['--context', '--acceptance'])).resolves.toEqual({ stage: 'context', driver: null, installDriver: false });
@@ -49,10 +49,10 @@ describe('dedicated host-test stage selection', () => {
     ], { cwd: repositoryRoot });
     const tree = JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; reportPath: string };
     expect(tree.stage).toBe('live-model');
-    expect(tree.profile).toBe(path.join(repositoryRoot, '.zcr-dev/live/profile'));
-    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zcr-dev/live/data'));
-    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zcr-dev/live/host-report.json'));
-    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zcr-dev/profile'));
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/live/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/live/data'));
+    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/live/host-report.json'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/profile'));
   });
 
   it('refuses the live model-catalog stage in acceptance, native and model-request modes', async () => {
@@ -104,7 +104,7 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--acceptance', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass --acceptance without --s5 or --s6/.test(failureMessage(error)));
   });
 
-  it('puts S6 in .zcr-dev/s6-virgin, not the signed-in profile', async () => {
+  it('puts S6 in .zotero-chatgpt-dev/s6-virgin, not the signed-in profile', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
       '--input-type=module',
       '-e',
@@ -112,14 +112,14 @@ describe('dedicated host-test stage selection', () => {
        console.log(JSON.stringify(selectHostTree(['--s6'], ${JSON.stringify(repositoryRoot)})));`,
     ], { cwd: repositoryRoot });
     const tree = JSON.parse(stdout) as { profile: string; dataDir: string; reportPath: string };
-    expect(tree.profile).toBe(path.join(repositoryRoot, '.zcr-dev/s6-virgin/profile'));
-    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zcr-dev/s6-virgin/data'));
-    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zcr-dev/s6-virgin/host-report.json'));
-    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zcr-dev/profile'));
-    expect(tree.dataDir).not.toBe(path.join(repositoryRoot, '.zcr-dev/data'));
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-virgin/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-virgin/data'));
+    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-virgin/host-report.json'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/profile'));
+    expect(tree.dataDir).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/data'));
   });
 
-  it('puts S6 two-version upgrade in .zcr-dev/s6-upgrade, not the signed-in profile', async () => {
+  it('puts S6 two-version upgrade in .zotero-chatgpt-dev/s6-upgrade, not the signed-in profile', async () => {
     const { stdout } = await execFileAsync(process.execPath, [
       '--input-type=module',
       '-e',
@@ -127,12 +127,12 @@ describe('dedicated host-test stage selection', () => {
        console.log(JSON.stringify(selectHostTree(['--s6', '--upgrade-xpi', '/tmp/newer.xpi', '--rollback-xpi', '/tmp/older.xpi'], ${JSON.stringify(repositoryRoot)})));`,
     ], { cwd: repositoryRoot });
     const tree = JSON.parse(stdout) as { profile: string; dataDir: string; reportPath: string };
-    expect(tree.profile).toBe(path.join(repositoryRoot, '.zcr-dev/s6-upgrade/profile'));
-    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zcr-dev/s6-upgrade/data'));
-    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zcr-dev/s6-upgrade/host-report.json'));
-    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zcr-dev/profile'));
-    expect(tree.dataDir).not.toBe(path.join(repositoryRoot, '.zcr-dev/data'));
-    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zcr-dev/s6-virgin/profile'));
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-upgrade/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-upgrade/data'));
+    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-upgrade/host-report.json'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/profile'));
+    expect(tree.dataDir).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/data'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-virgin/profile'));
   });
 
   it('puts --acceptance on the signed-in tree, not s6-virgin', async () => {
@@ -144,10 +144,10 @@ describe('dedicated host-test stage selection', () => {
     ], { cwd: repositoryRoot });
     const tree = JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; pdfPath: string };
     expect(tree.stage).toBe('acceptance');
-    expect(tree.profile).toBe(path.join(repositoryRoot, '.zcr-dev/profile'));
-    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zcr-dev/data'));
-    expect(tree.pdfPath).toBe(path.join(repositoryRoot, '.zcr-dev/fixtures/reading.pdf'));
-    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zcr-dev/s6-virgin/profile'));
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/data'));
+    expect(tree.pdfPath).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/fixtures/reading.pdf'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/s6-virgin/profile'));
   });
 
   it('rejects combining exclusive stage flags', async () => {

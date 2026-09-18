@@ -5,7 +5,7 @@ import type { HostReader, ItemDetails, PdfApplication, ZoteroHost, ZoteroWindow 
 import { updateToolbarButton } from './toolbar.ts';
 export type SidebarRenderer = (body: HTMLElement, identity: AttachmentIdentity, close: () => void, active: boolean) => (() => void) | void;
 export interface ReaderPaneAssets { stylesheet?: string; katex?: string }
-const WIDTH_PREF = 'extensions.zcr.sidebarWidth';
+const WIDTH_PREF = 'extensions.zchatgpt.sidebarWidth';
 
 export function attachmentIdentity(zotero: ZoteroHost, reader: HostReader): AttachmentIdentity | undefined {
   const item = zotero.Items.get(reader.itemID);
@@ -126,7 +126,7 @@ export class NativeReaderPane implements LayoutHost {
     return readerWidth > 0 ? readerWidth : (this.win.innerWidth || DEFAULT_SIDEBAR_WIDTH + MIN_READER_WIDTH);
   }
   currentWidth(): number {
-    const dock = this.readerDoc()?.querySelector<HTMLElement>('[data-zcr-dock]');
+    const dock = this.readerDoc()?.querySelector<HTMLElement>('[data-zchatgpt-dock]');
     if (dock) {
       const styled = Number.parseFloat(dock.style.width || dock.style.flexBasis);
       if (Number.isFinite(styled) && styled > 0) return styled;
@@ -248,8 +248,8 @@ export class NativeReaderPane implements LayoutHost {
     const win = this.win;
     const readerWin = this.reader._iframeWindow;
     const readerDoc = this.readerDoc();
-    const dock = readerDoc?.querySelector<HTMLElement>('[data-zcr-dock]');
-    const resizer = readerDoc?.querySelector<HTMLElement>('[data-zcr-resizer]');
+    const dock = readerDoc?.querySelector<HTMLElement>('[data-zchatgpt-dock]');
+    const resizer = readerDoc?.querySelector<HTMLElement>('[data-zchatgpt-resizer]');
     const schedule = () => {
       if (this.layoutTimer !== undefined) win.clearTimeout(this.layoutTimer);
       this.layoutTimer = win.setTimeout(() => { this.layoutTimer = undefined; this.onLayoutSettled(); }, 80);
@@ -303,7 +303,7 @@ export class NativeReaderPane implements LayoutHost {
     // this reader keeps ownership so coming back remounts the same conversation.
     if (!this.selected()) { this.unmountChat(); return; }
     if (context && !context.collapsed) this.controller.nativeAction();
-    else if (!this.readerDoc()?.querySelector('[data-zcr-dock]')) {
+    else if (!this.readerDoc()?.querySelector('[data-zchatgpt-dock]')) {
       void this.mountChat().then(ready => { if (ready && this.controller.active && this.selected()) this.setActive(true); });
     }
   }

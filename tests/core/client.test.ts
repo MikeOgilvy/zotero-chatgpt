@@ -248,7 +248,7 @@ describe('runtime handshake and policy', () => {
     expect(s.p.terminated).toBe(true); expect(methods(s.p)).not.toContain('account/read');
   });
   it('does not accept the expected version only inside a client-supplied user-agent suffix', async () => {
-    const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zcr; 0.154.0)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
+    const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zchatgpt; 0.154.0)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
     await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid })).rejects.toThrow('version');
     expect(s.p.terminated).toBe(true);
   });
@@ -512,7 +512,7 @@ describe('attachment conversations', () => {
       runtimeVersion: '0.154.0',
       errorCode: null,
       requestCount: 1,
-      storageLocation: 'Zotero profile/zotero-codex-reader/v1/records',
+      storageLocation: 'Zotero profile/zotero-chatgpt/v1/records',
     });
     expect(report.states.accepted ?? report.states.dispatching ?? report.states.running).toBe(1);
     const text = JSON.stringify(report);

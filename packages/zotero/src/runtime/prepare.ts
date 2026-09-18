@@ -6,7 +6,7 @@ import type { PreparedRuntime } from './supervisor.ts';
 export interface RuntimeHost extends AssetHost { profileDir: string }
 export async function prepareRuntime(host: RuntimeHost, rootURI: string, manifest: RuntimeManifest = PINNED_RUNTIME): Promise<PreparedRuntime> {
   if (host.os !== 'Darwin' || !/^(aarch64|arm64)-/u.test(host.abi)) throw new Error('Unsupported runtime platform: macOS Apple Silicon is required');
-  const root = await privateDirectory(host, host.profileDir, 'zotero-codex-reader/v1');
+  const root = await privateDirectory(host, host.profileDir, 'zotero-chatgpt/v1');
   const home = await privateDirectory(host, root, 'home');
   const account = await privateDirectory(host, root, 'account');
   const cwd = await privateDirectory(host, root, 'scratch');

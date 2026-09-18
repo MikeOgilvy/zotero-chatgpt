@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const escapePdf = (text) => text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
 
-export function createFixturePdf(title = 'ZCR synthetic reading fixture', verificationToken = 'ORCHID-72') {
+export function createFixturePdf(title = 'ZCHATGPT synthetic reading fixture', verificationToken = 'ORCHID-72') {
   const streams = [0, 1].map((page) => {
     const lines = [
       title,
@@ -51,7 +51,7 @@ export function createFixturePdf(title = 'ZCR synthetic reading fixture', verifi
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const outputPath = resolve(process.argv[2] ?? '.zcr-dev/fixtures/reading.pdf');
+  const outputPath = resolve(process.argv[2] ?? '.zotero-chatgpt-dev/fixtures/reading.pdf');
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, createFixturePdf());
   console.log(outputPath);

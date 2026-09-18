@@ -13,7 +13,7 @@ const temporaryDirectories: string[] = [];
 let builtExtension = '';
 
 async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), 'zcr-verify-test-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'zchatgpt-verify-test-'));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -51,7 +51,7 @@ describe('shareable artifact verification', () => {
   it('rejects a production bundle that imports node builtins', async () => {
     const copy = path.join(await makeTemporaryDirectory(), 'pkg');
     await cp(builtExtension, copy, { recursive: true });
-    const bundle = path.join(copy, 'content/zcr.js');
+    const bundle = path.join(copy, 'content/zchatgpt.js');
     await writeFile(bundle, `${await readFile(bundle, 'utf8')}\nimport "node:fs";\n`);
     await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /node:/i.test(failureMessage(error)));
   });
@@ -64,7 +64,7 @@ describe('shareable artifact verification', () => {
     await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /auth\.json/i.test(failureMessage(error)));
 
     await rm(path.join(copy, 'content/account/auth.json'));
-    const bundle = path.join(copy, 'content/zcr.js');
+    const bundle = path.join(copy, 'content/zchatgpt.js');
     await writeFile(bundle, `${await readFile(bundle, 'utf8')}\nconst home = "/Users/secret-user/Library";\n`);
     await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /\/Users\//.test(failureMessage(error)));
   });
@@ -124,15 +124,15 @@ describe('sibling SHA256SUMS for packaged XPI', () => {
   }
 
   it('accepts a matching sibling checksum file', async () => {
-    const archivePath = await writeArchive('zotero-codex-reader-0.3.0a1-dev.xpi', 'packaged-bytes');
+    const archivePath = await writeArchive('zotero-chatgpt-0.3.0a1-dev.xpi', 'packaged-bytes');
     const digest = createHash('sha256').update('packaged-bytes').digest('hex');
-    await writeFile(path.join(path.dirname(archivePath), 'SHA256SUMS'), `${digest}  zotero-codex-reader-0.3.0a1-dev.xpi\n`);
+    await writeFile(path.join(path.dirname(archivePath), 'SHA256SUMS'), `${digest}  zotero-chatgpt-0.3.0a1-dev.xpi\n`);
     await expect(checksums(archivePath)).resolves.toEqual({ checked: true, digest });
   });
 
   it('rejects a mismatched sibling checksum', async () => {
-    const archivePath = await writeArchive('zotero-codex-reader-0.3.0a1-dev.xpi', 'packaged-bytes');
-    await writeFile(path.join(path.dirname(archivePath), 'SHA256SUMS'), `${'0'.repeat(64)}  zotero-codex-reader-0.3.0a1-dev.xpi\n`);
+    const archivePath = await writeArchive('zotero-chatgpt-0.3.0a1-dev.xpi', 'packaged-bytes');
+    await writeFile(path.join(path.dirname(archivePath), 'SHA256SUMS'), `${'0'.repeat(64)}  zotero-chatgpt-0.3.0a1-dev.xpi\n`);
     await expect(checksums(archivePath)).rejects.toSatisfy((error: unknown) => /SHA256SUMS mismatch/.test(failureMessage(error)));
   });
 

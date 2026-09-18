@@ -25,11 +25,11 @@ const CANDIDATE_PREFIX: Record<CommandMenuKind, string> = { references: 'referen
 export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElement, choose: (id: string) => Promise<void>): CommandMenu {
   const doc = input.ownerDocument;
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string) => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.className = className; return node; };
-  const element = create('div', 'zcr-command-menu'); element.hidden = true;
-  const toolbar = create('div', 'zcr-command-toolbar');
-  const heading = create('div', 'zcr-command-heading');
-  const list = create('div', 'zcr-command-list'); list.id = `zcr-command-${++serial}`; list.setAttribute('role', 'listbox');
-  const status = create('p', 'zcr-command-status'); status.setAttribute('role', 'status'); status.hidden = true;
+  const element = create('div', 'zchatgpt-command-menu'); element.hidden = true;
+  const toolbar = create('div', 'zchatgpt-command-toolbar');
+  const heading = create('div', 'zchatgpt-command-heading');
+  const list = create('div', 'zchatgpt-command-list'); list.id = `zchatgpt-command-${++serial}`; list.setAttribute('role', 'listbox');
+  const status = create('p', 'zchatgpt-command-status'); status.setAttribute('role', 'status'); status.hidden = true;
   element.append(toolbar, heading, list, status); container.append(element);
   const position = container.style.position;
   const ownsPosition = !doc.defaultView?.getComputedStyle(container).position || doc.defaultView.getComputedStyle(container).position === 'static';
@@ -66,7 +66,7 @@ export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElem
     } finally { busy = false; }
   };
   const place = () => {
-    const pane = input.closest<HTMLElement>('[data-zcr-sidebar]') ?? container;
+    const pane = input.closest<HTMLElement>('[data-zchatgpt-sidebar]') ?? container;
     const paneRect = pane.getBoundingClientRect(); const anchor = container.getBoundingClientRect();
     if (!paneRect.height || !anchor.height) return;
     const above = anchor.top - paneRect.top - 6; const below = paneRect.bottom - anchor.bottom - 6;
@@ -82,17 +82,17 @@ export function mountCommandMenu(input: HTMLTextAreaElement, container: HTMLElem
     // A references chooser never renders a workflow and a commands chooser never renders a
     // reference, even if a caller accidentally hands it a mixed list.
     items = kind ? state.items.filter(item => item.id.startsWith(CANDIDATE_PREFIX[kind!])) : state.items;
-    if (kind) element.dataset.zcrCommandKind = kind; else delete element.dataset.zcrCommandKind;
+    if (kind) element.dataset.zchatgptCommandKind = kind; else delete element.dataset.zchatgptCommandKind;
     // A workflow chooser has no reference-type axis: hide its filter row instead of showing
     // reference filters that cannot apply. `hidden` loses to the flex rule, so clear the display.
     toolbar.style.display = kind === 'commands' ? 'none' : '';
     heading.textContent = state.heading; list.setAttribute('aria-label', state.heading);
     if (!items.some(item => item.id === active && !item.disabled)) active = items.find(item => !item.disabled)?.id ?? '';
     list.replaceChildren(...items.map((item, index) => {
-      const row = create('button', 'zcr-command-option'); row.type = 'button'; row.tabIndex = -1; row.id = `${list.id}-${index}`; row.dataset.candidateId = item.id;
+      const row = create('button', 'zchatgpt-command-option'); row.type = 'button'; row.tabIndex = -1; row.id = `${list.id}-${index}`; row.dataset.candidateId = item.id;
       row.setAttribute('role', 'option'); row.disabled = !!item.disabled; row.setAttribute('aria-disabled', String(!!item.disabled));
-      const label = create('span', 'zcr-command-label'); label.textContent = item.label; row.append(label);
-      if (item.description) { const detail = create('span', 'zcr-command-description'); detail.textContent = item.description; row.append(detail); }
+      const label = create('span', 'zchatgpt-command-label'); label.textContent = item.label; row.append(label);
+      if (item.description) { const detail = create('span', 'zchatgpt-command-description'); detail.textContent = item.description; row.append(detail); }
       row.addEventListener('pointerdown', event => event.preventDefault());
       row.addEventListener('pointermove', () => { if (!item.disabled) { active = item.id; markActive(); } });
       row.addEventListener('click', () => { active = item.id; markActive(); void chooseActive(); });

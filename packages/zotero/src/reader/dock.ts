@@ -1,8 +1,8 @@
 import { MIN_SIDEBAR_WIDTH, sidebarWidthBounds } from './layout.ts';
 
-export const DOCK_ATTR = 'data-zcr-dock';
-export const DOCK_WIDTH_VAR = '--zcr-dock-width';
-export const DOCK_OPEN_CLASS = 'zcr-dock-open';
+export const DOCK_ATTR = 'data-zchatgpt-dock';
+export const DOCK_WIDTH_VAR = '--zchatgpt-dock-width';
+export const DOCK_OPEN_CLASS = 'zchatgpt-dock-open';
 /** One arrow press; Shift+Arrow moves four times as far. */
 export const DOCK_RESIZE_STEP = 16;
 export const DOCK_RESIZE_STEP_LARGE = 64;
@@ -162,24 +162,24 @@ export function mountReaderDock(doc: Document): { dock: HTMLElement; body: HTMLE
     markDockOpen(doc, split);
     const current = Number.parseFloat(existing.style.width || existing.style.flexBasis);
     paintDockColumn(existing, Number.isFinite(current) && current > 0 ? current : undefined);
-    return { dock: existing, body: existing.querySelector<HTMLElement>('[data-zcr-dock-body]') ?? existing };
+    return { dock: existing, body: existing.querySelector<HTMLElement>('[data-zchatgpt-dock-body]') ?? existing };
   }
   const dock = createHtmlElement(doc, 'aside');
-  dock.className = 'zcr-dock zcr-paper';
+  dock.className = 'zchatgpt-dock zchatgpt-paper';
   dock.setAttribute(DOCK_ATTR, '');
   dock.setAttribute('role', 'complementary');
   dock.setAttribute('aria-label', 'Codex');
   exemptFromReaderFocusManager(dock);
   const resizer = createHtmlElement(doc, 'div');
-  resizer.className = 'zcr-dock-resizer';
-  resizer.dataset.zcrResizer = '';
+  resizer.className = 'zchatgpt-dock-resizer';
+  resizer.dataset.zchatgptResizer = '';
   resizer.setAttribute('role', 'separator');
   resizer.setAttribute('aria-orientation', 'vertical');
   resizer.setAttribute('aria-label', 'Resize Codex sidebar');
   resizer.setAttribute('tabindex', '0');
   const body = createHtmlElement(doc, 'div');
-  body.className = 'zcr-dock-body';
-  body.dataset.zcrDockBody = '';
+  body.className = 'zchatgpt-dock-body';
+  body.dataset.zchatgptDockBody = '';
   dock.append(resizer, body);
   paintDockColumn(dock);
   split.append(dock);
@@ -320,17 +320,17 @@ export function unmountReaderDock(doc: Document): void {
 
 export function injectReaderStyles(doc: Document, assets?: { stylesheet?: string; katex?: string }): void {
   const head = doc.head ?? doc.documentElement;
-  if (!doc.querySelector('style[data-zcr-sidebar-css]')) {
+  if (!doc.querySelector('style[data-zchatgpt-sidebar-css]')) {
     const css = createHtmlElement(doc, 'style');
-    css.setAttribute('data-zcr-sidebar-css', '');
+    css.setAttribute('data-zchatgpt-sidebar-css', '');
     head.append(css);
-    css.append(doc.createTextNode(__ZCR_SIDEBAR_CSS__));
+    css.append(doc.createTextNode(__ZCHATGPT_SIDEBAR_CSS__));
   }
-  if (assets?.katex && !doc.querySelector('link[data-zcr-katex-css]')) {
+  if (assets?.katex && !doc.querySelector('link[data-zchatgpt-katex-css]')) {
     const katex = createHtmlElement(doc, 'link') as HTMLLinkElement;
     katex.rel = 'stylesheet';
     katex.href = assets.katex;
-    katex.dataset.zcrKatexCss = '';
+    katex.dataset.zchatgptKatexCss = '';
     head.append(katex);
   }
 }

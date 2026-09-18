@@ -11,7 +11,7 @@ const requiredLicenses = [
   'content/assets/licenses/katex.LICENSE',
   'content/assets/licenses/markdown-it.LICENSE',
   'content/assets/licenses/dompurify.LICENSE',
-  // Notices for the remaining libraries bundled into content/zcr.js (transitive deps of
+  // Notices for the remaining libraries bundled into content/zchatgpt.js (transitive deps of
   // markdown-it/linkify-it). Requiring them keeps the shipped license set in step with the bundle.
   'content/assets/licenses/linkify-it.LICENSE',
   'content/assets/licenses/mdurl.LICENSE',
@@ -20,8 +20,8 @@ const requiredLicenses = [
   'content/assets/licenses/entities.LICENSE',
 ];
 const requiredPanes = ['content/preferences/preferences.xhtml', 'content/preferences/pane.js'];
-const requiredFiles = ['bootstrap.js', 'content/zcr.js', 'manifest.json', 'LICENSE', ...requiredLicenses, ...requiredPanes];
-const forbiddenNames = ['auth.json', 'auth.json.enc', 'credentials.json', '.zcr-dev'];
+const requiredFiles = ['bootstrap.js', 'content/zchatgpt.js', 'manifest.json', 'LICENSE', ...requiredLicenses, ...requiredPanes];
+const forbiddenNames = ['auth.json', 'auth.json.enc', 'credentials.json', '.zotero-chatgpt-dev'];
 const textSuffixes = ['.js', '.json', '.css', '.html', '.ftl', '.md', '.txt', '.toml'];
 
 function requireNode24() {
@@ -60,7 +60,7 @@ function assertCleanNames(files) {
     if (forbiddenNames.includes(base) || forbiddenNames.some(name => file.includes(`/${name}/`) || file.includes(`${name}/`))) {
       throw new Error(`Packaged artifact contains a forbidden file: ${file}`);
     }
-    if (file.includes('.zcr-dev') || file.endsWith('.jsonl') || file.includes('/records/')) {
+    if (file.includes('.zotero-chatgpt-dev') || file.endsWith('.jsonl') || file.includes('/records/')) {
       throw new Error(`Packaged artifact contains a forbidden file: ${file}`);
     }
   }
@@ -73,7 +73,7 @@ function assertRequired(files) {
 }
 
 function assertBundleText(relativePath, text) {
-  if (relativePath !== 'content/zcr.js' && relativePath !== 'bootstrap.js') return;
+  if (relativePath !== 'content/zchatgpt.js' && relativePath !== 'bootstrap.js') return;
   if (/['"]node:/.test(text)) throw new Error(`Production bundle ${relativePath} imports a node: builtin`);
   if (/\/Users\//.test(text)) throw new Error(`Production bundle ${relativePath} contains a /Users/ path`);
 }
@@ -151,7 +151,7 @@ async function main() {
     return;
   }
   const manifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/zotero/manifest.json'), 'utf8'));
-  const defaultXpi = path.join(repositoryRoot, `dist/zotero-codex-reader-${manifest.version}-dev.xpi`);
+  const defaultXpi = path.join(repositoryRoot, `dist/zotero-chatgpt-${manifest.version}-dev.xpi`);
   const defaultSource = path.join(repositoryRoot, 'build/dev');
   try {
     if ((await stat(defaultXpi)).isFile()) {

@@ -30,28 +30,28 @@ async function runHostSmoke(config) {
   const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
   try {
     await Zotero.initializationPromise;
-    await check('isolated-context-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zcr-dev/context/profile') && Zotero.DataDirectory.dir === config.dataDir);
+    await check('isolated-context-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/context/profile') && Zotero.DataDirectory.dir === config.dataDir);
     const win = await until(() => Zotero.getMainWindow(), 'main-window');
     report.environment = { zotero: Zotero.version, width: win.innerWidth, height: win.innerHeight, devicePixelRatio: win.devicePixelRatio };
     await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library-ready');
     await Zotero.Libraries.get(Zotero.Libraries.userLibraryID).waitForDataLoad('item');
     const addon = await AddonManager.getAddonByID(config.subjectID); if (addon?.userDisabled) await addon.enable();
     await check('full-xpi-active', addon?.isActive && addon.version === config.subjectVersion);
-    const title = 'ZCR current-PDF synthetic context and native interaction test';
+    const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
     const queue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue: queue });
     const a = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Main synthetic PDF', saveOptions: { notifierQueue: queue } });
     const b = await Zotero.Attachments.importFromFile({ file: config.supplementPdfPath ?? config.pdfPath, parentItemID: parent.id, title: 'Supplement synthetic PDF', saveOptions: { notifierQueue: queue } });
     await Promise.all([parent.loadAllData(), a.loadAllData(), b.loadAllData()]); await Zotero.Notifier.commit(queue);
     win.Zotero_Tabs.closeAll(); await until(() => Zotero.Reader._readers.length === 0, 'close-only-this-profile-tabs');
-    Zotero.Prefs.set('extensions.zcr.automaticPdfText', true, true);
-    Zotero.Prefs.set('extensions.zcr.pdfTextDisclosureSeen', false, true);
+    Zotero.Prefs.set('extensions.zchatgpt.automaticPdfText', true, true);
+    Zotero.Prefs.set('extensions.zchatgpt.pdfTextDisclosureSeen', false, true);
     // Falsifiability control, off unless its marker file is present: with the product's own opt-out
     // stored before the reader opens, its presenter is built with document reading disabled and must
     // not read this PDF at all. The run then fails at the preparation check with no host observation,
     // which is what keeps that check able to fail. Nothing else about the driver changes.
-    const optOutControl = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-opt-out'));
-    if (optOutControl) Zotero.Prefs.set('extensions.zcr.automaticPdfText', false, true);
+    const optOutControl = await IOUtils.exists(PathUtils.join(config.profile, 'zchatgpt-control-opt-out'));
+    if (optOutControl) Zotero.Prefs.set('extensions.zchatgpt.automaticPdfText', false, true);
     // --- The product's own automatic whole-PDF preparation, observed with nothing of the driver's on the
     // document ---
     // What a3 measured here was its own instrument. It wrapped `getPageData`/`getPageLabels2` on the
@@ -138,21 +138,21 @@ async function runHostSmoke(config) {
     const openedMs = Date.now() - t0;
     const reader = () => Zotero.Reader.getByTabID(tabId);
     const rdoc = () => reader()?._iframeWindow?.document;
-    const panel = () => rdoc()?.querySelector('[data-zcr-chat]');
-    const shell = () => rdoc()?.querySelector('[data-zcr-sidebar]');
-    const toggle = () => rdoc()?.querySelector('[data-zcr-toggle]');
-    const input = () => panel()?.querySelector('[data-zcr-input]');
+    const panel = () => rdoc()?.querySelector('[data-zchatgpt-chat]');
+    const shell = () => rdoc()?.querySelector('[data-zchatgpt-sidebar]');
+    const toggle = () => rdoc()?.querySelector('[data-zchatgpt-toggle]');
+    const input = () => panel()?.querySelector('[data-zchatgpt-input]');
     const pdf = () => reader()._internalReader._primaryView._iframeWindow.PDFViewerApplication;
     const pdfViewer = () => pdf().pdfViewer;
     const view = () => reader()._internalReader._primaryView;
     const viewWin = () => view()._iframeWindow;
-    const contextRing = () => panel()?.querySelector('[data-zcr-context-usage]');
-    const contextSource = () => panel()?.querySelector('[data-zcr-context-source]');
-    const disclosure = () => rdoc()?.querySelector('[data-zcr-context-disclosure]');
-    const refusalAlert = () => panel()?.querySelector('p.zcr-error:not([data-zcr-view-error])');
-    const contextScale = () => shell()?.style.getPropertyValue('--zcr-chat-text-scale') ?? '';
+    const contextRing = () => panel()?.querySelector('[data-zchatgpt-context-usage]');
+    const contextSource = () => panel()?.querySelector('[data-zchatgpt-context-source]');
+    const disclosure = () => rdoc()?.querySelector('[data-zchatgpt-context-disclosure]');
+    const refusalAlert = () => panel()?.querySelector('p.zchatgpt-error:not([data-zchatgpt-view-error])');
+    const contextScale = () => shell()?.style.getPropertyValue('--zchatgpt-chat-text-scale') ?? '';
     // Every selector that belonged to the deleted PDF-context panel. None may ever render again.
-    const REMOVED_PANEL_SELECTORS = ['[data-zcr-document-context]', '.zcr-document-panel', '.zcr-context-range', '[data-zcr-context-summary]', '[data-zcr-automatic-pdf]'];
+    const REMOVED_PANEL_SELECTORS = ['[data-zchatgpt-document-context]', '.zchatgpt-document-panel', '.zchatgpt-context-range', '[data-zchatgpt-context-summary]', '[data-zchatgpt-automatic-pdf]'];
     const panelSelectorsAbsent = () => { const doc = rdoc(); return Boolean(doc) && REMOVED_PANEL_SELECTORS.every(selector => !doc.querySelector(selector)); };
     await until(() => reader()?._internalReader?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfDocument, 'pdf-loaded');
     await until(() => toggle(), 'toolbar-toggle');
@@ -181,7 +181,7 @@ async function runHostSmoke(config) {
     // archived run that installed nothing (`host-report-0.4.0a3-DIAG4`) counted the product's own
     // preparation as working; the default run therefore observes only host APIs the product looks up
     // itself, and the wrapper is kept for a marked diagnostic run.
-    const wrapPdfInstrument = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-wrap-pdf'));
+    const wrapPdfInstrument = await IOUtils.exists(PathUtils.join(config.profile, 'zchatgpt-control-wrap-pdf'));
     if (wrapPdfInstrument) {
       const pdfObject = pdf().pdfDocument;
       const native = { getData: pdfObject.getData, getPageLabels2: pdfObject.getPageLabels2, getPageData: pdfObject.getPageData };
@@ -253,9 +253,9 @@ async function runHostSmoke(config) {
       counts: { ...counts },
       productVisible: {
         sidebarOpen: Boolean(panel()),
-        runtime: panel()?.dataset.zcrRuntime ?? null,
-        auth: panel()?.dataset.zcrAuth ?? null,
-        contextState: contextRing()?.dataset.zcrContextState ?? null,
+        runtime: panel()?.dataset.zchatgptRuntime ?? null,
+        auth: panel()?.dataset.zchatgptAuth ?? null,
+        contextState: contextRing()?.dataset.zchatgptContextState ?? null,
       },
       wrapPdfInstrument,
       note: 'Assertion source: the product\'s own revision gates for this file (IOUtils.stat + computeHexDigest, counted only after the driver\'s own disk probe). A second gate means the product reached its own validate() after reading the whole document. The driver never calls those on this PDF.',
@@ -270,13 +270,13 @@ async function runHostSmoke(config) {
     report.coldInputMs = win.performance.now() - coldStart;
     // The unsent tab is the New chat copy in either interface language. It must not be named after
     // the paper: paper identity is carried by the attachment/context system, not by a tab label.
-    const unsentTab = () => panel()?.querySelector('[data-zcr-current-title]');
+    const unsentTab = () => panel()?.querySelector('[data-zchatgpt-current-title]');
     const NEW_CHAT_COPY = ['New chat', '新建对话'];
     await check('new-chat-tab-before-or-with-connection',
-      unsentTab()?.dataset.zcrConversationId === 'new-chat'
-        && NEW_CHAT_COPY.includes((unsentTab()?.querySelector('[data-zcr-pane-label]')?.textContent ?? '').trim())
+      unsentTab()?.dataset.zchatgptConversationId === 'new-chat'
+        && NEW_CHAT_COPY.includes((unsentTab()?.querySelector('[data-zchatgpt-pane-label]')?.textContent ?? '').trim())
         && !unsentTab()?.textContent?.includes(title),
-      { tabId: unsentTab()?.dataset.zcrConversationId ?? null, label: unsentTab()?.querySelector('[data-zcr-pane-label]')?.textContent ?? null, articleTitle: title });
+      { tabId: unsentTab()?.dataset.zchatgptConversationId ?? null, label: unsentTab()?.querySelector('[data-zchatgpt-pane-label]')?.textContent ?? null, articleTitle: title });
     // Wait for the product's own gate sequence for this file: one gate from `prepare()`, a second from
     // `validate()`, which it can only reach after the whole-document read returned. Nothing of the
     // driver's is on the document, and the wait can fail honestly.
@@ -353,7 +353,7 @@ async function runHostSmoke(config) {
     report.backgroundPreparation.productGetData = productGetData;
     report.backgroundPreparation.legacyVerdict = legacyVerdict;
     report.backgroundPreparation.legacyGetters = { ...legacy.calls };
-    report.backgroundPreparation.nonFatal = await IOUtils.exists(PathUtils.join(config.profile, 'zcr-control-nonfatal-prep'));
+    report.backgroundPreparation.nonFatal = await IOUtils.exists(PathUtils.join(config.profile, 'zchatgpt-control-nonfatal-prep'));
     if (report.backgroundPreparation.nonFatal) await skip('automatic-whole-pdf-background-preparation-without-panel', `DIAGNOSTIC RUN (non-fatal): ${JSON.stringify({ counts, preparationObserved, gateMs: observations.find(entry => entry.label === 'computeHexDigest' && entry.file === expectedFile)?.ms ?? null, legacy: legacy.order.slice(0, 12) })}`);
     else await check('automatic-whole-pdf-background-preparation-without-panel', preparationObserved, report.backgroundPreparation);
     await check('removed-document-panel-stays-off-the-chat-surface', panelSelectorsAbsent(), { removedSelectorsAbsent: REMOVED_PANEL_SELECTORS });
@@ -361,29 +361,29 @@ async function runHostSmoke(config) {
     await until(() => contextRing(), 'context-ring');
     const ringLabel = contextRing()?.getAttribute('aria-label') ?? '';
     await check('context-ring-reports-honest-unknown-state',
-      contextRing().className === 'zcr-context-ring' && contextRing().dataset.zcrContextState === 'unknown' && contextRing().querySelector('.zcr-context-ring-fill')?.getAttribute('stroke-dasharray') === 'none' && /unknown/i.test(ringLabel) && !ringLabel.includes('%'),
-      { state: contextRing().dataset.zcrContextState, strokeDasharray: contextRing().querySelector('.zcr-context-ring-fill')?.getAttribute('stroke-dasharray'), label: ringLabel });
-    await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'native-runtime-initialization', 90000);
-    await check('native-runtime-handshake-ready', panel()?.dataset.zcrRuntime === 'ready', { visibleStatus: panel()?.querySelector('[role="status"]')?.textContent, visibleError: refusalAlert()?.textContent });
+      contextRing().className === 'zchatgpt-context-ring' && contextRing().dataset.zchatgptContextState === 'unknown' && contextRing().querySelector('.zchatgpt-context-ring-fill')?.getAttribute('stroke-dasharray') === 'none' && /unknown/i.test(ringLabel) && !ringLabel.includes('%'),
+      { state: contextRing().dataset.zchatgptContextState, strokeDasharray: contextRing().querySelector('.zchatgpt-context-ring-fill')?.getAttribute('stroke-dasharray'), label: ringLabel });
+    await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'native-runtime-initialization', 90000);
+    await check('native-runtime-handshake-ready', panel()?.dataset.zchatgptRuntime === 'ready', { visibleStatus: panel()?.querySelector('[role="status"]')?.textContent, visibleError: refusalAlert()?.textContent });
     // Opening the dock is a local tab, not a stored chat: first-open has no conversation id until
     // the first send. signedOut still disables the picker; signedIn with an unbound composer is the
     // same login-independent local surface the next check records.
     await until(() => {
       const chat = panel();
       if (!chat) return false;
-      if (chat.dataset.zcrConversation) return true;
-      if (chat.querySelector('[data-zcr-action="picker"]')?.disabled) return true;
-      return ['signedIn', 'signedOut'].includes(chat.dataset.zcrAuth);
+      if (chat.dataset.zchatgptConversation) return true;
+      if (chat.querySelector('[data-zchatgpt-action="picker"]')?.disabled) return true;
+      return ['signedIn', 'signedOut'].includes(chat.dataset.zchatgptAuth);
     }, 'native-conversation-or-signed-out', 30000);
-    await check('local-conversation-independent-of-login', ['signedIn', 'signedOut'].includes(panel().dataset.zcrAuth), { auth: panel().dataset.zcrAuth, conversation: panel().dataset.zcrConversation || null });
-    const conversationA = panel().dataset.zcrConversation || '';
+    await check('local-conversation-independent-of-login', ['signedIn', 'signedOut'].includes(panel().dataset.zchatgptAuth), { auth: panel().dataset.zchatgptAuth, conversation: panel().dataset.zchatgptConversation || null });
+    const conversationA = panel().dataset.zchatgptConversation || '';
     // The removed panel no longer wraps the page indicator; the source row is a bare chat sibling.
     await until(() => contextSource()?.hidden === true, 'context-source-hidden-without-a-citation', 15000);
-    await check('context-source-hidden-without-a-citation', Boolean(contextSource()) && contextSource().hidden === true && contextSource().parentElement === panel() && !contextSource().closest('.zcr-document-panel'), { source: contextSource()?.textContent ?? '' });
+    await check('context-source-hidden-without-a-citation', Boolean(contextSource()) && contextSource().hidden === true && contextSource().parentElement === panel() && !contextSource().closest('.zchatgpt-document-panel'), { source: contextSource()?.textContent ?? '' });
     input().value = 'Unsent synthetic question about the current PDF'; input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
     // --- Real selection on physical page 2 becomes the cited page the source row and reader follow ---
     const selectionPopup = () => rdoc()?.querySelector('.selection-popup');
-    const selectionBar = () => rdoc()?.querySelector('[data-zcr-selection-bar]');
+    const selectionBar = () => rdoc()?.querySelector('[data-zchatgpt-selection-bar]');
     const selectOnPage = async pageNumber => {
       await until(() => view()?._pdfPages?.[pageNumber - 1]?.chars?.length > 8, `page-${pageNumber}-characters`, 30000);
       const w = viewWin(); w.PDFViewerApplication.pdfViewer.currentPageNumber = pageNumber; await delay(400);
@@ -415,13 +415,13 @@ async function runHostSmoke(config) {
     let selected = false;
     for (let attempt = 0; attempt < 3 && !selected; attempt++) { try { await selectOnPage(2); selected = true; } catch (error) { report.selectionAttempt = String(error); await save(); await delay(500); } }
     if (selected) {
-      click(selectionBar().querySelector('[data-zcr-action="ask"]'));
-      await until(() => panel()?.querySelectorAll('[data-zcr-draft-citations] [data-zcr-citation]').length === 1, 'draft-citation-from-ask', 15000);
+      click(selectionBar().querySelector('[data-zchatgpt-action="ask"]'));
+      await until(() => panel()?.querySelectorAll('[data-zchatgpt-draft-citations] [data-zchatgpt-citation]').length === 1, 'draft-citation-from-ask', 15000);
       await until(() => contextSource() && !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || ''), 'context-source-follows-the-cited-page', 15000);
-      await check('context-source-points-at-the-selected-page', !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || '') && Boolean(contextSource().querySelector('[data-zcr-action="open-citation"]')), { source: contextSource().textContent });
+      await check('context-source-points-at-the-selected-page', !contextSource().hidden && /\bp\.\s*\S+/u.test(contextSource().textContent || '') && Boolean(contextSource().querySelector('[data-zchatgpt-action="open-citation"]')), { source: contextSource().textContent });
       pdfViewer().currentPageNumber = 1; await until(() => pdfViewer().currentPageNumber === 1, 'reset-viewer-to-page-1');
       const navigationSource = contextSource().textContent;
-      click(contextSource().querySelector('[data-zcr-action="open-citation"]'));
+      click(contextSource().querySelector('[data-zchatgpt-action="open-citation"]'));
       const navigated = await until(() => pdfViewer().currentPageNumber === 2, 'source-navigation-to-cited-page', 20000).catch(() => null);
       if (!navigated) {
         // Report what the owner would see instead of navigating, so a product failure is not mistaken
@@ -439,10 +439,10 @@ async function runHostSmoke(config) {
     let explainSelected = false;
     for (let attempt = 0; attempt < 3 && !explainSelected; attempt++) { try { await selectOnPage(2); explainSelected = true; } catch (error) { report.selectionAttempt = String(error); await save(); await delay(500); } }
     if (explainSelected) {
-      click(selectionBar().querySelector('[data-zcr-action="explain"]'));
+      click(selectionBar().querySelector('[data-zchatgpt-action="explain"]'));
       await until(() => disclosure() && !disclosure().hidden, 'consent-line-for-pending-explain', 15000);
-      const acknowledge = disclosure().querySelector('[data-zcr-action="acknowledge-context"]');
-      await check('consent-path-reachable-without-the-removed-panel', !disclosure().hidden && Boolean(acknowledge) && acknowledge.hidden === false && Zotero.Prefs.get('extensions.zcr.pdfTextDisclosureSeen', true) !== true, { copy: disclosure().querySelector('p')?.textContent?.slice(0, 80) });
+      const acknowledge = disclosure().querySelector('[data-zchatgpt-action="acknowledge-context"]');
+      await check('consent-path-reachable-without-the-removed-panel', !disclosure().hidden && Boolean(acknowledge) && acknowledge.hidden === false && Zotero.Prefs.get('extensions.zchatgpt.pdfTextDisclosureSeen', true) !== true, { copy: disclosure().querySelector('p')?.textContent?.slice(0, 80) });
       await skip('acknowledge-context-resumes-the-pending-explain', 'Acknowledging re-runs the pending explain, which starts the official login (signed out) or a real model request (signed in). --context must do neither, so the resume click is deliberately not executed.');
     } else {
       await skip('consent-path-reachable-without-the-removed-panel', 'No synthetic text selection could be simulated in the real reader view.');
@@ -452,10 +452,10 @@ async function runHostSmoke(config) {
     await check('close-preserves-current-page', pdfViewer().currentPageNumber === 2, {
       page: pdfViewer().currentPageNumber,
       location: pdfViewer()._location && { pageNumber: pdfViewer()._location.pageNumber, left: pdfViewer()._location.left, top: pdfViewer()._location.top, scale: pdfViewer()._location.scale },
-      dock: Boolean(rdoc()?.querySelector('[data-zcr-dock]')),
+      dock: Boolean(rdoc()?.querySelector('[data-zchatgpt-dock]')),
       sidebarCollapsed: win.ZoteroContextPane?.collapsed,
     });
-    toggle().click(); await until(() => input() && !input().disabled && panel()?.dataset.zcrConversation === conversationA, 'same-conversation-restored');
+    toggle().click(); await until(() => input() && !input().disabled && panel()?.dataset.zchatgptConversation === conversationA, 'same-conversation-restored');
     await check('reopen-keeps-current-page', pdfViewer().currentPageNumber === 2, {
       page: pdfViewer().currentPageNumber,
       locationPage: pdfViewer()._location?.pageNumber,
@@ -465,7 +465,7 @@ async function runHostSmoke(config) {
     const other = await Zotero.Reader.open(b.id); tabId = other.tabID;
     await until(() => toggle(), 'sibling-toolbar'); toggle().click();
     await until(() => shell()?.dataset.attachmentKey === b.key && input(), 'sibling-sidebar', 60000);
-    const siblingConversation = panel()?.dataset.zcrConversation || '';
+    const siblingConversation = panel()?.dataset.zchatgptConversation || '';
     // Same-title attachments are different papers. The proof is the reader binding, not a tab label:
     // the tab is the `New chat` copy now, so assert the shell is bound to the sibling attachment, its
     // composer is empty (the main attachment's draft did not bleed across), the main attachment's own
@@ -487,13 +487,13 @@ async function runHostSmoke(config) {
     // three-dot settings menu is gone; history is the remaining chrome popover that works whether
     // or not the account is signed in.
     const warm = []; const local = [];
-    const warmReady = () => input() && !input().disabled && (!conversationA || panel()?.dataset.zcrConversation === conversationA);
+    const warmReady = () => input() && !input().disabled && (!conversationA || panel()?.dataset.zchatgptConversation === conversationA);
     for (let n = 0; n < 30; n++) {
       toggle().click(); await until(() => !panel(), 'perf-close');
       const start = win.performance.now(); toggle().click();
       await until(warmReady, 'perf-input-ready'); warm.push(win.performance.now() - start);
-      const history = panel().querySelector('[data-zcr-action="history"]');
-      const historyPanel = panel().querySelector('[data-zcr-history]');
+      const history = panel().querySelector('[data-zchatgpt-action="history"]');
+      const historyPanel = panel().querySelector('[data-zchatgpt-history]');
       step = 'perf-local-feedback';
       const feedback = win.performance.now(); history.click();
       await until(() => historyPanel && !historyPanel.hidden, 'perf-state-feedback'); local.push(win.performance.now() - feedback);
@@ -503,9 +503,9 @@ async function runHostSmoke(config) {
     report.performance = { cachedOpen: metrics(warm), localInteraction: metrics(local), method: 'performance.now; poll 10ms until enabled input (and restored conversation when one is bound) or the history panel opens; same synthetic 2-page PDF; 30 cycles; runtime warmed; no model' };
     await check('warm-open-p95-under-250ms', report.performance.cachedOpen.p95 <= 250, { p95: report.performance.cachedOpen.p95 });
     await check('local-feedback-p95-under-100ms', report.performance.localInteraction.p95 <= 100, { p95: report.performance.localInteraction.p95 });
-    await check('single-dock-and-toggle-after-cycles', rdoc().querySelectorAll('[data-zcr-dock]').length === 1 && rdoc().querySelectorAll('[data-zcr-toggle]').length === 1);
+    await check('single-dock-and-toggle-after-cycles', rdoc().querySelectorAll('[data-zchatgpt-dock]').length === 1 && rdoc().querySelectorAll('[data-zchatgpt-toggle]').length === 1);
     step = 'inspect-request-records';
-    const records = PathUtils.join(config.profile, 'zotero-codex-reader', 'v1', 'records', 'conversations');
+    const records = PathUtils.join(config.profile, 'zotero-chatgpt', 'v1', 'records', 'conversations');
     let requests = 0;
     for (const file of await IOUtils.getChildren(records)) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
     report.recordedRequests = requests;
@@ -528,23 +528,23 @@ async function runHostSmoke(config) {
       await until(() => toggle(), 'blank-toolbar');
       if (!panel()) { toggle().click(); }
       await until(() => input(), 'blank-input');
-      await until(() => ['ready', 'error'].includes(panel()?.dataset.zcrRuntime), 'blank-runtime', 90000);
-      await until(() => panel()?.dataset.zcrAuth, 'blank-auth', 30000);
+      await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'blank-runtime', 90000);
+      await until(() => panel()?.dataset.zchatgptAuth, 'blank-auth', 30000);
       blankReady = true;
     } catch (error) { blankSetupError = String(error); await save(); }
     if (blankReady) {
       input().value = 'Synthetic question with no extractable PDF text';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
-      const blankSend = panel().querySelector('[data-zcr-action="send"]');
-      if (panel().dataset.zcrAuth === 'signedIn' && !blankSend.disabled) {
+      const blankSend = panel().querySelector('[data-zchatgpt-action="send"]');
+      if (panel().dataset.zchatgptAuth === 'signedIn' && !blankSend.disabled) {
         click(blankSend);
         // The predicate must return the element, not a boolean, or the check reads attributes off `true`.
         const refused = await until(() => { const alert = refusalAlert(); return alert && !alert.hidden ? alert : null; }, 'not-ready-refusal-alert', 30000);
         await check('not-ready-send-refuses-with-error-alert',
-          refused.getAttribute('role') === 'alert' && /No extractable text/iu.test(refused.textContent || '') && panel().dataset.zcrGenerating !== 'true',
+          refused.getAttribute('role') === 'alert' && /No extractable text/iu.test(refused.textContent || '') && panel().dataset.zchatgptGenerating !== 'true',
           { message: refused.textContent });
       } else {
-        await check('not-ready-send-cannot-silently-reach-a-model', blankSend.disabled === true, { auth: panel().dataset.zcrAuth, sendDisabled: blankSend.disabled });
+        await check('not-ready-send-cannot-silently-reach-a-model', blankSend.disabled === true, { auth: panel().dataset.zchatgptAuth, sendDisabled: blankSend.disabled });
         await skip('not-ready-send-refuses-with-error-alert', 'Only a signed-in runtime reaches the request boundary that refuses an unreadable PDF; this dedicated profile is signed out, so no real login or model call was made to observe the refusal copy.');
       }
     } else {
@@ -555,17 +555,17 @@ async function runHostSmoke(config) {
     await until(() => shell()?.dataset.attachmentKey === a.key, 'restore-main-attachment', 60000);
     if (config.live) {
       report.notRun = report.notRun.filter(name => !['real-model-answer', 'in-flight-model-stop'].includes(name));
-      await check('live-account-signed-in', panel().dataset.zcrAuth === 'signedIn');
-      const picker = panel().querySelector('[data-zcr-picker]'); picker.click();
-      const spark = [...panel().querySelectorAll('[data-zcr-setting="model"]')].find(node => /spark/i.test(node.textContent));
+      await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
+      const picker = panel().querySelector('[data-zchatgpt-picker]'); picker.click();
+      const spark = [...panel().querySelectorAll('[data-zchatgpt-setting="model"]')].find(node => /spark/i.test(node.textContent));
       if (spark) spark.click();
       if (picker.getAttribute('aria-expanded') === 'true') picker.click();
       report.liveModel = picker.textContent;
       input().value = 'What is the hidden verification token on the second physical page of this synthetic PDF, and what combines prior beliefs and likelihood? Cite the page label. Answer briefly.';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
-      const started = win.performance.now(); panel().querySelector('[data-zcr-action="send"]').click();
-      await until(() => panel()?.dataset.zcrGenerating === 'true', 'live-request-accepted');
-      await until(() => panel()?.dataset.zcrGenerating === 'false', 'live-answer-terminal', 120000);
+      const started = win.performance.now(); panel().querySelector('[data-zchatgpt-action="send"]').click();
+      await until(() => panel()?.dataset.zchatgptGenerating === 'true', 'live-request-accepted');
+      await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-answer-terminal', 120000);
       const record = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const last = record.requests.at(-1);
       const answer = record.messages.filter(m => m.role === 'assistant' && m.requestId === last?.requestId).map(m => m.text).join('\n');
@@ -575,11 +575,11 @@ async function runHostSmoke(config) {
       await check('full-document-in-live-request', Boolean(report.live.inputDocumentId));
       input().value = 'Explain this synthetic example in depth with ten worked examples and detailed reasoning for a beginner.';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
-      panel().querySelector('[data-zcr-action="send"]').click();
-      await until(() => panel()?.dataset.zcrGenerating === 'true', 'live-followup-started');
-      await until(() => panel()?.querySelector('[data-status="streaming"] [data-zcr-text]')?.textContent?.length > 0 || panel()?.dataset.zcrGenerating === 'false', 'live-followup-output', 120000);
-      const stop = panel().querySelector('[data-zcr-action="stop"]'); if (panel().dataset.zcrGenerating === 'true') stop.click();
-      await until(() => panel()?.dataset.zcrGenerating === 'false', 'live-followup-stopped', 30000);
+      panel().querySelector('[data-zchatgpt-action="send"]').click();
+      await until(() => panel()?.dataset.zchatgptGenerating === 'true', 'live-followup-started');
+      await until(() => panel()?.querySelector('[data-status="streaming"] [data-zchatgpt-text]')?.textContent?.length > 0 || panel()?.dataset.zchatgptGenerating === 'false', 'live-followup-output', 120000);
+      const stop = panel().querySelector('[data-zchatgpt-action="stop"]'); if (panel().dataset.zchatgptGenerating === 'true') stop.click();
+      await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-followup-stopped', 30000);
       const afterStop = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const terminal = afterStop.requests.at(-1)?.state;
       report.live.stopState = terminal;
@@ -598,7 +598,7 @@ async function runHostSmoke(config) {
     report.notRun.push('pref-pane-visual-theme-and-keyboard');
     report.notRun.push('pref-pane-registrar-isolated-from-host-auto-unregister');
     step = 'preferences-pane-preflight';
-    const PANE_ID = 'zcr-prefpane-settings';
+    const PANE_ID = 'zchatgpt-prefpane-settings';
     const panePanes = () => (Array.isArray(Zotero.PreferencePanes?.pluginPanes) ? Zotero.PreferencePanes.pluginPanes.filter(pane => pane && pane.id === PANE_ID) : null);
     const waive = value => { try { return Cu.waiveXrays(value); } catch { return value; } };
     const firstPane = () => { const entries = panePanes(); return entries && entries[0] ? waive(entries[0]) : null; };
@@ -619,7 +619,7 @@ async function runHostSmoke(config) {
     await check('pref-pane-registered-once-after-startup',
       identity.paneCount === 1 && identity.pluginIDMatches &&
       typeof identity.src === 'string' && identity.src.endsWith('content/preferences/preferences.xhtml') &&
-      identity.label === 'Zotero GPT Reader' &&
+      identity.label === 'Zotero ChatGPT' &&
       identity.scripts.length === 1 && identity.scripts[0].endsWith('content/preferences/pane.js') &&
       identity.defaultXUL === true,
       identity);
@@ -628,17 +628,17 @@ async function runHostSmoke(config) {
     await until(() => prefWin && waive(prefWin).document && waive(prefWin).document.getElementById(PANE_ID), 'preferences-pane-window');
     const prefDoc = waive(prefWin).document;
     const paneRoot = prefDoc.getElementById(PANE_ID);
-    await until(() => paneRoot.querySelector('[data-zcr-pref="form"]') || paneRoot.querySelector('[data-zcr-pref="error"]') || paneRoot.querySelector('[role="alert"]'), 'preferences-pane-mounted', 30000);
-    const form = paneRoot.querySelector('[data-zcr-pref="form"]');
+    await until(() => paneRoot.querySelector('[data-zchatgpt-pref="form"]') || paneRoot.querySelector('[data-zchatgpt-pref="error"]') || paneRoot.querySelector('[role="alert"]'), 'preferences-pane-mounted', 30000);
+    const form = paneRoot.querySelector('[data-zchatgpt-pref="form"]');
     const paneText = String(paneRoot.textContent || '').slice(0, 200);
-    const bridge = Boolean(waive(prefWin).Zotero && waive(prefWin).Zotero.ZoteroCodexReaderPreferencesPane);
+    const bridge = Boolean(waive(prefWin).Zotero && waive(prefWin).Zotero.ZoteroChatGPTPreferencesPane);
     const unavailable = !form || /unavailable|could not be displayed/i.test(paneText);
     report.preferencesPane = {
       windowOpened: true,
       sandboxPaneBridgeVisible: bridge,
       mountedForm: Boolean(form),
       controlCount: paneRoot.querySelectorAll('input, select, textarea, button').length,
-      settingsFields: paneRoot.querySelectorAll('[data-zcr-pref^="preference-"]').length,
+      settingsFields: paneRoot.querySelectorAll('[data-zchatgpt-pref^="preference-"]').length,
       unavailable,
       textSample: paneText,
     };
@@ -650,9 +650,9 @@ async function runHostSmoke(config) {
     // profile is left as it was found. Only the UI-language setting is written; no record is touched.
     // The canary is the legend of the fieldset that owns the UI-language control, not the pane's
     // first legend: the pane was reorganized, so positional legends now belong to another section.
-    const paneLegend = () => String(paneRoot.querySelector('[data-zcr-pref="uiLanguage"]')?.closest('fieldset')?.querySelector('legend')?.textContent ?? '');
-    const paneIdentifiers = () => [...paneRoot.querySelectorAll('[data-zcr-skill]')].map(row => ({ id: String(row.getAttribute('data-zcr-skill')), name: String(row.querySelector('label span')?.textContent ?? '') }));
-    const storedLanguage = async () => JSON.parse(String(await Zotero.ZoteroCodexReaderPreferencesHost.readSettings())).uiLanguage;
+    const paneLegend = () => String(paneRoot.querySelector('[data-zchatgpt-pref="uiLanguage"]')?.closest('fieldset')?.querySelector('legend')?.textContent ?? '');
+    const paneIdentifiers = () => [...paneRoot.querySelectorAll('[data-zchatgpt-skill]')].map(row => ({ id: String(row.getAttribute('data-zchatgpt-skill')), name: String(row.querySelector('label span')?.textContent ?? '') }));
+    const storedLanguage = async () => JSON.parse(String(await Zotero.ZoteroChatGPTPreferencesHost.readSettings())).uiLanguage;
     // That section's copy differs by build: the 0.4.0a3 bundle the profile ships renders it as "Chat";
     // f6592a3 (17:28) renamed it "Appearance" and that rename is not in the a3 bundle. Identify the
     // section from the copy this build renders, once, before any switch, so the language assertions
@@ -665,7 +665,7 @@ async function runHostSmoke(config) {
     const sectionCopy = paneSectionCopy.find(copy => copy.en === paneLegend() || copy.zh === paneLegend()) ?? null;
     const expectedLegend = language => (language === 'zh' ? sectionCopy?.zh : sectionCopy?.en);
     const switchLanguage = async language => {
-      const select = paneRoot.querySelector('[data-zcr-pref="uiLanguage"]');
+      const select = paneRoot.querySelector('[data-zchatgpt-pref="uiLanguage"]');
       select.value = language;
       select.dispatchEvent(new (waive(prefWin).Event)('change', { bubbles: true }));
       await until(() => paneLegend() === expectedLegend(language) && String(select.value) === language, `pref-pane-copy-${language}`, 30000);
@@ -676,7 +676,7 @@ async function runHostSmoke(config) {
     report.preferencesPane.sectionCopy = sectionCopy;
     report.preferencesPane.identifiersBefore = paneIdentifiers();
     await check('pref-pane-copy-matches-stored-ui-language',
-      sectionCopy !== null && languageBefore === String(paneRoot.querySelector('[data-zcr-pref="uiLanguage"]').value) && paneLegend() === expectedLegend(languageBefore),
+      sectionCopy !== null && languageBefore === String(paneRoot.querySelector('[data-zchatgpt-pref="uiLanguage"]').value) && paneLegend() === expectedLegend(languageBefore),
       { storedLanguage: languageBefore, legend: paneLegend(), sectionCopy });
     await switchLanguage('zh');
     const chineseIdentifiers = paneIdentifiers();
@@ -709,7 +709,7 @@ async function runHostSmoke(config) {
       await subjectAddon.enable();
       await until(() => panePanes()?.length === 1, 'pref-pane-single-after-reenable', 30000);
     } finally { Zotero.logError = originalLogError; }
-    const paneErrors = loggedErrors.filter(text => /preferences pane|prefpane|zcr-prefpane/i.test(text));
+    const paneErrors = loggedErrors.filter(text => /preferences pane|prefpane|zchatgpt-prefpane/i.test(text));
     await check('pref-pane-no-duplicates-across-disable-enable',
       panePanes()?.length === 1 && paneErrors.length === 0,
       { panesAfterReenable: panePanes()?.length ?? null, paneCountAfterStartup: identity.paneCount, preferencePaneErrors: paneErrors, loggedErrorCount: loggedErrors.length });

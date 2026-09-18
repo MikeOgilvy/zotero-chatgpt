@@ -15,7 +15,7 @@ function host(overrides: Partial<PreferencePaneRegistrarHost> = {}) {
     .mockResolvedValue(PREFERENCES_PANE_ID);
   const unregister = vi.fn<(id: string) => void>();
   const logError = vi.fn<(error: unknown) => void>();
-  const value: PreferencePaneRegistrarHost = { panes: { register, unregister }, pluginID: 'zcr@example.invalid', rootURI, logError, ...overrides };
+  const value: PreferencePaneRegistrarHost = { panes: { register, unregister }, pluginID: 'zchatgpt@example.invalid', rootURI, logError, ...overrides };
   return { value, register, unregister, logError };
 }
 
@@ -26,7 +26,7 @@ it('registers the native pane once with the bundled fragment and script, and unr
   await expect(registrar.ensure()).resolves.toBe(PREFERENCES_PANE_ID);
   expect(register).toHaveBeenCalledTimes(1);
   expect(register).toHaveBeenCalledWith({
-    pluginID: 'zcr@example.invalid',
+    pluginID: 'zchatgpt@example.invalid',
     id: PREFERENCES_PANE_ID,
     label: PREFERENCES_PANE_LABEL,
     src: `${rootURI}${PREFERENCES_PANE_SOURCE}`,
@@ -57,7 +57,7 @@ it('unregisters a pane that finished registering after shutdown had already star
   const register = vi.fn(() => new Promise<string>(resolve => { finish = resolve; }));
   const unregister = vi.fn<(id: string) => void>();
   const logError = vi.fn<(error: unknown) => void>();
-  const registrar = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zcr@example.invalid', rootURI, logError });
+  const registrar = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zchatgpt@example.invalid', rootURI, logError });
   const pending = registrar.ensure();
   registrar.remove();
   finish(PREFERENCES_PANE_ID);
@@ -73,7 +73,7 @@ it('clears a stale pane that still owns the fixed id and retries registration on
     .mockResolvedValueOnce(PREFERENCES_PANE_ID);
   const unregister = vi.fn<(id: string) => void>();
   const logError = vi.fn<(error: unknown) => void>();
-  const registrar = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zcr@example.invalid', rootURI, logError });
+  const registrar = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zchatgpt@example.invalid', rootURI, logError });
   await expect(registrar.ensure()).resolves.toBe(PREFERENCES_PANE_ID);
   expect(register).toHaveBeenCalledTimes(2);
   expect(unregister).toHaveBeenCalledWith(PREFERENCES_PANE_ID);
@@ -84,7 +84,7 @@ it('reports an honest failure without breaking the plugin and retries on the nex
   const register = vi.fn<(options: unknown) => Promise<string>>().mockRejectedValue(new Error('preferences window unavailable'));
   const unregister = vi.fn<(id: string) => void>();
   const logError = vi.fn<(error: unknown) => void>();
-  const registrar = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zcr@example.invalid', rootURI, logError });
+  const registrar = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zchatgpt@example.invalid', rootURI, logError });
   await expect(registrar.ensure()).resolves.toBeUndefined();
   expect(registrar.id).toBeUndefined();
   expect(logError).toHaveBeenCalledOnce();
@@ -96,14 +96,14 @@ it('reports an honest failure without breaking the plugin and retries on the nex
   registrar.remove();
   expect(unregister.mock.calls.length).toBe(staleAttempts);
   // The next startup tries again instead of giving up for the whole session.
-  const next = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zcr@example.invalid', rootURI, logError });
+  const next = createPreferencePaneRegistrar({ panes: { register, unregister }, pluginID: 'zchatgpt@example.invalid', rootURI, logError });
   await expect(next.ensure()).resolves.toBeUndefined();
   expect(register).toHaveBeenCalledTimes(4);
 });
 
 it('is safe when the host exposes no PreferencePanes API', async () => {
   const { logError } = host();
-  const registrar = createPreferencePaneRegistrar({ panes: undefined, pluginID: 'zcr@example.invalid', rootURI, logError });
+  const registrar = createPreferencePaneRegistrar({ panes: undefined, pluginID: 'zchatgpt@example.invalid', rootURI, logError });
   await expect(registrar.ensure()).resolves.toBeUndefined();
   expect(registrar.id).toBeUndefined();
   registrar.remove();

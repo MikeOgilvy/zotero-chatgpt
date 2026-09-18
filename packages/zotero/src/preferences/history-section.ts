@@ -106,83 +106,83 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   };
 
   const box = el(doc, 'fieldset');
-  box.dataset.zcrPref = 'history';
+  box.dataset.zchatgptPref = 'history';
   const legend = el(doc, 'legend');
   const counts = el(doc, 'p');
-  counts.className = 'zcr-preferences-muted';
-  counts.dataset.zcrHistory = 'counts';
+  counts.className = 'zchatgpt-preferences-muted';
+  counts.dataset.zchatgptHistory = 'counts';
   counts.hidden = true;
 
   // The search box carries its own accessible name; there is no second visible "Search chats…" label.
   const search = el(doc, 'input');
   search.type = 'search';
-  search.dataset.zcrHistory = 'search';
+  search.dataset.zchatgptHistory = 'search';
 
   const paperLabel = el(doc, 'label');
   const paperText = doc.createTextNode('');
   const paperSelect = el(doc, 'select');
-  paperSelect.dataset.zcrHistory = 'paper';
+  paperSelect.dataset.zchatgptHistory = 'paper';
   paperLabel.append(paperText, paperSelect);
 
   const filters = el(doc, 'div');
-  filters.className = 'zcr-preferences-history-filters';
+  filters.className = 'zchatgpt-preferences-history-filters';
   filters.append(search, paperLabel);
 
   // Bulk actions appear only when something is selected; the select-all row states the real count.
   const bulk = el(doc, 'div');
-  bulk.className = 'zcr-preferences-history-bulk';
-  bulk.dataset.zcrHistory = 'bulk';
+  bulk.className = 'zchatgpt-preferences-history-bulk';
+  bulk.dataset.zchatgptHistory = 'bulk';
   bulk.hidden = true;
   const selectAllLabel = el(doc, 'label');
   const selectAll = el(doc, 'input');
   selectAll.type = 'checkbox';
-  selectAll.dataset.zcrHistory = 'select-all';
+  selectAll.dataset.zchatgptHistory = 'select-all';
   const selectAllText = doc.createTextNode('');
   selectAllLabel.append(selectAll, selectAllText);
   const selectedText = el(doc, 'span');
-  selectedText.className = 'zcr-preferences-muted';
-  selectedText.dataset.zcrHistory = 'selected-count';
+  selectedText.className = 'zchatgpt-preferences-muted';
+  selectedText.dataset.zchatgptHistory = 'selected-count';
   const deleteSelected = el(doc, 'button');
   deleteSelected.type = 'button';
-  deleteSelected.dataset.zcrHistory = 'delete-selected';
+  deleteSelected.dataset.zchatgptHistory = 'delete-selected';
   const actions = el(doc, 'div');
-  actions.className = 'zcr-preferences-actions';
+  actions.className = 'zchatgpt-preferences-actions';
   actions.append(deleteSelected);
   bulk.append(selectAllLabel, selectedText, actions);
 
   const list = el(doc, 'div');
-  list.dataset.zcrHistory = 'list';
+  list.dataset.zchatgptHistory = 'list';
   const truncated = el(doc, 'p');
-  truncated.className = 'zcr-preferences-muted';
-  truncated.dataset.zcrHistory = 'truncated';
+  truncated.className = 'zchatgpt-preferences-muted';
+  truncated.dataset.zchatgptHistory = 'truncated';
   truncated.hidden = true;
   const empty = el(doc, 'p');
-  empty.className = 'zcr-preferences-muted';
-  empty.dataset.zcrHistory = 'empty';
+  empty.className = 'zchatgpt-preferences-muted';
+  empty.dataset.zchatgptHistory = 'empty';
   empty.hidden = true;
   const failure = el(doc, 'p');
-  failure.dataset.zcrHistory = 'error';
+  failure.dataset.zchatgptHistory = 'error';
   failure.setAttribute('role', 'alert');
   failure.hidden = true;
   const status = el(doc, 'p');
-  status.dataset.zcrHistory = 'status';
+  status.dataset.zchatgptHistory = 'status';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   status.hidden = true;
 
   const confirm = el(doc, 'div');
-  confirm.dataset.zcrHistory = 'confirm-actions';
+  confirm.dataset.zchatgptHistory = 'confirm-actions';
   confirm.hidden = true;
   const confirmText = el(doc, 'p');
-  confirmText.dataset.zcrHistory = 'confirm-text';
+  confirmText.dataset.zchatgptHistory = 'confirm-text';
   const confirmButtons = el(doc, 'div');
-  confirmButtons.className = 'zcr-preferences-actions';
+  confirmButtons.className = 'zchatgpt-preferences-actions';
   const confirmDelete = el(doc, 'button');
   confirmDelete.type = 'button';
-  confirmDelete.dataset.zcrHistory = 'confirm';
+  confirmDelete.dataset.zchatgptHistory = 'confirm';
   const cancel = el(doc, 'button');
   cancel.type = 'button';
-  cancel.dataset.zcrHistory = 'cancel';
+  cancel.dataset.zchatgptHistory = 'cancel';
   confirmButtons.append(confirmDelete, cancel);
   confirm.append(confirmText, confirmButtons);
 
@@ -198,12 +198,12 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     }
   }
   function lock(node: HTMLButtonElement | HTMLInputElement | HTMLSelectElement, locked: boolean): void {
-    if (locked) node.dataset.zcrHistoryLocked = 'true'; else delete node.dataset.zcrHistoryLocked;
+    if (locked) node.dataset.zchatgptHistoryLocked = 'true'; else delete node.dataset.zchatgptHistoryLocked;
     node.disabled = locked || busy;
   }
   function applyBusy(): void {
     for (const node of box.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button')) {
-      node.disabled = busy || node.dataset.zcrHistoryLocked === 'true';
+      node.disabled = busy || node.dataset.zchatgptHistoryLocked === 'true';
     }
   }
   function clearMessages(): void { status.textContent = ''; status.hidden = true; failure.textContent = ''; failure.hidden = true; }
@@ -241,7 +241,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       if (index) nodes.push(doc.createTextNode(' · '));
       if (content) {
         const node = el(doc, 'span', text);
-        node.dataset.zcrUi = 'false';
+        node.dataset.zchatgptUi = 'false';
         nodes.push(node);
       } else nodes.push(doc.createTextNode(text));
     });
@@ -255,31 +255,31 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
    */
   function historyRow(entry: HistoryEntry): { readonly row: HTMLElement; update(entry: HistoryEntry): void } {
     const row = el(doc, 'div');
-    row.className = 'zcr-preferences-history-row';
-    row.dataset.zcrHistoryId = entry.id;
+    row.className = 'zchatgpt-preferences-history-row';
+    row.dataset.zchatgptHistoryId = entry.id;
 
     const selectLabel = el(doc, 'label');
     const toggle = el(doc, 'input');
     toggle.type = 'checkbox';
-    toggle.dataset.zcrHistorySelect = entry.id;
+    toggle.dataset.zchatgptHistorySelect = entry.id;
     listen(toggle, 'change', () => { if (toggle.checked) selected.add(entry.id); else selected.delete(entry.id); renderBulk(); });
     // The chat title appears exactly once, on the row that selects it.
     const title = el(doc, 'strong');
-    title.dataset.zcrUi = 'false';
+    title.dataset.zchatgptUi = 'false';
     selectLabel.append(toggle, title);
 
     const meta = el(doc, 'p');
-    meta.className = 'zcr-preferences-muted';
+    meta.className = 'zchatgpt-preferences-muted';
     const preview = el(doc, 'p');
-    preview.className = 'zcr-preferences-muted';
-    preview.dataset.zcrUi = 'false';
+    preview.className = 'zchatgpt-preferences-muted';
+    preview.dataset.zchatgptUi = 'false';
 
     const remove = el(doc, 'button', 'Delete chat');
     remove.type = 'button';
-    remove.dataset.zcrHistoryDelete = entry.id;
+    remove.dataset.zchatgptHistoryDelete = entry.id;
     listen(remove, 'click', () => requestDelete([entry.id]));
     const rowActions = el(doc, 'div');
-    rowActions.className = 'zcr-preferences-actions';
+    rowActions.className = 'zchatgpt-preferences-actions';
     rowActions.append(remove);
 
     row.append(selectLabel, meta, preview, rowActions);
@@ -289,7 +289,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
       title.textContent = next.title || next.identity.title;
       meta.replaceChildren(...metaNodes(next));
       if (next.preview) { preview.textContent = next.preview; preview.hidden = false; } else { preview.textContent = ''; preview.hidden = true; }
-      if (next.unfinishedWork) { remove.dataset.zcrHistoryLocked = 'true'; remove.title = UNFINISHED; } else { delete remove.dataset.zcrHistoryLocked; remove.removeAttribute('title'); }
+      if (next.unfinishedWork) { remove.dataset.zchatgptHistoryLocked = 'true'; remove.title = UNFINISHED; } else { delete remove.dataset.zchatgptHistoryLocked; remove.removeAttribute('title'); }
     };
     update(entry);
     return { row, update };
@@ -363,7 +363,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     const shown = papers.slice(0, PAPER_LIMIT);
     const chosen = paper === null ? null : papers.find(option => option.id === paper) ?? null;
     if (chosen && !shown.includes(chosen)) shown.push(chosen);
-    const options = shown.map(option => { const node = el(doc, 'option', option.label); node.value = option.id; node.dataset.zcrUi = 'false'; return node; });
+    const options = shown.map(option => { const node = el(doc, 'option', option.label); node.value = option.id; node.dataset.zchatgptUi = 'false'; return node; });
     if (papers.length > shown.length) {
       const more = el(doc, 'option', morePapers(papers.length - shown.length));
       more.disabled = true;
@@ -424,7 +424,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   function beginDeleteFocus(ids: string[]): void {
     const active = doc.activeElement as HTMLElement | null;
     focusInsideSection = Boolean(active) && box.contains(active);
-    const order = ([...list.children] as HTMLElement[]).map(node => node.dataset.zcrHistoryId ?? '');
+    const order = ([...list.children] as HTMLElement[]).map(node => node.dataset.zchatgptHistoryId ?? '');
     const indices = ids.map(id => order.indexOf(id)).filter(index => index >= 0);
     focusAnchorIndex = indices.length ? Math.min(...indices) : 0;
   }
@@ -432,12 +432,12 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     const inside = focusInsideSection; const anchor = focusAnchorIndex;
     focusInsideSection = false; focusAnchorIndex = -1;
     if (!inside) return;
-    const nodes = [...list.querySelectorAll<HTMLElement>('[data-zcr-history-id]')];
+    const nodes = [...list.querySelectorAll<HTMLElement>('[data-zchatgpt-history-id]')];
     if (!nodes.length) { search.focus(); return; }
     // The row that took the deleted one's place first, then the rows above it; a locked row is skipped.
     const start = Math.min(Math.max(anchor, 0), nodes.length - 1);
     for (const node of [...nodes.slice(start), ...nodes.slice(0, start).reverse()]) {
-      const button = node.querySelector<HTMLButtonElement>('[data-zcr-history-delete]');
+      const button = node.querySelector<HTMLButtonElement>('[data-zchatgpt-history-delete]');
       if (button && !button.disabled) { button.focus(); return; }
     }
     search.focus();

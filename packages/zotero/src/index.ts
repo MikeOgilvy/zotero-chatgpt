@@ -19,7 +19,7 @@ declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
 export interface PluginContext { rootURI: string; pluginID: string; version?: string }
 interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string }
-const CLIENT_ID_PREF = 'extensions.zcr.clientId';
+const CLIENT_ID_PREF = 'extensions.zchatgpt.clientId';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 let context: PluginContext | undefined;
 let paneID = '';
@@ -31,12 +31,12 @@ let localServices: ReturnType<typeof createLocalServices> | undefined;
 let preferencePanes: PreferencePaneRegistrar | undefined;
 /** Small, JSON-only surface the Preferences window script may call; see preferences/entry.ts. */
 interface PreferencesBridgeHost {
-  ZoteroCodexReaderPreferencesHost?: unknown;
-  ZoteroCodexReaderPreferencesPane?: unknown;
+  ZoteroChatGPTPreferencesHost?: unknown;
+  ZoteroChatGPTPreferencesPane?: unknown;
 }
 function preferencesBridge(): PreferencesBridgeHost { return Zotero as ZoteroHost & PreferencesBridgeHost; }
-const AUTO_PDF_PREF = 'extensions.zcr.automaticPdfText';
-const PDF_DISCLOSURE_PREF = 'extensions.zcr.pdfTextDisclosureSeen';
+const AUTO_PDF_PREF = 'extensions.zchatgpt.automaticPdfText';
+const PDF_DISCLOSURE_PREF = 'extensions.zchatgpt.pdfTextDisclosureSeen';
 const readers = new Map<HostReader, ReaderEntry>();
 const windows = new Map<ZoteroWindow, () => void>();
 /** Presenters outlive views: drafts and conversation copies stay while a sidebar is closed. */
@@ -230,23 +230,23 @@ export function startup(options: PluginContext): void {
   localServices = createLocalServices(geckoHost().host, Zotero, clientId(), documentCache);
   paneID = Zotero.ItemPaneManager.registerSection({
     paneID: 'codex-reader', pluginID: options.pluginID,
-    header: { l10nID: 'zcr-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
-    sidenav: { l10nID: 'zcr-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
+    header: { l10nID: 'zchatgpt-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
+    sidenav: { l10nID: 'zchatgpt-pane-title', icon: `${options.rootURI}content/assets/icon.svg` },
     onItemChange: ({ tabType, setEnabled }) => { setEnabled(active && tabType === 'reader'); },
     onRender: ({ body }) => {
       if (!active) return;
       body.replaceChildren();
       const section = body.closest<HTMLElement>('item-pane-custom-section');
       if (section) {
-        section.dataset.zcrSection = '';
+        section.dataset.zchatgptSection = '';
         section.hidden = true;
       }
     },
   });
   const workspace = () => localServices
     ? localServices.getWorkspace()
-    : Promise.reject(new ReaderError('BUSY', 'Zotero GPT Reader is stopping.'));
-  preferencesBridge().ZoteroCodexReaderPreferencesHost = createPreferencesService({
+    : Promise.reject(new ReaderError('BUSY', 'Zotero ChatGPT is stopping.'));
+  preferencesBridge().ZoteroChatGPTPreferencesHost = createPreferencesService({
     workspace,
     // One pref, one owner: the native pane and the reader opt-out read the same value.
     readAutomaticPdfText: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
@@ -280,7 +280,7 @@ export function onMainWindowLoad(window: Window): void {
   katex.setAttribute('rel', 'stylesheet'); katex.setAttribute('href', `${context.rootURI}content/assets/katex/katex.min.css`);
   const locale = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
   // Zotero registers plugin locale files by resource basename, not absolute URI.
-  locale.setAttribute('rel', 'localization'); locale.setAttribute('href', 'zcr.ftl');
+  locale.setAttribute('rel', 'localization'); locale.setAttribute('href', 'zchatgpt.ftl');
   doc.documentElement.append(css, katex, locale);
   const onNativeClick = (event: Event) => {
     const target = event.target as Element | null;
@@ -322,7 +322,7 @@ export async function shutdown(): Promise<void> {
   readers.clear();
   preferencePanes?.remove(); preferencePanes = undefined;
   const bridge = preferencesBridge();
-  try { delete bridge.ZoteroCodexReaderPreferencesHost; delete bridge.ZoteroCodexReaderPreferencesPane; }
+  try { delete bridge.ZoteroChatGPTPreferencesHost; delete bridge.ZoteroChatGPTPreferencesPane; }
   catch (error) { Zotero.logError(error); }
   if (notifierID) Zotero.Notifier.unregisterObserver(notifierID);
   notifierID = undefined;

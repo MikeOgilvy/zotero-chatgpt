@@ -19,7 +19,7 @@ export interface PreferencesPaneHost {
   read(): Promise<WorkspaceSettings>;
   save(value: WorkspaceSettings): Promise<void>;
   setSkillEnabled(id: string, enabled: boolean): Promise<void>;
-  /** The shared automatic-PDF-text opt-out (`extensions.zcr.automaticPdfText`), never a store copy. */
+  /** The shared automatic-PDF-text opt-out (`extensions.zchatgpt.automaticPdfText`), never a store copy. */
   readAutomaticPdfText(): boolean;
   writeAutomaticPdfText(enabled: boolean): void;
   /**
@@ -148,7 +148,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   function labelled(doc: Document, parent: HTMLElement, title: string, pref: string, kind: 'input' | 'textarea' | 'select', choices?: ReadonlyArray<readonly [string, string]>): HTMLElement {
     const label = element(doc, 'label', title);
     const control = element(doc, kind);
-    control.dataset.zcrPref = pref;
+    control.dataset.zchatgptPref = pref;
     if (kind === 'select') {
       for (const [value, choice] of choices ?? []) {
         const option = element(doc, 'option', choice);
@@ -185,15 +185,15 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
 
   function build(doc: Document): Controls {
     const container = element(doc, 'div');
-    container.dataset.zcrPref = 'form';
-    container.className = 'zcr-preferences';
+    container.dataset.zchatgptPref = 'form';
+    container.className = 'zchatgpt-preferences';
     status = element(doc, 'p');
-    status.dataset.zcrPref = 'status';
+    status.dataset.zchatgptPref = 'status';
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     status.hidden = true;
     error = element(doc, 'p');
-    error.dataset.zcrPref = 'error';
+    error.dataset.zchatgptPref = 'error';
     error.setAttribute('role', 'alert');
     error.hidden = true;
 
@@ -207,12 +207,12 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     textScale.type = 'number'; textScale.min = String(CHAT_TEXT_SCALE_MIN); textScale.max = String(CHAT_TEXT_SCALE_MAX); textScale.step = '0.05';
 
     // PDF text holds the automatic-PDF-text opt-out. It is a plugin preference, not a workspace
-    // field: the pane reads and writes `extensions.zcr.automaticPdfText` directly so it is the
+    // field: the pane reads and writes `extensions.zchatgpt.automaticPdfText` directly so it is the
     // single source of truth for every reader, including an already-open sidebar.
     const pdfText = fieldset(doc, container, 'PDF text');
     const automaticPdfLabel = element(doc, 'label', 'Use current PDF text automatically');
     const automaticPdfText = element(doc, 'input');
-    automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zcrPref = 'automatic-pdf-text';
+    automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zchatgptPref = 'automatic-pdf-text';
     automaticPdfLabel.append(automaticPdfText);
     pdfText.append(automaticPdfLabel);
 
@@ -222,11 +222,11 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     // own contents; the note is rewritten by `syncModels` to state where the rows came from.
     const modelsField = fieldset(doc, container, 'Models');
     const note = element(doc, 'p', MODELS_NOTE_BUNDLED);
-    note.className = 'zcr-preferences-muted';
-    note.dataset.zcrPref = 'models-note';
+    note.className = 'zchatgpt-preferences-muted';
+    note.dataset.zchatgptPref = 'models-note';
     modelsNote = note;
     const models = element(doc, 'div');
-    models.dataset.zcrPref = 'models';
+    models.dataset.zchatgptPref = 'models';
     modelsField.append(note, models);
 
     // The Codex shape: a title, one description line and one multi-line instructions box with Save.
@@ -235,21 +235,21 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     const research = fieldset(doc, container, 'Codex instructions');
     // The one thing the legend and the field label cannot say: the box is global, not per chat.
     const instructionNote = element(doc, 'p', 'Applies to every chat.');
-    instructionNote.className = 'zcr-preferences-muted';
+    instructionNote.className = 'zchatgpt-preferences-muted';
     research.append(instructionNote);
     const instructionsLabel = labelled(doc, research, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
     const instructions = instructionsLabel.querySelector('textarea') as HTMLTextAreaElement;
     instructions.rows = 5;
     instructions.maxLength = INSTRUCTIONS_MAX;
     const savePreferences = element(doc, 'button', 'Save');
-    savePreferences.type = 'button'; savePreferences.dataset.zcrPref = 'save-preferences';
+    savePreferences.type = 'button'; savePreferences.dataset.zchatgptPref = 'save-preferences';
     research.append(savePreferences);
 
     // The builtin list is withdrawn to `annotate` for now (see `OFFERED_BUILTIN_SKILLS`); the
     // definitions stay installed and the owner's own user/imported workflows still list here.
     const workflows = fieldset(doc, container, 'Installed skills');
     const skills = element(doc, 'div');
-    skills.dataset.zcrPref = 'skills';
+    skills.dataset.zchatgptPref = 'skills';
     workflows.append(skills);
 
     // History management sits last so listing it never delays the settings form above it.
@@ -294,15 +294,15 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   function skillRow(skill: ReaderSkill): { row: HTMLElement; update(skill: ReaderSkill): void; setDisabled(disabled: boolean): void } {
     const doc = (root as Element).ownerDocument;
     const row = element(doc, 'div');
-    row.className = 'zcr-preferences-skill';
-    row.dataset.zcrSkill = skill.id;
+    row.className = 'zchatgpt-preferences-skill';
+    row.dataset.zchatgptSkill = skill.id;
     const label = element(doc, 'label');
     const toggle = element(doc, 'input');
     toggle.type = 'checkbox';
-    toggle.dataset.zcrSkillEnabled = skill.id;
+    toggle.dataset.zchatgptSkillEnabled = skill.id;
     const name = element(doc, 'span');
     const detail = element(doc, 'span');
-    detail.className = 'zcr-preferences-muted';
+    detail.className = 'zchatgpt-preferences-muted';
     label.append(toggle, name);
     row.append(label, detail);
     listen(toggle, 'change', () => { void toggleSkill(skill.id, toggle.checked); });
@@ -345,19 +345,19 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
   function modelRow(candidate: ModelCandidate): { row: HTMLElement; update(checked: boolean, name: string): void; setDisabled(disabled: boolean): void; isChecked(): boolean } {
     const doc = (root as Element).ownerDocument;
     const row = element(doc, 'div');
-    row.className = 'zcr-preferences-model';
-    row.dataset.zcrModel = candidate.id;
+    row.className = 'zchatgpt-preferences-model';
+    row.dataset.zchatgptModel = candidate.id;
     const label = element(doc, 'label');
     const toggle = element(doc, 'input');
     toggle.type = 'checkbox';
-    toggle.dataset.zcrModelAllowed = candidate.id;
+    toggle.dataset.zchatgptModelAllowed = candidate.id;
     const name = element(doc, 'span');
     label.append(toggle, name);
     // The label above is a local, id-derived display name; the exact id is what gets sent, so it is
     // always shown verbatim, on its own line and in monospace. It is never translated or hidden.
     const idLine = element(doc, 'div');
-    idLine.className = 'zcr-preferences-muted';
-    idLine.dataset.zcrUi = 'false';
+    idLine.className = 'zchatgpt-preferences-muted';
+    idLine.dataset.zchatgptUi = 'false';
     idLine.append(element(doc, 'code', candidate.id));
     row.append(label, idLine);
     listen(toggle, 'change', () => { void saveAllowedModels(); });
@@ -424,9 +424,9 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     const doc = root?.ownerDocument;
     if (!doc || !root) return;
     const box = element(doc, 'div');
-    box.className = 'zcr-preferences';
+    box.className = 'zchatgpt-preferences';
     const heading = element(doc, 'p');
-    heading.dataset.zcrPref = 'error';
+    heading.dataset.zchatgptPref = 'error';
     heading.setAttribute('role', 'alert');
     heading.textContent = text;
     box.append(heading);
@@ -520,7 +520,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
 
   async function mount(next: Element): Promise<void> {
     root = next;
-    root.setAttribute('data-zcr-pref-pane', '');
+    root.setAttribute('data-zchatgpt-pref-pane', '');
     const doc = next.ownerDocument;
     frame = build(doc).form;
     controls = null;
@@ -531,13 +531,13 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     form.prepend(error!, status!);
     controls = {
       form,
-      uiLanguage: form.querySelector('[data-zcr-pref="uiLanguage"]') as HTMLSelectElement,
-      textScale: form.querySelector('[data-zcr-pref="textScale"]') as HTMLInputElement,
-      automaticPdfText: form.querySelector('[data-zcr-pref="automatic-pdf-text"]') as HTMLInputElement,
-      instructions: form.querySelector(`[data-zcr-pref="preference-${INSTRUCTIONS_FIELD}"]`) as HTMLTextAreaElement,
-      savePreferences: form.querySelector('[data-zcr-pref="save-preferences"]') as HTMLButtonElement,
-      models: form.querySelector('[data-zcr-pref="models"]') as HTMLElement,
-      skills: form.querySelector('[data-zcr-pref="skills"]') as HTMLElement,
+      uiLanguage: form.querySelector('[data-zchatgpt-pref="uiLanguage"]') as HTMLSelectElement,
+      textScale: form.querySelector('[data-zchatgpt-pref="textScale"]') as HTMLInputElement,
+      automaticPdfText: form.querySelector('[data-zchatgpt-pref="automatic-pdf-text"]') as HTMLInputElement,
+      instructions: form.querySelector(`[data-zchatgpt-pref="preference-${INSTRUCTIONS_FIELD}"]`) as HTMLTextAreaElement,
+      savePreferences: form.querySelector('[data-zchatgpt-pref="save-preferences"]') as HTMLButtonElement,
+      models: form.querySelector('[data-zchatgpt-pref="models"]') as HTMLElement,
+      skills: form.querySelector('[data-zchatgpt-pref="skills"]') as HTMLElement,
     };
     localizer = mountUILocale(root);
 

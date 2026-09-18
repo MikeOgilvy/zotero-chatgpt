@@ -9,7 +9,7 @@ import { PINNED_RUNTIME, validatePackagedRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
-const requiredFiles = ["bootstrap.js", "content/zcr.js", "manifest.json", "LICENSE"];
+const requiredFiles = ["bootstrap.js", "content/zchatgpt.js", "manifest.json", "LICENSE"];
 const requiredManifestFields = [
   ["name"],
   ["version"],
@@ -144,7 +144,7 @@ export async function packageExtension(sourceDirectory = defaultSourceDirectory,
   const manifest = await validateManifest(sourceDirectory);
   const runtimeManifest = options.runtimeManifest ?? PINNED_RUNTIME;
   await validatePackagedRuntime(sourceDirectory, runtimeManifest);
-  const archivePath = requestedArchivePath ?? path.join(options.repositoryRoot ?? repositoryRoot, `dist/zotero-codex-reader-${manifest.version}-dev.xpi`);
+  const archivePath = requestedArchivePath ?? path.join(options.repositoryRoot ?? repositoryRoot, `dist/zotero-chatgpt-${manifest.version}-dev.xpi`);
   const files = (await listFiles(sourceDirectory)).filter(file => isRuntimeFile(file, runtimeManifest)).sort();
   await writeArchive(sourceDirectory, archivePath, files);
   const digest = createHash("sha256").update(await readFile(archivePath)).digest("hex");

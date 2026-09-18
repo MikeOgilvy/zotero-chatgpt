@@ -13,7 +13,7 @@ export interface AnswerSource {
 /** Frozen document identity needed to re-open a page: scope plus the exact revision to verify. */
 export type DocumentPageTarget = Pick<DocumentContext, 'paper' | 'revision'>;
 
-const INTERNAL_HOST = 'zcr.invalid';
+const INTERNAL_HOST = 'zchatgpt.invalid';
 const UNAVAILABLE_TEXT = 'This source is not available in this answer.';
 const OPEN_FAILED_TEXT = 'The source could not be opened. Reopen the PDF and try again.';
 export const UNLOCATED_SOURCE_TEXT = 'Opened the cited page, but the exact passage could not be located.';
@@ -149,8 +149,8 @@ function wire(anchor: HTMLAnchorElement): void {
 
 function unbind(anchor: HTMLAnchorElement): void {
   bindings.delete(anchor);
-  anchor.removeAttribute('data-zcr-source');
-  anchor.removeAttribute('data-zcr-page');
+  anchor.removeAttribute('data-zchatgpt-source');
+  anchor.removeAttribute('data-zchatgpt-page');
 }
 
 /**
@@ -188,8 +188,8 @@ export function answerSources(conversation: Conversation, message: Message): Ans
 function degrade(anchor: HTMLAnchorElement): void {
   bindings.delete(anchor);
   anchor.removeAttribute('href');
-  anchor.removeAttribute('data-zcr-source');
-  anchor.removeAttribute('data-zcr-page');
+  anchor.removeAttribute('data-zchatgpt-source');
+  anchor.removeAttribute('data-zchatgpt-page');
   anchor.setAttribute('aria-disabled', 'true');
   try { setStatus(anchor, UNAVAILABLE_TEXT); } catch { /* the answer still renders without a status */ }
 }
@@ -197,13 +197,13 @@ function degrade(anchor: HTMLAnchorElement): void {
 /**
  * Rewrites frozen answer citations into keyboard-operable anchors.
  *
- * Only `https://zcr.invalid/source/<id>/<page>` links whose source and page are present in
+ * Only `https://zchatgpt.invalid/source/<id>/<page>` links whose source and page are present in
  * `sources` become live. Everything else keeps its original behaviour; unsupported internal
  * links are disabled with a constant explanation. Click authority is captured in a closure so
  * later DOM or caller mutations cannot retarget an already-linked citation.
  *
  * Each anchor is isolated: a malformed citation must never throw out of this function and blank
- * the whole answer, and a failure must never leave a reserved `zcr.invalid` link live.
+ * the whole answer, and a failure must never leave a reserved `zchatgpt.invalid` link live.
  */
 export function linkAnswerSources(
   fragment: DocumentFragment,
@@ -230,8 +230,8 @@ export function linkAnswerSources(
       }
       anchor.removeAttribute('href');
       anchor.removeAttribute('aria-disabled');
-      anchor.dataset.zcrSource = source.id;
-      anchor.dataset.zcrPage = String(pageIndex);
+      anchor.dataset.zchatgptSource = source.id;
+      anchor.dataset.zchatgptPage = String(pageIndex);
       anchor.textContent = `p. ${page.pageLabel}`;
       clearStatus(anchor);
       // The link title is untrusted model text; it only ever becomes a literal search string.

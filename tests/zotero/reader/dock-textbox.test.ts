@@ -87,9 +87,9 @@ async function mountDockWithChat() {
 
 it('satisfies Zotero isTextBox for every text-entry control in the dock', async () => {
   const { doc, mounted, root, teardown } = await mountDockWithChat();
-  const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]');
-  const historySearch = root.querySelector<HTMLInputElement>('[data-zcr-history-search]');
-  const resizer = mounted.dock.querySelector<HTMLElement>('[data-zcr-resizer]');
+  const composer = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]');
+  const historySearch = root.querySelector<HTMLInputElement>('[data-zchatgpt-history-search]');
+  const resizer = mounted.dock.querySelector<HTMLElement>('[data-zchatgpt-resizer]');
   expect(composer?.tagName).toBe('TEXTAREA');
   expect(historySearch?.type).toBe('search');
   expect(resizer).toBeTruthy();
@@ -140,7 +140,7 @@ it('marks matching controls appended later and leaves unrelated dynamic controls
 
 it('keeps the exemption across dock reuse and never overwrites the view’s own value', async () => {
   const { doc, mounted, root, teardown } = await mountDockWithChat();
-  const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const composer = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   await vi.waitFor(() => expect(zoteroIsTextBox(composer)).toBe(true));
 
   const reused = mountReaderDock(doc)!;
@@ -162,11 +162,11 @@ it('keeps the exemption across dock reuse and never overwrites the view’s own 
 
 it('stops marking after unmount and disconnects the scoped observer', async () => {
   const { doc, mounted, root, teardown } = await mountDockWithChat();
-  const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const composer = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   await vi.waitFor(() => expect(zoteroIsTextBox(composer)).toBe(true));
 
   unmountReaderDock(doc);
-  expect(doc.querySelector('[data-zcr-dock]')).toBeNull();
+  expect(doc.querySelector('[data-zchatgpt-dock]')).toBeNull();
 
   const stray = doc.createElement('textarea');
   mounted.body.append(stray);
@@ -178,8 +178,8 @@ it('stops marking after unmount and disconnects the scoped observer', async () =
 
 it('keeps the splitter resizing while arrow keys reach the composer', async () => {
   const { doc, mounted, root, teardown } = await mountDockWithChat();
-  const resizer = mounted.dock.querySelector<HTMLElement>('[data-zcr-resizer]')!;
-  const composer = root.querySelector<HTMLTextAreaElement>('[data-zcr-input]')!;
+  const resizer = mounted.dock.querySelector<HTMLElement>('[data-zchatgpt-resizer]')!;
+  const composer = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
   await vi.waitFor(() => expect(zoteroIsTextBox(composer)).toBe(true));
 
   let width = 400;

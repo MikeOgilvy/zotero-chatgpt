@@ -11,7 +11,7 @@ import { selectHostStage, selectHostTree } from './host-test-stage.mjs';
 import { assertIsolatedRoot, assertNotRegularProfile, readXpiIdentity, requireLocalXpi } from './install-lifecycle.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const subjectID = '{8a5f5bde-b4e1-41eb-b5d9-2774afa0cf72}';
+const subjectID = '{90909501-7b5b-4985-9f55-566e9890746c}';
 const subjectManifest = JSON.parse(await readFile(join(root, 'packages/zotero/manifest.json'), 'utf8'));
 const argumentsList = process.argv.slice(2);
 const { driver: driverPath, installDriver } = selectHostStage(argumentsList);
@@ -78,7 +78,7 @@ if (twoVersion) {
   }
   subjectXpi = rollbackXpi;
 } else {
-  subjectXpi = resolve(positionalXpi() ?? join(root, `dist/zotero-codex-reader-${subjectManifest.version}-dev.xpi`));
+  subjectXpi = resolve(positionalXpi() ?? join(root, `dist/zotero-chatgpt-${subjectManifest.version}-dev.xpi`));
   await stat(subjectXpi);
 }
 
@@ -91,7 +91,7 @@ await mkdir(dataDir, { recursive: true });
 await mkdir(join(pdfPath, '..'), { recursive: true });
 await writeFile(pdfPath, createFixturePdf());
 const supplementPdfPath = tree.stage === 'context' ? join(pdfPath, '..', 'supplement.pdf') : undefined;
-if (supplementPdfPath) await writeFile(supplementPdfPath, createFixturePdf('ZCR synthetic supplement fixture', 'BAMBOO-19'));
+if (supplementPdfPath) await writeFile(supplementPdfPath, createFixturePdf('ZCHATGPT synthetic supplement fixture', 'BAMBOO-19'));
 const prefs = {
   'extensions.zotero.useDataDir': true,
   'extensions.zotero.dataDir': dataDir,
@@ -113,8 +113,8 @@ const prefs = {
 };
 await writeFile(join(profile, 'user.js'), Object.entries(prefs).map(([key, value]) => `user_pref(${JSON.stringify(key)}, ${JSON.stringify(value)});`).join('\n') + '\n');
 await copyFile(subjectXpi, join(profile, 'extensions', `${subjectID}.xpi`));
-const upgradeInProfile = twoVersion ? join(profile, 'zcr-upgrade.xpi') : undefined;
-const rollbackInProfile = twoVersion ? join(profile, 'zcr-rollback.xpi') : undefined;
+const upgradeInProfile = twoVersion ? join(profile, 'zchatgpt-upgrade.xpi') : undefined;
+const rollbackInProfile = twoVersion ? join(profile, 'zchatgpt-rollback.xpi') : undefined;
 if (twoVersion) {
   await copyFile(upgradeXpi, upgradeInProfile);
   await copyFile(rollbackXpi, rollbackInProfile);
@@ -141,14 +141,14 @@ const config = {
     rollbackVersion: rollbackIdentity.version,
   } : {}),
 };
-const driverOut = join(profile, 'extensions', 'zcr-host-test@local.xpi');
+const driverOut = join(profile, 'extensions', 'zchatgpt-host-test@local.xpi');
 if (installDriver) {
   if (!driverPath) throw new Error('Host stage is missing its driver');
   const manifest = {
     manifest_version: 2,
-    name: 'ZCR isolated host test driver',
+    name: 'ZCHATGPT isolated host test driver',
     version: '0.0.1',
-    applications: { zotero: { id: 'zcr-host-test@local', update_url: 'https://zcr-dev.invalid/driver-updates.json', strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
+    applications: { zotero: { id: 'zchatgpt-host-test@local', update_url: 'https://zotero-chatgpt-dev.invalid/driver-updates.json', strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
   };
   const bootstrap = `function startup(data) {
   Zotero.initializationPromise.then(async () => {
@@ -162,8 +162,8 @@ function shutdown() {}
 function install() {}
 function uninstall() {}
 `;
-  const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZcrHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
-  const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZcrHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
+  const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZchatgptHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
+  const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZchatgptHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
   const zip = new ZipFile();
   for (const [name, contents] of [
     ['manifest.json', JSON.stringify(manifest)],

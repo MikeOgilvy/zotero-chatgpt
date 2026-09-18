@@ -3,7 +3,7 @@ import type { ToolbarEvent } from './host-types.ts';
 export function createToolbarButton(doc: Document, toggle: () => void): HTMLButtonElement {
   const button = doc.createElement('button');
   button.type = 'button'; button.className = 'toolbar-button'; button.tabIndex = -1;
-  button.dataset.zcrToggle = '';
+  button.dataset.zchatgptToggle = '';
   const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', '20'); svg.setAttribute('height', '20'); svg.setAttribute('viewBox', '0 0 20 20');
   svg.setAttribute('aria-hidden', 'true');
@@ -21,6 +21,6 @@ export function updateToolbarButton(button: HTMLButtonElement, active: boolean):
   button.classList.toggle('active', active);
 }
 export function insertToolbarButton(event: Pick<ToolbarEvent, 'doc' | 'append'>, button: HTMLButtonElement): void {
-  event.doc.querySelector('[data-zcr-toggle]')?.remove();
+  event.doc.querySelector('[data-zchatgpt-toggle]')?.remove();
   event.append(button);
 }

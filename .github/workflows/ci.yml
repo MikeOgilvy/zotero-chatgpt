@@ -1,6 +1,6 @@
 name: CI
 
-# Non-host pipeline only. Host acceptance (dedicated `.zcr-dev/` Zotero profile, GUI, native
+# Non-host pipeline only. Host acceptance (dedicated `.zotero-chatgpt-dev/` Zotero profile, GUI, native
 # annotations, upgrade/rollback) and `--live` model checks are intentionally NOT part of CI: they
 # require a macOS GUI Zotero instance and, for `--live`, an authorized account. See
 # docs/development.md. CI never publishes, never tags and never uploads a release asset.
@@ -30,7 +30,7 @@ jobs:
 
   # Packaging must exercise the same commands docs/development.md promises. scripts/runtime-prepare.mjs
   # fetches the pinned, SHA-256-verified Codex 0.154.0 darwin/arm64 archive into the ignored
-  # `.zcr-dev/runtime-cache/`; CI only packages and hashes it, it never executes it. The XPI name is
+  # `.zotero-chatgpt-dev/runtime-cache/`; CI only packages and hashes it, it never executes it. The XPI name is
   # derived from packages/zotero/manifest.json, so a version bump cannot silently drift out of sync.
   package:
     needs: check

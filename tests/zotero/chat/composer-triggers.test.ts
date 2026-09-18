@@ -15,7 +15,7 @@ const reference: ReaderReference = { id: 'paper-one', kind: 'article', label: 'S
  */
 function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   const document = new Window().document as unknown as Document;
-  const pane = document.createElement('section'); pane.dataset.zcrSidebar = '';
+  const pane = document.createElement('section'); pane.dataset.zchatgptSidebar = '';
   const context = document.createElement('div'); const input = document.createElement('textarea'); const leading = document.createElement('div');
   pane.append(context, input, leading); document.body.append(pane);
   const actions: WorkspaceViewActions = {
@@ -29,9 +29,9 @@ function setup(overrides: Partial<WorkspaceViewActions> = {}) {
   view.update(state);
   const type = (value: string) => { input.value = value; input.setSelectionRange(value.length, value.length); input.dispatchEvent(new document.defaultView!.Event('input', { bubbles: true })); };
   const key = (name: string) => input.dispatchEvent(new document.defaultView!.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
-  const menu = () => pane.querySelector<HTMLElement>('.zcr-command-menu')!;
-  const toolbar = () => menu().querySelector<HTMLElement>('.zcr-command-toolbar')!;
-  const status = () => menu().querySelector<HTMLElement>('.zcr-command-status')!;
+  const menu = () => pane.querySelector<HTMLElement>('.zchatgpt-command-menu')!;
+  const toolbar = () => menu().querySelector<HTMLElement>('.zchatgpt-command-toolbar')!;
+  const status = () => menu().querySelector<HTMLElement>('.zchatgpt-command-status')!;
   const options = () => [...menu().querySelectorAll<HTMLElement>('[role="option"]')].map(node => node.textContent ?? '');
   const filterButton = (label: string) => toolbar().querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   return { document, pane, context, input, leading, actions, view, state, type, key, menu, toolbar, status, options, filterButton };
@@ -41,8 +41,8 @@ it('keeps @ on context references so it cannot reach or filter workflows', async
   const { type, menu, options, filterButton } = setup();
   type('@');
   await vi.waitFor(() => expect(options().length).toBeGreaterThan(0));
-  expect(menu().querySelector('.zcr-command-heading')!.textContent).toBe('References');
-  expect(menu().dataset.zcrCommandKind).toBe('references');
+  expect(menu().querySelector('.zchatgpt-command-heading')!.textContent).toBe('References');
+  expect(menu().dataset.zchatgptCommandKind).toBe('references');
   expect(options().join(' ')).toContain('Shared title');
   expect(options().join(' ')).not.toContain('/Derive');
   expect(filterButton('All')).not.toBeNull();
@@ -55,8 +55,8 @@ it('keeps / on installed workflows so it can neither list nor filter context ref
   const { type, menu, toolbar, options, filterButton } = setup();
   type('/');
   await vi.waitFor(() => expect(options().length).toBeGreaterThan(0));
-  expect(menu().querySelector('.zcr-command-heading')!.textContent).toBe('Installed skills');
-  expect(menu().dataset.zcrCommandKind).toBe('commands');
+  expect(menu().querySelector('.zchatgpt-command-heading')!.textContent).toBe('Installed skills');
+  expect(menu().dataset.zchatgptCommandKind).toBe('commands');
   expect(options().join(' ')).toContain('/Derive');
   expect(options().join(' ')).not.toContain('Shared title');
   // A workflow chooser has no reference-type axis: its filter row is not usable.

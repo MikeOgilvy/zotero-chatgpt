@@ -1,4 +1,4 @@
-var ZoteroCodexReader;
+var ZoteroChatGPT;
 var Zotero;
 var scriptScope;
 var startupTask;
@@ -29,12 +29,12 @@ async function initialize({ id, rootURI, version }) {
     fetch, crypto, TextDecoder, TextEncoder, URL, AbortController, atob, btoa, setTimeout, clearTimeout,
   };
   Services.scriptloader.loadSubScript(
-    `${rootURI}content/zcr.js`,
+    `${rootURI}content/zchatgpt.js`,
     scriptScope,
   );
-  ZoteroCodexReader = scriptScope.ZoteroCodexReader;
+  ZoteroChatGPT = scriptScope.ZoteroChatGPT;
 
-  await ZoteroCodexReader.startup({ rootURI, pluginID: id, ...(version ? { version } : {}) });
+  await ZoteroChatGPT.startup({ rootURI, pluginID: id, ...(version ? { version } : {}) });
   if (shutdownRequested) {
     return;
   }
@@ -61,7 +61,7 @@ async function isReady() {
     return false;
   }
   await startupTask;
-  return !shutdownRequested && Boolean(ZoteroCodexReader);
+  return !shutdownRequested && Boolean(ZoteroChatGPT);
 }
 
 async function registerWindow(window) {
@@ -71,7 +71,7 @@ async function registerWindow(window) {
 
   registeredWindows.add(window);
   try {
-    await ZoteroCodexReader.onMainWindowLoad(window);
+    await ZoteroChatGPT.onMainWindowLoad(window);
   } catch (error) {
     registeredWindows.delete(window);
     throw error;
@@ -82,7 +82,7 @@ async function unregisterWindow(window) {
   if (!registeredWindows.delete(window)) {
     return;
   }
-  await ZoteroCodexReader.onMainWindowUnload(window);
+  await ZoteroChatGPT.onMainWindowUnload(window);
 }
 
 async function shutdown() {
@@ -93,15 +93,15 @@ async function shutdown() {
     } catch {}
   }
 
-  if (ZoteroCodexReader) {
+  if (ZoteroChatGPT) {
     for (const window of Array.from(registeredWindows)) {
       await unregisterWindow(window);
     }
-    await ZoteroCodexReader.shutdown();
+    await ZoteroChatGPT.shutdown();
   }
 
   registeredWindows.clear();
-  ZoteroCodexReader = undefined;
+  ZoteroChatGPT = undefined;
   scriptScope = undefined;
   startupTask = undefined;
 }

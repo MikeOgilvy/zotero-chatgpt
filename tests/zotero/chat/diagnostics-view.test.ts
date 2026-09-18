@@ -40,10 +40,10 @@ it('keeps shareable diagnostics off the default sidebar; presenter still copies 
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
-  const doc = new Window({ url: 'https://zcr.test/' }).document as unknown as Document;
+  const doc = new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
   const root = doc.createElement('div');
   mountChatView(root, presenter);
-  expect(root.querySelector('[data-zcr-action="copy-diagnostics"]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-action="copy-diagnostics"]')).toBeNull();
   const text = await presenter.copyDiagnostics();
   expect(JSON.parse(text!)).toEqual(report);
   expect(text).not.toContain(citationA.text);

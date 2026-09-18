@@ -11,7 +11,7 @@ import type { RuntimeHost } from './prepare.ts';
 
 /** Local records are available before the executable or account service starts. */
 export async function openLocalStorage(host: RuntimeHost): Promise<StoragePort> {
-  const records = await privateDirectory(host, host.profileDir, 'zotero-codex-reader/v1/records');
+  const records = await privateDirectory(host, host.profileDir, 'zotero-chatgpt/v1/records');
   return new GeckoStorage(host, records);
 }
 export function createLocalServices(host: RuntimeHost, zotero: unknown, namespace: string, documentCache: ReaderDocumentCache) {
