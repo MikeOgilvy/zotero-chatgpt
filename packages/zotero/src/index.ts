@@ -79,7 +79,7 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
         getReading: localServices.getReading,
         library: localServices.library,
         openCitation: citation => openCitation(Zotero, citation, clientId()),
-        openItem: async (reference: import('../../contracts/src/agent.ts').NativeItemRef) => {
+        openItem: async (reference: import('../../contracts/src/native.ts').NativeItemRef) => {
           if (reference.clientId !== clientId()) throw new ReaderError('NOT_FOUND', 'The output belongs to another profile.');
           const item = Zotero.Items.getByLibraryAndKey?.(reference.libraryId, reference.key);
           const win = Zotero.getMainWindows()[0] as (ZoteroWindow & { ZoteroPane?: { selectItem(id: number): Promise<void> } }) | undefined;

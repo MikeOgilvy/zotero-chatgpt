@@ -1,4 +1,4 @@
-# Contributing to Zotero Codex Reader
+# Contributing to Zotero GPT Reader
 
 This is a community Zotero plugin. It is not affiliated with Zotero or OpenAI.
 

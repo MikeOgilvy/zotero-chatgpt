@@ -1,10 +1,10 @@
-import type { AcquisitionChoice, AcquisitionTaskItem, AgentTaskChoices, AgentTaskRecord } from '../../../contracts/src/tasks.ts';
-import type { NativeCollectionTarget } from '../../../contracts/src/agent.ts';
+import type { AcquisitionChoice, AcquisitionTaskItem, ActionTaskChoices, ActionTaskRecord } from '../../../contracts/src/tasks.ts';
+import type { NativeCollectionTarget } from '../../../contracts/src/native.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 
-export interface TaskViewState { tasks: AgentTaskRecord[]; readingJobs?: ReadingJob[] }
+export interface TaskViewState { tasks: ActionTaskRecord[]; readingJobs?: ReadingJob[] }
 export interface TaskViewActions {
-  approveSelected: (taskId: string, selectedItemIds: string[], choices: AgentTaskChoices) => Promise<unknown>;
+  approveSelected: (taskId: string, selectedItemIds: string[], choices: ActionTaskChoices) => Promise<unknown>;
   cancel: (taskId: string) => Promise<unknown>;
   reconcile: (taskId: string) => Promise<unknown>;
   undo: (taskId: string) => Promise<unknown>;
@@ -18,7 +18,7 @@ export interface TaskViewActions {
   describeReading?: (jobId: string) => Promise<{ question: string; scopeLabel: string } | null>;
 }
 
-type TaskItem = AgentTaskRecord['items'][number];
+type TaskItem = ActionTaskRecord['items'][number];
 const TASK_LABEL = { preparing: 'Preparing', review: 'Review', running: 'Running', completed: 'Completed', partial: 'Partly completed', cancelled: 'Cancelled', uncertain: 'Unconfirmed', undone: 'Undone', conflict: 'Conflict', failed: 'Failed' } as const;
 const ITEM_LABEL = { candidate: 'Ready', unresolved: 'Unresolved', skipped: 'Skipped', writing: 'Writing…', applied: 'Applied', 'metadata-only': 'Metadata saved', failed: 'Failed', uncertain: 'Unconfirmed', undoing: 'Undoing…', undone: 'Undone', conflict: 'Changed output preserved' } as const;
 function eligible(item: TaskItem): boolean { return item.status === 'candidate' && (item.kind === 'annotation' ? item.resolution?.status === 'resolved' : !!item.preview?.candidates.length); }
@@ -45,10 +45,10 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
   const create = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') => { const node = doc.createElementNS('http://www.w3.org/1999/xhtml', tag) as HTMLElementTagNameMap[K]; node.textContent = text; node.className = className; return node; };
   const root = create('section', '', 'zcr-task-view'); root.setAttribute('aria-label', 'Tasks'); container.append(root);
   const button = (label: string, action: string, click: () => void) => { const node = create('button', label, 'zcr-task-button'); node.type = 'button'; node.dataset.zcrTaskAction = action; node.setAttribute('aria-label', label); node.addEventListener('click', click); return node; };
-  const cards = new Map<string, { node: HTMLDetailsElement; update(task: AgentTaskRecord): void; dispose(): void }>();
+  const cards = new Map<string, { node: HTMLDetailsElement; update(task: ActionTaskRecord): void; dispose(): void }>();
   const readingCards = new Map<string, { node: HTMLDetailsElement; update(job: ReadingJob): void; dispose(): void }>();
   let disposed = false;
-  const createTask = (initial: AgentTaskRecord) => {
+  const createTask = (initial: ActionTaskRecord) => {
     let task = initial; let previousState = initial.state; let userToggled = false; let removed = false;
     const node = create('details', '', 'zcr-task-card'); node.dataset.zcrTaskId = task.id; node.open = !['completed', 'undone'].includes(task.state);
     const summary = create('summary'); summary.addEventListener('click', () => { userToggled = true; });
@@ -85,7 +85,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       return { choice, metadata, duplicates, valid: !!metadata && (duplicates.length < 2 || !!choice.duplicateKey) };
     };
     const approve = button('Approve selected', 'approve', () => {
-      const items = task.items.filter(item => eligible(item) && selected.get(item.id)); const frozen: AgentTaskChoices = {};
+      const items = task.items.filter(item => eligible(item) && selected.get(item.id)); const frozen: ActionTaskChoices = {};
       for (const item of items) if (item.kind === 'acquisition') frozen[item.id] = { ...choiceFor(item).choice };
       execute('approve', () => actions.approveSelected(task.id, items.map(item => item.id), frozen), approve);
     });
@@ -169,7 +169,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       undo.hidden = !task.approvedAt || !outputs.length || task.state === 'undone'; undo.disabled = mutating() || uncertain || task.state === 'running' || available?.undo === false;
       guidance.textContent = available?.reason || (uncertain ? 'Reconcile unconfirmed writes before undoing. They will not be resent automatically.' : task.state === 'conflict' ? 'Changed outputs and human changes are preserved. Undo checks the recorded version again.' : available?.downloadPDF === false && task.kind === 'acquisition' ? 'PDF download is unavailable for this target; approval saves metadata only.' : ''); guidance.hidden = !guidance.textContent;
     };
-    return { node, update: (next: AgentTaskRecord) => {
+    return { node, update: (next: ActionTaskRecord) => {
       if (next.revision < task.revision) return;
       if (next.revision > task.revision) { error.textContent = ''; error.hidden = true; }
       task = next; node.dataset.state = task.state;

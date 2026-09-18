@@ -1,10 +1,10 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { NATIVE_ANNOTATION_PROVENANCE, NativeAgentError, type NativeAgentPort, type NativeAnnotationSnapshot, type NativeCollectionTarget } from '../../../contracts/src/agent.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeCollectionTarget } from '../../../contracts/src/native.ts';
 import { ReaderError, type DocumentRevision } from '../../../contracts/src/index.ts';
 import { validatePaperScope } from '../../../contracts/src/validation.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
-import type { AcquisitionChoice, AcquisitionTaskItem, AgentTaskOperation, AgentTaskRecord, AgentTasks, AnnotationProposal, AnnotationTaskItem } from '../../../contracts/src/tasks.ts';
-export interface AgentTaskClock { uuid(): string; key(): string; now(): string }
+import type { AcquisitionChoice, AcquisitionTaskItem, ActionTaskOperation, ActionTaskRecord, ActionTasks, AnnotationProposal, AnnotationTaskItem } from '../../../contracts/src/tasks.ts';
+export interface ActionTaskClock { uuid(): string; key(): string; now(): string }
 interface TaskCoordination { queue: Promise<void>; active: Map<string, AbortController>; stopRequests: Set<string> }
 const coordinationByStorage = new WeakMap<StoragePort, TaskCoordination>();
 const ID = /^[a-zA-Z0-9-]{1,128}$/u;
@@ -58,7 +58,7 @@ function choice(value: unknown): AcquisitionChoice {
   if (c.downloadPDF !== undefined && typeof c.downloadPDF !== 'boolean') invalid();
   return clone(c);
 }
-export function validateTaskRecord(value: unknown): AgentTaskRecord {
+export function validateTaskRecord(value: unknown): ActionTaskRecord {
   const raw = record(value, ['schemaVersion', 'id', 'conversationId', 'kind', 'state', 'question', 'createdAt', 'updatedAt', 'revision', 'approvedAt', 'cancelRequested', 'paper', 'documentRevision', 'modelRequestId', 'target', 'items']);
   if (raw.schemaVersion !== 1 || !STATES.includes(String(raw.state)) || !['annotations', 'acquisition'].includes(String(raw.kind))) invalid();
   id(raw.id); id(raw.conversationId); text(raw.question, 16000); text(raw.createdAt, 64, 1); text(raw.updatedAt, 64, 1);
@@ -90,11 +90,11 @@ export function validateTaskRecord(value: unknown): AgentTaskRecord {
       if (entry.item !== undefined) { const item = record(entry.item); const target = record(raw.target); if (item.clientId !== target.clientId || item.libraryId !== target.libraryId || (entry.created && item.key !== itemKey)) invalid(); }
     }
   }
-  return clone(raw) as unknown as AgentTaskRecord;
+  return clone(raw) as unknown as ActionTaskRecord;
 }
-function errorCode(error: unknown): string { return error instanceof NativeAgentError ? error.code : 'NATIVE_ERROR'; }
+function errorCode(error: unknown): string { return error instanceof NativeOperationError ? error.code : 'NATIVE_ERROR'; }
 async function readWhileActive<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  const cancelled = () => new NativeAgentError('CANCELLED', 'Task preparation was cancelled.');
+  const cancelled = () => new NativeOperationError('CANCELLED', 'Task preparation was cancelled.');
   if (signal.aborted) throw cancelled();
   let abort = () => {};
   try { return await Promise.race([work, new Promise<never>((_resolve, reject) => { abort = () => reject(cancelled()); signal.addEventListener('abort', abort, { once: true }); })]); }
@@ -106,7 +106,7 @@ function matchesAnnotation(item: AnnotationTaskItem, snapshot: NativeAnnotationS
     && snapshot.text === candidate.text && snapshot.comment === NATIVE_ANNOTATION_PROVENANCE + (item.proposal.reason ? '\n' + item.proposal.reason.trim().normalize('NFC') : '')
     && !snapshot.isExternal && snapshot.authorName === '' && snapshot.tags.length === 0 && snapshot.sortIndex === candidate.sortIndex && snapshot.pageLabel === candidate.pageLabel && equal(snapshot.position, candidate.position);
 }
-function aggregate(task: AgentTaskRecord): AgentTaskRecord['state'] {
+function aggregate(task: ActionTaskRecord): ActionTaskRecord['state'] {
   const selected = task.items.filter(item => item.selected);
   if (selected.some(item => ['uncertain', 'writing', 'undoing'].includes(item.status))) return 'uncertain';
   if (selected.some(item => item.status === 'conflict')) return 'conflict';
@@ -119,12 +119,12 @@ function aggregate(task: AgentTaskRecord): AgentTaskRecord['state'] {
 }
 
 /** One controller per plugin supervisor; the only owner of task approval and native write intent. */
-export class AgentTaskController implements AgentTasks {
+export class ActionTaskController implements ActionTasks {
   private coordination: TaskCoordination;
   private active: Map<string, AbortController>;
   private stopRequests: Set<string>;
-  private listeners = new Set<(record: AgentTaskRecord) => void>();
-  constructor(private storage: StoragePort, private native: NativeAgentPort, private clock: AgentTaskClock) {
+  private listeners = new Set<(record: ActionTaskRecord) => void>();
+  constructor(private storage: StoragePort, private native: NativeActionPort, private clock: ActionTaskClock) {
     const existing = coordinationByStorage.get(storage);
     this.coordination = existing ?? { queue: Promise.resolve(), active: new Map(), stopRequests: new Set() };
     if (!existing) coordinationByStorage.set(storage, this.coordination);
@@ -132,7 +132,7 @@ export class AgentTaskController implements AgentTasks {
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> { const result = this.coordination.queue.then(operation); this.coordination.queue = result.then(() => undefined, () => undefined); return result; }
   private path(value: string): string { return `tasks/${id(value)}.json`; }
-  private async load(value: string): Promise<AgentTaskRecord> {
+  private async load(value: string): Promise<ActionTaskRecord> {
     let bytes: Uint8Array | null;
     try { bytes = await this.storage.read(this.path(value)); } catch { unavailable(); }
     if (!bytes) throw new ReaderError('NOT_FOUND', 'This task was not found.');
@@ -140,39 +140,39 @@ export class AgentTaskController implements AgentTasks {
     try { const task = validateTaskRecord(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown); if (task.id !== value) unavailable(); return task; }
     catch { unavailable(); }
   }
-  private async save(task: AgentTaskRecord): Promise<void> {
+  private async save(task: ActionTaskRecord): Promise<void> {
     task.updatedAt = this.clock.now(); task.revision++;
     const checked = validateTaskRecord(task); const bytes = new TextEncoder().encode(JSON.stringify(checked)); if (bytes.length > 8 * 1024 * 1024) invalid();
     try { await this.storage.writeAtomic(this.path(task.id), bytes); } catch { throw new ReaderError('HISTORY_UNAVAILABLE', 'Task state could not be saved. Native intent must be reconciled before continuing.'); }
     for (const listener of this.listeners) { try { listener(clone(task)); } catch { /* A view cannot invalidate a durable task update. */ } }
   }
-  private recovered(task: AgentTaskRecord): AgentTaskRecord {
+  private recovered(task: ActionTaskRecord): ActionTaskRecord {
     if (this.active.has(task.id)) return task;
     if (task.state === 'running' || task.items.some(item => ['writing', 'undoing'].includes(item.status))) { task.state = 'uncertain'; for (const item of task.items) if (['writing', 'undoing'].includes(item.status)) item.status = 'uncertain'; }
     else if (task.state === 'preparing') task.state = 'failed';
     return task;
   }
-  get = async (value: string): Promise<AgentTaskRecord> => this.recovered(await this.load(value));
-  list = async (conversationId?: string): Promise<AgentTaskRecord[]> => {
+  get = async (value: string): Promise<ActionTaskRecord> => this.recovered(await this.load(value));
+  list = async (conversationId?: string): Promise<ActionTaskRecord[]> => {
     if (conversationId !== undefined) id(conversationId); if (!this.storage.list) unavailable();
     let names: string[]; try { names = await this.storage.list('tasks'); } catch { unavailable(); }
-    const tasks: AgentTaskRecord[] = [];
+    const tasks: ActionTaskRecord[] = [];
     for (const name of names) { if (!/^[a-zA-Z0-9-]{1,128}\.json$/u.test(name)) { if (name.endsWith('.json')) unavailable(); continue; } const task = await this.get(name.slice(0, -5)); if (conversationId === undefined || task.conversationId === conversationId) tasks.push(task); }
     return tasks.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
   };
-  subscribe = (listener: (record: AgentTaskRecord) => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  subscribe = (listener: (record: ActionTaskRecord) => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private base(conversationId: string, question: string) { const now = this.clock.now(); return { schemaVersion: 1 as const, id: id(this.clock.uuid()), conversationId: id(conversationId), question: text(question, 16000), state: 'preparing' as const, createdAt: now, updatedAt: now, revision: 0 }; }
-  private async begin(task: AgentTaskRecord): Promise<AbortController> {
+  private async begin(task: ActionTaskRecord): Promise<AbortController> {
     if (await this.storage.read(this.path(task.id))) throw new ReaderError('REQUEST_CONFLICT', 'A task with this identifier already exists.');
     const abort = new AbortController(); this.active.set(task.id, abort);
     try { await this.save(task); } catch (error) { this.active.delete(task.id); throw error; } return abort;
   }
-  planAnnotations: AgentTasks['planAnnotations'] = value => {
+  planAnnotations: ActionTasks['planAnnotations'] = value => {
     const input = clone(value); if (!Array.isArray(input.candidates)) invalid(); const candidates = input.candidates.map(proposal); if (candidates.length > 50) invalid();
     const frozen = { conversationId: id(input.conversationId), question: text(input.question, 16000), paper: validatePaperScope(input.paper), documentRevision: documentRevision(input.revision) };
     const requestID = input.modelRequestId === undefined ? undefined : id(input.modelRequestId);
     return this.serial(async () => {
-      let existing: Extract<AgentTaskRecord, { kind: 'annotations' }> | undefined;
+      let existing: Extract<ActionTaskRecord, { kind: 'annotations' }> | undefined;
       if (requestID) {
         let bytes: Uint8Array | null; try { bytes = await this.storage.read(this.path(requestID)); } catch { unavailable(); }
         if (bytes) {
@@ -183,7 +183,7 @@ export class AgentTaskController implements AgentTasks {
           existing = stored;
         }
       }
-      const task: Extract<AgentTaskRecord, { kind: 'annotations' }> = existing ?? { ...this.base(frozen.conversationId, frozen.question), ...frozen, ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), kind: 'annotations', items: candidates.map(p => ({ kind: 'annotation', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', proposal: p })) };
+      const task: Extract<ActionTaskRecord, { kind: 'annotations' }> = existing ?? { ...this.base(frozen.conversationId, frozen.question), ...frozen, ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), kind: 'annotations', items: candidates.map(p => ({ kind: 'annotation', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', proposal: p })) };
       const abort = existing ? new AbortController() : await this.begin(task);
       if (existing) this.active.set(task.id, abort);
       if (this.stopRequests.has(task.id)) abort.abort();
@@ -201,11 +201,11 @@ export class AgentTaskController implements AgentTasks {
       } finally { this.active.delete(task.id); }
     });
   };
-  planAcquisition: AgentTasks['planAcquisition'] = value => {
+  planAcquisition: ActionTasks['planAcquisition'] = value => {
     const input = clone(value); if (!Array.isArray(input.identifiers) || input.identifiers.length > 50) invalid();
     const identifiers = [...new Set(input.identifiers.map(value => text(value, 8192, 1).trim()))];
     return this.serial(async () => {
-      const task: AgentTaskRecord = { ...this.base(input.conversationId, input.question), kind: 'acquisition', target: collectionTarget(input.target), items: identifiers.map(identifier => ({ kind: 'acquisition', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', identifier, duplicates: [] })) };
+      const task: ActionTaskRecord = { ...this.base(input.conversationId, input.question), kind: 'acquisition', target: collectionTarget(input.target), items: identifiers.map(identifier => ({ kind: 'acquisition', id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate', identifier, duplicates: [] })) };
       const abort = await this.begin(task);
       try {
         for (const item of task.items) {
@@ -223,7 +223,7 @@ export class AgentTaskController implements AgentTasks {
       } finally { this.active.delete(task.id); }
     });
   };
-  private async write<T>(task: AgentTaskRecord, item: AnnotationTaskItem | AcquisitionTaskItem, operation: AgentTaskOperation, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+  private async write<T>(task: ActionTaskRecord, item: AnnotationTaskItem | AcquisitionTaskItem, operation: ActionTaskOperation, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
     item.status = operation.endsWith('delete') || operation.endsWith('remove') || operation.endsWith('trash') ? 'undoing' : 'writing'; item.operation = operation; delete item.errorCode;
     await this.save(task);
     try { return { ok: true, value: await run() }; }
@@ -233,7 +233,7 @@ export class AgentTaskController implements AgentTasks {
       await this.save(task); return { ok: false };
     }
   }
-  approve: AgentTasks['approve'] = (value, selectedValues, choiceValues = {}) => {
+  approve: ActionTasks['approve'] = (value, selectedValues, choiceValues = {}) => {
     const selectedIDs = clone(selectedValues); const choices = clone(choiceValues);
     return this.serial(async () => {
       const task = this.recovered(await this.load(value));
@@ -276,7 +276,7 @@ export class AgentTaskController implements AgentTasks {
       } finally { this.active.delete(task.id); }
     });
   };
-  private async acquire(task: Extract<AgentTaskRecord, { kind: 'acquisition' }>, entry: AcquisitionTaskItem, signal: AbortSignal): Promise<void> {
+  private async acquire(task: Extract<ActionTaskRecord, { kind: 'acquisition' }>, entry: AcquisitionTaskItem, signal: AbortSignal): Promise<void> {
     const selected = entry.choice ?? {}; const metadata = entry.preview?.candidates[selected.metadataIndex ?? 0]; if (!metadata) invalid();
     if (selected.duplicateKey) {
       const duplicate = entry.duplicates.find(item => item.key === selected.duplicateKey); if (!duplicate || duplicate.clientId !== task.target.clientId || duplicate.libraryId !== task.target.libraryId) invalid();
@@ -307,7 +307,7 @@ export class AgentTaskController implements AgentTasks {
     } catch { entry.status = 'uncertain'; entry.errorCode = 'PDF_RESULT_UNCONFIRMED'; }
     await this.save(task);
   }
-  cancel: AgentTasks['cancel'] = value => {
+  cancel: ActionTasks['cancel'] = value => {
     id(value); this.stopRequests.add(value); this.active.get(value)?.abort();
     return this.serial(async () => {
       try {
@@ -319,7 +319,7 @@ export class AgentTaskController implements AgentTasks {
       } finally { this.stopRequests.delete(value); }
     });
   };
-  reconcile: AgentTasks['reconcile'] = value => this.serial(async () => {
+  reconcile: ActionTasks['reconcile'] = value => this.serial(async () => {
     const task = this.recovered(await this.load(value));
     if (!task.approvedAt) return task;
     for (const item of task.items) {
@@ -364,7 +364,7 @@ export class AgentTaskController implements AgentTasks {
     }
     task.state = aggregate(task); await this.save(task); return clone(task);
   });
-  undo: AgentTasks['undo'] = value => this.serial(async () => {
+  undo: ActionTasks['undo'] = value => this.serial(async () => {
     const task = this.recovered(await this.load(value));
     if (!task.approvedAt) return task;
     if (task.items.some(item => ['writing', 'undoing', 'uncertain'].includes(item.status))) throw new ReaderError('BUSY', 'Reconcile uncertain native writes before undoing this task.');

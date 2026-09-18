@@ -2,13 +2,19 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { DOCUMENT_BYTES, validateDocument } from '../../../contracts/src/document.ts';
 import { ReaderError, paperId, type DocumentContext, type DocumentPage, type DocumentRevision, type PaperScope } from '../../../contracts/src/index.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
+import type { LocateChar } from './locate.ts';
 
+/**
+ * The loaded PDF as the reader sees it. `getPageData` returns the native character boxes verbatim
+ * (glyph `rect`, `inlineRect`, page `viewBox`), which is what quote location needs; text extraction
+ * only reads the subset it renders.
+ */
 export interface TextPdf {
   numPages: number;
   fingerprints: string[];
   getData?(): Promise<Uint8Array | ArrayBuffer>;
   getPageLabels2(): Promise<string[] | null>;
-  getPageData(options: { pageIndex: number }): Promise<{ partial?: boolean; chars: Array<{ c: string; ignorable?: boolean; spaceAfter?: boolean; lineBreakAfter?: boolean; paragraphBreakAfter?: boolean }> }>;
+  getPageData(options: { pageIndex: number }): Promise<{ partial?: boolean; chars: LocateChar[]; viewBox?: readonly number[] }>;
 }
 export interface DocumentSource { pdf: TextPdf; revision: DocumentRevision }
 export interface DocumentProgress { done: number; total: number }
@@ -219,7 +225,7 @@ export function nativeDocumentSource(zotero: ZoteroHost, reader: () => HostReade
           // Zotero 9.0.6 GetPageData unconditionally sets partial=true for basic data before
           // citation/overlay enrichment. Its character extraction is complete (worker module.js).
           // Keep generic text-provider partial failures meaningful; do not forward this different flag.
-          const bounds = (raw as typeof raw & { viewBox?: unknown }).viewBox;
+          const bounds = raw.viewBox;
           const viewBox = Array.isArray(bounds) ? Array.from(bounds) as unknown[] : [];
           return { chars: Array.from(raw.chars), ...(viewBox.length === 4 && viewBox.every(value => typeof value === 'number' && Number.isFinite(value)) ? { viewBox: viewBox as number[] } : {}) };
         },

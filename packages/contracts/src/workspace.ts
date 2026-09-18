@@ -152,7 +152,7 @@ export interface ReaderWorkspace {
   removeConversation?(paper: PaperScope, id: string): Promise<void>;
 }
 export interface LibraryReferencePort {
-  collections?(): Promise<Array<import('./agent.ts').NativeCollectionTarget & { name: string }>>;
+  collections?(): Promise<Array<import('./native.ts').NativeCollectionTarget & { name: string }>>;
   search(query: string): Promise<ReaderReference[]>;
   read(reference: ReaderReference, signal: AbortSignal): Promise<ReferenceInput>;
   open(paper: PaperScope): Promise<void>;

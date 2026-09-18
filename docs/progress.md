@@ -4,6 +4,8 @@
 
 ## 当前状态
 
+- **产品分层**：Reader / Chat（当前 PDF 上下文阅读与问答）已实质实现，证据见下“已交付路径”与宿主 `--context` 报告；叠加其上的 agent/动作能力（真实模型行为、标注与获取整理的真实库写入及 UI、skill 作者 UI 等）仍有独立差距，见“剩余差距与下一任务”。产品定位不改变本页任何证据层级。产品规格已于 2026-09-18 撤销“未发送标签必须显示文章标题”；0.4.0a9 字节仍实现该行为，代码未改。
+
 - **Git**：`main` 基线 `59c21f3`。本轮工作在 `cursor/cursor-style-chat-tabs-272e`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。`dist/`、`build/`、`.zcr-dev/` 不在版本控制内。
 - **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a9`（侧载新 chrome 字节必须升版本；a7 的 `fcdcbc51…` 与 a8 的 `896063bf…` 从未装进 owner 正常 profile）。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
 - **本轮门禁（0.4.0a9，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` 打包前 **1066 passed / 2 skipped**；`npm run package:dev` → `dist/zotero-codex-reader-0.4.0a9-dev.xpi`（92,675,854 bytes，SHA-256 `3207d7e71c50a0ced0f58f9cf93b88ee318372e87fccad9bfe67698d55c60038`）；`npm run verify:artifacts` **84 files PASS**；打包后复跑 `test:unit` **1068 passed / 79 files / 0 skipped**。专用 `.zcr-dev/context` 真实宿主 `--context`：**32 executed / 32 PASS / 0 FAIL**，`recordedRequests = 0`。**真实模型 NOT RUN**。
@@ -42,7 +44,7 @@
 - 侧栏：无三点菜单（重命名在选中标签、账户用量在模型选择器）；已打开会话在左；首次打开未发送标签显示文章标题，`+` 在已有命名会话旁才是 New chat 文案，切走后仍留在条上，选中标签才有关闭 X，`+`/历史靠右；附件弹层只有 Attach file（多选文本或图片）；reference 与 skill 分入口；面向用户一律称 "skill"，存储 schema/id/名称逐字不变；历史行直删。
 - 全局设置在 Zotero 原生偏好设置面板（`startup()` 注册 `defaultXUL: true`、`shutdown()` 清理，JSON 文本函数桥，一次一个校验快照/skill 修订，拒绝写入即重读；pane `mount` 抛错不能中断切面板）；面板文案随 store 的 `uiLanguage`。侧栏只保留每对话内容。
 - 论断溯源：点击 `zcr.invalid/source/<id>/<page>` 引文先校验冻结 revision，再按链接 title 的逐字引用在该页字符盒定位，命中临时高亮、未命中诚实提示；点击路径无库写入。
-- 标注/获取整理 agent：候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验；第三方 skill 不能授予权限。
+- 标注/获取整理（Reader 之上的 agent 附加能力）：候选 JSON 解析、按 PDF 版本原文定位、任务审批、账本写意图/撤销/冲突检测、DOI/链接查重与 OA 附件校验；第三方 skill 不能授予权限。
 - 模型/多模态：固定 catalog 模态/窗口、provider 能力与 rate-limit 解析、每轮预算、粘贴/拖放/选文件多图（2 MiB 输入；reader clipboard 抛错继续走插件 realm；macOS TIFF 可转 PNG）、16 MiB 生成图校验、diagram 线程能力；诚实耗时指示（首个文本到达即冻结）。区域截图入口已删除；`capturePage` 端口仍在。
 - 安装/发行：`install:dev`（`plan`/`install`/`check`/`revert`/`rollback`）自校验；MIT `LICENSE` 与 5 个打包依赖许可（`linkify-it`/`mdurl`/`uc.micro`/`punycode.js` MIT，`entities@4.5.0` BSD-2-Clause）随包，`verify:artifacts` 列为必需；CI 用 `.nvmrc`，无 upload/publish/tag。
 

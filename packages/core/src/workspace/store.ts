@@ -1,7 +1,7 @@
 import { ReaderError, paperId, type Conversation, type ImageAttachment, type PaperIdentity, type PaperScope } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, HistoryScope, ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
-import type { AgentTaskRecord } from '../../../contracts/src/tasks.ts';
+import type { ActionTaskRecord } from '../../../contracts/src/tasks.ts';
 import { clone } from '../../../contracts/src/clone.ts';
 import { validateReference as reference } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateCitation, validateImageAttachment, validatePaperScope, validateSettings } from '../../../contracts/src/validation.ts';
@@ -292,14 +292,14 @@ export class WorkspaceStore implements ReaderWorkspace {
       if (paperId(value.paper) !== paperId(frozen)) unavailable(); return value;
     });
   }
-  private async historyTasks(conversations: Map<string, Conversation>): Promise<Map<string, AgentTaskRecord[]>> {
+  private async historyTasks(conversations: Map<string, Conversation>): Promise<Map<string, ActionTaskRecord[]>> {
     if (!this.storage.list) unavailable();
     let files: string[]; try { files = await this.storage.list('tasks'); } catch { unavailable(); }
     if (files.length > 50_000 || files.some(file => typeof file !== 'string')) unavailable();
-    const result = new Map<string, AgentTaskRecord[]>();
+    const result = new Map<string, ActionTaskRecord[]>();
     for (const file of new Set(files)) {
       if (!/^[a-zA-Z0-9-]{1,128}\.json$/u.test(file)) { if (file.endsWith('.json')) unavailable(); continue; }
-      let task: AgentTaskRecord;
+      let task: ActionTaskRecord;
       try {
         task = validateTaskRecord(await this.readJson(`tasks/${file}`, 8 * 1024 * 1024));
         if (task.id !== file.slice(0, -5)) unavailable(); timestamp(task.createdAt); timestamp(task.updatedAt);

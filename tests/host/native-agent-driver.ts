@@ -1,17 +1,17 @@
-import { NativeAgentError, type NativeAgentPort, type NativeMetadata } from '../../packages/contracts/src/agent.ts';
+import { NativeOperationError, type NativeActionPort, type NativeMetadata } from '../../packages/contracts/src/native.ts';
 import { ReaderError, type DocumentContext, type PaperScope } from '../../packages/contracts/src/index.ts';
 import type { LibraryReferencePort } from '../../packages/contracts/src/workspace.ts';
-import { AgentTaskController } from '../../packages/core/src/tasks/controller.ts';
-import { createNativeAgentPort } from '../../packages/zotero/src/agent/native.ts';
-import type { AgentHostCollection, AgentHostItem, NativeAgentHost } from '../../packages/zotero/src/agent/host.ts';
+import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
+import { createNativeActionPortFrom } from '../../packages/zotero/src/actions/native.ts';
+import type { NativeHostCollection, NativeHostItem, NativeZoteroHost } from '../../packages/zotero/src/host/native.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from '../../packages/zotero/src/reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from '../../packages/zotero/src/reader/source-highlight.ts';
 import type { HostReader, ZoteroHost, ZoteroWindow } from '../../packages/zotero/src/reader/host-types.ts';
-import { createLibraryReferencePort } from '../../packages/zotero/src/reader/library.ts';
+import { createLibraryReferencePort } from '../../packages/zotero/src/library/reference.ts';
 import { geckoHost } from '../../packages/zotero/src/runtime/gecko.ts';
 import { checkPath, GeckoStorage, privateDirectory, type FileHost } from '../../packages/zotero/src/runtime/storage.ts';
 
-export interface NativeAgentSmokeConfig {
+export interface NativeSmokeConfig {
   pdfPath: string;
   supplementPdfPath: string;
   reportPath: string;
@@ -21,20 +21,20 @@ export interface NativeAgentSmokeConfig {
   subjectVersion: string;
   artifactHash: string;
 }
-interface SmokeItem extends AgentHostItem {
+interface SmokeItem extends NativeHostItem {
   setField(name: string, value: string): void;
   saveTx(options?: { skipSelect?: boolean }): Promise<number | boolean>;
   loadAllData(): Promise<void>;
   getAnnotations(): SmokeItem[];
 }
-interface SmokeCollection extends AgentHostCollection { name: string; saveTx(): Promise<number | boolean> }
+interface SmokeCollection extends NativeHostCollection { name: string; saveTx(): Promise<number | boolean> }
 interface SmokeWindow extends ZoteroWindow {
   ZoteroPane?: { loaded?: boolean; itemsView?: unknown };
   Zotero_Tabs: { selectedID: string; getTabInfo(id: string): { id?: string; data?: { itemID?: number } }; select(id: string): void };
 }
 interface SmokeReader extends HostReader { tabID: string; _window: SmokeWindow; _initPromise?: Promise<void>; close(): void }
 interface SmokeLibrary { libraryID: number; editable: boolean; filesEditable: boolean; waitForDataLoad(type: 'item' | 'collection'): Promise<void> }
-interface SmokeZotero extends Omit<NativeAgentHost, 'Item' | 'Items' | 'Reader' | 'Libraries' | 'Collections' | 'Utilities' | 'Attachments'> {
+interface SmokeZotero extends Omit<NativeZoteroHost, 'Item' | 'Items' | 'Reader' | 'Libraries' | 'Collections' | 'Utilities' | 'Attachments'> {
   version: string;
   initializationPromise: Promise<void>;
   DataDirectory: { dir: string };
@@ -52,8 +52,8 @@ interface SmokeZotero extends Omit<NativeAgentHost, 'Item' | 'Items' | 'Reader' 
   Reader: { _readers: SmokeReader[]; open(id: number, location?: unknown, options?: { tabID?: string; allowDuplicate?: boolean; openInBackground?: boolean }): Promise<SmokeReader>; getByTabID(id: string): SmokeReader | undefined };
   Libraries: { userLibraryID: number; get(id: number): SmokeLibrary | undefined };
   Collections: { get(id: number): SmokeCollection | false | undefined; getByLibraryAndKey(libraryID: number, key: string): SmokeCollection | false | undefined };
-  Utilities: NativeAgentHost['Utilities'] & { generateObjectKey(): string };
-  Attachments: NativeAgentHost['Attachments'] & { importFromFile(options: { file: string; parentItemID: number; title: string; saveOptions: { skipSelect: true } }): Promise<SmokeItem> };
+  Utilities: NativeZoteroHost['Utilities'] & { generateObjectKey(): string };
+  Attachments: NativeZoteroHost['Attachments'] & { importFromFile(options: { file: string; parentItemID: number; title: string; saveOptions: { skipSelect: true } }): Promise<SmokeItem> };
   Notifier: { registerObserver(observer: { notify(event: string, type: string, ids: Array<string | number>): void }, types: string[], name: string): string; unregisterObserver(id: string): void };
 }
 declare const Zotero: SmokeZotero;
@@ -63,7 +63,7 @@ declare const Services: { appinfo: { OS: string; XPCOMABI: string; platformVersi
 
 type Evidence = 'real-host-api' | 'synthetic-proposal-real-host-write' | 'synthetic-user-edit-real-host-api' | 'real-network-translator';
 interface SmokeCheck { name: string; evidence: Evidence; status: 'running' | 'passed' | 'failed'; ok?: boolean; startedAt: string; completedAt?: string; details?: Record<string, unknown>; failure?: { code: string; message?: string } }
-export interface NativeAgentSmokeReport {
+export interface NativeSmokeReport {
   schemaVersion: 1;
   stage: 'native-agent';
   runId: string;
@@ -78,7 +78,7 @@ export interface NativeAgentSmokeReport {
   notRun: Array<{ name: string; reason: string }>;
   retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string };
 }
-class SmokeFailure extends Error { constructor(readonly code: string) { super(code); this.name = 'NativeAgentSmokeFailure'; } }
+class SmokeFailure extends Error { constructor(readonly code: string) { super(code); this.name = 'NativeSmokeFailure'; } }
 function requireCheck(ok: unknown, code: string): asserts ok { if (!ok) throw new SmokeFailure(code); }
 function safePath(value: unknown): string {
   requireCheck(typeof value === 'string' && value.startsWith('/') && value.length < 4096 && !/[\\:\u0000-\u001f]/u.test(value) && value.slice(1).split('/').every(part => !!part && part !== '.' && part !== '..'), 'INVALID_CONFIG_PATH');
@@ -86,11 +86,11 @@ function safePath(value: unknown): string {
 }
 function safeFailure(error: unknown): { code: string; message?: string } {
   if (error instanceof SmokeFailure) return { code: error.code };
-  if (error instanceof NativeAgentError || error instanceof ReaderError) return { code: error.code, message: error.message.slice(0, 256) };
+  if (error instanceof NativeOperationError || error instanceof ReaderError) return { code: error.code, message: error.message.slice(0, 256) };
   const native = error && typeof error === 'object' ? error as { name?: unknown; stack?: unknown; message?: unknown } : {};
   const name = typeof native.name === 'string' && /^[A-Za-z_]{1,80}$/u.test(native.name) ? native.name : 'Unknown';
   const stack = typeof native.stack === 'string' ? native.stack : '';
-  const knownFrames = ['privateDirectory', 'geckoHost', 'createNativeAgentPort', 'open', 'loadAllData', 'setPermissions', 'makeDirectory'].filter(name => stack.includes(name));
+  const knownFrames = ['privateDirectory', 'geckoHost', 'createNativeActionPortFrom', 'open', 'loadAllData', 'setPermissions', 'makeDirectory'].filter(name => stack.includes(name));
   const locations = [...stack.matchAll(/(?:reader|tabs|dataObject|item|annotations|driver)\.js:\d+:\d+/gu)].map(match => match[0]).slice(0, 6);
   const message = typeof native.message === 'string' ? native.message : '';
   const properties = ['tabID', 'itemID', '_window', 'Zotero_Tabs', 'focusOptions', 'keepTabFocused', 'getLibraryAndKeyFromID', 'collapsed', 'ZoteroContextPane', 'cloneInto', 'isReady'].filter(property => message.includes(property));
@@ -100,7 +100,7 @@ async function digest(bytes: Uint8Array): Promise<string> { return [...new Uint8
 function tabInfo(window: SmokeWindow, id: string) { try { return window.Zotero_Tabs.getTabInfo(id); } catch { return undefined; } }
 
 /** Test-only entrypoint. Importing this file never runs it or opens a reader. */
-export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<NativeAgentSmokeReport> {
+export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmokeReport> {
   await Zotero.initializationPromise;
   const profile = safePath(config.profile); const dataDir = safePath(config.dataDir);
   requireCheck(profile.endsWith('/.zcr-dev/context/profile') && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
@@ -120,7 +120,7 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
   }
   for (const path of [pdfPath, supplementPath]) requireCheck(await checkPath(host, path, 'regular'), 'SYNTHETIC_PDF_UNAVAILABLE');
   requireCheck(!host.isSymlink(reportPath), 'REPORT_SYMLINK_REJECTED');
-  const report: NativeAgentSmokeReport = {
+  const report: NativeSmokeReport = {
     schemaVersion: 1, stage: 'native-agent', runId: host.uuid(), startedAt: new Date().toISOString(), status: 'running',
     build: { expectedVersion: config.subjectVersion, expectedArtifactHash: config.artifactHash, artifactHashSource: 'prepare-script', adapterSource: 'working-tree-production-modules-in-test-driver', subjectScope: 'installed-addon-identity-only' },
     driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', checks: [],
@@ -151,7 +151,7 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
     const started = Date.now(); while (Date.now() - started < timeout) { guard(); const value = read(); if (value) return value; await Zotero.Promise.delay(20); } throw new SmokeFailure(code);
   };
   const ownedReaders: SmokeReader[] = []; let window: SmokeWindow | undefined; let previousTab: string | undefined;
-  let tasks: AgentTaskController | undefined; let unsubscribe: (() => void) | undefined; let reportTail = Promise.resolve();
+  let tasks: ActionTaskController | undefined; let unsubscribe: (() => void) | undefined; let reportTail = Promise.resolve();
   let currentStage = 'driver-startup';
   try {
     await save();
@@ -198,13 +198,13 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
     currentStage = 'construct-production-adapters';
     const cache = new ReaderDocumentCache({ yield: () => Zotero.Promise.delay(0), maxEntries: 3 });
     const source = nativeDocumentSource(Zotero as unknown as ZoteroHost, () => opened, paper);
-    const native: NativeAgentPort = createNativeAgentPort({ clientId, zotero: Zotero });
+    const native: NativeActionPort = createNativeActionPortFrom({ clientId, zotero: Zotero });
     const ledgerName = `zotero-codex-reader/native-agent-smoke/${report.runId}`;
     currentStage = 'create-isolated-gecko-ledger';
     const ledger = await privateDirectory(host, profile, ledgerName);
     currentStage = 'construct-task-controller';
     const storage = new GeckoStorage(host, ledger);
-    tasks = new AgentTaskController(storage, native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
+    tasks = new ActionTaskController(storage, native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
     report.retained = { parentKey: fixture.parent.key, attachmentKeys: [fixture.main.key, fixture.supplement.key], collectionKey: fixture.collection.key, taskIds: [], ledger: ledgerName };
     const document = await step('native-whole-pdf-text-and-loaded-file-sha256', 'real-host-api', async () => {
       const pdf = (opened._internalReader?._primaryView ?? opened._internalReader?._lastView)?._iframeWindow?.PDFViewerApplication?.pdfDocument;
@@ -260,7 +260,7 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
       guard(); const selected = firstTask.items.map(item => item.id); const approved = await taskController.approve(firstTask.id, selected); const repeated = await taskController.approve(firstTask.id, selected); await fixture.main.loadAllData();
       requireCheck(approved.state === 'completed' && repeated.state === 'completed' && approved.items.every(item => item.kind === 'annotation' && item.annotation), 'BATCH_NATIVE_WRITE_FAILED');
       requireCheck(fixture.main.getAnnotations().length === 2 && fixture.supplement.getAnnotations().length === 0, 'BATCH_DUPLICATED_OR_WRONG_ATTACHMENT');
-      const restored = new AgentTaskController(new GeckoStorage(host, ledger), native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
+      const restored = new ActionTaskController(new GeckoStorage(host, ledger), native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
       requireCheck((await restored.get(approved.id)).state === 'completed', 'GECKO_LEDGER_READBACK_FAILED');
       return { value: approved, details: { taskId: approved.id, annotations: 2, repeatedApprovalCreatedExtra: false, persistentLedgerReadback: true } };
     });
@@ -345,7 +345,7 @@ export async function runHostSmoke(config: NativeAgentSmokeConfig): Promise<Nati
 
 type Step = <T>(name: string, evidence: Evidence, work: () => Promise<{ value: T; details?: Record<string, unknown> }>, optional?: boolean) => Promise<T | undefined>;
 async function verifyReferenceImagesAndReaders(options: {
-  report: NativeAgentSmokeReport; step: Step; host: FileHost; contextRoot: string; window: SmokeWindow; opened: SmokeReader; paper: PaperScope; supplementPaper: PaperScope; document: DocumentContext;
+  report: NativeSmokeReport; step: Step; host: FileHost; contextRoot: string; window: SmokeWindow; opened: SmokeReader; paper: PaperScope; supplementPaper: PaperScope; document: DocumentContext;
   fixture: { parent: SmokeItem; main: SmokeItem; supplement: SmokeItem }; references: ReturnType<typeof createLibraryReferencePort>; referencePort: LibraryReferencePort;
   until<T>(this: void, read: () => T | false | undefined, code: string, timeout?: number): Promise<T>;
 }): Promise<void> {

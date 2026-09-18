@@ -1,15 +1,20 @@
 import type { DocumentRevision, PaperScope } from './index.ts';
-import type { NativeAcquisitionResult, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeQuoteResolution } from './agent.ts';
+import type { NativeAcquisitionResult, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeQuoteResolution } from './native.ts';
 
 export interface AnnotationProposal { quote: string; pageIndex: number; reason: string }
-export type AgentTaskState = 'preparing' | 'review' | 'running' | 'completed' | 'partial' | 'cancelled' | 'uncertain' | 'undone' | 'conflict' | 'failed';
-export type AgentTaskItemStatus = 'candidate' | 'unresolved' | 'skipped' | 'writing' | 'applied' | 'metadata-only' | 'failed' | 'uncertain' | 'undoing' | 'undone' | 'conflict';
-export type AgentTaskOperation = 'annotation-create' | 'metadata-create' | 'collection-add' | 'pdf-acquire' | 'annotation-delete' | 'collection-remove' | 'item-trash' | 'attachment-trash';
+/**
+ * State of one durable native action task. The task controller owns the transition; a view only
+ * projects it. `uncertain` means the write may or may not have landed and must be reconciled by its
+ * reserved key, never blindly retried.
+ */
+export type ActionTaskState = 'preparing' | 'review' | 'running' | 'completed' | 'partial' | 'cancelled' | 'uncertain' | 'undone' | 'conflict' | 'failed';
+export type ActionTaskItemStatus = 'candidate' | 'unresolved' | 'skipped' | 'writing' | 'applied' | 'metadata-only' | 'failed' | 'uncertain' | 'undoing' | 'undone' | 'conflict';
+export type ActionTaskOperation = 'annotation-create' | 'metadata-create' | 'collection-add' | 'pdf-acquire' | 'annotation-delete' | 'collection-remove' | 'item-trash' | 'attachment-trash';
 interface TaskItemBase {
   id: string;
   reservedKey: string;
-  status: AgentTaskItemStatus;
-  operation?: AgentTaskOperation;
+  status: ActionTaskItemStatus;
+  operation?: ActionTaskOperation;
   errorCode?: string;
   selected?: boolean;
 }
@@ -32,32 +37,33 @@ export interface AcquisitionTaskItem extends TaskItemBase {
   attachmentUndone?: true;
 }
 export interface AcquisitionChoice { metadataIndex?: number; duplicateKey?: string; downloadPDF?: boolean }
-export type AgentTaskChoices = Record<string, AcquisitionChoice>;
-interface AgentTaskBase {
+export type ActionTaskChoices = Record<string, AcquisitionChoice>;
+interface ActionTaskBase {
   schemaVersion: 1;
   id: string;
   conversationId: string;
   question: string;
-  state: AgentTaskState;
+  state: ActionTaskState;
   createdAt: string;
   updatedAt: string;
   revision: number;
   approvedAt?: string;
   cancelRequested?: true;
 }
-export type AgentTaskRecord =
-  | (AgentTaskBase & { kind: 'annotations'; paper: PaperScope; documentRevision: DocumentRevision; modelRequestId?: string; items: AnnotationTaskItem[] })
-  | (AgentTaskBase & { kind: 'acquisition'; target: NativeCollectionTarget; items: AcquisitionTaskItem[] });
+export type ActionTaskRecord =
+  | (ActionTaskBase & { kind: 'annotations'; paper: PaperScope; documentRevision: DocumentRevision; modelRequestId?: string; items: AnnotationTaskItem[] })
+  | (ActionTaskBase & { kind: 'acquisition'; target: NativeCollectionTarget; items: AcquisitionTaskItem[] });
 export interface AnnotationTaskPlan { conversationId: string; paper: PaperScope; revision: DocumentRevision; question: string; modelRequestId?: string; candidates: AnnotationProposal[] }
 export interface AcquisitionTaskPlan { conversationId: string; target: NativeCollectionTarget; question: string; identifiers: string[] }
-export interface AgentTasks {
-  list(conversationId?: string): Promise<AgentTaskRecord[]>;
-  get(id: string): Promise<AgentTaskRecord>;
-  subscribe(listener: (record: AgentTaskRecord) => void): () => void;
-  planAnnotations(input: AnnotationTaskPlan): Promise<AgentTaskRecord>;
-  planAcquisition(input: AcquisitionTaskPlan): Promise<AgentTaskRecord>;
-  approve(id: string, selectedItemIds: string[], choices?: AgentTaskChoices): Promise<AgentTaskRecord>;
-  cancel(id: string): Promise<AgentTaskRecord>;
-  reconcile(id: string): Promise<AgentTaskRecord>;
-  undo(id: string): Promise<AgentTaskRecord>;
+/** Durable action-task ledger surfaced to the UI; the implementation is `core/tasks`. */
+export interface ActionTasks {
+  list(conversationId?: string): Promise<ActionTaskRecord[]>;
+  get(id: string): Promise<ActionTaskRecord>;
+  subscribe(listener: (record: ActionTaskRecord) => void): () => void;
+  planAnnotations(input: AnnotationTaskPlan): Promise<ActionTaskRecord>;
+  planAcquisition(input: AcquisitionTaskPlan): Promise<ActionTaskRecord>;
+  approve(id: string, selectedItemIds: string[], choices?: ActionTaskChoices): Promise<ActionTaskRecord>;
+  cancel(id: string): Promise<ActionTaskRecord>;
+  reconcile(id: string): Promise<ActionTaskRecord>;
+  undo(id: string): Promise<ActionTaskRecord>;
 }

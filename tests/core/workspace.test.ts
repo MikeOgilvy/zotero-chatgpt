@@ -8,7 +8,7 @@ import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 import { defaultAllowedModels } from '../../packages/core/src/workspace/allowed-models.ts';
 import { documentA } from '../contracts/document-fixture.ts';
 import { documentSummary } from '../../packages/contracts/src/document.ts';
-import type { AgentTaskRecord } from '../../packages/contracts/src/tasks.ts';
+import type { ActionTaskRecord } from '../../packages/contracts/src/tasks.ts';
 const clock = { uuid: () => '12345678-0000-4000-8000-000000000001', now: () => '2026-09-12T10:00:00.000Z' };
 it('persists independent drafts and images without rewriting image bytes on every edit', async () => {
   const storage = new MemoryStorage(); const store = new WorkspaceStore(storage, clock);
@@ -100,7 +100,7 @@ it('lists saved conversation summaries without reading PDF bodies but still vali
   storage.files.set(`conversations/${c.id}.${documentA.id}.source.json`, new TextEncoder().encode(JSON.stringify(documentA)));
   expect(await store.readConversation(c.id)).toMatchObject({ queuedRequestIds: ['r2'], activeBatchId: c.activeBatchId });
 });
-function nativeTask(conversationId: string): Extract<AgentTaskRecord, { kind: 'acquisition' }> {
+function nativeTask(conversationId: string): Extract<ActionTaskRecord, { kind: 'acquisition' }> {
   return { schemaVersion: 1, id: 'native-acquisition', conversationId, kind: 'acquisition', state: 'review', question: 'Acquire Bayesian source literature', createdAt: clock.now(), updatedAt: '2026-09-13T11:00:00.000Z', revision: 1, target: { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' }, items: [] };
 }
 it('includes and searches native task-only history from the existing ledger using the task update date', async () => {

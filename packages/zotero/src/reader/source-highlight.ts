@@ -1,5 +1,4 @@
 import { ReaderError, type DocumentRevision, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
-import type { AgentDocumentSource } from '../agent/host.ts';
 import { nativeDocumentSource } from './document.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
 import { locateQuoteOnPage, type LocatePage, type LocatedPosition } from './locate.ts';
@@ -53,7 +52,7 @@ export function nativeSourceNavigator(zotero: ZoteroHost, reader: () => HostRead
     locate: async (target, pageIndex, quote) => {
       const captured = await source.capture();
       if (!sameRevision(target.revision, captured.revision)) throw new ReaderError('INVALID_REQUEST', 'The PDF changed before this citation could be located. Reopen it and try again.');
-      const pdf = captured.pdf as unknown as AgentDocumentSource['pdf'];
+      const pdf = captured.pdf;
       if (!Number.isSafeInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdf.numPages) return null;
       let page: LocatePage;
       try {

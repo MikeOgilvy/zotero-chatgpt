@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { NATIVE_ANNOTATION_PROVENANCE, NativeAgentError, type NativeAgentPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata } from '../../packages/contracts/src/agent.ts';
-import { AgentTaskController, parseAnnotationCandidates } from '../../packages/core/src/tasks/controller.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata } from '../../packages/contracts/src/native.ts';
+import { ActionTaskController, parseAnnotationCandidates } from '../../packages/core/src/tasks/controller.ts';
 import { MemoryStorage, flush } from './doubles.ts';
 import { paperA } from '../contracts/factories.ts';
 const revision = { fingerprint: 'synthetic', size: 1024, modifiedAt: 1000 };
@@ -12,11 +12,11 @@ function fixture() {
   const attachments = new Map<string, NativeAttachmentSnapshot>();
   const clock = { now: () => '2026-09-12T10:00:00.000Z', uuid: () => `12345678-0000-4000-8000-${String(++id).padStart(12, '0')}`, key: () => `K${String(++key).padStart(7, '0')}` };
   let creates = 0; let afterAnnotation: (() => Promise<void>) | null = null; let downloadFails = true;
-  const native: NativeAgentPort = {
+  const native: NativeActionPort = {
     resolveQuote: input => Promise.resolve({ status: 'resolved', candidate: { source: structuredClone(input), text: input.quote, pageLabel: '1', sortIndex: '00000|000000|00000', position: { pageIndex: input.pageIndexes?.[0] ?? 0, rects: [[0, 0, 100, 10]] } } }),
     createAnnotation: async input => {
       creates++;
-      if (annotations.has(input.key)) throw new NativeAgentError('CONFLICT', 'Already exists');
+      if (annotations.has(input.key)) throw new NativeOperationError('CONFLICT', 'Already exists');
       const saved: NativeAnnotationSnapshot = { paper: input.candidate.source.paper, key: input.key, type: input.type, text: input.candidate.text, comment: NATIVE_ANNOTATION_PROVENANCE + (input.comment ? '\n' + input.comment : ''), color: input.color, pageLabel: input.candidate.pageLabel, sortIndex: input.candidate.sortIndex, position: input.candidate.position, authorName: '', isExternal: false, tags: [], dateModified: '2026-09-12 10:00:00' };
       annotations.set(input.key, structuredClone(saved)); if (afterAnnotation) await afterAnnotation(); return saved;
     },
@@ -48,7 +48,7 @@ function fixture() {
     inspectAttachment: ref => Promise.resolve(structuredClone(attachments.get(ref.key) ?? null)),
     undoAttachment: input => { const current = attachments.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict' }); attachments.delete(current.key); const parent = items.get(current.parentKey)!; parent.attachmentKeys = parent.attachmentKeys.filter(key => key !== current.key); return Promise.resolve({ status: 'trashed' }); },
   };
-  const controller = new AgentTaskController(storage, native, clock);
+  const controller = new ActionTaskController(storage, native, clock);
   const plan = (count = 1) => controller.planAnnotations({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definitions.', candidates: Array.from({ length: count }, (_, i) => ({ quote: `Definition ${i + 1}`, pageIndex: i, reason: 'Definition' })) });
   return { storage, native, clock, controller, annotations, items, attachments, plan, creates: () => creates, afterAnnotation: (callback: (() => Promise<void>) | null) => { afterAnnotation = callback; }, setDownloadFails: (value: boolean) => { downloadFails = value; } };
 }
@@ -84,7 +84,7 @@ it('persists candidate review and source validation without native writes before
   const f = fixture(); const task = await f.plan();
   expect(task).toMatchObject({ kind: 'annotations', state: 'review', question: 'Mark the definitions.', items: [{ status: 'candidate', resolution: { status: 'resolved' } }] });
   expect(f.annotations.size).toBe(0); expect(f.items.size).toBe(0);
-  const restored = new AgentTaskController(f.storage, f.native, f.clock);
+  const restored = new ActionTaskController(f.storage, f.native, f.clock);
   expect(await restored.get(task.id)).toEqual(task); expect(await restored.list('conversation-a')).toHaveLength(1); expect(await restored.list('conversation-b')).toEqual([]);
 });
 it('a duplicate approval writes an annotation only once and persists its exact native output', async () => {
@@ -106,7 +106,7 @@ it('reconciles a host commit followed by lost ledger persistence without resubmi
   const f = fixture(); const task = await f.plan(); f.afterAnnotation(() => { f.storage.fail = true; return Promise.resolve(); });
   await expect(f.controller.approve(task.id, task.items.map(item => item.id))).rejects.toThrow();
   f.storage.fail = false; f.afterAnnotation(null);
-  const restored = new AgentTaskController(f.storage, f.native, f.clock);
+  const restored = new ActionTaskController(f.storage, f.native, f.clock);
   expect(await restored.get(task.id)).toMatchObject({ state: 'uncertain' });
   expect(await restored.reconcile(task.id)).toMatchObject({ state: 'completed', items: [{ status: 'applied' }] });
   await restored.approve(task.id, task.items.map(item => item.id)); expect(f.creates()).toBe(1);
@@ -177,7 +177,7 @@ it('metadata reconciliation never adopts later human fields into an undoable tas
   f.native.createItem = async input => { const item = await create(input); f.storage.fail = true; return item; };
   await expect(f.controller.approve(task.id, task.items.map(item => item.id))).rejects.toThrow();
   f.storage.fail = false; f.items.get(task.items[0]!.reservedKey)!.contentSignature = 'Later human notes and tags';
-  const restored = new AgentTaskController(f.storage, f.native, f.clock);
+  const restored = new ActionTaskController(f.storage, f.native, f.clock);
   const result = await restored.reconcile(task.id); expect(['uncertain', 'conflict']).toContain(result.state);
   await expect(restored.undo(task.id)).rejects.toThrow(); expect(f.items.size).toBe(1);
 });
@@ -186,7 +186,7 @@ it('reuses one persisted annotation plan for concurrent calls with the same mode
   const [first, second] = await Promise.all([f.controller.planAnnotations(input), f.controller.planAnnotations(input)]);
   expect(second.id).toBe(first.id); expect(second.items.map(item => item.reservedKey)).toEqual(first.items.map(item => item.reservedKey));
   expect(await f.controller.list('conversation-a')).toHaveLength(1);
-  expect(await new AgentTaskController(f.storage, f.native, f.clock).planAnnotations(input)).toEqual(first);
+  expect(await new ActionTaskController(f.storage, f.native, f.clock).planAnnotations(input)).toEqual(first);
 });
 it('rejects conflicting content for a reused model request instead of replacing its task', async () => {
   const f = fixture(); const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }] };
@@ -195,7 +195,7 @@ it('rejects conflicting content for a reused model request instead of replacing 
   expect(await f.controller.get(original.id)).toEqual(original); expect(f.creates()).toBe(0);
 });
 it('coordinates concurrent recovered controller instances over the same storage port', async () => {
-  const f = fixture(); const other = new AgentTaskController(f.storage, f.native, f.clock);
+  const f = fixture(); const other = new ActionTaskController(f.storage, f.native, f.clock);
   const input = { conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId: 'model-request-a', candidates: [{ quote: 'A definition', pageIndex: 0, reason: 'Definition' }] };
   const tasks = await Promise.all([f.controller.planAnnotations(input), other.planAnnotations(input)]);
   expect(tasks[0].id).toBe(tasks[1].id); expect(await other.list('conversation-a')).toHaveLength(1);

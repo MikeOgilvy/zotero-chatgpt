@@ -1,6 +1,6 @@
-# Zotero Codex Reader
+# Zotero GPT Reader
 
-独立社区项目：融入 Zotero、由 Codex 驱动的文献阅读与整理 agent。与 Zotero、OpenAI 无官方隶属或背书关系。
+独立社区项目：融入 Zotero 的 GPT 式文献阅读与问答插件，自动以当前 PDF 为上下文，保留公式、图表、引用与历史；工具调用/agent 是叠加在 Reader 之上的附加能力。与 Zotero、OpenAI 无官方隶属或背书关系。
 
 当前是 **macOS Apple Silicon / Zotero 9 开发预览**，不是已完成发行验收的正式产品。已有原生阅读器停靠、选区操作、附件会话、模型目录、图像粘贴和恢复链路。本轮已接入当前 PDF 本地全文、范围预览及请求参数链路；真实模型回答尚未验证。统一引用/skills、标注与获取整理的实际状态以 [进度与验收](docs/progress.md) 为准；目标不等于已经可用。
 
@@ -10,7 +10,7 @@
 
 开发者从本仓库构建和试用的命令见 [开发与发行](docs/development.md)。测试仅使用 `.zcr-dev/` 专用 profile/data 和合成 PDF，保留正常文献库。
 
-PDF 工具栏搜索左侧的 Codex 开关打开会话；**Ask in sidechat** 加入选区等待发送，**More details** 请求解释。打开侧栏本身不发送。默认全文背景的外发范围、关闭方式和提取状态必须在界面明确显示；历史回答不是文献证据。
+PDF 工具栏搜索左侧的助手开关打开会话；**Ask in sidechat** 加入选区等待发送，**More details** 请求解释。打开侧栏本身不发送。默认全文背景的外发范围、关闭方式和提取状态必须在界面明确显示；历史回答不是文献证据。
 
 ## 开发入口
 

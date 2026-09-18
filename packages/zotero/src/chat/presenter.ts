@@ -2,8 +2,8 @@ import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runti
 import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import type { AgentTaskChoices, AgentTaskRecord, AgentTasks } from '../../../contracts/src/tasks.ts';
-import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/agent.ts';
+import type { ActionTaskChoices, ActionTaskRecord, ActionTasks } from '../../../contracts/src/tasks.ts';
+import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import { buildContextBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
@@ -27,7 +27,7 @@ export interface DocumentServices {
 export type PresenterReading = Pick<ReadingCoordinator, 'start' | 'enqueue' | 'list' | 'get' | 'subscribe' | 'cancel' | 'reconcile'>;
 export interface PresenterServices {
   ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
-  getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; getTasks?(): Promise<AgentTasks>; getReading?(client?: ReaderClient): Promise<PresenterReading>;
+  getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; getTasks?(): Promise<ActionTasks>; getReading?(client?: ReaderClient): Promise<PresenterReading>;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
   contextBudget?(input: SendInput, conversation: Conversation): ContextBudget;
@@ -78,7 +78,7 @@ export interface PresenterState {
   historyQuery: string;
   scrollTop: number;
   persistence: 'session' | 'loading' | 'saving' | 'saved' | 'error';
-  tasks: AgentTaskRecord[];
+  tasks: ActionTaskRecord[];
   readingJobs: ReadingJob[];
   contextReport: ContextReport | null;
   queueing: boolean;
@@ -175,8 +175,8 @@ export class ConversationPresenter {
   private saveFlight: Promise<void> | null = null;
   private navigation = 0;
   private historySearch = 0;
-  private taskPort: AgentTasks | null = null;
-  private taskFlight: Promise<AgentTasks> | null = null;
+  private taskPort: ActionTasks | null = null;
+  private taskFlight: Promise<ActionTasks> | null = null;
   private untasks: (() => void) | null = null;
   private readingPort: PresenterReading | null = null;
   private readingClient: ReaderClient | null = null;
@@ -486,13 +486,13 @@ export class ConversationPresenter {
     if (target && !this.state.collectionOptions.some(option => option.clientId === target.clientId && option.libraryId === target.libraryId && option.collectionKey === target.collectionKey)) throw new ReaderError('INVALID_REQUEST', 'Choose an editable collection from this Zotero profile.');
     this.update({ acquisitionTarget: target ? clone(target) : null });
   }
-  private getTasks(): Promise<AgentTasks> {
+  private getTasks(): Promise<ActionTasks> {
     if (this.taskPort) return Promise.resolve(this.taskPort);
     if (!this.services.getTasks) return Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Native task review is unavailable.'));
     if (!this.taskFlight) this.taskFlight = this.services.getTasks().then(tasks => { this.taskPort = tasks; this.untasks = tasks.subscribe(task => this.acceptTask(task)); return tasks; }).catch(error => { this.taskFlight = null; throw error; });
     return this.taskFlight;
   }
-  private acceptTask(task: AgentTaskRecord): void {
+  private acceptTask(task: ActionTaskRecord): void {
     if (this.disposed || task.conversationId !== this.state.conversation?.id) return;
     const prior = this.state.tasks.find(item => item.id === task.id); if (prior && prior.revision > task.revision) return;
     this.update({ tasks: [...this.state.tasks.filter(item => item.id !== task.id), clone(task)].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) });
@@ -513,7 +513,7 @@ export class ConversationPresenter {
     if (this.services.getTasks) { const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks }); }
     if (this.services.getReading) { const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs }); }
   }
-  async approveTask(id: string, selected: string[], choices: AgentTaskChoices = {}): Promise<void> { this.acceptTask(await (await this.getTasks()).approve(id, [...selected], clone(choices))); }
+  async approveTask(id: string, selected: string[], choices: ActionTaskChoices = {}): Promise<void> { this.acceptTask(await (await this.getTasks()).approve(id, [...selected], clone(choices))); }
   async cancelTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).cancel(id)); }
   async reconcileTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).reconcile(id)); }
   async undoTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).undo(id)); }

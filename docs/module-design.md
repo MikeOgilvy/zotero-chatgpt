@@ -4,6 +4,8 @@
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
+产品默认路径是 Reader / Chat：在当前 PDF/附件上阅读、推理与问答。原生任务与 agent 端口（`core/tasks`、`zotero/agent` 以及审批、账本与撤销）是在 Reader 之上叠加的**动作能力**，只在显式工具调用与任务授权时运行；它们不是对整个产品的身份定义，也不改变默认阅读路径。
+
 ## 模块与寿命
 
 | 模块 | 责任 |
@@ -15,7 +17,7 @@
 | `core/workspace` | 离线历史、草稿、图片资产、偏好、研究主题和 SKILL.md |
 | `core/tasks` | 原生任务候选、任务级审批、写入意图、结果账本、对账与撤销 |
 | `zotero/reader` | 当前附件、原生 dock/缩放/选区、文本及版本校验、原文定位、页面图像、显式文章引用；`selection.ts` 从 Zotero 条目抽取书目字段，`metadata.ts` 只是 `core/context/bibliography.ts` 的再导出以保留原有导入路径 |
-| `zotero/agent` | 无状态 NativeAgentPort：定位引文、标注、元数据/查重、集合成员关系及 OA 附件 |
+| `zotero/agent` | Reader 之上的动作端口（无状态 NativeAgentPort）：定位引文、标注、元数据/查重、集合成员关系及 OA 附件 |
 | `zotero/chat` | Presenter 与视图投影、统一输入、历史/任务/上下文、净化 Markdown 和 KaTeX。dock 是 Cursor 式标签条加**一列**转录；没有第二列只读聊天。 |
 | `zotero/runtime` | 本地服务、GeckoStorage、发行资产校验、生成图像加载、自有进程监督器 |
 

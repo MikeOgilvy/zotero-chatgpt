@@ -1,6 +1,6 @@
 # 开发、测试与发行
 
-当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a9**。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
+Zotero GPT Reader 当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a9**。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
 
 四份权威文档分别负责[产品行为](zotero-codex-user-flow.md)、[架构与数据契约](module-design.md)、本文的开发操作、[进度与验收结果](progress.md)。不要再复制旧阶段计划或把单元、宿主、模型、发行证据混写成一个 PASS。
 

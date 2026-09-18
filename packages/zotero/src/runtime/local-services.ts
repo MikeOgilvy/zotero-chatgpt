@@ -1,10 +1,10 @@
 import type { ReaderClient, StoragePort } from '../../../contracts/src/runtime.ts';
 import { WorkspaceStore } from '../../../core/src/workspace/store.ts';
-import { AgentTaskController } from '../../../core/src/tasks/controller.ts';
+import { ActionTaskController } from '../../../core/src/tasks/controller.ts';
 import { ReadingCoordinator } from '../../../core/src/context/coordinator.ts';
-import { createNativeAgentPort } from '../agent/native.ts';
-import type { NativeAgentHost } from '../agent/host.ts';
-import { createLibraryReferencePort } from '../reader/library.ts';
+import { createNativeActionPortFrom } from '../actions/native.ts';
+import type { NativeZoteroHost } from '../host/native.ts';
+import { createLibraryReferencePort } from '../library/reference.ts';
 import type { ReaderDocumentCache } from '../reader/document.ts';
 import { GeckoStorage, privateDirectory } from './storage.ts';
 import type { RuntimeHost } from './prepare.ts';
@@ -18,7 +18,7 @@ export function createLocalServices(host: RuntimeHost, zotero: unknown, namespac
   const clock = { uuid: () => host.uuid(), now: () => new Date().toISOString() };
   let storage: Promise<StoragePort> | undefined;
   let workspace: Promise<WorkspaceStore> | undefined;
-  let tasks: Promise<AgentTaskController> | undefined;
+  let tasks: Promise<ActionTaskController> | undefined;
   let stopped = false;
   let activeReader: { client: ReaderClient; coordinator: Promise<ReadingCoordinator> } | undefined;
   let offlineReader: Promise<ReadingCoordinator> | undefined;
@@ -28,7 +28,7 @@ export function createLocalServices(host: RuntimeHost, zotero: unknown, namespac
   };
   const library = createLibraryReferencePort(zotero, { clientId: namespace, documentCache, ...clock });
   const getWorkspace = () => workspace ??= records().then(storage => new WorkspaceStore(storage, clock, { clientId: namespace })).catch(error => { workspace = undefined; throw error; });
-  const getTasks = () => tasks ??= records().then(storage => new AgentTaskController(storage, createNativeAgentPort({ clientId: namespace, zotero: zotero as NativeAgentHost }), {
+  const getTasks = () => tasks ??= records().then(storage => new ActionTaskController(storage, createNativeActionPortFrom({ clientId: namespace, zotero: zotero as NativeZoteroHost }), {
     ...clock,
     key: () => (zotero as { Utilities: { generateObjectKey(): string } }).Utilities.generateObjectKey(),
   })).catch(error => { tasks = undefined; throw error; });
