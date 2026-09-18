@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method -- assertions inspect injected spies without invoking them. */
 import { expect, it, vi } from 'vitest';
-import { ConversationPresenter, type PresenterReading, type PresenterServices } from '../../../packages/zotero/src/chat/presenter.ts';
+import { ConversationPresenter, type PresenterAgent, type PresenterReading, type PresenterServices } from '../../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput } from '../../../packages/contracts/src/index.ts';
 import type { ReaderReference, ReaderSkill, ReaderWorkspace, PickedFile, SavedDraft, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
@@ -14,6 +14,11 @@ import { documentA } from '../../contracts/document-fixture.ts';
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 const reference: ReaderReference = { id: 'other-paper', kind: 'article', label: 'Paper B', paper: paperB, identity: { title: 'Paper B', authors: [] }, capturedAt: '2026-09-12T00:00:00Z' };
 const copy = <T>(value: T): T => structuredClone(value);
+/** Assemble only the Agent halves a test needs, the way the composition root supplies both. */
+const agentPort = (overrides: Partial<PresenterAgent>): PresenterAgent => ({
+  tasks: overrides.tasks ?? (() => Promise.reject(new Error('This fixture assembled no task port.'))),
+  reading: overrides.reading ?? (() => Promise.reject(new Error('This fixture assembled no reading port.'))),
+});
 function fixture(options: { offline?: boolean; document?: boolean; searchTimeoutMs?: number } = {}) {
   let conversation: Conversation = { id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', paper: paperA, title: 'Paper A', settings, messages: [], activeRequestId: null, lastSeq: 0, createdAt: '2026-09-12T00:00:00Z', updatedAt: '2026-09-12T00:00:00Z' };
   const conversations = new Map([[conversation.id, conversation]]);
@@ -258,7 +263,7 @@ function unknownBudget(): ReturnType<NonNullable<PresenterServices['contextBudge
 it('routes long-source sends and explicit queues through the shared reading coordinator', async () => {
   const f = fixture({ document: true }); const r = readingPort(f.conversation().id);
   const long = { ...copy(documentA), pages: documentA.pages.map(page => ({ ...page, text: 'A source paragraph.\n\n'.repeat(200) })) };
-  f.services.document!.prepare = () => Promise.resolve(long); f.services.contextBudget = smallBudget; f.services.getReading = () => Promise.resolve(r.reading);
+  f.services.document!.prepare = () => Promise.resolve(long); f.services.contextBudget = smallBudget; f.services.agent = agentPort({ reading: () => Promise.resolve(r.reading) });
   await f.presenter.activate(); f.presenter.setQuestion('Summarize all pages'); await f.presenter.send();
   expect(r.reading.start).toHaveBeenCalledWith(expect.objectContaining({ document: long }), expect.objectContaining({ mode: 'multi-pass' })); expect(f.sent).toHaveLength(0);
   expect(f.presenter.snapshot().contextReport?.mode).toBe('multi-pass');
@@ -304,14 +309,14 @@ it('reports the planner\'s excluded-page explanation, not a generic sentence, fo
 });
 
 it('loads persisted reading jobs without a runtime connection', async () => {
-  const f = fixture({ offline: true }); const r = readingPort(f.conversation().id);
+  const f = fixture({ offline: true }); const r = readingPort(f.conversation().id); const t = taskPort(f.conversation().id);
   r.jobs.push({ schemaVersion: 1, id: 'saved-job', conversationId: f.conversation().id, inputHash: 'hash', revision: 1, status: 'uncertain', steps: [], createdAt: 'now', updatedAt: 'now', cancelRequested: false });
-  f.services.getReading = vi.fn(() => Promise.resolve(r.reading)); await f.presenter.activate();
-  expect(f.services.getReading).toHaveBeenCalledWith(undefined); expect(f.presenter.snapshot().readingJobs).toEqual(r.jobs); f.presenter.dispose();
+  const reading = vi.fn(() => Promise.resolve(r.reading)); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port), reading }); await f.presenter.activate();
+  expect(reading).toHaveBeenCalledWith(undefined); expect(f.presenter.snapshot().readingJobs).toEqual(r.jobs); f.presenter.dispose();
 });
 
 it('turns an acquire workflow into a scoped native preview without sending a model request', async () => {
-  const f = fixture(); const t = taskPort(f.conversation().id); f.services.getTasks = () => Promise.resolve(t.port);
+  const f = fixture(); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'acquire', name: 'Acquire', workflow: 'acquire' });
   const target = { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' };
   f.services.library!.collections = () => Promise.resolve([{ ...target, name: 'Research' }]);
@@ -322,7 +327,7 @@ it('turns an acquire workflow into a scoped native preview without sending a mod
 });
 
 it('plans completed annotation JSON once against the frozen PDF version without approving writes', async () => {
-  const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.getTasks = () => Promise.resolve(t.port);
+  const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', name: 'Annotate', workflow: 'annotate' });
   await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark the definition'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Central definition' }] });
@@ -334,11 +339,30 @@ it('plans completed annotation JSON once against the frozen PDF version without 
 });
 
 it('refuses chat deletion while native work remains without cancelling or undoing it', async () => {
-  const f = fixture(); const t = taskPort(f.conversation().id); f.services.getTasks = () => Promise.resolve(t.port);
+  const f = fixture(); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   await t.port.planAcquisition({ conversationId: f.conversation().id, target: { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' }, question: 'Get paper', identifiers: ['10.1234/example'] });
   f.client.deleteConversation = vi.fn(f.client.deleteConversation); await f.presenter.activate(); await f.presenter.deleteConversation(f.conversation().id);
   expect(f.client.deleteConversation).not.toHaveBeenCalled(); expect(f.presenter.snapshot().message).toMatch(/unfinished native tasks/iu);
   expect(t.port.cancel).not.toHaveBeenCalled(); expect(t.port.undo).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('refuses chat deletion while a reading job is still unfinished', async () => {
+  // Conversation ids are shared by tasks and reading jobs (R7): deleting the chat would orphan a
+  // reading job that still owns writes, so the same refusal must cover the reading side too.
+  const f = fixture(); const r = readingPort(f.conversation().id); const t = taskPort(f.conversation().id);
+  r.jobs.push({ schemaVersion: 1, id: 'running-job', conversationId: f.conversation().id, inputHash: 'hash', revision: 1, status: 'running', steps: [], createdAt: 'now', updatedAt: 'now', cancelRequested: false });
+  f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port), reading: () => Promise.resolve(r.reading) });
+  f.client.deleteConversation = vi.fn(f.client.deleteConversation); await f.presenter.activate(); await f.presenter.deleteConversation(f.conversation().id);
+  expect(f.client.deleteConversation).not.toHaveBeenCalled(); expect(f.presenter.snapshot().message).toMatch(/unfinished reading/iu);
+  expect(r.reading.cancel).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('serves an ordinary chat request with no Agent capability assembled at all', async () => {
+  // Invariant 4: a Chat-only build never reaches task orchestration. Sending still works, and no
+  // task or reading state is constructed, because the capability is simply absent.
+  const f = fixture(); await f.presenter.activate(); f.presenter.setQuestion('What does this paper claim?'); await f.presenter.send();
+  expect(f.sent).toHaveLength(1); expect(f.presenter.snapshot().tasks).toEqual([]); expect(f.presenter.snapshot().readingJobs).toEqual([]);
+  f.presenter.dispose();
 });
 
 it('carries the stored Codex instructions into the outgoing request for an ordinary question', async () => {
@@ -382,7 +406,7 @@ it('projects runtime usage and generated images without treating cumulative usag
 });
 
 it('keeps a background annotation completion owned by its original chat after New chat', async () => {
-  const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.getTasks = () => Promise.resolve(t.port);
+  const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', workflow: 'annotate' });
   await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId;   await f.presenter.newConversation();
@@ -396,7 +420,7 @@ it('keeps a background annotation completion owned by its original chat after Ne
 });
 
 it('recovers completed annotation output after a restart gap without re-planning an existing task', async () => {
-  const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.getTasks = () => Promise.resolve(t.port);
+  const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', workflow: 'annotate' });
   await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] });

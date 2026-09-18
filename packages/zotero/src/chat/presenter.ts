@@ -2,7 +2,7 @@ import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runti
 import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { parseAnnotationCandidates, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
+import { citationFromAnnotation, parseAnnotationCandidates, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
@@ -16,9 +16,20 @@ import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
 const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available; global preferences apply.';
 export type PresenterReading = Pick<ReadingCoordinator, 'start' | 'enqueue' | 'list' | 'get' | 'subscribe' | 'cancel' | 'reconcile'>;
+/**
+ * The Agent Mode capability: durable native task orchestration plus multi-pass reading. The
+ * composition root assembles this once and injects it. A Chat-only/reader-only host leaves it
+ * absent, and then nothing in the chat path can reach approvals, the write-intent ledger,
+ * reconciliation or undo. Its absence is the design (invariant 4), not a legacy compatibility gap:
+ * one interface makes the boundary visible where two loose optional members did not.
+ */
+export interface PresenterAgent {
+  tasks(): Promise<ActionTasks>;
+  reading(client?: ReaderClient): Promise<PresenterReading>;
+}
 export interface PresenterServices {
   ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
-  getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; getTasks?(): Promise<ActionTasks>; getReading?(client?: ReaderClient): Promise<PresenterReading>;
+  getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
   contextBudget?(input: SendInput, conversation: Conversation): ContextBudget;
@@ -485,8 +496,8 @@ export class ConversationPresenter {
   }
   private getTasks(): Promise<ActionTasks> {
     if (this.taskPort) return Promise.resolve(this.taskPort);
-    if (!this.services.getTasks) return Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Native task review is unavailable.'));
-    if (!this.taskFlight) this.taskFlight = this.services.getTasks().then(tasks => { this.taskPort = tasks; this.untasks = tasks.subscribe(task => this.acceptTask(task)); return tasks; }).catch(error => { this.taskFlight = null; throw error; });
+    if (!this.services.agent) return Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Native task review is unavailable.'));
+    if (!this.taskFlight) this.taskFlight = this.services.agent.tasks().then(tasks => { this.taskPort = tasks; this.untasks = tasks.subscribe(task => this.acceptTask(task)); return tasks; }).catch(error => { this.taskFlight = null; throw error; });
     return this.taskFlight;
   }
   private acceptTask(task: ActionTaskRecord): void {
@@ -496,8 +507,8 @@ export class ConversationPresenter {
   }
   private async getReading(client?: ReaderClient): Promise<PresenterReading> {
     if (this.readingPort && this.readingClient === (client ?? null)) return this.readingPort;
-    if (!this.services.getReading) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Multi-pass reading is unavailable in this runtime. Nothing was sent.');
-    const reading = await this.services.getReading(client); this.unreading?.(); this.readingPort = reading; this.readingClient = client ?? null;
+    if (!this.services.agent) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Multi-pass reading is unavailable in this runtime. Nothing was sent.');
+    const reading = await this.services.agent.reading(client); this.unreading?.(); this.readingPort = reading; this.readingClient = client ?? null;
     this.unreading = reading.subscribe(job => this.acceptReading(job)); return reading;
   }
   private acceptReading(job: ReadingJob): void {
@@ -507,8 +518,8 @@ export class ConversationPresenter {
   }
   private async refreshTaskState(): Promise<void> {
     const id = this.state.conversation?.id; if (!id) return;
-    if (this.services.getTasks) { const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks }); }
-    if (this.services.getReading) { const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs }); }
+    if (this.services.agent) { const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks }); }
+    if (this.services.agent) { const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs }); }
   }
   async approveTask(id: string, selected: string[], choices: ActionTaskChoices = {}): Promise<void> { this.acceptTask(await (await this.getTasks()).approve(id, [...selected], clone(choices))); }
   async cancelTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).cancel(id)); }
@@ -517,7 +528,7 @@ export class ConversationPresenter {
   private async planReturnedAnnotations(requestId: string, conversation = this.state.conversation): Promise<void> {
     if (!conversation || paperId(conversation.paper) !== paperId(this.paper)) return;
     const key = `${conversation.id}:${requestId}`;
-    if (!this.services.getTasks || this.planningAnnotations.has(key)) return;
+    if (!this.services.agent || this.planningAnnotations.has(key)) return;
     const user = conversation.messages.find(message => message.requestId === requestId && message.role === 'user');
     if (user?.workflow?.skill?.workflow !== 'annotate' || user.batch?.phase === 'map') return;
     const answer = conversation.messages.filter(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed' && message.phase !== 'commentary').at(-1);
@@ -533,7 +544,7 @@ export class ConversationPresenter {
     } finally { this.planningAnnotations.delete(key); }
   }
   private async recoverAnnotationPlans(conversation: Conversation): Promise<void> {
-    if (!this.services.getTasks || !this.client || this.disposed) return;
+    if (!this.services.agent || !this.client || this.disposed) return;
     const requests = new Set(conversation.messages.filter(message => message.role === 'user' && message.workflow?.skill?.workflow === 'annotate' && message.batch?.phase !== 'map').map(message => message.requestId));
     for (const requestId of requests) {
       if (conversation.activeRequestId === requestId || !conversation.messages.some(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed')) continue;
@@ -550,8 +561,13 @@ export class ConversationPresenter {
     if (!this.services.openCitation) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native source navigation is unavailable.');
     const task = await (await this.getTasks()).get(id); const item = task.items.find(item => item.id === itemId);
     if (task.kind !== 'annotations' || item?.kind !== 'annotation' || item.resolution?.status !== 'resolved') throw new ReaderError('NOT_FOUND', 'This candidate has no resolved source.');
-    const source = item.resolution.candidate; const position = source.position;
-    await this.services.openCitation({ id: this.services.uuid(), paper: clone(task.paper), title: paperId(task.paper) === paperId(this.paper) ? this.identity.title : task.paper.attachmentKey, authors: [], text: source.text, pageLabel: source.pageLabel, positions: [{ pageIndex: position.pageIndex, rects: clone(position.rects) }], capturedAt: this.services.now(), contextScope: 'selection', documentRevision: clone(task.documentRevision) });
+    await this.services.openCitation(citationFromAnnotation({
+      paper: task.paper,
+      documentRevision: task.documentRevision,
+      candidate: item.resolution.candidate,
+      title: paperId(task.paper) === paperId(this.paper) ? this.identity.title : task.paper.attachmentKey,
+      clock: { uuid: () => this.services.uuid(), now: () => this.services.now() },
+    }));
   }
   async openTaskOutput(id: string, itemId: string): Promise<void> {
     const task = await (await this.getTasks()).get(id); const item = task.items.find(item => item.id === itemId);
@@ -869,7 +885,7 @@ export class ConversationPresenter {
       if (event.type === 'completed') void this.planStoredCompletion(event.requestId, conversation).catch(error => this.reportError(this.errorText(error)));
       return;
     }
-    if (event.type !== 'completed' || !this.services.getTasks) return;
+    if (event.type !== 'completed' || !this.services.agent) return;
     const known = this.state.conversations.some(conversation => conversation.id === event.conversationId) || this.drafts.has(event.conversationId);
     if (!known) return;
     void this.client?.get(event.conversationId).then(conversation => {
@@ -1256,11 +1272,11 @@ export class ConversationPresenter {
       const client = await this.connect();
       const target = this.state.conversation?.id === id ? this.state.conversation : this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(id) : await client.get(id);
       if (target.id !== id) throw new ReaderError('NOT_FOUND', 'The selected chat could not be located.');
-      if (this.services.getTasks) {
+      if (this.services.agent) {
         const tasks = await (await this.getTasks()).list(id);
         if (tasks.some(task => ['preparing', 'review', 'running', 'uncertain'].includes(task.state) || task.items.some(item => ['writing', 'undoing', 'uncertain'].includes(item.status)))) throw new ReaderError('BUSY', 'Cancel or reconcile this chat’s unfinished native tasks before deleting it. Existing native outputs will not be undone.');
       }
-      if (this.services.getReading && (await (await this.getReading(client)).list(id)).some(unfinishedReading)) throw new ReaderError('BUSY', 'Cancel or reconcile this chat’s unfinished reading task before deleting it.');
+      if (this.services.agent && (await (await this.getReading(client)).list(id)).some(unfinishedReading)) throw new ReaderError('BUSY', 'Cancel or reconcile this chat’s unfinished reading task before deleting it.');
       this.stageDraft(); await this.flushDraft();
       const conversation = await client.deleteConversation(target.paper, id);
       this.drafts.delete(id); this.positions.delete(id); this.pendingSaves.delete(id);

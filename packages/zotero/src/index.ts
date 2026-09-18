@@ -1,5 +1,5 @@
 import { mountChatView, renderReaderShell } from './chat/view.ts';
-import { ConversationPresenter } from './chat/presenter.ts';
+import { ConversationPresenter, type PresenterAgent } from './chat/presenter.ts';
 import { createRuntimeSupervisor } from './runtime/supervisor.ts';
 import { createLocalServices } from './runtime/local-services.ts';
 import { geckoHost } from './runtime/gecko.ts';
@@ -49,6 +49,14 @@ function clientId(): string {
   if (typeof existing === 'string' && UUID.test(existing)) return existing;
   const fresh = crypto.randomUUID(); Zotero.Prefs.set(CLIENT_ID_PREF, fresh, true); return fresh;
 }
+/**
+ * The one place the Agent capability is assembled. Task orchestration and multi-pass reading always
+ * arrive together from the local services; grouping them here is what keeps the chat path from
+ * reaching either of them except through this injected interface.
+ */
+function assembleAgent(services: ReturnType<typeof createLocalServices>): PresenterAgent {
+  return { tasks: () => services.getTasks(), reading: client => services.getReading(client) };
+}
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
   const client = clientId();
   const paper = paperScope(client, identity); const key = paperId(paper);
@@ -60,16 +68,18 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
     const source = nativeDocumentSource(Zotero, () => Zotero.Reader._readers.find(r => {
       const item = Zotero.Items.get(r.itemID); return item?.key === paper.attachmentKey && item.libraryID === paper.libraryId;
     }), paper);
+    const local = localServices;
     presenter = new ConversationPresenter(context, {
       ensureStarted: () => runtime ? runtime.ensureStarted() : Promise.reject(new Error('Plugin stopped.')),
       openAuthorization: url => Zotero.launchURL(url),
       uuid: () => crypto.randomUUID(),
       now: () => new Date().toISOString(),
-      ...(localServices ? {
-        getWorkspace: localServices.getWorkspace,
-        getTasks: localServices.getTasks,
-        getReading: localServices.getReading,
-        library: localServices.library,
+      ...(local ? {
+        getWorkspace: local.getWorkspace,
+        // The Agent capability is assembled here, once, from the local services; a host without it
+        // leaves the chat path unable to reach approvals, the ledger or undo (Stage 4).
+        agent: assembleAgent(local),
+        library: local.library,
         openCitation: citation => openCitation(Zotero, citation, clientId()),
         openItem: async (reference: import('../../contracts/src/native.ts').NativeItemRef) => {
           if (reference.clientId !== clientId()) throw new ReaderError('NOT_FOUND', 'The output belongs to another profile.');
@@ -79,7 +89,7 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
           await win.ZoteroPane.selectItem(item.id);
         },
         openHistory: async (scope: PaperScope, conversationId: string) => {
-          await localServices?.library.open(scope);
+          await local.library.open(scope);
           const target = Zotero.Reader._readers.find(reader => { const item = Zotero.Items.get(reader.itemID); return item?.key === scope.attachmentKey && item.libraryID === scope.libraryId; });
           const identity = target && attachmentIdentity(Zotero, target);
           if (!target || !identity) throw new ReaderError('NOT_FOUND', 'The saved chat attachment could not be opened.');
