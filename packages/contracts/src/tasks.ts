@@ -1,5 +1,6 @@
-import { ReaderError, type DocumentRevision, type PaperScope } from './index.ts';
-import type { NativeAcquisitionResult, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeQuoteResolution } from './native.ts';
+import { ReaderError, type Citation, type DocumentRevision, type PaperScope } from './index.ts';
+import { validateCitation } from './validation.ts';
+import type { NativeAcquisitionResult, NativeAnnotationCandidate, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeQuoteResolution } from './native.ts';
 
 export interface AnnotationProposal { quote: string; pageIndex: number; reason: string }
 /**
@@ -24,6 +25,32 @@ export function parseAnnotationCandidates(value: string): AnnotationProposal[] {
   let parsed: unknown; try { parsed = JSON.parse(value) as unknown; } catch { invalid(); }
   const result = record(parsed, ['candidates']); if (!Array.isArray(result.candidates) || result.candidates.length > 50) invalid();
   return result.candidates.map(validateAnnotationProposal);
+}
+/**
+ * The one domain constructor for a Citation built from a task-resolved annotation candidate. The
+ * task controller resolved and froze the quote against a PDF version; a view must not re-derive the
+ * page, rect or revision rules on its own (R4). It lives next to `parseAnnotationCandidates`, not in
+ * `core/tasks`, so the chat path can call it without importing Agent orchestration.
+ */
+export function citationFromAnnotation(input: {
+  paper: PaperScope;
+  documentRevision: DocumentRevision;
+  candidate: NativeAnnotationCandidate;
+  title: string;
+  clock: { uuid(): string; now(): string };
+}): Citation {
+  return validateCitation({
+    id: input.clock.uuid(),
+    paper: input.paper,
+    title: input.title,
+    authors: [],
+    text: input.candidate.text,
+    pageLabel: input.candidate.pageLabel,
+    positions: [{ pageIndex: input.candidate.position.pageIndex, rects: input.candidate.position.rects }],
+    capturedAt: input.clock.now(),
+    contextScope: 'selection',
+    documentRevision: input.documentRevision,
+  });
 }
 /**
  * State of one durable native action task. The task controller owns the transition; a view only
