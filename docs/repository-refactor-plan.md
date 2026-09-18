@@ -3,7 +3,7 @@
 本文件是 **勘察与迁移计划**，不是重构本身。它把仓库当前真实状态（code / unit test / 真实宿主 / 真实模型 / 发行物五级证据分开标注）与目标架构对照，给出可逐步执行、每步都能验证的迁移路线。
 
 - 目标架构以 [模块设计](module-design.md) 与 [产品规格](zotero-chatgpt-user-flow.md) 为准；当前进度与证据边界见 [进度](progress.md)。
-- 本计划遵守 [AGENTS.md](../AGENTS.md)：不改代码、不 push、不安装、不启动 Zotero、不接触真实 profile / library / 认证文件、不读认证文件。以上描述的是 Stage 0 的只读勘察；Stage 1 的代码改动由 owner 于 2026-09-18 单独授权，范围与约束见 §I 与 §L。
+- 本计划遵守 [AGENTS.md](../AGENTS.md)：不改代码、不 push、不安装、不启动 Zotero、不接触真实 profile / library / 认证文件、不读认证文件。以上描述的是 Stage 0 的只读勘察；Stage 1 的代码改动由 owner 于 2026-09-18 单独授权，Stage 2/Stage 3 同样由 owner 于 2026-09-18 授权实施（范围与约束见 §I 与 §L）。
 - 本文件最初作为 Stage 0 唯一新增的文档；Stage 1 起按 §I / §L 落地实现。
 
 ---
@@ -379,7 +379,7 @@ Agent Mode:
 | `zotero/bootstrap.js` | XPI 入口 shim | 不变 | KEEP | 外部宿主要求 |
 | `zotero/src/reader/document.ts` | PDF 抽取 + 缓存 | 不变 | KEEP | 不要提前抽象 |
 | `zotero/src/reader/{dock,layout,reader-pane,selection,selection-actions,source-highlight,toolbar,locate,host-types}.ts` | Reader 集成 | 归入显式的 reader context 层，`locate.ts` 保持纯函数 | KEEP BUT MOVE | 只做归属声明，不合并文件 |
-| `zotero/src/reader/context.ts` | — | **新增**：`ReaderContext` 聚合（身份+版本+选区+范围+布局） | REPLACE（替代分散字段） | Stage 2 的核心产出 |
+| `zotero/src/reader/context.ts` | — | **新增**：`ReaderContext` 聚合（身份+版本+选区+范围+布局） | REPLACE（替代分散字段） | Stage 2 的核心产出（已实施 2026-09-18，`2d83c26`；实时布局锚点未并入，见 §I Stage 2 实施记录） |
 | `zotero/src/library/native-read.ts`、`native-support.ts` | Zotero 只读访问 | 不变 | KEEP | 已是读侧边界 |
 | `zotero/src/library/reference.ts` | 搜索/读 PDF/打开条目 **+ 选文件/截图/导出** | 保留读逻辑；IO 动作移到 `zotero/src/actions/files.ts` | SPLIT | 需先抽接口（`LibraryReferencePort` 已存在） |
 | `zotero/src/actions/native.ts` | Zotero 写入 | 不变，成为动作边界 | KEEP | **后期前不要动** |
@@ -387,7 +387,7 @@ Agent Mode:
 | `zotero/src/runtime/*` | 进程/存储/准备/监督 | 不变 | KEEP | 高风险区，后置 |
 | `zotero/src/chat/presenter.ts`（1352） | 会话+草稿+预算+规划+任务+导航 | 拆 `draft-store.ts`、`request-pipeline.ts`、`capabilities.ts` | SPLIT | **必须先抽接口**；移除 `core/tasks` 静态 import |
 | `zotero/src/chat/view.ts`（1659） | 侧栏 DOM | 拆 `model-picker`、`context-report-view`、`composer` | SPLIT | 只搬，不改渲染细节 |
-| `zotero/src/chat/{draft,task-view,workspace-view,context-view,source-links,render-answer,command-menu,generation-settings,message-time,pick-images,text-scale,ui-locale}.ts` | 侧栏子模块 | 不变（`generation-settings` 的策略下沉 core） | KEEP | 策略下沉属 Stage 3 |
+| `zotero/src/chat/{draft,task-view,workspace-view,context-view,source-links,render-answer,command-menu,generation-settings,message-time,pick-images,text-scale,ui-locale}.ts` | 侧栏子模块 | 不变（`generation-settings` 的策略下沉 core） | KEEP | 策略下沉属 Stage 3（已实施 2026-09-18，`0913d49`：`offeredModelIds`/`unofferableAllowedModelIds` 归 `core/workspace/allowed-models.ts`） |
 | `zotero/src/preferences/*` + `preferences.xhtml` | 偏好设置 UI/桥 | 不变；`pane.ts` 的 allowlist 逻辑改为调用 core | KEEP | 已隔离 |
 | `runtime/*` | 发行身份 | 不变 | KEEP | 禁止改 |
 | `tests/build/dependency-boundaries.test.ts` | 分层门禁 | 增加 Chat/Agent 边界断言 | REFACTOR | Stage 1 起持续扩展 |
@@ -411,11 +411,11 @@ Agent Mode:
 
 | 风险 | 证据 | 失败模式 | 安全拆除顺序 |
 | --- | --- | --- | --- |
-| R1 `chat` → `core/tasks` 静态 import | `code: presenter.ts:13` | 拆分 presenter 时 Agent 依赖被带进 Chat；Chat 模式无法脱离 action 基础设施 | ① 先把 `parseAnnotationCandidates` 从 `core/src/tasks/controller.ts` 纯搬迁到 `packages/contracts`（D1，Stage 1 完成）；② 加 boundary 断言「chat 不得 import core/tasks」，搬迁后即为绿，不引入故意失败的测试；③ 后续再让 `getTasks` 成为唯一入口（Stage 4） |
+| R1 `chat` → `core/tasks` 静态 import | `code: presenter.ts:13` | 拆分 presenter 时 Agent 依赖被带进 Chat；Chat 模式无法脱离 action 基础设施 | ① 先把 `parseAnnotationCandidates` 从 `core/src/tasks/controller.ts` 纯搬迁到 `packages/contracts`（D1，Stage 1 完成）；② 加 boundary 断言「chat 不得 import core/tasks」，搬迁后即为绿，不引入故意失败的测试；③ 后续再让 `getTasks` 成为唯一入口（Stage 4）。**Stage 3（2026-09-18，`cad7eea`）核对**：`getTasks`/`getReading` 已是 Chat 路径唯一 Agent 触达点，未发现新边；端口化的正式化（组合根显式装配）仍属 Stage 4 |
 | R2 组合根模块级可变 Map | `code: index.ts:43-44` | 并行 view/presenter 竞争；测试间串味；局部重构就可能引发跨 tab 状态泄漏 | ① 把 `presenters`/`readers`/`windows`/`citationVersions` 收进一个显式 `PluginRuntime` 对象；② 只在 `startup/shutdown` 创建/销毁；③ 加生命周期单测 |
 | R3 conversation 双写者 | `code: sessions/store.ts:280-296`；`core/workspace/store.ts` | 偏好设置删除与侧栏保存并发 → 索引与文件不一致（历史上出现过 "Unknown conversation"） | ① 把删除收敛到 `sessions/store.ts`；② `HistoryManager` 退化为只读查询；③ 用现有 `unit test` 回归 |
 | R4 presenter 直接做域逻辑（`openTaskSource` 手搓 `Citation`） | `code: presenter.ts:551-557` | UI 层复制领域构造规则，`Citation` 校验/页映射会漂移 | ① 在 core 提供 `citationFromAnnotation`；② presenter 只调用 |
-| R5 `estimateBudget` 与 `buildContextBudget` 双实现 | `code: presenter.ts:1032-1046`；`core/codex/model-capabilities.ts:104` | 预算口径分叉，覆盖率说明与真实发送不一致 | ① 让组合根注入 `contextBudget`；② 删 presenter 副本；③ 用 planner 单测锁定 |
+| R5 `estimateBudget` 与 `buildContextBudget` 双实现 | `code: presenter.ts:1032-1046`；`core/codex/model-capabilities.ts:104` | 预算口径分叉，覆盖率说明与真实发送不一致 | ① 让组合根注入 `contextBudget`；② 删 presenter 副本；③ 用 planner 单测锁定。**已修复（2026-09-18，commit `3be663d`）**：presenter 侧副本整体迁入 `core/src/codex/model-capabilities.ts` 的 `estimateRequestBudget()`，presenter 只保留一行委托；`PresenterServices.contextBudget?` 仍是宿主覆盖点；单测锁定单一来源（core 与 presenter 两侧） |
 | R6 请求 hash 与持久化记录耦合 | `code: core/sessions/service.ts` 的 `hashInput`/`reconstructInput` | 加 `mode` 后若不同时支持 v2 重建，旧记录会被判 `uncertain` 或错认 | ① 先只读地枚举 hashVersion 分支；② 加 v2→v3 重建测试；③ 再落 `mode` |
 | R7 会话 id 跨系统复用 | `code: core/tasks/controller.ts`、`core/context/coordinator.ts` 的 `conversationId` | 删除/归档会话时 task/reading job 变孤儿 | ① 在删除路径显式检查未完成任务（已有 `unfinishedWork` 语义，`core/workspace/history.ts:136-139`）；② 加断言测试 |
 | R8 测试与实现细节绑定 | 测试专用 presenter 方法 `presenter.ts:418-455`；`ChatViewHooks.readTextScale` 仅测试注入 | 想删死代码时先破坏测试，导致不敢删 | ① 先补行为级测试；② 再删测试专用包装；③ 最后删死代码 |
@@ -436,7 +436,7 @@ Agent Mode:
 - 回滚/风险：无。
 - 宿主证据：不需要。
 
-### Stage 1 — 契约与模式冻结（contracts）
+### Stage 1 — 契约与模式冻结（contracts）（2026-09-18 已实施，代码 + 单元测试）
 
 - 目标：为 Chat/Agent 建立显式、可冻结、可单测的请求模式契约；不产生任何行为变化。
 - owner 决策（2026-09-18，覆盖本文件旧表述）：
@@ -455,22 +455,38 @@ Agent Mode:
 - 退出门禁：`npm run typecheck`、`npm run lint`、`npm run test:unit`；新增 hash v2→v3 重建测试与 `mode` 校验测试通过。
 - 回滚/风险：hash 变更不可逆地影响记录判读 → 必须先有 v2 重建测试（R6）。
 - 宿主证据：不需要。
+- 实施记录（2026-09-18，commits `aa7446a`、`27ec1ef`、`7a58d12`、`25a7e76`，本地未 push）：见 [progress.md](progress.md) 的「Stage 1」小节；门禁 79 files / 1079 passed / 0 skipped。**真实宿主与真实模型 NOT RUN**。
 
-### Stage 2 — 共享文档上下文（ReaderContext）
+### Stage 2 — 共享文档上下文（ReaderContext）（2026-09-18 已实施，代码 + 单元测试）
 
 - 目标：为「当前 PDF」建立单一属主，Chat/Agent 都从它读。
 - 具体动作：新增 `zotero/src/reader/context.ts` 聚合身份/冻结版本/选区/页范围/布局；presenter 的 `document.*` 字段改为读该对象；给 `ReaderContext` 加只读契约。
 - 退出门禁：typecheck/lint/test:unit；`tests/zotero/reader/*` 全绿；dependency-boundaries 全绿。
 - 回滚/风险：presenter 是最大改动点 → 先加 `presenter.test.ts` 覆盖再改。
 - 宿主证据：建议（非必须）用 `.zotero-chatgpt-dev/` + 合成 PDF 验证选区/页范围；本任务不执行。
+- **实施记录（2026-09-18，commit `2d83c26`，证据层级：代码 + 单元测试）**：
+  - 属主落在 `packages/zotero/src/reader/context.ts`（D5：仅在适配层聚合，**未**向 `packages/contracts` 新增「当前文档」契约，避免与既有 `PaperScope`/`DocumentContext` 形成平行契约，见附录 1 #1 已决）。
+  - 实际聚合口径与计划措辞略有出入，按事实记录：`prepared: DocumentContext | null` 承载冻结文件版本（`prepared.revision`，由 `readerRevision()` 读取）；**实时布局锚点（当前页 / 滚动 / zoom / dock 宽度）未进入聚合**，仍归 `reader/reader-pane.ts` + `chat/layout.ts` 的每视图 DOM 状态所有，需要时经 `capturePosition` 捕获（理由是复制它会制造第二属主）。聚合内的 `range` 是侧栏**请求**的页范围，不是 PDF 当前页的镜像。
+  - 迁移的分散消费方：`chat/presenter.ts`（`PresenterState.document` 直接持有该上下文；构造签名改为 `(context, services)`）、`reader/reader-pane.ts`（删除自带的 `attachmentIdentity`）、`chat/view.ts`（删除自带的 `AttachmentIdentity`，改为再导出）、`index.ts`（组合根，用 `readerContextFor` + `nativeDocumentServices` 装配）。唯一构造点即 `index.ts`，测试夹具为 `tests/zotero/presenter-context.ts`，**无第二属主**。
+  - 保持不动：`reader/document.ts` 的抽取与 revision/hash、`reader/locate.ts` 纯函数模块、reader 渲染行为。
+  - 门禁结果：typecheck PASS；lint PASS；test:unit **79 files / 1079 passed / 0 skipped**（计数不变，仅改写既有测试的构造调用）；dependency-boundaries 全绿。
+  - **真实宿主 NOT RUN**（未执行 `tests/host/**`，未在真实 Zotero 上观察缩放/IME/焦点/滚动锚点/选区捕获）。
 
-### Stage 3 — Chat runtime 显式化
+### Stage 3 — Chat runtime 显式化（2026-09-18 已实施，代码 + 单元测试）
 
 - 目标：Chat 路径不再触达 Agent 基础设施。
 - 具体动作：把 presenter 的 chat-only 流程抽成 `request-pipeline.ts`；`generation-settings` 的策略下沉 core；启用 Stage 1 的新边界断言。
 - 退出门禁：Stage 1 的失败断言转为通过；typecheck/lint/test:unit。
 - 回滚/风险：若断言无法通过，保留临时 adapter 并在文档标记 temporary compatibility，不得让树不可构建。
 - 宿主证据：需要（Chat 只读行为）；本任务不执行。
+- **实施记录（2026-09-18，commits `3be663d`、`0913d49`、`cad7eea`，证据层级：代码 + 单元测试）**：
+  - Agent 入口：`PresenterServices.getTasks` / `getReading` 确认是 Chat 路径唯一可达 Agent 能力的入口（采集分支只在 `frozenMode()` 判为 `'agent'` 时进入）；Stage 1 的静态断言继续守住 `chat` ↛ `core/tasks`、`chat` ↛ `zotero/actions`，本阶段未发现新的 Chat→Agent 边。
+  - **R5（上下文预算重复）修复（`3be663d`）**：presenter 侧的生产兜底估算整体迁入 `core/src/codex/model-capabilities.ts` 的 `estimateRequestBudget()`（与 `buildContextBudget` 同处），presenter 只保留一行委托；注入端口 `PresenterServices.contextBudget?` 仍是宿主覆盖点。单测锁定单一来源：`tests/core/model-capabilities.test.ts`（每份不同文档只计一次 / 图片增量 / workflow 预留 / 未知窗口的诚实结论）与 `tests/zotero/chat/presenter.test.ts`（真实 send 的 `contextReport` 等于对同一请求调用 core）。未新增抽象层。
+  - **模型目录/白名单策略下沉（`0913d49`）**：`core/src/workspace/allowed-models.ts` 新增 `offeredModelIds()`（可 offer 集合 + newest-first 排序 + 「列表全失效时退回家族规则」兜底）与 `unofferableAllowedModelIds()`（保存时保留、但不渲染的已存 id）；`chat/generation-settings.ts` 与 `preferences/pane.ts` 改为只消费 core 决策。UI 显示内容不变（既有渲染测试未修改即通过）。
+  - **边界断言加强（`cad7eea`）**：新增「`zotero/src/reader/**` 不得 import `zotero/src/chat/**`」（该边在 Stage 2 前会失败，因为 `reader-pane.ts` 曾从 `chat/view.ts` 取类型）；`library/reference.ts -> chat/pick-images.ts` 的残留现实记录在案，留待 Stage 5 文件动作搬迁，未加白名单掩盖。该文件现为 9 条断言。
+  - **与计划原文的偏离（显式记录）**：计划建议的「把 presenter 的 chat-only 流程抽成 `request-pipeline.ts`」**未实施**——那是 Stage 4/5 的适配层拆分，会与 Agent 端口化同时改动同一大文件，属计划自己禁止的跨阶段大爆炸移动；本阶段验收（只读 + 端口唯一 + 策略单一属主）不依赖它。
+  - 门禁结果：typecheck PASS；lint PASS；test:unit **79 files / 1085 passed / 0 skipped**（较 Stage 1 的 1079 为 +6：`model-capabilities` +2、`presenter` +1、`allowed-models` +3）。
+  - **真实宿主 NOT RUN**（Chat「结构性只读」未在真实 Zotero/真实库中观察，仅为结构结论）；**真实模型 NOT RUN**。
 
 ### Stage 4 — Agent capability 端口化
 
@@ -594,7 +610,7 @@ Agent Mode:
 
 ## 附录 1：需要人工判断（Needs Human Judgment）
 
-1. **「当前 PDF」是否需要一个新契约类型**（例如 `CurrentDocument` / `ReaderContext` 是否进 `contracts`，还是只存在于 `zotero` 适配层）。代码里 `PaperScope`（身份）与 `DocumentContext`（抽取文本）已存在，新增类型有重复风险，需 owner 决定。
+1. **「当前 PDF」是否需要一个新契约类型**（例如 `CurrentDocument` / `ReaderContext` 是否进 `contracts`，还是只存在于 `zotero` 适配层）。代码里 `PaperScope`（身份）与 `DocumentContext`（抽取文本）已存在，新增类型有重复风险，需 owner 决定。 — **已决（2026-09-18，Stage 2 落地，commit `2d83c26`）**：`ReaderContext` 只作为 `packages/zotero/src/reader/context.ts` 的**适配层聚合**存在，**不**进入 `packages/contracts`；它组合既有 `PaperScope` + `DocumentContext` + `ReaderDocumentCache`，不复制字段、不重算 revision/hash。`contracts` 未新增任何「当前文档」类型（若将来 Chat 与 Agent 确实需要跨边界只读快照，再单独评估，仍以最小只读类型为限）。
 2. **模式的最小载体** — **已决（owner 2026-09-18）**：使用新的独立字段 `RequestMode = 'chat' | 'agent'`，**不**扩展或复用 `WorkflowKind`。值是每轮请求冻结的显式契约，可观测、可单测；`WorkflowKind` 语义不变。
 3. **`mode` 缺省语义** — **已决（owner 2026-09-18）**：已持久化且没有 `mode` 字段的请求一律解释为 `'chat'`；只影响解释，不据此迁移或重写旧记录，hash 仍按各自 `hashVersion` 重建。
 4. **conversation 存储唯一属主**：是否允许 `WorkspaceStore` 继续持有 `removeConversation`（当前偏好设置删除依赖它），还是全部委托 `ConversationStore`。
