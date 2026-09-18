@@ -8,25 +8,22 @@ import { validatePreferences, validateReference, validateReferenceInput, validat
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import { estimateRequestBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
-import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/coordinator.ts';
+import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
 import type { DocumentServices, ReaderContext } from '../reader/context.ts';
+import type { PresenterAgent, PresenterReading } from './capability.ts';
+import { executeAgentSend, type AgentSendContext } from './agent-execution.ts';
+import { executeChatSend, refuseChatAction, refuseChatWorkflow } from './chat-execution.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
 const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available; global preferences apply.';
-export type PresenterReading = Pick<ReadingCoordinator, 'start' | 'enqueue' | 'list' | 'get' | 'subscribe' | 'cancel' | 'reconcile'>;
 /**
- * The Agent Mode capability: durable native task orchestration plus multi-pass reading. The
- * composition root assembles this once and injects it. A Chat-only/reader-only host leaves it
- * absent, and then nothing in the chat path can reach approvals, the write-intent ledger,
- * reconciliation or undo. Its absence is the design (invariant 4), not a legacy compatibility gap:
- * one interface makes the boundary visible where two loose optional members did not.
+ * Stage 8 moved the Agent capability into `chat/capability.ts` and re-exports it here so every
+ * existing caller keeps this import site. `PresenterAgent` and `PresenterReading` are the names the
+ * composition root and tests already use; `AgentCapability` is the same interface.
  */
-export interface PresenterAgent {
-  tasks(): Promise<ActionTasks>;
-  reading(client?: ReaderClient): Promise<PresenterReading>;
-}
+export type { AgentCapability, PresenterAgent, PresenterReading } from './capability.ts';
 export interface PresenterServices {
   ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
   getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
@@ -265,6 +262,9 @@ export class ConversationPresenter {
     if (this.modes.get(this.draftKey()) === mode) return;
     this.modes.set(this.draftKey(), mode);
     this.update({});
+    // Agent state is hydrated on demand: Chat never touches the task/reading infrastructure, so
+    // switching to Agent is what licenses the first refresh.
+    if (mode === 'agent') void this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
   }
   private errorText(error: unknown): string { return error instanceof Error && error.message ? error.message : 'Codex could not complete this action.'; }
   private signedIn(): boolean { return this.state.runtime?.account.state === 'signedIn' && (this.state.runtime?.models.length ?? 0) > 0; }
@@ -550,9 +550,13 @@ export class ConversationPresenter {
     this.update({ readingJobs: [...this.state.readingJobs.filter(item => item.id !== job.id), clone(job)].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) });
   }
   private async refreshTaskState(): Promise<void> {
+    // Agent infrastructure is Agent-Mode-only. A refresh while the composer is in Chat Mode must not
+    // acquire the task port or the reading coordinator: doing so would subscribe to Agent state just
+    // by using Chat Mode. `setMode('agent')` and Agent sends hydrate instead.
+    if (this.state.mode !== 'agent' || !this.services.agent) return;
     const id = this.state.conversation?.id; if (!id) return;
-    if (this.services.agent) { const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks }); }
-    if (this.services.agent) { const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs }); }
+    const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks });
+    const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs });
   }
   async approveTask(id: string, selected: string[], choices: ActionTaskChoices = {}): Promise<void> { this.acceptTask(await (await this.getTasks()).approve(id, [...selected], clone(choices))); }
   async cancelTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).cancel(id)); }
@@ -1149,22 +1153,27 @@ export class ConversationPresenter {
     try {
       const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace);
       if (workflow) input.workflow = workflow;
-      // Stage 6: the composer's mode control is the single authority for `mode`; `workflow` never
-      // infers it. Chat is read-only, so Agent-only workflows are refused before anything is sent
-      // and no task is ever planned for a chat request (invariants 3 and 4).
-      if (workflow?.skill?.workflow === 'acquire') {
-        if (mode === 'chat') throw new ReaderError('UNSUPPORTED_INTERACTION', 'Acquiring articles is an Agent action. Switch to Agent mode to run it.');
+      const skillWorkflow = workflow?.skill?.workflow ?? null;
+      // Stage 6/8: the composer's mode control is the single authority for `mode`; `workflow` never
+      // infers it. `submit` is a thin dispatcher on the frozen mode: the Chat path
+      // (`executeChatSend`) can only read context and deliver one request, while the Agent path
+      // (`executeAgentSend`) is the only one that can plan a task or start a reading job.
+      if (skillWorkflow === 'acquire') {
+        if (mode === 'chat') refuseChatWorkflow('acquire');
         if (queued) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Acquisition previews use task review, not the model request queue. Your draft is kept.');
         if (!context.acquisitionTarget) throw new ReaderError('INVALID_REQUEST', 'Choose a target collection before acquiring articles.');
         const identifiers = [...new Set((input.question.match(/https?:\/\/[^\s<>"']+|\b10\.\d{4,9}\/[^\s<>"']+/giu) ?? []).map(value => value.replace(/[.,;，。；]+$/u, '')))];
         if (!identifiers.length) throw new ReaderError('INVALID_REQUEST', 'Provide explicit DOI identifiers or article URLs for acquisition.');
-        const task = await (await this.getTasks()).planAcquisition({ conversationId: conversation.id, target: clone(context.acquisitionTarget), question: input.question, identifiers }); this.acceptTask(task); return;
+        await executeAgentSend(this.agentSendContext(client, conversation, input, null, queued, { target: clone(context.acquisitionTarget), identifiers }));
+        return;
       }
+      if (skillWorkflow === 'diagram' && this.state.runtime?.capabilities?.imageGeneration !== true) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Image generation is unavailable in this runtime.');
       if (mode === 'chat') {
-        if (workflow?.skill?.workflow === 'diagram') throw new ReaderError('UNSUPPORTED_INTERACTION', 'Image generation is an Agent action. Switch to Agent mode to run it.');
-        if (workflow?.skill && workflow.skill.workflow !== 'read') throw new ReaderError('UNSUPPORTED_INTERACTION', 'That skill changes the PDF, so it needs Agent mode. Switch to Agent to run it.');
+        // Chat is read context + reason + answer: an Agent-only skill or a plainly imperative
+        // library/PDF mutation is refused before the document is even prepared.
+        refuseChatWorkflow(skillWorkflow);
+        refuseChatAction(input.question);
       }
-      if (workflow?.skill?.workflow === 'diagram' && this.state.runtime?.capabilities?.imageGeneration !== true) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Image generation is unavailable in this runtime.');
       if (context.enabled) input.document = await this.requestDocument(context.range, controller.signal);
       const references: ReferenceInput[] = [];
       for (const reference of draft.references) {
@@ -1180,17 +1189,29 @@ export class ConversationPresenter {
       // `mode` is readonly on the contract, so it rides on the request copy handed to the session
       // rather than being assigned back like `workflow`; the hash and the stored message use it.
       const request: SendInput = { ...input, mode };
-      if (plan) {
-        const reading = await this.getReading(client);
-        this.readingDescriptions.set(input.requestId, { question: input.question, scopeLabel: [input.document ? input.paper?.title || this.identity.title : '', ...(input.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ') });
-        this.acceptReading(await (queued ? reading.enqueue(request, plan) : reading.start(request, plan)));
+      if (mode === 'chat') {
+        await executeChatSend({ client, request, queued, plan });
+      } else {
+        const scopeLabel = [input.document ? input.paper?.title || this.identity.title : '', ...(input.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ');
+        await executeAgentSend(this.agentSendContext(client, conversation, request, plan, queued, null, scopeLabel));
       }
-      else if (queued) await client.enqueue!(request);
-      else await client.send(request);
       if (this.state.conversation?.id === conversation.id) await this.sync();
       await this.refreshList();
     }
     finally { this.submissions.delete(conversation.id); this.update({}); }
+  }
+  /**
+   * The Agent execution context. Building it acquires the ports lazily through the presenter, so the
+   * capability's cache and subscriptions stay owned here, and the Chat path never sees this object.
+   */
+  private agentSendContext(client: ReaderClient, conversation: Conversation, request: SendInput, plan: ContextPlan | null, queued: boolean, acquisition: { target: NativeCollectionTarget; identifiers: string[] } | null, scopeLabel = ''): AgentSendContext {
+    return {
+      ports: { tasks: () => this.getTasks(), reading: readingClient => this.getReading(readingClient) },
+      client, conversationId: conversation.id, request, plan, queued, acquisition, scopeLabel,
+      acceptTask: task => this.acceptTask(task),
+      acceptReading: job => this.acceptReading(job),
+      describeReading: description => this.readingDescriptions.set(request.requestId, description),
+    };
   }
   async cancel(): Promise<void> {
     const client = this.client; const conversation = this.state.conversation;

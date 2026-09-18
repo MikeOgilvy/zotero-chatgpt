@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { ChatSendContext } from '../../packages/zotero/src/chat/chat-execution.ts';
 
 /**
  * The product layering, enforced as a test rather than as a comment:
@@ -116,5 +117,21 @@ describe('module dependency boundaries', () => {
 
   it('has no agent directory: action execution lives in core/tasks and zotero/actions', () => {
     expect(readdirSync(path.join(packagesRoot, 'zotero/src')).filter(name => name === 'agent')).toEqual([]);
+  });
+
+  // The Stage 8 execution split is enforced as a file boundary, not a comment. The Chat execution
+  // path may read context and deliver a request; it must not reach the reading coordinator (so it
+  // cannot start a reading job) and its typed context must have no Agent capability member. The
+  // `HasAgentMember` check fails typecheck if `agent` is ever added to `ChatSendContext`.
+  it('keeps the Chat execution path free of Agent infrastructure', () => {
+    const file = path.join(packagesRoot, 'zotero/src/chat/chat-execution.ts');
+    const specifiers = importSpecifiers(readFileSync(file, 'utf8'));
+    expect(specifiers.filter(specifier => /core\/src\/context\/coordinator/u.test(specifier))).toEqual([]);
+    expect(specifiers.filter(specifier => /core\/src\/tasks|zotero\/src\/actions/u.test(specifier))).toEqual([]);
+    // No capability import either: the Chat context cannot even name the Agent surface.
+    expect(specifiers.filter(specifier => /(^|\/)capability\.ts$/u.test(specifier))).toEqual([]);
+    type HasAgentMember<T> = 'agent' extends keyof T ? true : false;
+    const chatSurfaceHasNoAgent: HasAgentMember<ChatSendContext> = false;
+    expect(chatSurfaceHasNoAgent).toBe(false);
   });
 });
