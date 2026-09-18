@@ -4,6 +4,7 @@ import { ConversationPresenter, type PresenterState } from '../../../packages/zo
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type MessageStatus, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../../packages/contracts/src/index.ts';
 import { citationA, citationB, imageA, paperA, settings } from '../../contracts/factories.ts';
+import { estimateRequestBudget } from '../../../packages/core/src/codex/model-capabilities.ts';
 import { presenterContext } from '../presenter-context.ts';
 import { documentA } from '../../contracts/document-fixture.ts';
 import type { ClipboardImageRead } from '../../../packages/zotero/src/chat/pick-images.ts';
@@ -189,6 +190,16 @@ describe('conversation presenter', () => {
     expect(prepare).toHaveBeenCalledTimes(1); expect(validate).toHaveBeenCalledTimes(1);
     expect(presenter.snapshot().document.prepared).toEqual(documentA);
     expect(f.sent).toHaveLength(0);
+  });
+  it('plans a send against the one core request-budget authority when no port is injected (R5)', async () => {
+    const f = fixture();
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+    await presenter.activate(); presenter.setQuestion('What does x denote?'); await presenter.send();
+    const request = f.sent[0]!;
+    // The report the send carries must be the core estimate for that same request, not a second formula.
+    const expected = estimateRequestBudget({ request, messages: [] });
+    expect(presenter.snapshot().contextReport).toMatchObject({ capacity: expected.capacity, provenance: expected.provenance, reservedTokens: expected.reservations.total, textBudgetTokens: expected.textBudgetTokens });
+    expect(presenter.snapshot().contextReport?.reason).toContain('Model capacity or retained history is unknown');
   });
   it('keeps PDF failures visible and never sends a bibliographic-only substitute', async () => {
     const f = fixture(); const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {

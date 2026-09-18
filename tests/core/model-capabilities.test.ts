@@ -1,7 +1,11 @@
 import { expect, it, vi } from 'vitest';
-import { buildContextBudget, getPinnedModelCapabilities, parseThreadUsage } from '../../packages/core/src/codex/model-capabilities.ts';
+import { buildContextBudget, estimateRequestBudget, getPinnedModelCapabilities, parseThreadUsage } from '../../packages/core/src/codex/model-capabilities.ts';
 import { PINNED_MODEL_CATALOG } from '../../runtime/model-capabilities.ts';
 import { PINNED_RUNTIME } from '../../runtime/manifest.ts';
+import { makeSend, imageA, settings } from '../contracts/factories.ts';
+import { validateWorkflow } from '../../packages/contracts/src/workspace-validation.ts';
+import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
+import type { Message } from '../../packages/contracts/src/index.ts';
 
 it('uses the exact pinned model default window rather than its optional maximum', () => {
   expect(getPinnedModelCapabilities('gpt-5.4')).toMatchObject({ contextWindow: 272000, maxContextWindow: 1000000, inputModalities: ['text', 'image'], provenance: 'pinned-catalog', runtimeVersion: '0.154.0' });
@@ -118,4 +122,55 @@ it.each([
   { historyTokens: Number.MAX_SAFE_INTEGER, workflowBytes: Number.MAX_SAFE_INTEGER },
 ])('rejects invalid or overflowing budget inputs %j', patch => {
   expect(() => buildContextBudget({ ...budgetInput, ...patch })).toThrow(RangeError);
+});
+
+/**
+ * The request-level reservation estimate is the single producer-side authority (R5): the chat
+ * presenter delegates to it instead of keeping a second copy, so these numbers are what a send
+ * actually plans against. The fixtures are the synthetic ones the contracts tests use.
+ */
+function userMessage(overrides: Partial<Message> = {}): Message {
+  return {
+    id: '2e4a6c8e-0b1d-4f3a-a5c7-9e1b3d5f7a90', requestId: '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e',
+    role: 'user', phase: null, settings: settings, text: 'Explain x', citations: [], status: 'completed', ...overrides,
+  };
+}
+function summary(id: string, textBytes: number) {
+  return { id, revision: { fingerprint: 'synthetic-v1', size: textBytes, modifiedAt: 1000 }, parserVersion: 'zotero-pdfjs-text-v1', totalPages: 3, pages: [], textBytes };
+}
+/** The bytes one recorded turn adds before its document text is counted. */
+const turnBytes = (text: string): number => new TextEncoder().encode(JSON.stringify({ role: 'user', text, citations: [] })).length;
+
+it('charges each distinct recorded document once and adds the image allowance', () => {
+  const document = summary('aabbccdd-0000-4000-8000-000000000001', 40000);
+  const budget = estimateRequestBudget({
+    request: makeSend({ question: 'Why?', settings: { model: 'gpt-5.4', serviceTier: null, effort: null } }),
+    messages: [
+      userMessage({ text: 'first', document }),
+      userMessage({ text: 'second', document, referenceDocuments: [{ referenceId: 'ref-1', document }], images: [imageA] }),
+    ],
+    usage: { model: 'gpt-5.4', contextWindow: 100000, last, total },
+  });
+  // The same document cited by two turns and re-sent as a reference is still charged once.
+  expect(budget.capacity).toBe(100000);
+  expect(budget.provenance).toBe('runtime-reported');
+  expect(budget.reservations.history).toBe(turnBytes('first') + turnBytes('second') + 16384 + 40000);
+  expect(budget.reservations.images).toBe(0);
+  expect(budget.reservations.question).toBe(new TextEncoder().encode('Why?').length);
+  expect(budget.reservations.total).toBe(
+    budget.reservations.history! + budget.reservations.instructions + budget.reservations.workflow + budget.reservations.images + budget.reservations.question + budget.reservations.output + budget.reservations.safety!,
+  );
+});
+
+it('charges the frozen workflow and the request images, and stays honest without a reported window', () => {
+  const workflow = validateWorkflow({ skill: null, profileId: null, preferences: defaultSettings().preferences });
+  const budget = estimateRequestBudget({
+    request: makeSend({ workflow, images: [imageA], settings: { model: 'unlisted-model', serviceTier: null, effort: null } }),
+    messages: [],
+  });
+  expect(budget.capacity).toBeNull();
+  expect(budget.accuracy).toBe('unknown');
+  expect(budget.reservations.workflow).toBeGreaterThan(0);
+  expect(budget.reservations.images).toBe(16384);
+  expect(budget.reservations.history).toBe(0);
 });

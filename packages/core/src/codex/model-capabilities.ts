@@ -1,5 +1,7 @@
 import { PINNED_RUNTIME } from '../../../../runtime/manifest.ts';
 import { PINNED_MODEL_CATALOG } from '../../../../runtime/model-capabilities.ts';
+import type { Message, SendInput, UsageReport } from '../../../contracts/src/index.ts';
+import { PAPER_THREAD_POLICY, readingInput } from './reader-policy.ts';
 
 export interface PinnedModelCapabilities {
   contextWindow: number;
@@ -91,6 +93,53 @@ export interface ContextBudget {
   overBudget: boolean | null;
   assumptions: string[];
 }
+
+export interface RequestBudgetInput {
+  request: SendInput;
+  /** The conversation's recorded turns; their documents are charged once per distinct document. */
+  messages: readonly Message[];
+  /** The report to trust for this request's window, already checked against the request's model. */
+  usage?: UsageReport | undefined;
+}
+
+/**
+ * The one producer-side reservation estimate for a paper-thread request: retained history (including
+ * each distinct recorded document once), the paper-thread instructions the turn actually carries,
+ * the frozen workflow, the images and the question, fed into `buildContextBudget`.
+ *
+ * This is the admission estimate used before a request is sent, so it must stay the caller's only
+ * authority: a second copy in the UI would silently plan against a different window. Nothing here
+ * tokenizes or claims account capacity; see `buildContextBudget` for that policy.
+ */
+export function estimateRequestBudget(input: RequestBudgetInput): ContextBudget {
+  const request = input.request;
+  const bare: SendInput = { ...request, question: '' }; delete bare.document; delete bare.workflow;
+  if (request.references) bare.references = request.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; });
+  const sources = new Map<string, number>(); let history = 0;
+  for (const message of input.messages) {
+    history += bytes({ role: message.role, text: message.text, citations: message.citations, references: message.references, workflow: message.workflow });
+    history += (message.images?.length ?? 0) * 16384;
+    if (message.document) sources.set(message.document.id, message.document.textBytes);
+    for (const reference of message.referenceDocuments ?? []) sources.set(reference.document.id, reference.document.textBytes);
+  }
+  history += [...sources.values()].reduce((sum, value) => sum + value, 0);
+  return buildContextBudget({
+    modelId: request.settings.model,
+    reportedWindow: input.usage?.contextWindow ?? null,
+    historyTokens: history,
+    instructionBytes: bytes(PAPER_THREAD_POLICY.baseInstructions + PAPER_THREAD_POLICY.developerInstructions) + bytes(readingInput(bare)),
+    workflowBytes: request.workflow ? bytes(request.workflow) : 0,
+    imageCount: request.images?.length ?? 0,
+    questionBytes: bytes(request.question),
+  });
+}
+/**
+ * UTF-8 bytes of a value as `buildContextBudget` charges them: a string is charged as its own
+ * characters, not as JSON with quotes, because the caller serializes it into the prompt verbatim.
+ * (`context/coordinator.ts` keeps its own JSON-only variant for stored structures; they are
+ * intentionally not the same function.)
+ */
+function bytes(value: unknown): number { return new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value)).length; }
 function count(value: unknown, label: string): number {
   if (!isCount(value)) throw new RangeError(`Invalid ${label} budget`);
   return value;

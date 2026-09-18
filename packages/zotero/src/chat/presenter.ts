@@ -6,8 +6,7 @@ import { parseAnnotationCandidates, type ActionTaskChoices, type ActionTaskRecor
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
-import { buildContextBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
-import { PAPER_THREAD_POLICY, readingInput } from '../../../core/src/codex/reader-policy.ts';
+import { estimateRequestBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
@@ -1036,20 +1035,15 @@ export class ConversationPresenter {
     if (!draft.profileId || !settings || settings.profiles.some(profile => profile.id === draft.profileId)) return { draft, stale: false };
     return { draft: { ...draft, profileId: null }, stale: true };
   }
+  /**
+   * The admission estimate for this request. The host may inject a port; otherwise it delegates to
+   * the one core authority (`estimateRequestBudget`), so the chat path cannot plan against a second
+   * copy of the reservation policy (R5).
+   */
   private estimateBudget(input: SendInput, conversation: Conversation): ContextBudget {
     if (this.services.contextBudget) return this.services.contextBudget(input, conversation);
-    const bare: SendInput = { ...input, question: '' }; delete bare.document; delete bare.workflow;
-    if (input.references) bare.references = input.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; });
-    const sources = new Map<string, number>(); let history = 0;
-    for (const message of conversation.messages) {
-      history += bytes({ role: message.role, text: message.text, citations: message.citations, references: message.references, workflow: message.workflow });
-      history += (message.images?.length ?? 0) * 16384;
-      if (message.document) sources.set(message.document.id, message.document.textBytes);
-      for (const reference of message.referenceDocuments ?? []) sources.set(reference.document.id, reference.document.textBytes);
-    }
-    history += [...sources.values()].reduce((sum, value) => sum + value, 0);
     const usage = conversation.usage?.model === input.settings.model ? conversation.usage : undefined;
-    return buildContextBudget({ modelId: input.settings.model, reportedWindow: usage?.contextWindow ?? null, historyTokens: history, instructionBytes: bytes(PAPER_THREAD_POLICY.baseInstructions + PAPER_THREAD_POLICY.developerInstructions) + bytes(readingInput(bare)), workflowBytes: input.workflow ? bytes(input.workflow) : 0, imageCount: input.images?.length ?? 0, questionBytes: bytes(input.question) });
+    return estimateRequestBudget({ request: input, messages: conversation.messages, usage });
   }
   private async planInput(input: SendInput, conversation: Conversation): Promise<ContextPlan | null> {
     const documents = [input.document, ...(input.references ?? []).map(reference => reference.document)].filter((document): document is DocumentContext => !!document);
