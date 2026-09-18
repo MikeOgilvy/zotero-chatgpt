@@ -7,7 +7,7 @@
  * the rest of the plugin.
  */
 export const PREFERENCES_PANE_ID = 'zcr-prefpane-settings';
-export const PREFERENCES_PANE_LABEL = 'Zotero Codex Reader';
+export const PREFERENCES_PANE_LABEL = 'Zotero GPT Reader';
 export const PREFERENCES_PANE_SOURCE = 'content/preferences/preferences.xhtml';
 export const PREFERENCES_PANE_SCRIPT = 'content/preferences/pane.js';
 
@@ -69,13 +69,13 @@ export function createPreferencePaneRegistrar(host: PreferencePaneRegistrarHost)
           host.panes.unregister(PREFERENCES_PANE_ID);
           registered = await register();
         } catch (retry) {
-          host.logError(new Error(`The Zotero Codex Reader preferences pane could not be registered: ${failure(error)}; retry: ${failure(retry)}`));
+          host.logError(new Error(`The Zotero GPT Reader preferences pane could not be registered: ${failure(error)}; retry: ${failure(retry)}`));
           return undefined;
         }
       }
       // Registration is asynchronous; a shutdown that raced it must still clean the pane up.
       if (stopped) {
-        try { host.panes.unregister(registered); } catch (error) { host.logError(new Error(`The Zotero Codex Reader preferences pane could not be unregistered: ${failure(error)}`)); }
+        try { host.panes.unregister(registered); } catch (error) { host.logError(new Error(`The Zotero GPT Reader preferences pane could not be unregistered: ${failure(error)}`)); }
         return undefined;
       }
       id = registered;
@@ -89,7 +89,7 @@ export function createPreferencePaneRegistrar(host: PreferencePaneRegistrarHost)
       try {
         host.panes.unregister(registered);
       } catch (error) {
-        host.logError(new Error(`The Zotero Codex Reader preferences pane could not be unregistered: ${failure(error)}`));
+        host.logError(new Error(`The Zotero GPT Reader preferences pane could not be unregistered: ${failure(error)}`));
       }
     },
   };

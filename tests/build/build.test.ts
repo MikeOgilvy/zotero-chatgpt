@@ -71,7 +71,7 @@ describe("development build", () => {
           strict_min_version: "9.0.6",
         },
       },
-      name: "Zotero Codex Reader (Development)",
+      name: "Zotero GPT Reader (Development)",
     });
     expect(parsedManifest.version).toBe(sourceManifest.version);
     expect(bootstrap.length).toBeGreaterThan(0);

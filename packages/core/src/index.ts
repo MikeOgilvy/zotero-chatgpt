@@ -15,7 +15,7 @@ export async function createReaderClient(process: ManagedProcess, storage: Stora
   try {
     if (options.codexVersion !== '0.154.0' || !options.cwd) throw new RuntimeFailure('Unsupported runtime version or directory');
     rpc = new RpcTransport(process);
-    const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero Codex Reader', version: options.pluginVersion ?? 'unknown' }, capabilities: { experimentalApi: false } }));
+    const response = record(await rpc.request('initialize', { clientInfo: { name: 'zotero_codex_reader', title: 'Zotero GPT Reader', version: options.pluginVersion ?? 'unknown' }, capabilities: { experimentalApi: false } }));
     if (typeof response.userAgent !== 'string' || !/^[^/]+\/0\.154\.0(?:\s|$)/u.test(response.userAgent)) throw new RuntimeFailure('Unsupported runtime version');
     const codexHome = typeof response.codexHome === 'string' ? response.codexHome : '';
     if (!codexHome.startsWith('/') || (options.codexHome !== undefined && options.codexHome !== codexHome)) throw new RuntimeFailure('Reader policy unavailable: the runtime is not using the dedicated account directory');

@@ -611,7 +611,7 @@ async function runHostSmoke(config) {
     await check('pref-pane-registered-once-after-startup',
       identity.paneCount === 1 && identity.pluginIDMatches &&
       typeof identity.src === 'string' && identity.src.endsWith('content/preferences/preferences.xhtml') &&
-      identity.label === 'Zotero Codex Reader' &&
+      identity.label === 'Zotero GPT Reader' &&
       identity.scripts.length === 1 && identity.scripts[0].endsWith('content/preferences/pane.js') &&
       identity.defaultXUL === true,
       identity);

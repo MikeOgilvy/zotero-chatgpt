@@ -245,7 +245,7 @@ export function startup(options: PluginContext): void {
   });
   const workspace = () => localServices
     ? localServices.getWorkspace()
-    : Promise.reject(new ReaderError('BUSY', 'Zotero Codex Reader is stopping.'));
+    : Promise.reject(new ReaderError('BUSY', 'Zotero GPT Reader is stopping.'));
   preferencesBridge().ZoteroCodexReaderPreferencesHost = createPreferencesService({
     workspace,
     // One pref, one owner: the native pane and the reader opt-out read the same value.

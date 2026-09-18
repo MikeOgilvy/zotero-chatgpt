@@ -51,7 +51,7 @@ function mount(root: Element): void {
     const zotero = scope.Zotero;
     const bridge = zotero?.ZoteroCodexReaderPreferencesHost;
     if (!zotero || !bridge) {
-      unavailable(root, 'Zotero Codex Reader preferences are unavailable because the plugin is not running.');
+      unavailable(root, 'Zotero GPT Reader preferences are unavailable because the plugin is not running.');
       return;
     }
     // History methods cross as JSON text too. A host that has not published them yet gets a pane with
