@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Window } from 'happy-dom';
 import { expect, it, vi } from 'vitest';
-import { ConversationPresenter, type DocumentServices } from '../../../packages/zotero/src/chat/presenter.ts';
+import { ConversationPresenter } from '../../../packages/zotero/src/chat/presenter.ts';
+import type { DocumentServices } from '../../../packages/zotero/src/reader/context.ts';
 import { documentA } from '../../contracts/document-fixture.ts';
 import { groupHistory, historyGroup, HISTORY_BUCKETS, mountChatView, renderReaderShell } from '../../../packages/zotero/src/chat/view.ts';
 import { UNLOCATED_SOURCE_TEXT } from '../../../packages/zotero/src/chat/source-links.ts';
@@ -17,6 +18,7 @@ import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts'
 import type { ContextBudget } from '../../../packages/core/src/codex/model-capabilities.ts';
 import { documentSummary } from '../../../packages/contracts/src/document.ts';
 import { citationA, imageA, paperA, paperB, settings, TINY_PNG_DATA_URL } from '../../contracts/factories.ts';
+import { presenterContext } from '../presenter-context.ts';
 
 const model: ModelOption = {
   id: 'catalog-default', displayName: 'Catalog Default', isDefault: true,
@@ -152,14 +154,14 @@ async function mountReadyChat(options: {
     })),
     subscribe: listener => { onEvent = listener; return () => undefined; }, close: async () => {},
   };
-  const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', {
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A', options.identity), {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined,
     uuid: options.uuid ?? (() => '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e'), now: () => 'now',
     ...(options.document ? { document: options.document } : {}),
     ...(options.clipboardImages ? { readClipboardImage: options.clipboardImages } : {}),
     ...(options.workspace ? { getWorkspace: () => Promise.resolve(options.workspace!) } : {}),
     ...(options.contextBudget ? { contextBudget: options.contextBudget } : {}),
-  }, options.identity);
+  });
   if (options.draftCitations) {
     for (const citation of options.draftCitations) presenter.addCitation(citation);
   }
@@ -904,7 +906,7 @@ it('keeps an attachment fallback title available in compact chrome without a her
     })),
     subscribe: () => () => undefined, close: async () => {},
   };
-  const presenter = new ConversationPresenter(paperA, 'PDF', {
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'PDF'), {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
@@ -941,7 +943,7 @@ it('shows the New chat tab at first paint without creating a chat', async () => 
     })),
     subscribe: () => () => undefined, close: async () => {},
   };
-  const presenter = new ConversationPresenter(paperA, title, {
+  const presenter = new ConversationPresenter(presenterContext(paperA, title), {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   const doc = documentOf();
@@ -1669,7 +1671,7 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
     })),
     subscribe: () => () => undefined, close: async () => {},
   };
-  const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', {
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();

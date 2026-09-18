@@ -6,6 +6,7 @@ import { bindDockResize, mountReaderDock, unmountReaderDock } from '../../../pac
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
 import { SHAREABLE_STORAGE_LOCATION, type Conversation } from '../../../packages/contracts/src/index.ts';
 import { citationA, paperA, settings } from '../../contracts/factories.ts';
+import { presenterContext } from '../presenter-context.ts';
 
 /**
  * Zotero 9.0.6 reader source `resource/reader/reader.js:27222`:
@@ -75,7 +76,7 @@ async function mountDockWithChat() {
     diagnostics: () => Promise.resolve({ pluginVersion: '0.4.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }),
     subscribe: () => () => undefined, close: async () => {},
   };
-  const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', {
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();

@@ -4,6 +4,7 @@ import { ConversationPresenter, type PresenterState } from '../../../packages/zo
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type MessageStatus, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../../packages/contracts/src/index.ts';
 import { citationA, citationB, imageA, paperA, settings } from '../../contracts/factories.ts';
+import { presenterContext } from '../presenter-context.ts';
 import { documentA } from '../../contracts/document-fixture.ts';
 import type { ClipboardImageRead } from '../../../packages/zotero/src/chat/pick-images.ts';
 const model = { id: 'catalog-default', displayName: 'Catalog Default', isDefault: true, supportedReasoningEfforts: [{ id: 'medium', description: '' }, { id: 'high', description: '' }], defaultReasoningEffort: 'medium', serviceTiers: [{ id: 'priority', name: 'Priority', description: '' }, { id: 'flex', name: 'Flex', description: '' }], defaultServiceTier: 'priority' };
@@ -73,7 +74,7 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
   };
   const states: PresenterState[] = [];
   const services = { ensureStarted: vi.fn(() => Promise.resolve(client)), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
-  const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', services);
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
   // `forId` targets a specific chat: a background answer belongs to the chat that asked for it, even
@@ -159,7 +160,7 @@ describe('conversation presenter', () => {
   it('freezes the question, settings and conversation while PDF preparation is pending, and keeps newer input', async () => {
     const f = fixture(); let resolve!: (value: typeof documentA) => void;
     const prepare = () => new Promise<typeof documentA>(r => { resolve = r; });
-    const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', { ...f.services, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), { ...f.services, document: { prepare, validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });
     await presenter.activate(); presenter.setQuestion('Explain x');
     const pending = presenter.send(); await settle();
     expect(f.sent).toHaveLength(0); expect(presenter.snapshot().generating).toBe(true);
@@ -170,7 +171,7 @@ describe('conversation presenter', () => {
   });
   it('cancels PDF preparation without sending and preserves the question', async () => {
     const f = fixture();
-    const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {
       prepare: signal => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Preparation cancelled.')), { once: true })),
       validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
     } });
@@ -182,7 +183,7 @@ describe('conversation presenter', () => {
   it('prepares the current PDF locally on activation without creating a model request', async () => {
     const f = fixture();
     const prepare = vi.fn(() => Promise.resolve(documentA)); const validate = vi.fn(async () => {});
-    const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} } });
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} } });
     await presenter.activate();
     await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
     expect(prepare).toHaveBeenCalledTimes(1); expect(validate).toHaveBeenCalledTimes(1);
@@ -190,7 +191,7 @@ describe('conversation presenter', () => {
     expect(f.sent).toHaveLength(0);
   });
   it('keeps PDF failures visible and never sends a bibliographic-only substitute', async () => {
-    const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+    const f = fixture(); const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {
       prepare: () => Promise.reject(new Error('PDF unavailable.')), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
     } });
     await presenter.activate(); presenter.setQuestion('Keep this'); await presenter.send();
@@ -199,7 +200,7 @@ describe('conversation presenter', () => {
   it('surfaces a failed background local read where the composer shows errors', async () => {
     // No panel renders document preparation any more, so a background failure that only set
     // `document.phase` was invisible: the owner saw nothing and could not tell why nothing was read.
-    const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+    const f = fixture(); const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {
       prepare: () => Promise.reject(new ReaderError('INVALID_REQUEST', 'The current PDF did not finish loading in time to read it locally. Wait for it to load or reopen it; your question is kept.')),
       validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
     } });
@@ -209,7 +210,7 @@ describe('conversation presenter', () => {
     expect(presenter.snapshot().message).not.toMatch(/changed/iu);
   });
   it('does not announce a background preparation the user cancelled by opting out', async () => {
-    const f = fixture(); const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+    const f = fixture(); const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {
       prepare: signal => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('PDF preparation cancelled. Your question is kept.')), { once: true })),
       validate: async () => {}, readEnabled: () => true, writeEnabled: () => {},
     } });
@@ -220,7 +221,7 @@ describe('conversation presenter', () => {
   });
   it('honors automatic-context opt-out changed by another view before sending', async () => {
     const f = fixture(); let enabled = true;
-    const presenter = new ConversationPresenter(paperA, 'A', { ...f.services, document: {
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: {
       prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => enabled, writeEnabled: value => { enabled = value; },
     } });
     await presenter.activate(); enabled = false; presenter.setQuestion('Explicit selection only'); await presenter.send();

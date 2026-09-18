@@ -5,6 +5,7 @@ import { mountChatView } from '../../../packages/zotero/src/chat/view.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
 import { SHAREABLE_STORAGE_LOCATION, type Conversation, type ShareableDiagnostics } from '../../../packages/contracts/src/index.ts';
 import { citationA, paperA, settings } from '../../contracts/factories.ts';
+import { presenterContext } from '../presenter-context.ts';
 
 it('keeps shareable diagnostics off the default sidebar; presenter still copies whitelist JSON', async () => {
   const report: ShareableDiagnostics = {
@@ -36,7 +37,7 @@ it('keeps shareable diagnostics off the default sidebar; presenter still copies 
     diagnostics: vi.fn(() => Promise.resolve(report)),
     subscribe: () => () => undefined, close: async () => {},
   };
-  const presenter = new ConversationPresenter(paperA, 'Synthetic Paper A', {
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
     ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();

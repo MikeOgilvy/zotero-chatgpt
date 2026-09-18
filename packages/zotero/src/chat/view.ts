@@ -15,7 +15,9 @@ import { answerSources, linkAnswerSources, type AnswerSource, type DocumentPageT
 import type { SourceOpenOutcome } from '../reader/source-highlight.ts';
 import { applyChatTextScale, bindUnifiedReaderZoom, type ReaderZoomHost } from './text-scale.ts';
 import { attachmentsFromClipboard, clipboardHasImage, clipboardHasText, readGeckoClipboardImage, resolveGeckoClipboardAccess, type ClipboardImageRead, type ClipboardImageRefusal, type ClipboardLike, type GeckoClipboardAccess } from './pick-images.ts';
-export interface AttachmentIdentity { title: string; key: string; libraryID: number }
+import { activeCitation, type AttachmentIdentity } from '../reader/context.ts';
+/** Re-exported so the reader shell and its callers keep naming the attachment the one reader context names. */
+export type { AttachmentIdentity };
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
   openDocumentPage?(document: DocumentPageTarget, pageIndex: number, quote?: string | null): Promise<SourceOpenOutcome | void>;
@@ -175,16 +177,6 @@ function pageLabel(citation: Citation): string {
 /** Keep source titles intact; the compact header truncates only their visual presentation. */
 export function compactPaperTitle(title: string): string {
   return title.trim();
-}
-function latestCitation(state: PresenterState): Citation | undefined {
-  const draft = state.draft.citations.at(-1);
-  if (draft) return draft;
-  const messages = state.conversation?.messages ?? [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const citation = messages[i]?.citations.at(-1);
-    if (citation) return citation;
-  }
-  return undefined;
 }
 function conversationTitle(conversation: Pick<Conversation, 'title'>): string {
   return compactPaperTitle(conversation.title) || COPY.untitled;
@@ -1139,7 +1131,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   const updateContext = (state: PresenterState) => {
     if (!state.conversation && !renameForm.hidden) toggleRename(false);
-    const citation = latestCitation(state);
+    const citation = activeCitation(state.draft.citations, state.conversation?.messages ?? []);
     const sourceKey = citation ? `${citation.id}:${pageLabel(citation)}` : '';
     if (contextSource.dataset.rendered !== sourceKey) {
       contextSource.dataset.rendered = sourceKey;

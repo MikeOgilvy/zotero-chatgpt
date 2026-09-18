@@ -1,20 +1,20 @@
-import { mountChatView, renderReaderShell, type AttachmentIdentity } from './chat/view.ts';
+import { mountChatView, renderReaderShell } from './chat/view.ts';
 import { ConversationPresenter } from './chat/presenter.ts';
 import { createRuntimeSupervisor } from './runtime/supervisor.ts';
 import { createLocalServices } from './runtime/local-services.ts';
 import { geckoHost } from './runtime/gecko.ts';
 import { injectReaderStyles } from './reader/dock.ts';
-import { NativeReaderPane, attachmentIdentity, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
+import { NativeReaderPane, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
 import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
-import { paperIdentityOf } from '../../core/src/context/bibliography.ts';
+import { attachmentIdentity, nativeDocumentServices, paperScope, readerContextFor, type AttachmentIdentity } from './reader/context.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { createPreferencesService } from './preferences/service.ts';
 import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './preferences/registration.ts';
-import { ReaderError, paperId, type Citation, type PaperIdentity, type PaperScope } from '../../contracts/src/index.ts';
+import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
 export interface PluginContext { rootURI: string; pluginID: string; version?: string }
@@ -49,26 +49,18 @@ function clientId(): string {
   if (typeof existing === 'string' && UUID.test(existing)) return existing;
   const fresh = crypto.randomUUID(); Zotero.Prefs.set(CLIENT_ID_PREF, fresh, true); return fresh;
 }
-function paperOf(identity: AttachmentIdentity): PaperScope { return { clientId: clientId(), libraryId: identity.libraryID, attachmentKey: identity.key }; }
-/**
- * Freezes everything the reader read about this paper into the one identity the session and the
- * model context carry. `paperIdentityOf` owns the field list, the caps and the "absent stays absent"
- * rule, so the sidebar card, the `@`-reference listing and the reading JSON all describe the same
- * paper the same way.
- */
-function paperIdentityFor(identity: AttachmentIdentity, reader?: HostReader): PaperIdentity {
-  const metadata = reader ? paperMetadata(Zotero, reader) : undefined;
-  return paperIdentityOf(metadata ?? { title: '', authors: [] }, metadata?.title.trim() || identity.title || 'PDF attachment');
-}
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
-  const paper = paperOf(identity); const key = paperId(paper);
+  const client = clientId();
+  const paper = paperScope(client, identity); const key = paperId(paper);
   let presenter = presenters.get(key);
   if (!presenter) {
-    const identityMeta = paperIdentityFor(identity, reader);
+    // One reader context per attachment: identity, frozen read state and the document port all come
+    // from the reader layer, so Chat and Agent read the same object instead of each building one.
+    const context = readerContextFor(Zotero, identity, reader, client);
     const source = nativeDocumentSource(Zotero, () => Zotero.Reader._readers.find(r => {
       const item = Zotero.Items.get(r.itemID); return item?.key === paper.attachmentKey && item.libraryID === paper.libraryId;
     }), paper);
-    presenter = new ConversationPresenter(paper, identityMeta.title, {
+    presenter = new ConversationPresenter(context, {
       ensureStarted: () => runtime ? runtime.ensureStarted() : Promise.reject(new Error('Plugin stopped.')),
       openAuthorization: url => Zotero.launchURL(url),
       uuid: () => crypto.randomUUID(),
@@ -95,19 +87,18 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
           const next = presenterFor(identity, target); await next.activate(); await next.openConversation(conversationId);
         },
       } : {}),
-      document: {
-        readEnabled: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
-        writeEnabled: value => Zotero.Prefs.set(AUTO_PDF_PREF, value, true),
-        needsDisclosure: () => Zotero.Prefs.get(PDF_DISCLOSURE_PREF, true) !== true,
-        acknowledge: () => Zotero.Prefs.set(PDF_DISCLOSURE_PREF, true, true),
-        prepare: async (signal, progress, range) => {
-          const captured = await source.capture(signal);
-          if (!documentCache) throw new Error('PDF preparation is unavailable.');
-          return documentCache.read(paper, captured, signal, progress, range);
+      document: nativeDocumentServices({
+        paper,
+        source,
+        cache: () => documentCache,
+        automaticText: {
+          read: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
+          write: value => { Zotero.Prefs.set(AUTO_PDF_PREF, value, true); },
+          disclosureSeen: () => Zotero.Prefs.get(PDF_DISCLOSURE_PREF, true) === true,
+          markDisclosureSeen: () => { Zotero.Prefs.set(PDF_DISCLOSURE_PREF, true, true); },
         },
-        validate: source.validate,
-      },
-    }, identityMeta);
+      }),
+    });
     presenters.set(key, presenter);
   }
   return presenter;
@@ -187,7 +178,7 @@ function onSelectionPopup(event: SelectionPopupEvent): void {
   const identity = attachmentIdentity(Zotero, event.reader); const metadata = paperMetadata(Zotero, event.reader);
   if (!identity || !metadata) return;
   try {
-    const citation = captureSelection(event, paperOf(identity), metadata, { uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() });
+    const citation = captureSelection(event, paperScope(clientId(), identity), metadata, { uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() });
     const version = freezeCitationVersion(Zotero, event.reader, citation);
     current.latestSelectionId = citation.id;
     citationVersions.set(citation, version);

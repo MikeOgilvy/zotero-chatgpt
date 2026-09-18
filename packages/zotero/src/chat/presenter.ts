@@ -13,16 +13,9 @@ import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/c
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
+import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
 const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available; global preferences apply.';
-export interface DocumentServices {
-  prepare(signal: AbortSignal, progress: (p: { done: number; total: number }) => void, range?: readonly [number, number]): Promise<DocumentContext>;
-  validate(document: DocumentContext): Promise<void>;
-  readEnabled(): boolean;
-  writeEnabled(enabled: boolean): void;
-  needsDisclosure?(): boolean;
-  acknowledge?(): void;
-}
 export type PresenterReading = Pick<ReadingCoordinator, 'start' | 'enqueue' | 'list' | 'get' | 'subscribe' | 'cancel' | 'reconcile'>;
 export interface PresenterServices {
   ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
@@ -84,7 +77,8 @@ export interface PresenterState {
   messageFocus: { messageId: string; token: number } | null;
   acquisitionTarget: NativeCollectionTarget | null;
   collectionOptions: Array<NativeCollectionTarget & { name: string }>;
-  document: { enabled: boolean; disclosure: boolean; phase: 'idle' | 'preparing' | 'ready' | 'error'; prepared: DocumentContext | null; progress: { done: number; total: number }; range: [number, number] | null; error: string | null };
+  /** The one reader context for this attachment: identity, frozen read, range and local read status. */
+  document: ReaderContext;
 }
 const LOGIN_HOSTS = ['auth.openai.com', 'chatgpt.com'];
 const UNCERTAIN_ISOLATION = 'An earlier request in this conversation could not be confirmed; start a new conversation to continue.';
@@ -194,18 +188,23 @@ export class ConversationPresenter {
    */
   private selectionCleared = false;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
-  constructor(readonly paper: PaperScope, private title: string, private services: PresenterServices, private identity: PaperIdentity = { title, authors: [] }) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0,
+  constructor(context: ReaderContext, private services: PresenterServices) {
+    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0,
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
-      document: { enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false, phase: 'idle', prepared: null, progress: { done: 0, total: 0 }, range: null, error: null } };
+      // The port decides the initial opt-in/disclosure; everything else comes from the reader context.
+      document: { ...context, enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false } };
   }
+  /** The durable identity of the paper this presenter is bound to, owned by the reader context. */
+  private get paper(): PaperScope { return this.state.document.paper; }
+  /** The frozen bibliographic identity of this paper, owned by the reader context. */
+  private get identity(): PaperIdentity { return this.state.document.identity; }
   /**
    * The identity sent with a request. It forwards every optional field the reader extracted instead
    * of rebuilding a four-field subset, so the send path and a `hashVersion: 2` replay of the stored
    * identity are the same object; dropping a field here would make the same question hash twice.
    */
   private paperIdentity(): PaperIdentity {
-    const title = this.identity.title.trim() || this.title.trim() || this.state.conversation?.title || '';
+    const title = this.identity.title.trim() || this.state.conversation?.title || '';
     return { ...this.identity, title };
   }
   /** Ask in sidechat: the citation is already in the draft; the view should focus the question input. */
@@ -553,7 +552,7 @@ export class ConversationPresenter {
     const task = await (await this.getTasks()).get(id); const item = task.items.find(item => item.id === itemId);
     if (task.kind !== 'annotations' || item?.kind !== 'annotation' || item.resolution?.status !== 'resolved') throw new ReaderError('NOT_FOUND', 'This candidate has no resolved source.');
     const source = item.resolution.candidate; const position = source.position;
-    await this.services.openCitation({ id: this.services.uuid(), paper: clone(task.paper), title: paperId(task.paper) === paperId(this.paper) ? this.title : task.paper.attachmentKey, authors: [], text: source.text, pageLabel: source.pageLabel, positions: [{ pageIndex: position.pageIndex, rects: clone(position.rects) }], capturedAt: this.services.now(), contextScope: 'selection', documentRevision: clone(task.documentRevision) });
+    await this.services.openCitation({ id: this.services.uuid(), paper: clone(task.paper), title: paperId(task.paper) === paperId(this.paper) ? this.identity.title : task.paper.attachmentKey, authors: [], text: source.text, pageLabel: source.pageLabel, positions: [{ pageIndex: position.pageIndex, rects: clone(position.rects) }], capturedAt: this.services.now(), contextScope: 'selection', documentRevision: clone(task.documentRevision) });
   }
   async openTaskOutput(id: string, itemId: string): Promise<void> {
     const task = await (await this.getTasks()).get(id); const item = task.items.find(item => item.id === itemId);
@@ -583,7 +582,7 @@ export class ConversationPresenter {
     const job = this.state.readingJobs.find(job => job.id === id); if (!job) return null;
     const conversation = job.conversationId === this.state.conversation?.id ? this.state.conversation : this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(job.conversationId) : null;
     const user = conversation?.messages.find(message => message.role === 'user' && message.requestId === job.id); if (!user) return null;
-    return { question: user.batch?.question ?? user.text, scopeLabel: [user.document ? user.paper?.title || this.title : '', ...(user.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ') || 'Recorded source scope is shown by the completed passes.' };
+    return { question: user.batch?.question ?? user.text, scopeLabel: [user.document ? user.paper?.title || this.identity.title : '', ...(user.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ') || 'Recorded source scope is shown by the completed passes.' };
   }
   private contextOptions(): RequestContext {
     // Recheck the shared opt-out at the request boundary, including an already-open second view.
@@ -729,7 +728,7 @@ export class ConversationPresenter {
     if (adopted) { await this.sync(); await this.refreshList(); return adopted; }
     // The new-chat state (after `+` or a close) is the honest equivalent of starting over: the first
     // question creates the record instead of re-adopting the chat that was just left.
-    const conversation = await client.newConversation(this.paper, this.title, this.currentSettings() ?? undefined);
+    const conversation = await client.newConversation(this.paper, this.identity.title, this.currentSettings() ?? undefined);
     this.selectionCleared = false;
     // The New chat tab's draft lives under `unbound` until this first send creates a record.
     this.drafts.delete('unbound'); this.positions.delete('unbound'); this.pendingSaves.delete('unbound');
@@ -1128,7 +1127,7 @@ export class ConversationPresenter {
       const request: SendInput = { ...input, mode };
       if (plan) {
         const reading = await this.getReading(client);
-        this.readingDescriptions.set(input.requestId, { question: input.question, scopeLabel: [input.document ? input.paper?.title || this.title : '', ...(input.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ') });
+        this.readingDescriptions.set(input.requestId, { question: input.question, scopeLabel: [input.document ? input.paper?.title || this.identity.title : '', ...(input.references ?? []).map(reference => reference.label)].filter(Boolean).join(' · ') });
         this.acceptReading(await (queued ? reading.enqueue(request, plan) : reading.start(request, plan)));
       }
       else if (queued) await client.enqueue!(request);

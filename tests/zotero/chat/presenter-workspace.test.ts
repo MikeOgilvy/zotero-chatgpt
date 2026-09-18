@@ -8,6 +8,7 @@ import type { ActionTaskRecord, ActionTasks } from '../../../packages/contracts/
 import type { ReadingJob } from '../../../packages/core/src/context/coordinator.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
 import { paperA, paperB, citationA, imageA, settings } from '../../contracts/factories.ts';
+import { presenterContext } from '../presenter-context.ts';
 import { documentA } from '../../contracts/document-fixture.ts';
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
@@ -52,7 +53,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
   const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportImage: vi.fn(() => Promise.resolve()) };
   let id = 0;
   const services: PresenterServices = { ensureStarted: vi.fn(() => options.offline ? Promise.reject(new Error('Runtime unavailable')) : Promise.resolve(client)), openAuthorization: () => undefined, uuid: () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++id).padStart(12, '0')}`, now: () => '2026-09-12T00:00:00Z', getWorkspace: () => Promise.resolve(workspace), library, openHistory: vi.fn(() => Promise.resolve()), ...(options.searchTimeoutMs === undefined ? {} : { searchTimeoutMs: options.searchTimeoutMs }), ...(options.document ? { document: { prepare: () => Promise.resolve(copy(documentA)), validate: () => Promise.resolve(), readEnabled: () => true, writeEnabled: () => {} } } : {}) };
-  const presenter = new ConversationPresenter(paperA, 'Paper A', services);
+  const presenter = new ConversationPresenter(presenterContext(paperA, 'Paper A'), services);
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
   const emit = (event: Pending) => { const value: ReaderEvent = { ...event, seq: conversation.lastSeq + 1, conversationId: conversation.id, at: 'now' }; saveConversation({ ...conversation, lastSeq: value.seq, ...(['completed', 'cancelled', 'failed', 'uncertain'].includes(event.type) ? { activeRequestId: null } : {}) }); for (const listener of listeners) listener(value); };
   const emitFor = (id: string, event: Pending) => { const record = conversations.get(id)!; const value: ReaderEvent = { ...event, seq: record.lastSeq + 1, conversationId: id, at: 'now' }; conversations.set(id, { ...record, lastSeq: value.seq, ...(['completed', 'cancelled', 'failed', 'uncertain'].includes(event.type) ? { activeRequestId: null } : {}) }); for (const listener of listeners) listener(value); };
@@ -401,7 +402,7 @@ it('recovers completed annotation output after a restart gap without re-planning
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] });
   f.saveConversation({ ...f.conversation(), activeRequestId: null, messages: [...f.conversation().messages, { id: 'saved-answer', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text }] });
   f.presenter.dispose();
-  const restored = new ConversationPresenter(paperA, 'Paper A', f.services); await restored.activate();
+  const restored = new ConversationPresenter(presenterContext(paperA, 'Paper A'), f.services); await restored.activate();
   await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledTimes(1));
   const unbind = restored.bind(() => {}); unbind(); await Promise.resolve(); await Promise.resolve();
   expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); restored.dispose();

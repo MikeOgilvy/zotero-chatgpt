@@ -1,4 +1,4 @@
-import type { AttachmentIdentity } from '../chat/view.ts';
+import { attachmentIdentity, type AttachmentIdentity } from './context.ts';
 import { applyDockWidth, bindDockResize, injectReaderStyles, mountReaderDock, unmountReaderDock } from './dock.ts';
 import { DEFAULT_SIDEBAR_WIDTH, MIN_READER_WIDTH, ReaderLayoutController, type Anchor, type DockState, type LayoutHost, type Scale, type ViewPosition } from './layout.ts';
 import type { HostReader, ItemDetails, PdfApplication, ZoteroHost, ZoteroWindow } from './host-types.ts';
@@ -7,10 +7,6 @@ export type SidebarRenderer = (body: HTMLElement, identity: AttachmentIdentity, 
 export interface ReaderPaneAssets { stylesheet?: string; katex?: string }
 const WIDTH_PREF = 'extensions.zchatgpt.sidebarWidth';
 
-export function attachmentIdentity(zotero: ZoteroHost, reader: HostReader): AttachmentIdentity | undefined {
-  const item = zotero.Items.get(reader.itemID);
-  return item && { title: item.getField('title'), key: item.key, libraryID: item.libraryID };
-}
 /** Private PDF state is read in this adapter only. Numeric _location.scale is a percentage. */
 export function pdfApplication(reader: HostReader): PdfApplication | undefined {
   return reader._internalReader?._lastView?._iframeWindow?.PDFViewerApplication;
