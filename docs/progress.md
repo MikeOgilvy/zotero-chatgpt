@@ -5,10 +5,11 @@
 ## 当前状态
 
 - **产品分层**：**Chat Mode**（当前 PDF 上下文阅读与问答）已实质实现，证据见下“已交付路径”与宿主 `--context` 报告；叠加其上的 **Agent Mode** 动作能力（真实模型行为、标注与获取整理的真实库写入及 UI、skill 作者 UI 等）仍有独立差距，见“剩余差距与下一任务”。2026-09-18 的 Chat Mode / Agent Mode 文档决策见下节；它不改变本页任何证据层级。
-- **架构分层（2026-09-18 重构 + Stage 1，见下）**：原生读取与原生写入已分开——`zotero/library`（读取）+ `zotero/library/native-support.ts`（共享宿主访问）+ `zotero/actions`（写入）。`reader`/`library`/`chat` 不再依赖写入侧，旧的 `zotero/agent/` 目录已删除，`agent` 术语从代码中移除。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制。Stage 1 起，Chat/Agent 模式是**每请求显式冻结、随请求记录持久化、并由边界断言强制**的路由字段（`RequestMode = 'chat' | 'agent'`，请求输入 hash `hashVersion: 3`）；但**面向用户的模式开关与任何按 `mode` 门禁的行为仍 NOT IMPLEMENTED**（见下“Stage 1”）。Stage 2/3 起，「当前 PDF + reader 状态」有唯一属主 `zotero/src/reader/context.ts`（Chat 与 Agent 读同一对象），请求级上下文预算与模型目录策略的唯一属主都在 `core`（见下“Stage 2”“Stage 3”）。Stage 4 起，Agent 能力（`ActionTasks` 编排 + 多轮阅读）是组合根**显式装配并注入**的单一 `PresenterAgent`，Chat-only/reader-only 主机不提供它即无法触达审批、写账本、对账或撤销（见下“Stage 4”）。Stage 5 起，Zotero 读端口（`zotero/src/library/reference.ts`）不再混入文件 IO，`pickFile`/`exportImage` 归 `zotero/src/actions/files.ts`，共享的字节→图像构造归 `contracts/src/image.ts`，读侧不再依赖 `chat/` 或 `actions/`（见下“Stage 5”）。
+- **架构分层（2026-09-18 重构 + Stage 1，见下）**：原生读取与原生写入已分开——`zotero/library`（读取）+ `zotero/library/native-support.ts`（共享宿主访问）+ `zotero/actions`（写入）。`reader`/`library`/`chat` 不再依赖写入侧，旧的 `zotero/agent/` 目录已删除，`agent` 术语从代码中移除。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制。Stage 1 起，Chat/Agent 模式是**每请求显式冻结、随请求记录持久化、并由边界断言强制**的路由字段（`RequestMode = 'chat' | 'agent'`，请求输入 hash `hashVersion: 3`）；Stage 6 起**面向用户的模式开关与按 `mode` 的门禁均已实现**（见下“Stage 1”“Stage 6”）。Stage 2/3 起，「当前 PDF + reader 状态」有唯一属主 `zotero/src/reader/context.ts`（Chat 与 Agent 读同一对象），请求级上下文预算与模型目录策略的唯一属主都在 `core`（见下“Stage 2”“Stage 3”）。Stage 4 起，Agent 能力（`ActionTasks` 编排 + 多轮阅读）是组合根**显式装配并注入**的单一 `PresenterAgent`，Chat-only/reader-only 主机不提供它即无法触达审批、写账本、对账或撤销（见下“Stage 4”）。Stage 5 起，Zotero 读端口（`zotero/src/library/reference.ts`）不再混入文件 IO，`pickFile`/`exportImage` 归 `zotero/src/actions/files.ts`，共享的字节→图像构造归 `contracts/src/image.ts`，读侧不再依赖 `chat/` 或 `actions/`（见下“Stage 5”）。Stage 6 起，Chat/Agent 模式是**用户可见的每轮开关**（composer 起始处的 segmented 控件），`mode` 的权威完全移出 `workflow`，Chat 模式隐藏任务/采集面并在触达模型前拒绝 Agent-only workflow；同一会话、`ReaderContext` 与历史跨模式续用（见下“Stage 6”）。Stage 7 删除了旧侧栏编辑器留下的死 hooks/死参数/过期选择器与从未注入的 `availability` hook，并把 presenter 的测试专用方法显式标注为临时面（见下“Stage 7”）。
 
-- **Git**：`main` 基线 `59c21f3`；重构提交 `b6df0e5`、`013df5b`、`11cf37d`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。2026-09-18 的 `602c640` 引入 Chat Mode / Agent Mode 文档决策；同日按 owner 授权完成项目重命名（提交 `c2840ac`，见下“项目重命名”）；同日 Stage 1 留下四个本地提交 `aa7446a`、`27ec1ef`、`7a58d12`、`25a7e76`（见下“Stage 1”），Stage 2 留下 `2d83c26`，Stage 3 留下 `3be663d`、`0913d49`、`cad7eea`（见下“Stage 2”“Stage 3”），Stage 4 留下 `679e2d7`、`40f47ac`、Stage 5 留下 `406dcc6`（见下“Stage 4”“Stage 5”），本页记录提交 `cf26a99`、`17002ba`（均为纯文档），**均未 push**，前一条已记录基线为 `2d3d757`。`dist/`、`build/`、`.zotero-chatgpt-dev/` 不在版本控制内。
+- **Git**：`main` 基线 `59c21f3`；重构提交 `b6df0e5`、`013df5b`、`11cf37d`。2026-09-15 的仓库整理已在 `main`（`f48f337` 快进到 `6a39c1a` 再记入 `59c21f3`）。2026-09-18 的 `602c640` 引入 Chat Mode / Agent Mode 文档决策；同日按 owner 授权完成项目重命名（提交 `c2840ac`，见下“项目重命名”）；同日 Stage 1 留下四个本地提交 `aa7446a`、`27ec1ef`、`7a58d12`、`25a7e76`（见下“Stage 1”），Stage 2 留下 `2d83c26`，Stage 3 留下 `3be663d`、`0913d49`、`cad7eea`（见下“Stage 2”“Stage 3”），Stage 4 留下 `679e2d7`、`40f47ac`、Stage 5 留下 `406dcc6`（见下“Stage 4”“Stage 5”），Stage 6 留下 `b4e02fc`（见下“Stage 6”），Stage 7 留下 `09dbeba`、`9ff034c`、`98e3590`、`75fc5a9`（见下“Stage 7”），本页记录提交 `cf26a99`、`17002ba`（均为纯文档），**均未 push**，前一条已记录基线为 `2d3d757`。`dist/`、`build/`、`.zotero-chatgpt-dev/` 不在版本控制内。
 - **版本**：npm `0.4.0-alpha.1` / Zotero `0.4.0a11`。重命名改变了 addon id、bundle 文件名与 manifest 字节，按“侧载新字节先升版本”的规则升到 **a11**，不覆盖 a10 的标签；npm 工作区版本不是侧载身份，未随动。a7 的 `fcdcbc51…` 与 a8 的 `896063bf…` 从未装进 owner 正常 profile。工具链 Node 24.11.0 / npm 11.6.1；固定运行时 `codex-cli 0.154.0`（`runtime/manifest.ts`）。
+- **本轮门禁（Stage 6 + Stage 7，代码树 `75fc5a9`，2026-09-18，同一树、按序）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **79 files / 1092 passed / 0 skipped**（5.4s）。Stage 6 相对 Stage 5 的 1088 为 **+4**（presenter 模式门禁 +2、view 模式控件 +1、ui-locale 模式文案 +1）；Stage 7 **不改变计数**——受影响用例是改写而非删除（见下“Stage 7”）。**本次未运行** `npm run package:dev` / `npm run verify:artifacts` / `install:dev` / `verify:install` / `release:dry-run` 与任何宿主驱动，故 **`dist/` 与 0.4.0a11 字节不变、没有新 XPI**。
 - **本轮门禁（Stage 2 + Stage 3，代码树 `cad7eea`，2026-09-18，同一树、按序；文档提交 `cf26a99` 后复跑同样 PASS）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **79 files / 1085 passed / 0 skipped**（5.46s）。**本次未运行** `npm run package:dev` / `npm run verify:artifacts` / `install:dev` / `verify:install` / `release:dry-run` 与任何宿主驱动，故 **`dist/` 与 0.4.0a11 字节不变、没有新 XPI**。最近一次完整发行回合仍是 0.4.0a11 重命名：`npm run package:dev` → `dist/zotero-chatgpt-0.4.0a11-dev.xpi`（92,676,309 bytes，SHA-256 `2c9494b5521394cdf99e2f4b6150868fd3ed41d4b7df07130a17eb711d130863`），`npm run verify:artifacts` **84 files PASS**，该树打包前 **1071 passed / 2 skipped**、打包后 **1073 passed / 79 files / 0 skipped**。**真实宿主与真实模型 NOT RUN**：a11 的 addon id 与字节从未装进任何 `.zotero-chatgpt-dev/` 树，故无 `--context` 结论可沿用（a10 的 32/32 属于重命名前的另一身份，见下）。
 
 ### 产品方向：Chat Mode / Agent Mode（2026-09-18 文档决策）
@@ -20,6 +21,8 @@
 - 第 1 阶段的产品价值由 Chat Mode 承载：自动当前 PDF 上下文、高质量全文检索、页/引用定位与良好阅读体验；Agent Mode 的标注、笔记、元数据编辑、文献库整理、下载、文件动作与多步工作流按顺序补上。
 - **尚未在代码中实现独立的模式开关/模式路由**：今天只有单一对话路径，加上叠加的 `core/tasks` + `zotero/actions` 动作能力。模式切换 UI、跨模式续用同一会话属于待实现差距（见下 Epic F）；其中“把模式作为每轮冻结设置”的**契约与持久化**已由同日 Stage 1 落定（见下“Stage 1”），但 UI 与按 `mode` 门禁的行为仍未实现。
 - 契约见[产品规格](zotero-chatgpt-user-flow.md)的“定位与范围”“当前 PDF 默认上下文”“会话、历史与请求”，以及[架构与契约](module-design.md)的模式请求策略段落。
+
+> 后续（不修改本节原文）：同日 Stage 6 已实现用户可见的模式开关与每轮冻结，`workflow` 不再推导 `mode`；现状与证据见下“Stage 6”。
 
 ### 项目重命名：Zotero ChatGPT（2026-09-18，owner 授权）
 
@@ -190,6 +193,31 @@
 
 证据层级：**代码 + 单元测试**。**真实宿主 NOT RUN**（真实文件选择/导出、真实 Zotero 写入均未执行，`pickFile`/`exportImage` 的宿主行为按保守实现处理，未宣称正确）；**真实模型 NOT RUN**。
 
+## Stage 6：UI 集成 Chat / Agent 开关（2026-09-18）
+
+依据[仓库重构计划](repository-refactor-plan.md) §D.4 与 §I Stage 6，在 Stage 1 已冻结的 `RequestMode` 契约上做出**用户可见**的模式开关，并终结 Stage 1 记录在案的临时桥（`frozenMode(workflow)` 由 skill 推导 `mode`）。一个本地提交 `b4e02fc`，**未 push**。**本阶段不产生真实模型或发行物证据。**
+
+- **控件与位置（`chat/view.ts`）**：composer 起始处（`composer-leading`）加一个紧凑 segmented 控件（`.zchatgpt-mode-switch` + 两个 `.zchatgpt-mode-option`，`Chat` / `Agent`），沿用 `.zchatgpt-*` 与中性 token 约定，`aria-pressed` 表示当前档、`data-zchatgpt-mode` 供样式与测试读取。它由 `PresenterState.mode` 渲染，`ui-locale` 只翻译组标签与 `Chat`；`Agent` 保持产品术语不译。
+- **模式成为唯一权威（`chat/presenter.ts`）**：新增每会话的 `modes` Map（含未绑定新会话的 `'unbound'` 槽），`setMode` 只改**下一轮**的未冻结选择；`update` 把当前会话的模式投影进 `state.mode`；`sendDraft` 在提交开始时捕获 `this.state.mode` 并作为 `submit(..., mode)` 传入，随请求副本冻结。**`frozenMode(workflow)` 已删除**：`workflow` 不再推导 `mode`（计划 §D.4 的「模式权威」条据此标记为已解决）。缺省仍是 `'chat'`（D3）。
+- **Chat 只读门禁（不变量 3/4）**：Chat 模式下 acquire / diagram / 其它非 `read` workflow 在触达模型、文档读取与 `core/tasks` 之前即被拒绝；annotation plan/recovery 也要求 Agent 请求。无 `mode` 字段的旧记录仍按自身 `hashVersion` 重建，不被重新归类为 chat（不变量 11）。任务面板与采集目标在 Chat 模式隐藏（`visibleTasks = state.mode === 'agent' ? state.tasks : []`），审批/账本/对账/撤销不出现。
+- **共享层未新增（不变量 8）**：同一 conversation、同一 `ConversationPresenter`、同一 `ReaderContext`、同一 conversation history 跨模式续用；**没有**第二个 presenter/session/context/cache。模式只是路由字段，不授予任何权限（与 skill 不授权一致）。
+- **门禁（HEAD `b4e02fc`）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **79 files / 1092 passed / 0 skipped**（较 Stage 5 的 1088 为 +4）。`package:dev`、`verify:artifacts`、`install:dev`、`verify:install`、`release:dry-run` 与任何 `tests/host/**` 驱动**均未运行**（本阶段授权禁止），故无新 XPI、`dist/` 仍是 0.4.0a11 字节。
+
+证据层级：**代码 + 单元测试**。**真实宿主 NOT RUN**——控件在真实 dock 的布局、IME、焦点、滚动锚点与原生缩放**均未观察**；这是本阶段最高风险的未验证面，这里只做保守实现，**不宣称 UX 正确**。**真实模型 NOT RUN**；**发行物 NOT RUN**。
+
+## Stage 7：遗留清理（2026-09-18）
+
+依据[仓库重构计划](repository-refactor-plan.md) §E 与 §G，逐条在**实际代码**中复核后删除死代码与过期胶水，使仓库只剩一套架构。四个逻辑独立的本地提交 `09dbeba`、`9ff034c`、`98e3590`、`75fc5a9`，**未 push**。
+
+- **删除（已验证无生产调用者）**：`ChatViewHooks.writeTextScale`（无人写聊天字号）与 `pasteTargets`（粘贴目标仍由存活的 `zoomTargets` 组装，生产行为不变）；`renderReaderShell` 的死 `close` 参数（`void close`）及其 8 处调用实参；`view.ts` 重复的 `renameForm.append`（第二次是 no-op）；从未被读取的 `WorkspaceMounts.leading`；从未被调用的 `WorkspaceViewActions.selectProfile` 动作及其 `view.ts` 接线；`TaskViewActions.availability` 与 `task-view.ts` 的 5 处守卫（生产从不注入，原生写入层已用 `NOT_EDITABLE` 拒绝不可写目标，`approve.disabled` 等因此简化）；`ui-locale.ts` 的 `.zchatgpt-workspace-settings*` / `.zchatgpt-workspace-editor*` / `select[name=detail|mathematics|workflow]` 选择器与仅由它们触达的 `actionLabel` 分支；`assets/sidebar.css` 中对应的 `.zchatgpt-workspace-settings*` 与 `.zchatgpt-workspace-editor` 块（在用的 `.zchatgpt-workspace-actions`/`-muted`/`-chip*`/`-status`/`-preview*` 全部保留）。
+- **保留并显式标注（计划 §H R8）**：presenter 的 `selectProfile`/`savePreferences`/`saveAppearance`/`saveProfile`/`deleteProfile`/`saveSkill`/`copyDiagnostics`/`setDocumentEnabled`/`setDocumentRange` 现在**只被单测可达**（其侧栏 UI 已移到 Zotero 原生 Preferences 窗口），在 `presenter.ts` 内以「Test-only surface, kept deliberately」注释块标注为临时面，并与对应行为级单测一起保留——**先补/换行为级测试再删包装，而不为删死代码先破坏覆盖**。计划附录 1 #6 据此标为已决。
+- **订正**：`core/codex/errors.ts` 的 pin 版本注释 `0.144.1` → `0.154.0`（与 `runtime/manifest.ts` 一致）。
+- **复核为不存在/无需订正**：`docs/progress.md` 中 `data-zchatgpt-output` 只出现在描述已删除 S1–S4 驱动的历史条目里且表述正确，当前状态段没有该钩子说法，故未改（历史条目保持逐字不变）。`tests/host/native-action-driver.ts` 的 `native-agent` 字符串属本次授权**禁止触碰**的文件，未改，保留给有权限者。
+- **明确保留（不删）**：`archivedAt`、`permissionMode`、旧 `schemaVersion` 读取分支（持久化兼容，不变量 11）、`capturePage`（无 Zotero 写入，冻结的宿主驱动依赖它）、外部产品名（Codex App Server、`codex-*`、`runtime/manifest.ts`）、真实包名、`paneID: 'codex-reader'` 与 pref 键（owner 决定）。
+- **门禁（HEAD `75fc5a9`）**：`npm run typecheck` PASS；`npm run lint` PASS；`npm run test:unit` **79 files / 1092 passed / 0 skipped**——与 Stage 6 **相同**：本阶段没有整条删除测试，受影响的用例是**改写**（`task-view.test.ts` 的 availability 用例保留“不可信任务文本惰性”断言、去掉只验证已删 hook 的 `Library is read only` 断言；`ui-locale.test.ts` 两处去掉仅由已删选择器触达的断言，任务范围本地化断言保留；`view.test.ts`/`dock*.test.ts`/`workspace-view.test.ts`/`composer-triggers.test.ts` 只改调用签名与 fixture），故行为覆盖无净减少、计数不降。`package:dev`、`verify:artifacts`、`install:dev`、`verify:install`、`release:dry-run` 与任何 `tests/host/**` 驱动**均未运行**，无新 XPI。
+
+证据层级：**代码 + 单元测试**（含“零引用”的静态核对）。**真实宿主 NOT RUN**（删除本身不改宿主行为，但也未在宿主上复跑）；**真实模型 NOT RUN**；**发行物 NOT RUN**。清理后仓库只有一套架构：旧侧栏编辑器、旧术语与平行写路径均无残留，保留的兼容/临时面（`archivedAt`/`permissionMode`/旧 `schemaVersion` 读取、`paneID`、pref 键、presenter 测试专用方法）都已显式标注。
+
 ## 仓库整理（2026-09-15）
 
 目标：只保留 Zotero 原生界面 → TypeScript core → Gecko stdio → 随包 Codex App Server 的源码、四份有效文档与其配套脚本/测试/CI。每个可验证变更一个本地提交（`18d43c5`…HEAD）。
@@ -214,7 +242,7 @@
 | **C 工作区作者能力** | skill 创建/编辑/复制/导入/导出/试跑 UI —— 2026-09-15 已删除 presenter 里无 view 调用的 CRUD 包装，数据层 `WorkspaceStore.saveSkill/importSkill/deleteSkill` 与 presenter `selectSkill`/`saveSkill` 保留，UI 需在其上重建；research-topic profile 与 per-chat override 的 UI（数据层在 `contracts/src/workspace.ts`）；固定来源 + 从选中来源新建会话；`@collection`/`@note`/`@annotation`（kind 已声明，`library/reference.ts` `search()` 只返回 `article`）；参考文件拖拽（今天只有图片） | 代码 + 单元（自主） | 无；UI 目视与真实库接线归 D |
 | **D 视觉/交互/长时** | 偏好面板 zh/en + 暗色/亮色 + 键盘 Tab；真实 Gecko 高亮与阅读锚点视觉；真实 IME；多窗口一致性；窄窗/多显示器/主题溢出；reduced-motion；Cursor 式标签条在真实 dock 宽度/主题下的表现 | 真实宿主视觉（截图/录屏 + 人工） | 需 owner 在场目视；契约级检查可自主做 |
 | **E 发行与安装生命周期** | 无 Node 安装、下载隔离、干净 checkout 重建（历史上在临时 worktree 复现过一次，未重跑）、升级/回退、**签名**公开发行，全部在真实产物上 | 真实产物 + 签名发行 | 签名与公开发行需 owner 明确授权（当前授权不含 push/publish/付费服务） |
-| **F 模式与共享上下文** | Chat Mode / Agent Mode 的模式切换 UI 与模式路由；两种模式共用同一文档上下文层与同一会话、跨模式续用先前对话与文档引用；上下文分层取用（轻量元数据 / 即时 reader / 按需全文）在真实请求中的体现；Chat Mode 轮次不计入 Agent/动作额度 | 代码 + 单元（自主）；额度记账与真实请求归 A | 无；额度记账需 owner 授权的真实账户 |
+| **F 模式与共享上下文** | Chat Mode / Agent Mode 的模式路由与跨模式续用（模式切换 UI 与每轮冻结已由 Stage 6 交付，见下“Stage 6”）；两种模式共用同一文档上下文层与同一会话、跨模式续用先前对话与文档引用；上下文分层取用（轻量元数据 / 即时 reader / 按需全文）在真实请求中的体现；Chat Mode 轮次不计入 Agent/动作额度 | 代码 + 单元（自主）；额度记账与真实请求归 A | 无；额度记账需 owner 授权的真实账户 |
 
 人工试用：按 development 的 `--context --acceptance` 方式运行，移除自动驱动再使用；保留合成文献和已保存会话。无需 Node/CLI 的最终用户安装体验仍等待发行验收。
 
@@ -226,6 +254,8 @@
 - **Stage 2/3（HEAD `cad7eea`）无宿主、无发行物、无真实模型证据**：`package:dev`/`verify:artifacts` 未运行（`dist/` 仍是重命名前的 0.4.0a11 XPI），未执行任何 `tests/host/**` 驱动，`dist/` 中 `zchatgpt.js` 不含 Stage 2/3 改动。具体未观察项：真实 Zotero 中 dock 宽度/主题下的 reader 渲染与缩放、真实滚动锚点与当前页捕获、IME 组合、焦点；Chat 路径的「结构性只读」在真实宿主上的行为（未在真实库中尝试写操作，因此只读是**结构**结论而非观测结论）；`estimateRequestBudget` 与实际模型窗口/服务端计量的一致性（无真实模型调用）；模型目录下沉后原生偏好面板的渲染（未打开真实面板）。
 - **Stage 4（HEAD `40f47ac`）无宿主、无发行物、无真实模型证据**：`package:dev`/`verify:artifacts` 未运行（`dist/` 仍是重命名前的 0.4.0a11 XPI）；未执行任何 `tests/host/**` 驱动。审批、写账本、对账、撤销与 Agent Mode 会话均**未在真实 Zotero/真实库观察**；`PresenterAgent` 的装配正确性只有代码 + 单元证据。`actions/native.ts` 与 `core/src/tasks/controller.ts` 未改，故无新增写入风险面。
 - **Stage 5（HEAD `406dcc6`）无宿主、无发行物、无真实模型证据**：`package:dev`/`verify:artifacts` 未运行；未执行任何 `tests/host/**` 驱动。真实原生文件选择、受限读取、`imgITools` 解码、图片导出写入与 `capturePage` 光栅化**均未在真实 Zotero 观察**；`pickFile`/`exportImage` 的搬迁按保守实现处理，**不得宣称宿主行为正确**。
+- **Stage 6（HEAD `b4e02fc`）无宿主、无发行物、无真实模型证据**：`package:dev`/`verify:artifacts` 未运行（`dist/` 仍是重命名前的 0.4.0a11 XPI），未执行任何 `tests/host/**` 驱动，`dist/` 中 `zchatgpt.js` 不含模式控件。**这是本轮最高风险的未验证面**：模式的 segmented 控件在真实 dock 宽度/主题下的布局与命中区、真实 IME 组合与焦点、切模式后滚动锚点与原生缩放的保持、chat 字号（`readTextScale`）与模式行的共存，**均未观察**；Chat 模式“只读”是**结构**结论（拒绝路径在触达模型/文档/任务层之前），未在真实 Zotero 中尝试写操作来证实。模式控件的可访问性只有 DOM 级断言，未经真实屏幕阅读器/键盘走查。
+- **Stage 7（HEAD `75fc5a9`）无宿主、无发行物、无真实模型证据**：删除项经全仓库零引用核对，但未在真实宿主上复跑；`package:dev`/`verify:artifacts` 未运行，无新 XPI。
 - 真实模型输出/流式/停止/在途恢复、真实图像生成、真实档位/用量；`--live` 与 `--live-model` 均 NOT RUN。
 - a9 `--context` 报告的 8 项 `notRun`（见上；与 a5 名单相同）。
 - Cursor 式标签条在真实 dock 宽度/主题下的**目视**、剪贴板粘贴（含 macOS TIFF）、Attach file 多选、偏好面板从其它插件切到本面板、书目卡片与本地读取状态在真实大论文上的呈现（含 12 秒就绪等待）、历史直删后的焦点/滚动、attach 弹层键盘操作、workflow→skill 文案在原生偏好面板的渲染、IME 组合期间后台会话流式回答不抢焦点、后台会话流式回答的到达顺序。a9 `--context` 覆盖了未建记录的本地会话、一列转录所依赖的已有检查、偏好 `defaultXUL` 与 zh/en 文案，**不**覆盖 a10 的 `new-chat-tab-before-or-with-connection`，也不是上述目视/IME/剪贴板项。
