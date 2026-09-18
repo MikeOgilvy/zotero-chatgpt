@@ -1280,6 +1280,12 @@ it('offers a per-chat Chat / Agent selector that freezes the mode onto the next 
   const agent = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="mode-agent"]')!;
   expect(group.getAttribute('role')).toBe('group');
   expect(group.getAttribute('aria-label')).toBe('Mode');
+  // The options carry the segmented-control class, not the generic button skin: the pressed fill and
+  // the compact pill are both `.zchatgpt-mode-option[...]`, so a wrong class leaves the selected mode
+  // invisible and the control looking like two plain buttons.
+  expect(chat.classList.contains('zchatgpt-mode-option')).toBe(true);
+  expect(agent.classList.contains('zchatgpt-mode-option')).toBe(true);
+  expect(chat.classList.contains('zchatgpt-button')).toBe(false);
   // Chat is the default (D3), and the pressed state is presenter state, not the button's own opinion.
   expect(chat.getAttribute('aria-pressed')).toBe('true');
   expect(agent.getAttribute('aria-pressed')).toBe('false');

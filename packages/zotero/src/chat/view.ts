@@ -381,8 +381,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     svg.append(path);
     return svg;
   };
-  const button = (label: string, action: string, onClick: () => void, glyph?: keyof typeof ICONS, className = 'zchatgpt-icon-button') => {
-    const node = el('button', glyph ? className : 'zchatgpt-button', glyph ? '' : label);
+  const button = (label: string, action: string, onClick: () => void, glyph?: keyof typeof ICONS, className?: string) => {
+    // The explicit class wins; otherwise a glyph button is an icon button and a text button gets the
+    // shared button skin. (The caller's class used to be dropped for text buttons, which left the
+    // Chat/Agent options without `.zchatgpt-mode-option` — no pressed fill and no segmented layout.)
+    const node = el('button', className ?? (glyph ? 'zchatgpt-icon-button' : 'zchatgpt-button'), glyph ? '' : label);
     node.type = 'button'; node.dataset.zchatgptAction = action;
     node.setAttribute('aria-label', label); node.title = label;
     if (glyph) node.append(icon(glyph));
