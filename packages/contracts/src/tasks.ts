@@ -1,7 +1,30 @@
-import type { DocumentRevision, PaperScope } from './index.ts';
+import { ReaderError, type DocumentRevision, type PaperScope } from './index.ts';
 import type { NativeAcquisitionResult, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeQuoteResolution } from './native.ts';
 
 export interface AnnotationProposal { quote: string; pageIndex: number; reason: string }
+/**
+ * Untrusted model/user JSON is validated here, next to the contract it produces. The helpers mirror
+ * the task controller's task-input validator so the relocated candidate parser keeps byte-identical
+ * error text and limits; like `validation.ts`, they stay module-local rather than shared.
+ */
+function invalid(): never { throw new ReaderError('INVALID_REQUEST', 'The task input is invalid or no longer matches its review.'); }
+function text(value: unknown, max: number, min = 0): string { if (typeof value !== 'string' || value.length < min || value.length > max || value.includes('\0')) invalid(); return value; }
+function record(value: unknown, allowed?: string[]): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); const object = value as Record<string, unknown>; if (allowed && Object.keys(object).some(k => !allowed.includes(k))) invalid(); return object; }
+/** One model-proposed annotation, before the controller resolves it against a frozen PDF version. */
+export function validateAnnotationProposal(value: unknown): AnnotationProposal {
+  const p = record(value, ['quote', 'pageIndex', 'reason']);
+  if (!Number.isSafeInteger(p.pageIndex) || (p.pageIndex as number) < 0 || (p.pageIndex as number) >= 10000) invalid();
+  // `reason` only becomes the annotation comment. A model that omits it still has to supply an exact
+  // quote and a valid page, so treating it as empty keeps a resolvable candidate instead of dropping
+  // the whole batch. Extra keys remain rejected: the allowlist is what stops model-chosen write fields.
+  return { quote: text(p.quote, 16000, 2), pageIndex: p.pageIndex as number, reason: p.reason === undefined ? '' : text(p.reason, 4000) };
+}
+export function parseAnnotationCandidates(value: string): AnnotationProposal[] {
+  text(value, 1024 * 1024, 2);
+  let parsed: unknown; try { parsed = JSON.parse(value) as unknown; } catch { invalid(); }
+  const result = record(parsed, ['candidates']); if (!Array.isArray(result.candidates) || result.candidates.length > 50) invalid();
+  return result.candidates.map(validateAnnotationProposal);
+}
 /**
  * State of one durable native action task. The task controller owns the transition; a view only
  * projects it. `uncertain` means the write may or may not have landed and must be reconciled by its

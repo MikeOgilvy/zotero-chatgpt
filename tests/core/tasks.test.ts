@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata } from '../../packages/contracts/src/native.ts';
-import { ActionTaskController, parseAnnotationCandidates } from '../../packages/core/src/tasks/controller.ts';
+import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
+import { parseAnnotationCandidates } from '../../packages/contracts/src/tasks.ts';
 import { MemoryStorage, flush } from './doubles.ts';
 import { paperA } from '../contracts/factories.ts';
 const revision = { fingerprint: 'synthetic', size: 1024, modifiedAt: 1000 };

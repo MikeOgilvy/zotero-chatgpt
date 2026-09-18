@@ -2,7 +2,7 @@ import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runti
 import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import type { ActionTaskChoices, ActionTaskRecord, ActionTasks } from '../../../contracts/src/tasks.ts';
+import { parseAnnotationCandidates, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
@@ -10,7 +10,6 @@ import { buildContextBudget, type ContextBudget } from '../../../core/src/codex/
 import { PAPER_THREAD_POLICY, readingInput } from '../../../core/src/codex/reader-policy.ts';
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingCoordinator, ReadingJob } from '../../../core/src/context/coordinator.ts';
-import { parseAnnotationCandidates } from '../../../core/src/tasks/controller.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';

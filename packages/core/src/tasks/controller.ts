@@ -3,7 +3,7 @@ import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPo
 import { ReaderError, type DocumentRevision } from '../../../contracts/src/index.ts';
 import { validatePaperScope } from '../../../contracts/src/validation.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
-import type { AcquisitionChoice, AcquisitionTaskItem, ActionTaskOperation, ActionTaskRecord, ActionTasks, AnnotationProposal, AnnotationTaskItem } from '../../../contracts/src/tasks.ts';
+import { validateAnnotationProposal as proposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem } from '../../../contracts/src/tasks.ts';
 export interface ActionTaskClock { uuid(): string; key(): string; now(): string }
 interface TaskCoordination { queue: Promise<void>; active: Map<string, AbortController>; stopRequests: Set<string> }
 const coordinationByStorage = new WeakMap<StoragePort, TaskCoordination>();
@@ -25,20 +25,6 @@ function equal(a: unknown, b: unknown): boolean {
     return JSON.stringify(value);
   };
   return canonical(a) === canonical(b);
-}
-function proposal(value: unknown): AnnotationProposal {
-  const p = record(value, ['quote', 'pageIndex', 'reason']);
-  if (!Number.isSafeInteger(p.pageIndex) || (p.pageIndex as number) < 0 || (p.pageIndex as number) >= 10000) invalid();
-  // `reason` only becomes the annotation comment. A model that omits it still has to supply an exact
-  // quote and a valid page, so treating it as empty keeps a resolvable candidate instead of dropping
-  // the whole batch. Extra keys remain rejected: the allowlist is what stops model-chosen write fields.
-  return { quote: text(p.quote, 16000, 2), pageIndex: p.pageIndex as number, reason: p.reason === undefined ? '' : text(p.reason, 4000) };
-}
-export function parseAnnotationCandidates(value: string): AnnotationProposal[] {
-  text(value, 1024 * 1024, 2);
-  let parsed: unknown; try { parsed = JSON.parse(value) as unknown; } catch { invalid(); }
-  const result = record(parsed, ['candidates']); if (!Array.isArray(result.candidates) || result.candidates.length > 50) invalid();
-  return result.candidates.map(proposal);
 }
 function documentRevision(value: unknown): DocumentRevision {
   const r = record(value, ['fingerprint', 'size', 'modifiedAt', 'sha256']);

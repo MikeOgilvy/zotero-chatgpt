@@ -13,7 +13,9 @@ import { describe, expect, it } from 'vitest';
  *
  * `agent` is not a layer name here: agent/tool execution is the task orchestration in `core/tasks`
  * plus whatever a skill or the UI drives through a port. A reader-only build must be able to skip
- * the write half entirely, which is only true while these directions hold.
+ * the write half entirely, which is only true while these directions hold. The `chat` UI in
+ * particular must not import `zotero/actions` (native writes) or `core/tasks` (Agent orchestration);
+ * it reaches them only through the injected task/action ports.
  */
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const packagesRoot = path.join(repositoryRoot, 'packages');
@@ -88,6 +90,13 @@ describe('module dependency boundaries', () => {
 
   it('never lets the chat UI import the native write implementation', () => {
     expect(violations(file => file.startsWith('packages/zotero/src/chat/'), /^packages\/zotero\/src\/actions\//u)).toEqual([]);
+  });
+
+  // Chat must not reach the Agent task orchestration either. The candidate parser moved to
+  // `contracts` so the presenter imports it without pulling `core/tasks` into the chat path; a
+  // remaining edge here means the Agent dependency has crept back into a Chat-only module.
+  it('never lets the chat UI import the Agent task orchestration', () => {
+    expect(violations(file => file.startsWith('packages/zotero/src/chat/'), /^packages\/core\/src\/tasks\//u)).toEqual([]);
   });
 
   it('has no agent directory: action execution lives in core/tasks and zotero/actions', () => {
