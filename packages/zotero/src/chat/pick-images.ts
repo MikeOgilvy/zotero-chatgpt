@@ -1,10 +1,7 @@
 import type { ImageAttachment } from '../../../contracts/src/index.ts';
+import { imageFromBytes, sniffImageMime } from '../../../contracts/src/image.ts';
+import { LIMITS } from '../../../contracts/src/validation.ts';
 
-const MAX_BYTES = 2 * 1024 * 1024;
-const PNG = [0x89, 0x50, 0x4e, 0x47];
-const JPEG = [0xff, 0xd8, 0xff];
-const GIF = [0x47, 0x49, 0x46];
-const PDF = [0x25, 0x50, 0x44, 0x46];
 /** DOM `image/*` plus macOS pasteboard UTIs. TIFF is converted by requesting `image/png` from nsIClipboard. */
 export const CLIPBOARD_IMAGE_FLAVORS = [
   'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
@@ -25,26 +22,6 @@ export type ClipboardImageRefusal = 'too-large' | 'unsupported';
  * owner with a paste that appears to have done nothing. An empty pasteboard stays silent.
  */
 export interface ClipboardImageRead { images: ImageAttachment[]; refused?: ClipboardImageRefusal }
-
-function startsWith(bytes: Uint8Array, magic: readonly number[]): boolean {
-  return magic.length <= bytes.length && magic.every((value, index) => bytes[index] === value);
-}
-
-export function sniffImageMime(bytes: Uint8Array): ImageAttachment['mime'] | undefined {
-  if (startsWith(bytes, PDF)) return undefined;
-  if (startsWith(bytes, PNG)) return 'image/png';
-  if (startsWith(bytes, JPEG)) return 'image/jpeg';
-  if (startsWith(bytes, GIF)) return 'image/gif';
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
-    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'image/webp';
-  return undefined;
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const value of bytes) binary += String.fromCharCode(value);
-  return btoa(binary);
-}
 
 export function isClipboardImageFlavor(type: string): boolean {
   const normalized = type.toLowerCase();
@@ -135,7 +112,7 @@ export async function attachmentsFromItems(
     const image = attachmentFromBytes({ id: uuid(), name, bytes });
     if (image) { images.push(image); continue; }
     // The bytes were read and refused: say which cap refused them, never silently drop the paste.
-    refused ??= bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES ? 'too-large' : 'unsupported';
+    refused ??= bytes.byteLength === 0 || bytes.byteLength > LIMITS.imageBytes ? 'too-large' : 'unsupported';
   }
   return { images, ...(refused ? { refused } : {}) };
 }
@@ -149,7 +126,7 @@ export async function imagesFromClipboardItems(
 
 /** One attachment, or `undefined` with the reason kept by the caller's refusal bookkeeping. */
 function attachmentFromBytes(input: { id: string; name: string; bytes: Uint8Array }): ImageAttachment | undefined {
-  return input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_BYTES ? undefined : imageFromBytes(input);
+  return input.bytes.byteLength === 0 || input.bytes.byteLength > LIMITS.imageBytes ? undefined : imageFromBytes(input);
 }
 
 function itemsFromClipboard(data: ClipboardLike | null | undefined): ClipboardImageItem[] {
@@ -198,15 +175,6 @@ export function attachmentsFromClipboard(
   uuid: () => string,
 ): Promise<ClipboardImageRead> {
   return attachmentsFromItems(itemsFromClipboard(data), uuid);
-}
-
-export function imageFromBytes(input: { id: string; name: string; bytes: Uint8Array }): ImageAttachment | undefined {
-  if (input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_BYTES) return undefined;
-  const mime = sniffImageMime(input.bytes);
-  if (!mime) return undefined;
-  const name = input.name.split(/[/\\]/u).at(-1)?.trim() || 'image';
-  if (name.toLowerCase().endsWith('.pdf')) return undefined;
-  return { id: input.id, name, mime, dataUrl: `data:${mime};base64,${toBase64(input.bytes)}` };
 }
 
 interface GeckoClipboardService {
@@ -408,5 +376,5 @@ export function readGeckoClipboardImage(
   const image = imageFromBytes({ id: uuid(), name: 'screenshot.png', bytes });
   if (image) return { images: [image] };
   // The bytes were really on the pasteboard; the refusal names why they were not attached.
-  return { images: [], refused: bytes.byteLength > MAX_BYTES ? 'too-large' : 'unsupported' };
+  return { images: [], refused: bytes.byteLength > LIMITS.imageBytes ? 'too-large' : 'unsupported' };
 }

@@ -1,12 +1,11 @@
 import { ReaderError, paperId, type DocumentContext, type DocumentRevision, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
 import type { NativeCollectionTarget } from '../../../contracts/src/native.ts';
-import type { LibraryReferencePort, PickedFile, ReaderReference } from '../../../contracts/src/workspace.ts';
+import type { LibraryReferencePort, ReaderReference } from '../../../contracts/src/workspace.ts';
 import { paperIdentityOf, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from '../reader/document.ts';
 import type { HostReader, ZoteroHost } from '../reader/host-types.ts';
-import { imageFromBytes } from '../chat/pick-images.ts';
+import { boundary, createNativeFiles, fail, type NativeFileOptions } from './native-files.ts';
 
 export interface LibraryItem {
   id: number; key: string; libraryID: number; parentID?: number | null; parentItemID?: number; deleted?: boolean;
@@ -47,99 +46,38 @@ export interface NativeLibraryHost {
   Libraries?: { getAll: () => Array<{ libraryID: number; name: string; editable: boolean; libraryType?: string; waitForDataLoad?(type: 'collection'): Promise<void> }> };
   Collections?: { getByLibrary: (libraryID: number, recursive: boolean, includeTrashed: boolean) => Array<{ key: string; libraryID: number; name: string; parentKey?: string | null | false; deleted?: boolean; isEditable(): boolean }> };
 }
-export interface LibraryFilePicker {
-  modeOpen: number; modeOpenMultiple: number; modeSave: number; returnOK: number; returnReplace: number;
-  defaultString: string; file?: string; files?: string[];
-  init(window: Window, title: string, mode: number): void;
-  appendFilter(title: string, pattern: string): void;
-  show: () => Promise<number>;
-}
-export interface LibraryFileIO {
-  stat(path: string): Promise<{ size: number; type?: string }>;
-  read(path: string, options: { maxBytes: number }): Promise<Uint8Array>;
-  write(path: string, bytes: Uint8Array): Promise<unknown>;
-}
 export interface LibraryDocumentSource { capture: (signal?: AbortSignal) => Promise<DocumentSource>; validate: (document: DocumentContext) => Promise<void> }
 export interface LibraryRasterInput { reader: LibraryReader; paper: PaperScope; revision: DocumentRevision; pageIndex: number; rect?: Rect; scale: number; signal: AbortSignal }
-export interface LibraryReferenceOptions {
-  clientId: string; documentCache: Pick<ReaderDocumentCache, 'read'>; uuid(): string; now?(): string;
+export interface LibraryReferenceOptions extends NativeFileOptions {
+  clientId: string; documentCache: Pick<ReaderDocumentCache, 'read'>; now?(): string;
   getWindow?(): (Window & LibraryWindow) | undefined;
   source?(reader: LibraryReader, paper: PaperScope): LibraryDocumentSource;
   watchTabSelection?(selected: (id: string) => void): () => void;
-  createFilePicker?(): LibraryFilePicker;
-  io?: LibraryFileIO;
-  decodeImage?(bytes: Uint8Array, mime: ImageAttachment['mime']): Promise<{ width: number; height: number }>;
   cloneInto?: (value: object, target: object, options?: { wrapReflectors?: boolean }) => object;
   waiveXrays?: (value: object) => object;
   rasterize?(input: LibraryRasterInput): Promise<Uint8Array>;
 }
 export interface NativeLibraryReferencePort extends LibraryReferencePort {
   capturePage(paper: PaperScope, pageIndex: number, signal?: AbortSignal): Promise<ImageAttachment>;
-  exportImage(image: ImageAttachment): Promise<void>;
   collections(): Promise<Array<NativeCollectionTarget & { name: string }>>;
-  pickFile(): Promise<PickedFile>;
 }
 
 const KEY = /^[A-Z0-9]{8}$/u;
 const MAX_RESULTS = 50;
 const MAX_RASTER_PIXELS = 8_000_000;
-/**
- * The file routes this port can honestly take. The **extension decides the route** and the **bytes
- * then have to prove it**: a text-extension file must decode as UTF-8 without control bytes, and an
- * image-extension file must carry a PNG/JPEG/GIF/WebP magic and pass the native decode, so a renamed
- * binary or a `.png` that is not an image is refused rather than mis-sent. Sniffing content alone
- * would be worse in the other direction: a truncated or plain-text `.png` would silently become
- * "text context" the owner never asked for.
- */
-const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'] as const;
-const TEXT_FILE_EXTENSIONS = [
-  'txt', 'text', 'md', 'markdown', 'rst', 'org',
-  'csv', 'tsv', 'json', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'properties', 'env', 'log',
-  'xml', 'html', 'htm', 'xhtml', 'svg', 'tex', 'latex', 'bib', 'ris', 'srt', 'vtt',
-  'py', 'ipynb', 'js', 'mjs', 'cjs', 'ts', 'mts', 'cts', 'tsx', 'jsx', 'css', 'scss', 'less',
-  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'r', 'rmd', 'jl', 'm', 'mm', 'java', 'kt', 'scala', 'groovy', 'gradle',
-  'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'pl', 'lua', 'swift', 'dart', 'sql', 'graphql', 'proto',
-] as const;
-const IMAGE_FILE_PATTERNS = IMAGE_FILE_EXTENSIONS.map(extension => `*.${extension}`).join('; ');
-const TEXT_FILE_PATTERNS = TEXT_FILE_EXTENSIONS.map(extension => `*.${extension}`).join('; ');
-/**
- * Cheap 32-bit FNV-1a over the bytes just read. Its only job is to keep the same file from being
- * attached twice under two ids, and to keep two same-named files apart inside one draft; it is not a
- * security hash and is never used as a document identity or a content-address.
- */
-function contentFingerprint(bytes: Uint8Array): string {
-  let hash = 0x811c9dc5;
-  for (const byte of bytes) { hash ^= byte; hash = Math.imul(hash, 0x01000193) >>> 0; }
-  return hash.toString(16).padStart(8, '0');
-}
-function fileExtension(name: string): string { return /\.([a-z0-9]+)$/iu.exec(name)?.[1]?.toLowerCase() ?? ''; }
-function fail(message: string, code: ConstructorParameters<typeof ReaderError>[0] = 'INVALID_REQUEST'): never { throw new ReaderError(code, message); }
 function check(signal: AbortSignal): void { if (signal.aborted) fail('Reference preparation cancelled.'); }
 async function waitRead<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   check(signal); let abort = () => {};
   try { return await Promise.race([work, new Promise<never>((_resolve, reject) => { abort = () => reject(new ReaderError('INVALID_REQUEST', 'Reference preparation cancelled.')); signal.addEventListener('abort', abort, { once: true }); })]); }
   finally { signal.removeEventListener('abort', abort); }
 }
-async function boundary<T>(work: () => Promise<T>, message: string): Promise<T> {
-  try { return await work(); } catch (error) { if (error instanceof ReaderError) throw error; fail(message); }
-}
-function bareName(name: string, fallback: string): string {
-  const file = name.split(/[/\\]/u).at(-1)?.trim().replace(/\.\./gu, '_').replace(/[\u0000-\u001f]/gu, '') || fallback;
-  return [...file].slice(0, 220).join('');
-}
 function sameRevision(a: DocumentRevision, b: DocumentRevision): boolean { return JSON.stringify(a) === JSON.stringify(b); }
-interface NativeGlobals {
-  ChromeUtils?: { importESModule(uri: string): { FilePicker?: new () => LibraryFilePicker } };
-  IOUtils?: LibraryFileIO;
-  Cu?: { cloneInto(value: object, target: object, options?: { wrapReflectors?: boolean }): object; waiveXrays?(value: object): object };
-  Cc?: Record<string, { getService(type: unknown): { decodeImageFromArrayBuffer(bytes: ArrayBuffer, mime: string): { width: number; height: number } } }>;
-  Ci?: { imgITools?: unknown };
-}
 
 /** Metadata lookup and native file/reader inputs. No search path parses attachment bodies. */
 export function createLibraryReferencePort(zotero: unknown, options: LibraryReferenceOptions): NativeLibraryReferencePort {
   const z = zotero as NativeLibraryHost;
-  const globals = () => globalThis as unknown as NativeGlobals;
+  const files = createNativeFiles(zotero, options);
+  const globals = () => files.globals();
   const now = () => options.now?.() ?? new Date().toISOString();
   const window = () => options.getWindow?.() ?? z.getMainWindow?.();
   const scopeOf = (scope: PaperScope): PaperScope => {
@@ -253,7 +191,6 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
   };
   const identity = (item: LibraryItem, fallback: LibraryItem): PaperIdentity =>
     paperIdentityOf(metadataOf(item, fallback), readField(item, 'title') || readField(fallback, 'title') || 'PDF attachment');
-  const io = () => options.io ?? globals().IOUtils ?? fail('Native file access is unavailable.', 'UNSUPPORTED_INTERACTION');
   /** Every library an @-reference may point at. A feed has no PDF items; the fallback keeps the default search path. */
   const libraries = (): Array<{ libraryID?: number }> => {
     const readable = (z.Libraries?.getAll() ?? []).filter(library => library.libraryType !== 'feed' && Number.isSafeInteger(library.libraryID) && library.libraryID >= 1);
@@ -270,41 +207,6 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     }
     return results;
   };
-  const filePicker = (title: string, kind: 'save' | 'file', name = '') => {
-    const picker = options.createFilePicker?.() ?? (() => {
-      const FilePicker = globals().ChromeUtils?.importESModule('chrome://zotero/content/modules/filePicker.mjs').FilePicker;
-      return FilePicker ? new FilePicker() : fail('The native file picker is unavailable.', 'UNSUPPORTED_INTERACTION');
-    })();
-    const owner = window(); if (!owner) fail('Open a Zotero window before choosing a file.', 'UNSUPPORTED_INTERACTION');
-    picker.init(owner, title, kind === 'save' ? picker.modeSave : picker.modeOpenMultiple);
-    if (name) picker.defaultString = bareName(name, 'export.txt');
-    return picker;
-  };
-  const readFile = async (path: string, maximum: number): Promise<Uint8Array> => {
-    const files = io(); const stat = await files.stat(path);
-    // A directory or a device would make `size` meaningless and could hang a native read, so only a
-    // regular file is ever read; the check is skipped when the host cannot report a type.
-    if (stat.type !== undefined && stat.type !== 'regularFile') fail('Choose a regular file, not a folder.');
-    if (!Number.isSafeInteger(stat.size) || stat.size <= 0 || stat.size > maximum) fail('The selected file is empty or exceeds the supported size limit.', 'PAYLOAD_TOO_LARGE');
-    const bytes = await files.read(path, { maxBytes: maximum + 1 });
-    if (!bytes.length || bytes.length > maximum) fail('The selected file exceeds the supported size limit.', 'PAYLOAD_TOO_LARGE');
-    return bytes;
-  };
-  const decodeImage = async (bytes: Uint8Array, mime: ImageAttachment['mime']) => {
-    if (options.decodeImage) return options.decodeImage(bytes, mime);
-    const native = globals(); const owner = window() as unknown as NativeGlobals | undefined;
-    const cc = owner?.Cc ?? native.Cc; const ci = owner?.Ci ?? native.Ci;
-    const tools = cc?.['@mozilla.org/image/tools;1']?.getService(ci?.imgITools);
-    if (!tools) fail('Native image validation is unavailable.', 'UNSUPPORTED_INTERACTION');
-    return tools.decodeImageFromArrayBuffer(new Uint8Array(bytes).buffer, mime);
-  };
-  const image = async (bytes: Uint8Array, name: string, origin?: ImageAttachment['origin']): Promise<ImageAttachment> => {
-    const value = imageFromBytes({ id: options.uuid(), name: bareName(name, 'image.png'), bytes });
-    if (!value) fail('Choose a valid PNG, JPEG, GIF or WebP image within the image size limit.');
-    const dimensions = await decodeImage(bytes, value.mime);
-    if (!Number.isSafeInteger(dimensions.width) || !Number.isSafeInteger(dimensions.height) || dimensions.width < 1 || dimensions.height < 1) fail('The selected image could not be decoded.');
-    return validateImageAttachment({ ...value, ...(origin ? { origin: clone(origin) } : {}) });
-  };
   const capture = (paper: PaperScope, pageIndex: number, rect?: Rect, expected?: DocumentRevision, signal = new AbortController().signal) => {
     const scope = scopeOf(paper); const frozenRect = rect ? [...rect] as Rect : undefined;
     if (!Number.isSafeInteger(pageIndex) || pageIndex < 0) fail('Choose a valid PDF page.');
@@ -317,7 +219,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       const fresh = await waitRead(source.capture(signal), signal);
       if (!sameRevision(revision, fresh.revision)) fail('The PDF changed while preparing this image. Capture it again.');
       attachment(scope);
-      return image(bytes, `${scope.attachmentKey} - p.${pageIndex + 1}.png`, { kind: 'paper', paper: scope, pageIndex, revision });
+      return files.image(bytes, `${scope.attachmentKey} - p.${pageIndex + 1}.png`, { kind: 'paper', paper: scope, pageIndex, revision });
     }), 'The native PDF image could not be rendered. This reader may not support page capture.');
   };
   return {
@@ -393,48 +295,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
       }, 'The referenced PDF could not be read locally.');
     },
     open: paper => boundary(async () => { const scope = scopeOf(paper); await z.Reader.open(attachment(scope).id); }, 'The referenced PDF could not be opened.'),
-    // Explicitly chosen files, attached as real content rather than as a reference to a file the
-    // model would have to open itself. The extension chooses the route and the bytes then have to
-    // prove it, and the chosen path is dropped here: what leaves this port is a bare file name plus
-    // either decoded UTF-8 text (reference context) or a validated image attachment. The model never
-    // receives a filesystem path, cannot request a different one, and reads the body as data.
-    pickFile: () => boundary(async () => {
-      const picker = filePicker('Attach files', 'file');
-      picker.appendFilter('Images', IMAGE_FILE_PATTERNS); picker.appendFilter('Text', TEXT_FILE_PATTERNS); picker.appendFilter('All files', '*');
-      if (await picker.show() !== picker.returnOK) return { references: [], images: [] };
-      const paths = picker.files?.length ? [...picker.files] : (picker.file ? [picker.file] : []);
-      if (!paths.length) fail('No file was selected.');
-      const references: PickedFile['references'] = [];
-      const images: ImageAttachment[] = [];
-      for (const path of paths) {
-        const name = bareName(path, 'attachment'); const extension = fileExtension(name);
-        if ((IMAGE_FILE_EXTENSIONS as readonly string[]).includes(extension)) {
-          images.push(await image(await readFile(path, LIMITS.imageBytes), name));
-          continue;
-        }
-        if (!(TEXT_FILE_EXTENSIONS as readonly string[]).includes(extension)) fail(`Attach a text file (${TEXT_FILE_EXTENSIONS.slice(0, 6).join(', ')}, …) or an image (${IMAGE_FILE_EXTENSIONS.join(', ')}).`);
-        const bytes = await readFile(path, LIMITS.referenceTextBytes);
-        let body: string;
-        try { body = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
-        catch { fail('This file is not UTF-8 text, so it cannot become text context. Attach a text file or an image.'); }
-        if (!body.trim()) fail('This file has no text to attach.');
-        // A misnamed binary would otherwise reach the model as mojibake. The readable whitespace
-        // controls (`\t`, `\n`, `\r`) stay; any other C0 control byte is treated as proof of binary.
-        if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(body)) fail('This file looks like binary data, so it cannot become text context.');
-        references.push({ id: `file-${options.clientId}-${contentFingerprint(bytes)}`, kind: 'file', label: name, text: body, capturedAt: now() });
-      }
-      if (images.length > LIMITS.imagesPerRequest) fail(`Choose at most ${LIMITS.imagesPerRequest} images at a time.`);
-      return { references, images };
-    }, 'The selected file could not be read.'),
     capturePage: (paper, pageIndex, signal) => capture(paper, pageIndex, undefined, undefined, signal),
-    exportImage: original => boundary(async () => {
-      const image = original.origin?.kind === 'generated' ? validateOutputImage(original) : validateImageAttachment(original);
-      const bytes = Uint8Array.from(atob(image.dataUrl.slice(image.dataUrl.indexOf(',') + 1)), char => char.charCodeAt(0));
-      await decodeImage(bytes, image.mime);
-      const picker = filePicker('Export image', 'save', image.name); picker.appendFilter('Image', `*.${image.mime === 'image/jpeg' ? 'jpg' : image.mime.slice('image/'.length)}`);
-      const result = await picker.show(); if (result !== picker.returnOK && result !== picker.returnReplace) return;
-      if (!picker.file) fail('No export file was selected.'); await io().write(picker.file, bytes);
-    }, 'The image could not be exported.'),
   };
 }
 

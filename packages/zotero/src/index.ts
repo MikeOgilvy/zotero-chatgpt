@@ -14,6 +14,7 @@ import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { createPreferencesService } from './preferences/service.ts';
 import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './preferences/registration.ts';
+import { createFileActions, type LibraryFileActions } from './actions/files.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
@@ -57,6 +58,16 @@ function clientId(): string {
 function assembleAgent(services: ReturnType<typeof createLocalServices>): PresenterAgent {
   return { tasks: () => services.getTasks(), reading: client => services.getReading(client) };
 }
+/**
+ * The composition root merges the read port with the file actions. The read side must not import
+ * `actions/` (dependency-boundaries), so the two halves meet here: `library/reference.ts` keeps
+ * search/read/open/capture and `actions/files.ts` owns the file picker and export. Both are
+ * stateless, so assembling this per call is just object spread.
+ */
+function libraryPort(): ReturnType<typeof createLocalServices>['library'] & LibraryFileActions {
+  if (!localServices) throw new Error('The local Zotero library is unavailable.');
+  return { ...localServices.library, ...createFileActions(Zotero, { clientId: clientId(), uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() }) };
+}
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
   const client = clientId();
   const paper = paperScope(client, identity); const key = paperId(paper);
@@ -79,7 +90,7 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
         // The Agent capability is assembled here, once, from the local services; a host without it
         // leaves the chat path unable to reach approvals, the ledger or undo (Stage 4).
         agent: assembleAgent(local),
-        library: local.library,
+        library: libraryPort(),
         openCitation: citation => openCitation(Zotero, citation, clientId()),
         openItem: async (reference: import('../../contracts/src/native.ts').NativeItemRef) => {
           if (reference.clientId !== clientId()) throw new ReaderError('NOT_FOUND', 'The output belongs to another profile.');
@@ -123,7 +134,7 @@ const hooks = {
   openLink: (url: string) => { Zotero.launchURL(url); },
   exportImage: async (image: import('../../contracts/src/index.ts').ImageAttachment) => {
     if (!localServices) throw new Error('Image export is unavailable.');
-    await localServices.library.exportImage(image);
+    await libraryPort().exportImage(image);
   },
 };
 function readerAssets(): { stylesheet?: string; katex?: string } {

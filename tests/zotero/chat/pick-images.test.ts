@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import {
-  attachmentsFromClipboard, attachmentsFromItems, clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imageFromBytes, imagesFromClipboard,
+  attachmentsFromClipboard, attachmentsFromItems, clipboardHasImage, clipboardHasText, geckoClipboardHasImage, imagesFromClipboard,
   imagesFromClipboardItems, pluginClipboardAccess, readGeckoClipboardImage, resolveGeckoClipboardAccess,
   type ClipboardImageItem,
 } from '../../../packages/zotero/src/chat/pick-images.ts';
+import { imageFromBytes } from '../../../packages/contracts/src/image.ts';
 import { TINY_PNG_DATA_URL } from '../../contracts/factories.ts';
 
 const PNG_ID = '6c8e0a2b-4d1f-4e3a-9c5b-1a7d3e5f9b20';

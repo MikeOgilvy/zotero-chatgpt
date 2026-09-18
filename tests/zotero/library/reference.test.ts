@@ -1,6 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import { Window as HappyWindow } from 'happy-dom';
-import { createLibraryReferencePort, type LibraryDocumentSource, type LibraryFilePicker, type LibraryItem, type LibraryReader, type LibraryReferenceOptions, type NativeLibraryHost } from '../../../packages/zotero/src/library/reference.ts';
+import { createLibraryReferencePort, type LibraryDocumentSource, type LibraryItem, type LibraryReader, type LibraryReferenceOptions, type NativeLibraryHost } from '../../../packages/zotero/src/library/reference.ts';
+import { createFileActions } from '../../../packages/zotero/src/actions/files.ts';
+import { type LibraryFilePicker } from '../../../packages/zotero/src/library/native-files.ts';
 import { ReaderDocumentCache, type DocumentSource } from '../../../packages/zotero/src/reader/document.ts';
 import { paperA, TINY_PNG_DATA_URL } from '../../contracts/factories.ts';
 import type { ReaderReference } from '../../../packages/contracts/src/workspace.ts';
@@ -35,7 +37,10 @@ function setup(options: Partial<LibraryReferenceOptions> = {}, nativeRaster = fa
       tabs.set(tabID, { id: tabID, data: { itemID } }); host.Reader._readers.push(reader); return Promise.resolve(reader);
     }) }, getMainWindow: () => win,
   };
-  const port = createLibraryReferencePort(host, { clientId: paperA.clientId, documentCache: new ReaderDocumentCache({ yield: async () => {} }), uuid: () => uuid, now: () => '2026-09-12T00:00:00Z', source: () => source, getWindow: () => win, watchTabSelection: selected => { onSelection = selected; return unwatch; }, createFilePicker: () => picker, io, decodeImage: () => Promise.resolve({ width: 1, height: 1 }), ...(!nativeRaster ? { rasterize: vi.fn().mockResolvedValue(png) } : {}), ...options });
+  const config: LibraryReferenceOptions = { clientId: paperA.clientId, documentCache: new ReaderDocumentCache({ yield: async () => {} }), uuid: () => uuid, now: () => '2026-09-12T00:00:00Z', source: () => source, getWindow: () => win, watchTabSelection: selected => { onSelection = selected; return unwatch; }, createFilePicker: () => picker, io, decodeImage: () => Promise.resolve({ width: 1, height: 1 }), ...(!nativeRaster ? { rasterize: vi.fn().mockResolvedValue(png) } : {}), ...options };
+  // The composition root merges the read port with the file actions; the tests exercise the same
+  // single object the presenter sees.
+  const port = { ...createLibraryReferencePort(host, config), ...createFileActions(host, config) };
   return { port, host, items, pdf, source, conditions, metadataReads, tabs, nativeTabs, closes, unwatch, picker, io, select: (id: string) => { nativeTabs.selectedID = id; onSelection(id); } };
 }
 

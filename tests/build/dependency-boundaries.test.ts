@@ -63,6 +63,7 @@ describe('module dependency boundaries', () => {
     expect(edges.length).toBeGreaterThan(100);
     expect(edges).toContainEqual({ from: 'packages/zotero/src/actions/native.ts', to: 'packages/zotero/src/library/native-read.ts' });
     expect(edges).toContainEqual({ from: 'packages/zotero/src/library/reference.ts', to: 'packages/zotero/src/reader/document.ts' });
+    expect(edges).toContainEqual({ from: 'packages/zotero/src/actions/files.ts', to: 'packages/zotero/src/library/native-files.ts' });
   });
 
   it('keeps contracts below core and zotero', () => {
@@ -90,11 +91,16 @@ describe('module dependency boundaries', () => {
 
   // The reader context is the aggregation layer the chat presenter reads, so the dependency points
   // chat -> reader and never back. A `reader/` file importing the chat UI would mean the open-PDF
-  // state grew a second owner downstream of the UI. (The one library -> chat edge that remains,
-  // `library/reference.ts -> chat/pick-images.ts`, is a misplaced clipboard helper and belongs to
-  // the Stage 5 file-action move, not to this layer.)
+  // state grew a second owner downstream of the UI.
   it('never lets the reader side depend on the chat UI', () => {
     expect(violations(file => file.startsWith('packages/zotero/src/reader/'), /^packages\/zotero\/src\/chat\//u)).toEqual([]);
+  });
+
+  // The library read side is the `createLibraryReferencePort` surface. The one historical edge,
+  // `library/reference.ts -> chat/pick-images.ts`, was a misplaced byte->image helper that now lives
+  // in `contracts/src/image.ts`; this assertion keeps that edge from coming back.
+  it('never lets the library read side depend on the chat UI', () => {
+    expect(violations(file => file.startsWith('packages/zotero/src/library/'), /^packages\/zotero\/src\/chat\//u)).toEqual([]);
   });
 
   it('never lets the chat UI import the native write implementation', () => {
