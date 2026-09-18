@@ -1,4 +1,4 @@
-import { requestProgress, type Citation, type ContextReport, type Conversation, type ImageAttachment, type Message, type RequestTiming } from '../../../contracts/src/index.ts';
+import { requestProgress, type Citation, type ContextReport, type Conversation, type ImageAttachment, type Message, type RequestMode, type RequestTiming } from '../../../contracts/src/index.ts';
 import type { HistoryEntry } from '../../../contracts/src/workspace.ts';
 import { currentContextUsage, mountContextRing } from './context-view.ts';
 import { mountWorkspaceView } from './workspace-view.ts';
@@ -54,6 +54,11 @@ const COPY = {
   closeChat: 'Close chat',
   deleteChat: 'Delete chat',
   newContent: 'New content',
+  // Chat / Agent routing mode (Stage 6). The selector is per chat and names the mode the next
+  // request will be frozen with, not the mode of any request already in the transcript.
+  mode: 'Mode',
+  modeChat: 'Chat',
+  modeAgent: 'Agent',
   askPlaceholder: 'Ask a question…',
   question: 'Question',
   send: 'Send',
@@ -659,7 +664,21 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   );
   plusMenu.append(attachGroup, referenceGroup, skillGroup);
   composer.append(plusMenu);
-  leading.append(plus);
+  // The routing mode for the next request, beside `+` at the composer's start in the same control
+  // style. It is per chat: the selected state is painted from presenter state, so a switch is shown
+  // only once the presenter accepted it, and it never rewrites an already recorded request.
+  const modeSwitch = el('div', 'zchatgpt-mode-switch');
+  modeSwitch.dataset.zchatgptModeSwitch = '';
+  modeSwitch.setAttribute('role', 'group');
+  modeSwitch.setAttribute('aria-label', COPY.mode);
+  modeSwitch.dataset.zchatgptUi = 'true';
+  const modeButtons: Array<{ mode: RequestMode; node: HTMLButtonElement }> = (['chat', 'agent'] as const).map(mode => {
+    const node = button(mode === 'chat' ? COPY.modeChat : COPY.modeAgent, `mode-${mode}`, () => presenter.setMode(mode), undefined, 'zchatgpt-mode-option');
+    node.setAttribute('aria-pressed', String(mode === 'chat'));
+    return { mode, node };
+  });
+  modeSwitch.append(...modeButtons.map(entry => entry.node));
+  leading.append(plus, modeSwitch);
   const acquisition = el('label', 'zchatgpt-acquisition-target', 'Save literature to'); acquisition.hidden = true;
   const collection = el('select'); collection.dataset.zchatgptCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
   collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });
@@ -1129,6 +1148,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     documentStatus.hidden = text === '';
     if (text) documentStatus.textContent = text; else documentStatus.replaceChildren();
   };
+  /**
+   * Paint the mode the presenter will freeze onto the next request. `aria-pressed` is set from
+   * presenter state, never from the button that was clicked, so the control cannot show a mode the
+   * send path would not use. Recorded requests and messages keep the mode they were frozen with.
+   */
+  const renderMode = (state: PresenterState) => {
+    for (const entry of modeButtons) entry.node.setAttribute('aria-pressed', String(entry.mode === state.mode));
+    modeSwitch.dataset.zchatgptMode = state.mode;
+  };
   const updateContext = (state: PresenterState) => {
     if (!state.conversation && !renameForm.hidden) toggleRename(false);
     const citation = activeCitation(state.draft.citations, state.conversation?.messages ?? []);
@@ -1455,6 +1483,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const update = (state: PresenterState) => {
     latestViewState = state;
     paintTiming(state);
+    // Chat mode is the read-only surface: Agent-only affordances (approvals, ledger, reconciliation,
+    // undo, annotation review) never appear, even if a stored conversation still carries tasks. The
+    // tasks stay only in presenter state; the view simply does not render them (invariants 3 and 4).
+    const agentMode = state.mode === 'agent';
+    const visibleTasks = agentMode ? state.tasks : [];
     const uiLanguage = state.workspace?.uiLanguage ?? 'en';
     if (lastLanguage !== uiLanguage) { lastLanguage = uiLanguage; localizer.update(uiLanguage); }
     // The consent prompt is a state, not a banner: it appears only when a request actually needs it.
@@ -1473,7 +1506,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         workspaceView.update({ settings: state.workspace, draft: { references: state.draft.references, skillId: state.draft.skillId, profileId: state.draft.profileId } });
       }
       applyChatTextScale(root, state.workspace.textScale);
-      const acquire = state.workspace.skills.find(skill => skill.id === state.draft.skillId)?.workflow === 'acquire'; acquisition.hidden = !acquire;
+      const acquire = state.workspace.skills.find(skill => skill.id === state.draft.skillId)?.workflow === 'acquire';
+      // The collection target is an Agent affordance: it is only shown when the acquire workflow is
+      // actually runnable in this chat, i.e. in Agent mode.
+      acquisition.hidden = !acquire || !agentMode;
       if (acquire && !requestedCollections) { requestedCollections = true; void presenter.collections().catch(() => { requestedCollections = false; reportViewMessage(COPY.collectionsFailed); }); }
       const collectionKey = JSON.stringify(state.collectionOptions);
       if (collection.dataset.options !== collectionKey) {
@@ -1482,12 +1518,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }
       collection.value = state.acquisitionTarget ? `${state.acquisitionTarget.libraryId}:${state.acquisitionTarget.collectionKey}` : '';
     }
-    const nextTasks = `${state.tasks.map(task => `${task.id}:${task.revision}`).join(',')}/${state.readingJobs.map(job => `${job.id}:${job.revision}`).join(',')}`;
-    if (nextTasks !== tasksKey) { tasksKey = nextTasks; taskView.update({ tasks: state.tasks, readingJobs: state.readingJobs }); }
+    const nextTasks = `${state.mode}/${visibleTasks.map(task => `${task.id}:${task.revision}`).join(',')}/${state.readingJobs.map(job => `${job.id}:${job.revision}`).join(',')}`;
+    if (nextTasks !== tasksKey) { tasksKey = nextTasks; taskView.update({ tasks: visibleTasks, readingJobs: state.readingJobs }); }
     const list = transcriptOf(state.conversation, state.messageFocus?.messageId ?? null);
     const nextChrome = [
       state.connection, state.runtime?.revision ?? 0, state.runtime?.account.state ?? '', state.runtime?.login?.state ?? '',
-      state.generating, state.message ?? '', state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
+      state.generating, state.message ?? '', state.mode, state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
       state.conversation?.activeRequestId ?? '', state.conversations.map(c => `${c.id}:${c.title}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}`).join('\n'),
       state.openConversations.map(c => `${c.id}:${c.title}:${c.lastSeq}:${c.activeRequestId ?? ''}`).join('\n'),
       state.draft.citations.map(c => c.id).join('\n'), state.draft.images.map(image => image.id).join('\n'), JSON.stringify(state.draft.settings), state.focusToken,
@@ -1502,6 +1538,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       return;
     }
     chromeKey = nextChrome;
+    renderMode(state);
     const account = state.runtime?.account.state ?? 'signedOut';
     const pendingLogin = state.runtime?.login?.state === 'pending';
     chat.dataset.zchatgptRuntime = state.connection; chat.dataset.zchatgptAuth = account; chat.dataset.zchatgptGenerating = String(state.generating);
@@ -1573,7 +1610,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }
     }
     if (messages.lastElementChild !== taskPanel) messages.append(taskPanel);
-    taskPanel.hidden = !state.tasks.length && !state.readingJobs.length;
+    taskPanel.hidden = !visibleTasks.length && !state.readingJobs.length;
     const nextKey = list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text.length}:${m.generatedImages?.map(image => image.id).join(',') ?? ''}`).join('\n');
     const contentChanged = nextKey !== contentKey;
     const follow = followAnswerScroll(nearBottom, contentChanged && contentKey !== '');
@@ -1581,7 +1618,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const editableView: RenderView = {
       conversation: state.conversation,
       models: state.runtime?.models ?? [],
-      tasks: state.tasks,
+      tasks: visibleTasks,
       queued: state.conversation?.queuedRequestIds ? new Set(state.conversation.queuedRequestIds) : null,
     };
     for (const message of list) {

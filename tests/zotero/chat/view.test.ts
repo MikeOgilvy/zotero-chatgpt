@@ -116,7 +116,7 @@ async function mountReadyChat(options: {
         messages: [...conversation.messages, {
           id: `u-${conversation.messages.length + 1}`, requestId: input.requestId, role: 'user',
           phase: null, settings: input.settings, text: input.question, citations: input.citations,
-          status: 'completed', ...(input.images ? { images: input.images } : {}),
+          status: 'completed', ...(input.images ? { images: input.images } : {}), ...(input.mode ? { mode: input.mode } : {}),
         }],
         lastSeq: conversation.lastSeq + 1,
       };
@@ -1271,6 +1271,43 @@ it('keeps the composer in document flow as its references grow, without reservin
   expect(draft.querySelectorAll('[data-zchatgpt-citation], [data-zchatgpt-draft-image]')).toHaveLength(2);
   expect(['absolute', 'fixed']).not.toContain(styles(draft).position);
   expect(root.querySelector('[data-zchatgpt-action="attach"]')).toBeNull();
+});
+
+it('offers a per-chat Chat / Agent selector that freezes the mode onto the next request', async () => {
+  const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent });
+  const group = root.querySelector<HTMLElement>('[data-zchatgpt-mode-switch]')!;
+  const chat = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="mode-chat"]')!;
+  const agent = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="mode-agent"]')!;
+  expect(group.getAttribute('role')).toBe('group');
+  expect(group.getAttribute('aria-label')).toBe('Mode');
+  // Chat is the default (D3), and the pressed state is presenter state, not the button's own opinion.
+  expect(chat.getAttribute('aria-pressed')).toBe('true');
+  expect(agent.getAttribute('aria-pressed')).toBe('false');
+  const conversationId = presenter.snapshot().conversation!.id;
+  agent.click();
+  expect(presenter.snapshot().mode).toBe('agent');
+  expect(agent.getAttribute('aria-pressed')).toBe('true');
+  expect(chat.getAttribute('aria-pressed')).toBe('false');
+  const input = root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!;
+  input.value = 'Explain the method';
+  input.dispatchEvent(new root.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="send"]')!.click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]!.mode).toBe('agent');
+  // Switching back after the send does not rewrite the accepted request, and the same conversation
+  // continues: the mode changed, the session/context did not.
+  chat.click();
+  expect(presenter.snapshot().mode).toBe('chat');
+  expect(sent).toHaveLength(1); expect(sent[0]!.mode).toBe('agent');
+  expect(presenter.snapshot().conversation?.id).toBe(conversationId);
+  // A New chat inherits the mode on screen and keeps its own selection through the first send.
+  await presenter.newConversation();
+  expect(presenter.snapshot().mode).toBe('chat');
+  agent.click();
+  expect(presenter.snapshot().mode).toBe('agent');
+  await presenter.openConversation(conversationId);
+  expect(presenter.snapshot().mode).toBe('chat');
 });
 
 it('keeps the composer as one card: textarea, footer chip, and circular arrow send', async () => {
@@ -2555,7 +2592,9 @@ it('keeps the plus at the composer start and removes the attach and @ buttons', 
   const { root } = await mountReadyChat();
   const leading = root.querySelector<HTMLElement>('[data-zchatgpt-composer-leading]')!;
   const controls = [...leading.querySelectorAll<HTMLButtonElement>('button')];
-  expect(controls.map(node => node.dataset.zchatgptAction)).toEqual(['composer-plus']);
+  // The plus is still the first control; Stage 6 added the Chat / Agent selector beside it.
+  expect(controls[0]!.dataset.zchatgptAction).toBe('composer-plus');
+  expect(controls.slice(1).map(node => node.dataset.zchatgptAction)).toEqual(['mode-chat', 'mode-agent']);
   const plus = controls[0]!;
   expect(plus.dataset.zchatgptPlus).toBe('');
   expect(plus.getAttribute('aria-label')).toBe('Add images or context');

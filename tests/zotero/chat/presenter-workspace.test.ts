@@ -47,7 +47,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     snapshot: () => copy(runtime), observe: listener => { listener(copy(runtime)); return () => undefined; }, refreshAccount: () => Promise.resolve(), startLogin: () => Promise.reject(new Error('No login in tests')), cancelLogin: () => Promise.resolve(),
     current: vi.fn(() => Promise.resolve(copy(conversation))), peekCurrent: vi.fn(() => Promise.resolve(copy(conversation))), newConversation: vi.fn(() => { saveConversation({ ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], activeRequestId: null, queuedRequestIds: [], lastSeq: 0 }); return Promise.resolve(copy(conversation)); }),
     list: () => Promise.resolve(copy([...conversations.values()].filter(item => item.paper.attachmentKey === paperA.attachmentKey))), get: id => { const found = conversations.get(id); return found ? Promise.resolve(copy(found)) : Promise.reject(new ReaderError('NOT_FOUND', 'Unknown')); }, select: (_paper, id) => { const value = conversations.get(id); if (!value) return Promise.reject(new Error('Unknown')); conversation = value; return Promise.resolve(copy(value)); },
-    send: vi.fn<ReaderClient['send']>(input => { const target = conversations.get(input.conversationId)!; sent.push(copy(input)); persistConversation({ ...target, activeRequestId: input.requestId, lastSeq: target.lastSeq + 1, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, text: input.question, settings: input.settings, citations: input.citations, status: 'completed', ...(input.images ? { images: input.images } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.document ? { document: { id: input.document.id, revision: input.document.revision, parserVersion: input.document.parserVersion, totalPages: input.document.totalPages, pages: input.document.pages.map(page => ({ pageIndex: page.pageIndex, pageLabel: page.pageLabel, status: page.status })), textBytes: input.document.pages.reduce((sum, page) => sum + new TextEncoder().encode(page.text).length, 0) } } : {}), ...(input.references ? { references: input.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; }) } : {}) }] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
+    send: vi.fn<ReaderClient['send']>(input => { const target = conversations.get(input.conversationId)!; sent.push(copy(input)); persistConversation({ ...target, activeRequestId: input.requestId, lastSeq: target.lastSeq + 1, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, text: input.question, settings: input.settings, citations: input.citations, status: 'completed', ...(input.images ? { images: input.images } : {}), ...(input.mode ? { mode: input.mode } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.document ? { document: { id: input.document.id, revision: input.document.revision, parserVersion: input.document.parserVersion, totalPages: input.document.totalPages, pages: input.document.pages.map(page => ({ pageIndex: page.pageIndex, pageLabel: page.pageLabel, status: page.status })), textBytes: input.document.pages.reduce((sum, page) => sum + new TextEncoder().encode(page.text).length, 0) } } : {}), ...(input.references ? { references: input.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; }) } : {}) }] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
     enqueue: vi.fn<NonNullable<ReaderClient['enqueue']>>(input => { queued.push(copy(input)); saveConversation({ ...conversation, queuedRequestIds: [...(conversation.queuedRequestIds ?? []), input.requestId] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
     request: (_conversation, requestId) => Promise.resolve({ requestId, state: 'completed', replay: false }), cancel: vi.fn<ReaderClient['cancel']>((_conversation, requestId) => Promise.resolve({ requestId, state: 'cancelled' as const, replay: false })),
     deleteConversation: () => Promise.resolve(copy(conversation)),
@@ -320,7 +320,7 @@ it('turns an acquire workflow into a scoped native preview without sending a mod
   f.workspaceSettings().skills.push({ ...userSkill, id: 'acquire', name: 'Acquire', workflow: 'acquire' });
   const target = { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' };
   f.services.library!.collections = () => Promise.resolve([{ ...target, name: 'Research' }]);
-  await f.presenter.activate(); await f.presenter.collections(); f.presenter.setAcquisitionTarget(target); await f.presenter.selectSkill('acquire');
+  await f.presenter.activate(); await f.presenter.collections(); f.presenter.setAcquisitionTarget(target); await f.presenter.selectSkill('acquire'); f.presenter.setMode('agent');
   f.presenter.setQuestion('Get 10.1234/example'); await f.presenter.send();
   expect(t.port.planAcquisition).toHaveBeenCalledWith({ conversationId: f.conversation().id, target, question: 'Get 10.1234/example', identifiers: ['10.1234/example'] });
   expect(f.sent).toHaveLength(0); expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
@@ -329,13 +329,48 @@ it('turns an acquire workflow into a scoped native preview without sending a mod
 it('plans completed annotation JSON once against the frozen PDF version without approving writes', async () => {
   const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', name: 'Annotate', workflow: 'annotate' });
-  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark the definition'); await f.presenter.send();
+  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent'); f.presenter.setQuestion('Mark the definition'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Central definition' }] });
   f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' }); f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
   await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledTimes(1));
   expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ revision: documentA.revision, modelRequestId: requestId }));
   f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text }); await Promise.resolve(); await Promise.resolve();
   expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('refuses a write workflow in the default Chat mode instead of sending it', async () => {
+  // Invariant 3: Chat is read-only. The refusal happens in `submit` before the model, the document
+  // read or the task layer is reached, so a chat request can never plan a native write.
+  const f = fixture(); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+  f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', name: 'Annotate', workflow: 'annotate' });
+  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark the definition'); await f.presenter.send();
+  expect(f.presenter.snapshot().mode).toBe('chat');
+  expect(f.sent).toHaveLength(0); expect(f.queued).toHaveLength(0);
+  expect(t.port.planAnnotations).not.toHaveBeenCalled(); expect(t.port.planAcquisition).not.toHaveBeenCalled();
+  expect(f.presenter.snapshot().message).toMatch(/Agent mode/iu);
+  f.presenter.dispose();
+});
+
+it('freezes the selected mode onto each request instead of inferring it from the skill', async () => {
+  const f = fixture(); await f.presenter.activate();
+  await f.presenter.selectSkill('user-study');
+  const conversationId = f.conversation().id;
+  // The same read skill in both requests: only the control decides, so `workflow` can no longer
+  // disagree with `mode` for one request.
+  f.presenter.setMode('agent'); f.presenter.setQuestion('First question'); await f.presenter.send();
+  expect(f.sent[0]).toMatchObject({ mode: 'agent', conversationId });
+  expect(f.sent[0]?.workflow?.skill?.workflow).toBe('read');
+  // Switching the control after the send never rewrites the recorded request or its message.
+  f.presenter.setMode('chat');
+  expect(f.sent[0]?.mode).toBe('agent');
+  f.emit({ type: 'completed', requestId: f.sent[0]!.requestId, messageId: 'answer', finalText: 'Done' });
+  f.presenter.setQuestion('Second question'); await f.presenter.send();
+  expect(f.sent[1]).toMatchObject({ mode: 'chat', conversationId });
+  // One conversation, one context: the mode changed, the session did not.
+  const state = f.presenter.snapshot();
+  expect(state.conversation?.id).toBe(conversationId);
+  expect(state.conversation?.messages.filter(message => message.role === 'user').map(message => message.mode)).toEqual(['agent', 'chat']);
+  f.presenter.dispose();
 });
 
 it('refuses chat deletion while native work remains without cancelling or undoing it', async () => {
@@ -408,7 +443,7 @@ it('projects runtime usage and generated images without treating cumulative usag
 it('keeps a background annotation completion owned by its original chat after New chat', async () => {
   const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', workflow: 'annotate' });
-  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
+  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId;   await f.presenter.newConversation();
   expect(f.presenter.snapshot().conversation).toBeNull(); expect(f.presenter.snapshot().generating).toBe(false);
   const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] });
@@ -422,7 +457,7 @@ it('keeps a background annotation completion owned by its original chat after Ne
 it('recovers completed annotation output after a restart gap without re-planning an existing task', async () => {
   const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', workflow: 'annotate' });
-  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
+  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] });
   f.saveConversation({ ...f.conversation(), activeRequestId: null, messages: [...f.conversation().messages, { id: 'saved-answer', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text }] });
   f.presenter.dispose();

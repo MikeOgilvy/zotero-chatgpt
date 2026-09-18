@@ -551,6 +551,40 @@ body.zchatgpt-dock-open #split-view .primary-view,
 .zchatgpt-composer .zchatgpt-picker { border-radius: 999px; }
 .zchatgpt-composer .zchatgpt-picker:hover { background: var(--fill-quinary, ButtonFace); }
 .zchatgpt-composer-leading { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* Chat / Agent routing mode. A compact segmented control at the composer start, in the tone of the
+   composer's other controls: the selected option reads as a filled state, never as accent chrome. */
+.zchatgpt-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--fill-quinary, ButtonFace);
+}
+.zchatgpt-mode-option {
+  appearance: none;
+  margin: 0;
+  padding: 3px 8px;
+  min-height: 20px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fill-secondary, GrayText);
+  font: inherit;
+  font-size: var(--zchatgpt-control-font-size, 12px);
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.zchatgpt-mode-option:hover { color: var(--fill-primary, CanvasText); }
+.zchatgpt-mode-option[aria-pressed="true"] {
+  background: var(--material-background, Canvas);
+  color: var(--fill-primary, CanvasText);
+  box-shadow: 0 1px 2px color-mix(in srgb, CanvasText 14%, transparent);
+}
+.zchatgpt-mode-option:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
 .zchatgpt-composer-trailing {
   display: flex;
   align-items: center;

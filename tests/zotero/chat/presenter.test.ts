@@ -49,7 +49,10 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
     send: vi.fn((input: SendInput) => {
       sent.push(input);
       const target = conversations.find(entry => entry.id === input.conversationId) ?? conversation;
-      conversation = remember({ ...target, settings: input.settings, activeRequestId: input.requestId, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' }], lastSeq: ++seq });
+      // The store records the frozen mode with the user message; the presenter reads it back to
+      // decide whether a completed answer's annotation plans are an Agent action.
+      const user = { id: `u-${sent.length}`, requestId: input.requestId, role: 'user' as const, phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed' as const, ...(input.mode ? { mode: input.mode } : {}) };
+      conversation = remember({ ...target, settings: input.settings, activeRequestId: input.requestId, messages: [...target.messages, user], lastSeq: ++seq });
       return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false });
     }),
     request: (_c, requestId) => {

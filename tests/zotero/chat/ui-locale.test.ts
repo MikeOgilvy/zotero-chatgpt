@@ -257,6 +257,22 @@ it('localizes completed metadata outcomes, annotation review counts and switches
   locale.update('en'); expect(summary.textContent).toBe('Acquire literature · Completed · 2 metadata item(s) · 0 PDFs attached'); expect(editHeading.textContent).toBe('Edit Send'); locale.dispose();
 });
 
+it('localizes the Chat / Agent mode selector while keeping the product term and pressed state', () => {
+  const { root, add } = setup();
+  const group = add('div', 'zchatgpt-mode-switch'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', 'Mode'); group.setAttribute('data-zchatgpt-ui', 'true');
+  const chat = add('button', 'zchatgpt-mode-option', 'Chat', group); chat.dataset.zchatgptAction = 'mode-chat'; chat.setAttribute('aria-label', 'Chat'); chat.setAttribute('aria-pressed', 'true');
+  const agent = add('button', 'zchatgpt-mode-option', 'Agent', group); agent.dataset.zchatgptAction = 'mode-agent'; agent.setAttribute('aria-label', 'Agent'); agent.setAttribute('aria-pressed', 'false');
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(group.getAttribute('aria-label')).toBe('模式');
+  expect(chat.textContent).toBe('对话'); expect(chat.getAttribute('aria-label')).toBe('对话');
+  // `Agent` is the product's own term for the acting mode, so it stays itself rather than becoming a
+  // translated control phrase; the pressed state is not copy and is never rewritten.
+  expect(agent.textContent).toBe('Agent');
+  expect(chat.getAttribute('aria-pressed')).toBe('true');
+  locale.update('en');
+  expect(chat.textContent).toBe('Chat'); expect(group.getAttribute('aria-label')).toBe('Mode'); locale.dispose();
+});
+
 it('translates the plus section headings and each row title and description', () => {
   const { add } = setup();
   const group = add('div', 'zchatgpt-plus-group');

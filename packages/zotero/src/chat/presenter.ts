@@ -67,6 +67,12 @@ export interface PresenterState {
   pendingExplain: Citation | null;
   message: string | null;
   generating: boolean;
+  /**
+   * The routing mode the composer will freeze onto its next request. It is the authoritative source
+   * for `mode` (Stage 6): the mode control sets it, `workflow`/skill never infers it, and changing
+   * it only affects the next send — recorded requests keep the mode they were frozen with.
+   */
+  mode: RequestMode;
   /** Incremented when the view should move focus into the question input. */
   focusToken: number;
   workspace: WorkspaceSettings | null;
@@ -197,9 +203,16 @@ export class ConversationPresenter {
    * never leaves an empty record behind, so nothing invisible is ever counted or named.
    */
   private selectionCleared = false;
+  /**
+   * The mode selected per chat. The unbound new chat has no id yet, so its mode lives under
+   * `unbound` until `ensureConversation` transfers it onto the stored conversation — the same shape
+   * the draft already uses for the pre-first-send tab. Switching chats switches the selector with
+   * them: mode is a property of the chat, not of the composer widget.
+   */
+  private modes = new Map<string, RequestMode>();
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(context: ReaderContext, private services: PresenterServices) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, focusToken: 0,
+    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, mode: 'chat', focusToken: 0,
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       // The port decides the initial opt-in/disclosure; everything else comes from the reader context.
       document: { ...context, enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false } };
@@ -234,11 +247,24 @@ export class ConversationPresenter {
   }
   private update(patch: Partial<PresenterState>): void {
     this.state = { ...this.state, ...patch };
+    // Mode tracks the chat on screen (its stored id, or `unbound` before the first send) and falls
+    // back to the product default. Deriving it here keeps one authority: whichever chat the view is
+    // showing is the chat whose selector the composer renders.
+    this.state.mode = this.modes.get(this.draftKey()) ?? 'chat';
     // The chat on screen is one of the open chats, so its pane entry is always the same object as
     // `conversation`: a pane list, a transcript and a composer can never disagree about one chat.
     if (this.state.conversation) this.state.openConversations = this.withOpen(this.state.conversation);
     this.state.generating = !!this.state.conversation && (this.submissions.has(this.state.conversation.id) || !!this.state.conversation.activeRequestId || this.state.readingJobs.some(activeReading));
     this.notify();
+  }
+  /**
+   * Choose the mode for the next request from the composer control. It is frozen per request by
+   * `sendDraft`, so switching here never rewrites an already recorded request or message.
+   */
+  setMode(mode: RequestMode): void {
+    if (this.modes.get(this.draftKey()) === mode) return;
+    this.modes.set(this.draftKey(), mode);
+    this.update({});
   }
   private errorText(error: unknown): string { return error instanceof Error && error.message ? error.message : 'Codex could not complete this action.'; }
   private signedIn(): boolean { return this.state.runtime?.account.state === 'signedIn' && (this.state.runtime?.models.length ?? 0) > 0; }
@@ -530,7 +556,10 @@ export class ConversationPresenter {
     const key = `${conversation.id}:${requestId}`;
     if (!this.services.agent || this.planningAnnotations.has(key)) return;
     const user = conversation.messages.find(message => message.requestId === requestId && message.role === 'user');
-    if (user?.workflow?.skill?.workflow !== 'annotate' || user.batch?.phase === 'map') return;
+    // Chat mode never reaches Agent infrastructure. A request recorded before the mode field existed
+    // has no mode; its non-read workflow is still the only signal, so the legacy read is kept rather
+    // than retroactively reclassifying stored Agent work as chat.
+    if (user?.mode === 'chat' || user?.workflow?.skill?.workflow !== 'annotate' || user.batch?.phase === 'map') return;
     const answer = conversation.messages.filter(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed' && message.phase !== 'commentary').at(-1);
     if (!answer?.text.trim()) return;
     const origin = user.document ?? (user.batch ? conversation.messages.find(message => message.role === 'user' && message.batch?.id === user.batch?.id && message.document)?.document : undefined);
@@ -545,7 +574,7 @@ export class ConversationPresenter {
   }
   private async recoverAnnotationPlans(conversation: Conversation): Promise<void> {
     if (!this.services.agent || !this.client || this.disposed) return;
-    const requests = new Set(conversation.messages.filter(message => message.role === 'user' && message.workflow?.skill?.workflow === 'annotate' && message.batch?.phase !== 'map').map(message => message.requestId));
+    const requests = new Set(conversation.messages.filter(message => message.role === 'user' && message.mode !== 'chat' && message.workflow?.skill?.workflow === 'annotate' && message.batch?.phase !== 'map').map(message => message.requestId));
     for (const requestId of requests) {
       if (conversation.activeRequestId === requestId || !conversation.messages.some(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed')) continue;
       try {
@@ -745,7 +774,10 @@ export class ConversationPresenter {
     // question creates the record instead of re-adopting the chat that was just left.
     const conversation = await client.newConversation(this.paper, this.identity.title, this.currentSettings() ?? undefined);
     this.selectionCleared = false;
-    // The New chat tab's draft lives under `unbound` until this first send creates a record.
+    // The New chat tab's draft lives under `unbound` until this first send creates a record. Its
+    // selected mode moves onto the new id with the draft, so the frozen mode matches the composer.
+    const mode = this.modes.get('unbound') ?? this.state.mode;
+    this.modes.delete('unbound'); this.modes.set(conversation.id, mode);
     this.drafts.delete('unbound'); this.positions.delete('unbound'); this.pendingSaves.delete('unbound');
     this.update({ conversation, openConversations: this.withOpen(conversation), newChatOpen: false, draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
     await this.sync();
@@ -992,6 +1024,9 @@ export class ConversationPresenter {
     return this.queueFlight;
   }
   private async sendDraft(draft: WorkspaceDraft, version: number, settings: GenerationSettings | null, document: RequestContext, workspace: Promise<WorkspaceSettings | null>, target: Conversation | null, queued = false): Promise<void> {
+    // Freeze the mode the composer is showing when this send starts, before any await, so a switch
+    // during preparation cannot retrofit a different mode onto this one request.
+    const mode = this.state.mode;
     try {
       await this.loadLocal();
       const configuration = await workspace; if (this.disposed) return;
@@ -1000,7 +1035,7 @@ export class ConversationPresenter {
       const conversation = target ?? await this.ensureConversation();
       const resolved = ConversationPresenter.withoutStaleProfile(draft, configuration);
       const input = makeAsk(resolved.draft, conversation.id, this.services.uuid(), settings ?? conversation.settings, this.paperIdentity());
-      await this.submit(conversation, input, document, resolved.draft, configuration, queued);
+      await this.submit(conversation, input, document, resolved.draft, configuration, queued, mode);
       // Remember what was sent so Stop can return it to the composer.
       this.submitted.set(conversation.id, clone(resolved.draft));
       const active = this.state.conversation?.id === conversation.id;
@@ -1033,14 +1068,6 @@ export class ConversationPresenter {
     const skill = draft.skillId ? settings.skills.find(skill => skill.id === draft.skillId) : null;
     if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected skill is unavailable or disabled.');
     return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
-  }
-  /**
-   * Routing mode for one request, frozen with the workflow on the same snapshot (D2). Until a mode
-   * control exists, a non-read skill is the only thing that selects the agent path; everything else
-   * is a chat request, which is also what an absent mode means (D3). No action is gated on it yet.
-   */
-  private frozenMode(workflow: WorkflowSnapshot | undefined): RequestMode {
-    return workflow?.skill && workflow.skill.workflow !== 'read' ? 'agent' : 'chat';
   }
   /**
    * Does this draft still point at a research profile that exists? When it does not, the dead
@@ -1099,7 +1126,7 @@ export class ConversationPresenter {
     const plan: ContextPlan = { mode: 'multi-pass', documents: all, budget, coverage: { ...first.coverage, reason: `The authorized sources require ${all.length} reading passes followed by synthesis. ${reasons.join(' ')}` } };
     input.contextReport = { mode: 'multi-pass', capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: first.coverage.selectedPages, totalPages: first.coverage.totalPages, reason: plan.coverage.reason }; return plan;
   }
-  private async submit(conversation: Conversation, input: SendInput, context: RequestContext, draft: WorkspaceDraft, configuration: WorkspaceSettings | null, queued = false): Promise<void> {
+  private async submit(conversation: Conversation, input: SendInput, context: RequestContext, draft: WorkspaceDraft, configuration: WorkspaceSettings | null, queued = false, mode: RequestMode = 'chat'): Promise<void> {
     if (this.submissions.has(conversation.id)) throw new ReaderError('BUSY', 'This chat is already preparing a request.');
     const client = await this.connect();
     if (queued && !client.enqueue) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Durable request queuing is unavailable. Your draft is kept.');
@@ -1110,14 +1137,20 @@ export class ConversationPresenter {
     try {
       const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace);
       if (workflow) input.workflow = workflow;
-      // Frozen with the workflow on the same snapshot; default chat (D3), no UI change yet.
-      const mode = this.frozenMode(workflow);
+      // Stage 6: the composer's mode control is the single authority for `mode`; `workflow` never
+      // infers it. Chat is read-only, so Agent-only workflows are refused before anything is sent
+      // and no task is ever planned for a chat request (invariants 3 and 4).
       if (workflow?.skill?.workflow === 'acquire') {
+        if (mode === 'chat') throw new ReaderError('UNSUPPORTED_INTERACTION', 'Acquiring articles is an Agent action. Switch to Agent mode to run it.');
         if (queued) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Acquisition previews use task review, not the model request queue. Your draft is kept.');
         if (!context.acquisitionTarget) throw new ReaderError('INVALID_REQUEST', 'Choose a target collection before acquiring articles.');
         const identifiers = [...new Set((input.question.match(/https?:\/\/[^\s<>"']+|\b10\.\d{4,9}\/[^\s<>"']+/giu) ?? []).map(value => value.replace(/[.,;，。；]+$/u, '')))];
         if (!identifiers.length) throw new ReaderError('INVALID_REQUEST', 'Provide explicit DOI identifiers or article URLs for acquisition.');
         const task = await (await this.getTasks()).planAcquisition({ conversationId: conversation.id, target: clone(context.acquisitionTarget), question: input.question, identifiers }); this.acceptTask(task); return;
+      }
+      if (mode === 'chat') {
+        if (workflow?.skill?.workflow === 'diagram') throw new ReaderError('UNSUPPORTED_INTERACTION', 'Image generation is an Agent action. Switch to Agent mode to run it.');
+        if (workflow?.skill && workflow.skill.workflow !== 'read') throw new ReaderError('UNSUPPORTED_INTERACTION', 'That skill changes the PDF, so it needs Agent mode. Switch to Agent to run it.');
       }
       if (workflow?.skill?.workflow === 'diagram' && this.state.runtime?.capabilities?.imageGeneration !== true) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Image generation is unavailable in this runtime.');
       if (context.enabled) input.document = await this.requestDocument(context.range, controller.signal);
@@ -1192,6 +1225,9 @@ export class ConversationPresenter {
     const position = this.positions.get('unbound');
     const unbound = this.drafts.get('unbound');
     this.selectionCleared = true;
+    // The New chat tab inherits the mode on screen, the way it inherits the model settings: a `+`
+    // starts a new conversation, not a different mode.
+    this.modes.set('unbound', this.modes.get(this.draftKey()) ?? this.state.mode);
     this.update({
       conversation: null,
       openConversations: open,
