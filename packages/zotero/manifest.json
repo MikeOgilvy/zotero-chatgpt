@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Zotero ChatGPT (Development)",
-  "version": "0.4.0a12",
+  "version": "0.4.0a13",
   "description": "Development preview for reading and discussing papers with a GPT-style assistant in Zotero.",
   "applications": {
     "zotero": {
