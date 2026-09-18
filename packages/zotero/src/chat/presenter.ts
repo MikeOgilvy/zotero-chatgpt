@@ -9,6 +9,7 @@ import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../c
 import { estimateRequestBudget, type ContextBudget } from '../../../core/src/codex/model-capabilities.ts';
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
+import { conversationHasAgentWork } from '../../../core/src/chat/agent-work.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
@@ -1341,11 +1342,17 @@ export class ConversationPresenter {
       const client = await this.connect();
       const target = this.state.conversation?.id === id ? this.state.conversation : this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(id) : await client.get(id);
       if (target.id !== id) throw new ReaderError('NOT_FOUND', 'The selected chat could not be located.');
-      if (this.services.agent) {
+      // The busy check must not initialize the Agent capability for a chat that never ran Agent work:
+      // deleting is reachable straight from the Chat-Mode history row. It runs when the composer is in
+      // Agent Mode, or when the conversation's own transcript evidences Agent work. An unfinished
+      // native task or reading job always implies such a message, so no real protection is lost, while
+      // a pure Chat-Mode delete stays free of task/reading initialization.
+      const inspectAgent = this.state.mode === 'agent' || conversationHasAgentWork(target);
+      if (this.services.agent && inspectAgent) {
         const tasks = await (await this.getTasks()).list(id);
         if (tasks.some(task => ['preparing', 'review', 'running', 'uncertain'].includes(task.state) || task.items.some(item => ['writing', 'undoing', 'uncertain'].includes(item.status)))) throw new ReaderError('BUSY', 'Cancel or reconcile this chat’s unfinished native tasks before deleting it. Existing native outputs will not be undone.');
       }
-      if (this.services.agent && (await (await this.getReading(client)).list(id)).some(unfinishedReading)) throw new ReaderError('BUSY', 'Cancel or reconcile this chat’s unfinished reading task before deleting it.');
+      if (this.services.agent && inspectAgent && (await (await this.getReading(client)).list(id)).some(unfinishedReading)) throw new ReaderError('BUSY', 'Cancel or reconcile this chat’s unfinished reading task before deleting it.');
       this.stageDraft(); await this.flushDraft();
       const conversation = await client.deleteConversation(target.paper, id);
       this.drafts.delete(id); this.positions.delete(id); this.pendingSaves.delete(id);

@@ -378,7 +378,7 @@ it('freezes the selected mode onto each request instead of inferring it from the
 it('refuses chat deletion while native work remains without cancelling or undoing it', async () => {
   const f = fixture(); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   await t.port.planAcquisition({ conversationId: f.conversation().id, target: { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' }, question: 'Get paper', identifiers: ['10.1234/example'] });
-  f.client.deleteConversation = vi.fn(f.client.deleteConversation); await f.presenter.activate(); await f.presenter.deleteConversation(f.conversation().id);
+  f.client.deleteConversation = vi.fn(f.client.deleteConversation); await f.presenter.activate(); f.presenter.setMode('agent'); await f.presenter.deleteConversation(f.conversation().id);
   expect(f.client.deleteConversation).not.toHaveBeenCalled(); expect(f.presenter.snapshot().message).toMatch(/unfinished native tasks/iu);
   expect(t.port.cancel).not.toHaveBeenCalled(); expect(t.port.undo).not.toHaveBeenCalled(); f.presenter.dispose();
 });
@@ -389,9 +389,40 @@ it('refuses chat deletion while a reading job is still unfinished', async () => 
   const f = fixture(); const r = readingPort(f.conversation().id); const t = taskPort(f.conversation().id);
   r.jobs.push({ schemaVersion: 1, id: 'running-job', conversationId: f.conversation().id, inputHash: 'hash', revision: 1, status: 'running', steps: [], createdAt: 'now', updatedAt: 'now', cancelRequested: false });
   f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port), reading: () => Promise.resolve(r.reading) });
-  f.client.deleteConversation = vi.fn(f.client.deleteConversation); await f.presenter.activate(); await f.presenter.deleteConversation(f.conversation().id);
+  f.client.deleteConversation = vi.fn(f.client.deleteConversation); await f.presenter.activate(); f.presenter.setMode('agent'); await f.presenter.deleteConversation(f.conversation().id);
   expect(f.client.deleteConversation).not.toHaveBeenCalled(); expect(f.presenter.snapshot().message).toMatch(/unfinished reading/iu);
   expect(r.reading.cancel).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('deletes a Chat-mode conversation with no Agent work without initializing the Agent capability', async () => {
+  // The delete path is reachable straight from the Chat-mode history row, so it must not acquire the
+  // task controller or the reading coordinator for a chat that never used Agent Mode: doing so would
+  // make Chat Mode a trigger for Agent-infrastructure initialization.
+  const f = fixture(); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  f.client.deleteConversation = vi.fn(f.client.deleteConversation);
+  await f.presenter.activate();
+  await f.presenter.deleteConversation(f.conversation().id);
+  expect(f.client.deleteConversation).toHaveBeenCalledTimes(1);
+  expect(agent.tasks).not.toHaveBeenCalled(); expect(agent.reading).not.toHaveBeenCalled();
+  expect(agent.tasksList).not.toHaveBeenCalled(); expect(agent.readingList).not.toHaveBeenCalled();
+  f.presenter.dispose();
+});
+
+it('still refuses deleting a chat with Agent work when the composer is in Chat mode', async () => {
+  // The busy check must not depend on the *current* mode alone: a reopened chat defaults to Chat, so
+  // a conversation whose own transcript evidences Agent work stays protected.
+  const f = fixture(); const agent = agentSpies(f.conversation().id); f.services.agent = agent.port;
+  await f.presenter.activate();
+  f.presenter.setMode('agent'); f.presenter.setQuestion('Summarize this paper.'); await f.presenter.send(); finish(f);
+  await agent.task.port.planAcquisition({ conversationId: f.conversation().id, target: { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' }, question: 'Get paper', identifiers: ['10.1234/example'] });
+  f.presenter.setMode('chat');
+  f.client.deleteConversation = vi.fn(f.client.deleteConversation);
+  await f.presenter.deleteConversation(f.conversation().id);
+  expect(f.presenter.snapshot().mode).toBe('chat');
+  expect(f.client.deleteConversation).not.toHaveBeenCalled();
+  expect(f.presenter.snapshot().message).toMatch(/unfinished native tasks/iu);
+  expect(agent.task.port.cancel).not.toHaveBeenCalled(); expect(agent.task.port.undo).not.toHaveBeenCalled();
+  f.presenter.dispose();
 });
 
 it('serves an ordinary chat request with no Agent capability assembled at all', async () => {
