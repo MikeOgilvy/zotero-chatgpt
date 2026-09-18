@@ -268,6 +268,35 @@ async function runHostSmoke(config) {
     const coldStart = win.performance.now(); toggle().click();
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
+    // --- The composer's Chat / Agent routing control, in the real dock ---
+    // The unit DOM cannot reproduce this: the option's pressed fill and pill geometry are
+    // `.zchatgpt-mode-option[...]`, so rendering the options with the generic `.zchatgpt-button`
+    // skin (the regression this observes) leaves the selected mode invisible and the control
+    // looking like two plain buttons. `aria-pressed` is painted from presenter state, so a real
+    // click that does not move it means the switch is not wired. Nothing here sends a request.
+    const modeSwitch = () => panel()?.querySelector('[data-zchatgpt-mode-switch]');
+    const modeButton = mode => panel()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
+    const pressed = mode => modeButton(mode)?.getAttribute('aria-pressed') === 'true';
+    await until(() => modeSwitch() && modeButton('chat') && modeButton('agent'), 'mode-switch-rendered');
+    const modeShape = {
+      role: modeSwitch().getAttribute('role'),
+      groupLabel: modeSwitch().getAttribute('aria-label'),
+      chatText: (modeButton('chat').textContent ?? '').trim(),
+      mode: modeSwitch().dataset.zchatgptMode,
+      chatPressed: pressed('chat'), agentPressed: pressed('agent'),
+      chatSegmented: modeButton('chat').classList.contains('zchatgpt-mode-option') && modeButton('agent').classList.contains('zchatgpt-mode-option'),
+      genericButtonSkin: modeButton('chat').classList.contains('zchatgpt-button') || modeButton('agent').classList.contains('zchatgpt-button'),
+    };
+    await check('mode-selector-defaults-to-chat-with-segmented-options',
+      modeShape.role === 'group' && Boolean(modeShape.groupLabel) && modeShape.mode === 'chat' && modeShape.chatPressed && !modeShape.agentPressed
+        && modeShape.chatSegmented && !modeShape.genericButtonSkin,
+      modeShape);
+    click(modeButton('agent'));
+    await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'mode-agent-selected');
+    await check('mode-selector-click-selects-agent', pressed('agent') && !pressed('chat'), { mode: modeSwitch().dataset.zchatgptMode, agentPressed: pressed('agent') });
+    click(modeButton('chat'));
+    await until(() => pressed('chat') && modeSwitch().dataset.zchatgptMode === 'chat', 'mode-chat-restored');
+    await check('mode-selector-click-returns-to-chat', pressed('chat') && !pressed('agent'), { mode: modeSwitch().dataset.zchatgptMode, chatPressed: pressed('chat') });
     // The unsent tab is the New chat copy in either interface language. It must not be named after
     // the paper: paper identity is carried by the attachment/context system, not by a tab label.
     const unsentTab = () => panel()?.querySelector('[data-zchatgpt-current-title]');
