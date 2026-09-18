@@ -1,4 +1,4 @@
-import { ReaderError, type Citation, type GenerationSettings, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect, type SendInput } from './index.ts';
+import { ReaderError, type Citation, type GenerationSettings, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect, type RequestMode, type SendInput } from './index.ts';
 import { validateDocument, validateRevision } from './document.ts';
 import { validateBatch, validateContextReport, validateReferenceInput, validateWorkflow } from './workspace-validation.ts';
 // Limits are first-version engineering choices from the contracts appendix.
@@ -109,6 +109,15 @@ export function validateSettings(value: unknown): GenerationSettings {
   const effort = settings.effort === null ? null : text(settings.effort, 'settings.effort', 64, 1);
   return { model: text(settings.model, 'settings.model', 128, 1), serviceTier: tier, effort };
 }
+/**
+ * Request routing mode. Only the two explicit values are accepted. An absent mode is not rewritten
+ * here: `validateSendInput` keeps it absent so a legacy request round-trips unchanged, and D3 fixes
+ * its meaning as `'chat'` wherever it is consumed (hash input, presentation).
+ */
+function requestMode(value: unknown): RequestMode {
+  if (value !== 'chat' && value !== 'agent') invalid('request.mode must be chat or agent');
+  return value;
+}
 /** Returns a checked copy or throws a ReaderError carrying INVALID_REQUEST or PAYLOAD_TOO_LARGE. */
 export function validateSendInput(value: unknown): SendInput {
   let withoutImages: unknown = value;
@@ -122,7 +131,7 @@ export function validateSendInput(value: unknown): SendInput {
   let serialized: string;
   try { serialized = JSON.stringify(withoutImages) ?? ''; } catch { invalid('request is not serializable'); }
   if (new TextEncoder().encode(serialized).length > LIMITS.payloadBytes) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The request is larger than the reader accepts; select less text.');
-  const input = record(value, ['requestId', 'conversationId', 'action', 'question', 'citations', 'settings', 'paper', 'images', 'document', 'workflow', 'references', 'batch', 'contextReport'], 'request');
+  const input = record(value, ['requestId', 'conversationId', 'action', 'question', 'citations', 'settings', 'paper', 'images', 'document', 'workflow', 'references', 'batch', 'contextReport', 'mode'], 'request');
   if (input.action !== 'explain' && input.action !== 'ask') invalid('request.action must be explain or ask');
   if (!Array.isArray(input.citations) || input.citations.length > LIMITS.citationsPerRequest) invalid('request.citations is out of range');
   const question = text(input.question, 'request.question', LIMITS.questionCodePoints);
@@ -130,7 +139,7 @@ export function validateSendInput(value: unknown): SendInput {
   if (input.action === 'ask' && question.trim().length === 0) invalid('ask requires a question');
   const citations = input.citations.map(validateCitation);
   if (new Set(citations.map(c => c.id)).size !== citations.length) invalid('request.citations repeat an identifier');
-  const result: SendInput = { requestId: uuid(input.requestId, 'request.requestId'), conversationId: uuid(input.conversationId, 'request.conversationId'), action: input.action, question, citations, settings: validateSettings(input.settings) };
+  const result: SendInput = { requestId: uuid(input.requestId, 'request.requestId'), conversationId: uuid(input.conversationId, 'request.conversationId'), action: input.action, question, citations, settings: validateSettings(input.settings), ...(input.mode !== undefined ? { mode: requestMode(input.mode) } : {}) };
   if (input.paper !== undefined) result.paper = validatePaperIdentity(input.paper);
   if (input.document !== undefined) result.document = validateDocument(input.document);
   if (input.workflow !== undefined) result.workflow = validateWorkflow(input.workflow);

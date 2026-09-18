@@ -37,6 +37,12 @@ export interface Citation {
 
 export type RequestState = 'accepted' | 'dispatching' | 'running' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
 export type MessageStatus = 'pending' | 'streaming' | 'completed' | 'cancelled' | 'failed' | 'uncertain';
+/**
+ * How one request is routed, frozen per request like its model settings. `chat` is the read-only
+ * reader; `agent` may additionally reach the task/action path. It is a separate field on purpose and
+ * does not extend `WorkflowKind`: the UI/skill state and the routing contract evolve independently.
+ */
+export type RequestMode = 'chat' | 'agent';
 
 /**
  * Local, honest timing of one request. `firstTextAt` is the first delivered assistant text, not a
@@ -242,6 +248,11 @@ export interface Message {
   status: MessageStatus;
   /** Present on user messages so the view can hide internal explain prompts. */
   action?: 'explain' | 'ask';
+  /**
+   * Routing mode frozen for this request. Absent on messages persisted before the field existed and
+   * then means `'chat'` (D3); the store does not rewrite an old record to add it.
+   */
+  mode?: RequestMode;
   images?: ImageAttachment[];
   document?: DocumentSummary;
   paper?: PaperIdentity;
@@ -289,6 +300,11 @@ export interface SendInput {
   settings: GenerationSettings;
   /** Bibliographic identity of the current paper; required for asks without a citation. */
   paper?: PaperIdentity;
+  /**
+   * Routing mode for this request. Absent means `'chat'` (D3): it is a legacy request or a direct
+   * caller that did not freeze one. The value is frozen per request and never mutated afterwards.
+   */
+  readonly mode?: RequestMode;
   /** Optional image parts for rust-v0.144.1 `{ type: "image", url: dataUrl }`. */
   images?: ImageAttachment[];
   document?: DocumentContext;

@@ -53,6 +53,13 @@ describe('send input', () => {
     const withImage = makeSend({ action: 'ask', question: '图里是什么？', citations: [], images: [imageA] });
     expect(validateSendInput(withImage).images).toEqual([imageA]);
   });
+  it('accepts an explicit request mode, rejects anything else, and leaves an absent mode absent', () => {
+    expect(validateSendInput(makeSend({ mode: 'agent' })).mode).toBe('agent');
+    expect(validateSendInput(makeSend({ mode: 'chat' })).mode).toBe('chat');
+    // D3: an absent mode means chat, so the validator keeps it absent instead of materializing it.
+    expect(validateSendInput(makeSend())).not.toHaveProperty('mode');
+    for (const bad of ['AGENT', 'Chat', '', null, 1, true]) expectCode(() => validateSendInput({ ...makeSend(), mode: bad }), 'INVALID_REQUEST');
+  });
   it.each<[string, Partial<SendInput> | Record<string, unknown>, string]>([
     ['explain without citations', { citations: [] }, 'INVALID_REQUEST'],
     ['ask without a question', { action: 'ask', question: '   ' }, 'INVALID_REQUEST'],
