@@ -108,17 +108,30 @@ it('persists real usage separately from cumulative history and emits it to views
 });
 it('starts every multi-pass step in a fresh thread without replaying previous raw inputs', async () => {
   const { c, p, explain } = await signedIn();
-  await c.send(explain(710, { document: documentA, batch: { id: requestId(711), index: 0, total: 3, phase: 'map', question: 'Read all pages' } })); await tick();
+  await c.send(explain(710, { mode: 'agent', document: documentA, batch: { id: requestId(711), index: 0, total: 3, phase: 'map', question: 'Read all pages' } })); await tick();
   complete(p, 'thread-1', 'turn-1', 'part-1', 'First part findings'); await tick();
-  await c.send(explain(712, { batch: { id: requestId(711), index: 2, total: 3, phase: 'reduce', question: 'Read all pages', summaries: [{ index: 0, pages: [0, 1], text: 'First part findings' }] } })); await tick();
+  await c.send(explain(712, { mode: 'agent', batch: { id: requestId(711), index: 2, total: 3, phase: 'reduce', question: 'Read all pages', summaries: [{ index: 0, pages: [0, 1], text: 'First part findings' }] } })); await tick();
   expect(methods(p).filter(method => method === 'thread/start')).toHaveLength(2);
   const last = p.writes.map(line => JSON.parse(line) as { method: string; params: { input: Array<{ text: string }> } }).filter(line => line.method === 'turn/start').at(-1)!;
   expect(last.params.input[0]?.text).toContain('First part findings'); expect(last.params.input[0]?.text).not.toContain('hidden state');
 });
+it('refuses Agent work sent as Chat at the runtime, not just in the composer', async () => {
+  const { c, p, explain } = await signedIn();
+  const batch = { id: requestId(791), index: 0, total: 2, phase: 'map' as const, question: 'Read all pages' };
+  // An absent mode is Chat (D3), and a multi-pass batch is Agent work: the session service refuses
+  // both, so a caller that skipped the presenter cannot start a reading job as Chat.
+  await expect(c.send(explain(790, { batch }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+  await expect(c.send(explain(792, { mode: 'chat', batch }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+  const diagram = { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null };
+  await expect(c.send(explain(793, { mode: 'chat', workflow: diagram }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+  // A refused request is never committed, so no thread or turn was ever started for it.
+  expect(methods(p)).not.toContain('turn/start');
+  expect(await c.get(explain(790).conversationId)).toMatchObject({ activeRequestId: null });
+});
 it('requires an enabled image generation capability and actual image output for the diagram workflow', async () => {
   const { c, p, explain } = await signedIn();
   const workflow = { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null };
-  await c.send(explain(720, { workflow })); await tick();
+  await c.send(explain(720, { mode: 'agent', workflow })); await tick();
   expect(methods(p)).toContain('experimentalFeature/list');
   complete(p, 'thread-1', 'turn-1', 'text-only', 'I would draw a diagram'); await tick();
   expect((await c.request(explain(720).conversationId, requestId(720))).state).toBe('failed');
@@ -143,7 +156,7 @@ it('stores one verified image per native item and disables generation on the nex
   const decode = vi.fn(() => Promise.resolve(generated));
   const { c, p, events } = await setup(undefined, undefined, { generatedImage: decode }); await c.refreshAccount();
   const conversation = await c.current(paperA, 'Diagram example');
-  const input: SendInput = { requestId: requestId(750), conversationId: conversation.id, action: 'ask', question: 'Draw the paper mechanism', citations: [], settings, workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } };
+  const input: SendInput = { requestId: requestId(750), conversationId: conversation.id, action: 'ask', question: 'Draw the paper mechanism', citations: [], settings, mode: 'agent', workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } };
   await c.send(input); await tick();
   const output = { type: 'imageGeneration', id: 'rendered-image', status: 'completed', result: imageA.dataUrl };
   p.emit({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: output } });
@@ -151,7 +164,8 @@ it('stores one verified image per native item and disables generation on the nex
   expect((await c.request(conversation.id, input.requestId)).state).toBe('completed');
   expect((await c.get(conversation.id)).messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
   expect(decode).toHaveBeenCalledTimes(1); expect(events.filter(event => event.type === 'image')).toHaveLength(1);
-  const { workflow: _workflow, ...ordinary } = input; void _workflow;
+  // The follow-up is an ordinary Chat question: both the Agent-mode freeze and the non-read skill are dropped.
+  const { workflow: _workflow, mode: _mode, ...ordinary } = input; void _workflow; void _mode;
   await c.send({ ...ordinary, requestId: requestId(751), question: 'Explain the diagram' }); await tick();
   const resume = p.writes.map(line => JSON.parse(line) as { method: string; params: { config: Record<string, unknown> } }).find(line => line.method === 'thread/resume');
   expect(resume?.params.config['features.image_generation']).toBe(false);
@@ -159,7 +173,7 @@ it('stores one verified image per native item and disables generation on the nex
 it('reconciles a completed image task from native history after restart without resending', async () => {
   const storage = new MemoryStorage();
   const first = await signedIn(undefined, storage);
-  const input = first.explain(760, { workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } });
+  const input = first.explain(760, { mode: 'agent', workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } });
   await first.c.send(input); await tick(); await first.c.close();
   const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
   const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'imageGeneration', id: 'recovered-output', status: 'completed', result: imageA.dataUrl }] }] } })), storage, { generatedImage: () => Promise.resolve(generated) });
@@ -170,14 +184,14 @@ it('reconciles a completed image task from native history after restart without 
 });
 it('keeps queued questions behind the complete reading batch, including the gaps between passes', async () => {
   const { c, p, explain, conversation } = await signedIn(); const batch = requestId(771);
-  await c.send(explain(770, { batch: { id: batch, index: 0, total: 3, phase: 'map', question: 'Read all' } })); await tick();
+  await c.send(explain(770, { mode: 'agent', batch: { id: batch, index: 0, total: 3, phase: 'map', question: 'Read all' } })); await tick();
   await c.enqueue!(explain(772, { question: 'Question after the complete reading task' }));
   complete(p, 'thread-1', 'turn-1', 'part-0', 'First findings'); await tick(15);
   expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(1);
   expect((await c.get(conversation.id)).activeBatchId).toBe(batch);
-  await c.send(explain(773, { batch: { id: batch, index: 1, total: 3, phase: 'map', question: 'Read all' } })); await tick();
+  await c.send(explain(773, { mode: 'agent', batch: { id: batch, index: 1, total: 3, phase: 'map', question: 'Read all' } })); await tick();
   complete(p, 'thread-2', 'turn-2', 'part-1', 'Second findings'); await tick();
-  await c.send(explain(774, { batch: { id: batch, index: 2, total: 3, phase: 'reduce', question: 'Read all' } })); await tick();
+  await c.send(explain(774, { mode: 'agent', batch: { id: batch, index: 2, total: 3, phase: 'reduce', question: 'Read all' } })); await tick();
   complete(p, 'thread-3', 'turn-3', 'synthesis', 'Complete synthesis'); await tick(15);
   expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(4);
   expect((await c.get(conversation.id)).activeBatchId).toBeUndefined();
@@ -217,7 +231,7 @@ it('rejects forbidden native tool activity during history recovery just as it do
 it('retains an already persisted image when its temporary native output path has expired during recovery', async () => {
   const storage = new MemoryStorage(); const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
   const first = await setup(undefined, storage, { generatedImage: () => Promise.resolve(generated) }); await first.c.refreshAccount(); const conversation = await first.c.current(paperA, 'Diagram');
-  const input: SendInput = { requestId: requestId(785), conversationId: conversation.id, question: 'Draw', action: 'ask', citations: [], settings, workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } };
+  const input: SendInput = { requestId: requestId(785), conversationId: conversation.id, question: 'Draw', action: 'ask', citations: [], settings, mode: 'agent', workflow: { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null } };
   const item = { type: 'imageGeneration', id: 'saved-image', status: 'completed', result: '', savedPath: '/expired.png' };
   await first.c.send(input); await tick(); first.p.emit({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item } }); await tick(); await first.c.close();
   const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, item] }] } })), storage, { generatedImage: () => Promise.reject(new Error('Expired')) });

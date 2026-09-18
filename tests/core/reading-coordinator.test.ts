@@ -16,7 +16,7 @@ function fixture(window = 20000) {
   const storage = new MemoryStorage(); const receipts = new Map<string, RequestState>(); const sent: SendInput[] = []; const cancelled: string[] = []; const enqueued: SendInput[] = []; const waiting: SendInput[] = []; const released: string[] = [];
   const conversation: Conversation = { id: uuid(1), paper: paperA, title: 'Synthetic source', settings, activeRequestId: null, messages: [], lastSeq: 0, createdAt: clock.now(), updatedAt: clock.now() };
   const document: DocumentContext = { id: uuid(2), paper: paperA, revision: { fingerprint: 'synthetic', size: 1024, modifiedAt: 1 }, parserVersion: 'synthetic', totalPages: 2, pages: [0, 1].map(pageIndex => ({ pageIndex, pageLabel: pageIndex === 0 ? 'iv' : '1', text: `Raw source page ${pageIndex}.`, status: 'text' })) };
-  const input: SendInput = { requestId: uuid(3), conversationId: conversation.id, action: 'ask', question: 'Compare all definitions and conclusions.', citations: [], settings, document, paper: { title: 'Synthetic source', authors: ['Author'] } };
+  const input: SendInput = { requestId: uuid(3), conversationId: conversation.id, action: 'ask', question: 'Compare all definitions and conclusions.', citations: [], settings, mode: 'agent', document, paper: { title: 'Synthetic source', authors: ['Author'] } };
   const plan: ContextPlan = { mode: 'multi-pass', documents: document.pages.map((page, index) => ({ ...document, id: uuid(10 + index), sourceId: document.id, pages: [page] })), coverage: { totalPages: 2, selectedPages: [0, 1], reason: 'All authorized pages, in two synthetic passes.' }, budget: buildContextBudget({ modelId: 'gpt-5.4', reportedWindow: window, historyTokens: 0, instructionBytes: 500, workflowBytes: 0, imageCount: 0, questionBytes: 100, outputReserve: 1000 }) };
   input.settings = { model: 'gpt-5.4', effort: 'high', serviceTier: 'priority' }; conversation.settings = input.settings;
   let onSend: ((input: SendInput) => Promise<void>) | null = null;
@@ -91,6 +91,17 @@ it('reserves all request ids and records submitting intent before the first read
   const job = await coordinator.start(f.input, f.plan); await settle();
   expect(reserved).toBe(true); expect(f.sent).toHaveLength(1); expect(job.id).toBe(f.input.requestId);
   expect(f.storage.writes.filter(text => text.includes('Raw source page 0.'))).toHaveLength(1);
+});
+
+it('refuses to create a reading job from a Chat-mode request', async () => {
+  const f = fixture(); const coordinator = new ReadingCoordinator(f.client, f.storage, f.clock);
+  const chat = { ...f.input, mode: 'chat' as const };
+  await expect(coordinator.start(chat, f.plan)).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+  // An absent mode is Chat too, and neither attempt reserved a step or touched the reader.
+  const { mode: _mode, ...unfrozen } = f.input; void _mode;
+  await expect(coordinator.start(unfrozen, f.plan)).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+  expect(f.sent).toHaveLength(0);
+  expect(f.storage.files.size).toBe(0);
 });
 
 it('waits for real terminal state and reduces only actual persisted summaries in the same conversation', async () => {

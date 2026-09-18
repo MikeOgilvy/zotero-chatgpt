@@ -4,6 +4,7 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { documentSummary } from '../../../contracts/src/document.ts';
 import { RuntimeFailure, type ModelOption } from '../../../contracts/src/runtime.ts';
 import { validatePaperScope, validateSendInput, validateSettings } from '../../../contracts/src/validation.ts';
+import { assertModeBoundary } from '../chat/mode-boundary.ts';
 import { record } from '../codex/transport.ts';
 import { string } from '../codex/models.ts';
 import { parseThreadUsage } from '../codex/model-capabilities.ts';
@@ -483,6 +484,9 @@ export class ReaderService {
   }
   async send(raw: unknown, allowQueue = false): Promise<SendReceipt> {
     const input = validateSendInput(raw);
+    // The runtime enforces the Chat/Agent boundary, not just the composer: a request that is not in
+    // Agent mode may not carry Agent work, so no reading job or native task can be started as Chat.
+    assertModeBoundary(input);
     const hash = await hashInput(input);
     await this.ensureRecovered(input.conversationId);
     const outcome = await this.serial(input.conversationId, async (): Promise<{ receipt: SendReceipt; run: Run | null }> => {

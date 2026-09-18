@@ -17,6 +17,7 @@ import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 import type { PresenterAgent, PresenterReading } from './capability.ts';
 import { executeAgentSend, type AgentSendContext } from './agent-execution.ts';
 import { executeChatSend, refuseChatAction, refuseChatWorkflow } from './chat-execution.ts';
+import { traceMode } from './mode-trace.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
 const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available; global preferences apply.';
 /**
@@ -261,6 +262,7 @@ export class ConversationPresenter {
    */
   setMode(mode: RequestMode): void {
     if (this.modes.get(this.draftKey()) === mode) return;
+    traceMode(`[mode] selected ${mode} for ${this.draftKey()}`);
     this.modes.set(this.draftKey(), mode);
     this.update({});
     // Agent state is hydrated on demand: Chat never touches the task/reading infrastructure, so
@@ -531,7 +533,7 @@ export class ConversationPresenter {
   private getTasks(): Promise<ActionTasks> {
     if (this.taskPort) return Promise.resolve(this.taskPort);
     if (!this.services.agent) return Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Native task review is unavailable.'));
-    if (!this.taskFlight) this.taskFlight = this.services.agent.tasks().then(tasks => { this.taskPort = tasks; this.untasks = tasks.subscribe(task => this.acceptTask(task)); return tasks; }).catch(error => { this.taskFlight = null; throw error; });
+    if (!this.taskFlight) { traceMode('[agent-runtime] acquiring task capability'); this.taskFlight = this.services.agent.tasks().then(tasks => { this.taskPort = tasks; this.untasks = tasks.subscribe(task => this.acceptTask(task)); return tasks; }).catch(error => { this.taskFlight = null; throw error; }); }
     return this.taskFlight;
   }
   private acceptTask(task: ActionTaskRecord): void {
@@ -542,6 +544,7 @@ export class ConversationPresenter {
   private async getReading(client?: ReaderClient): Promise<PresenterReading> {
     if (this.readingPort && this.readingClient === (client ?? null)) return this.readingPort;
     if (!this.services.agent) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Multi-pass reading is unavailable in this runtime. Nothing was sent.');
+    traceMode('[agent-runtime] acquiring reading capability');
     const reading = await this.services.agent.reading(client); this.unreading?.(); this.readingPort = reading; this.readingClient = client ?? null;
     this.unreading = reading.subscribe(job => this.acceptReading(job)); return reading;
   }

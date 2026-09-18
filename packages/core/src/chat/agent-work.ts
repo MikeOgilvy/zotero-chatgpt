@@ -1,4 +1,23 @@
-import type { Conversation } from '../../../contracts/src/index.ts';
+import type { Conversation, RequestMode } from '../../../contracts/src/index.ts';
+import type { WorkflowSnapshot } from '../../../contracts/src/workspace.ts';
+
+/**
+ * The structural Agent-work fields, shared by a recorded user message and an incoming request. A
+ * request in Agent mode, a multi-pass reading batch, or a non-`read` skill is Agent work; everything
+ * else — a plain read with a document, citations and images — is Chat work.
+ */
+export interface AgentWorkFields {
+  mode?: RequestMode;
+  batch?: unknown;
+  workflow?: WorkflowSnapshot | null;
+}
+
+/** Is this request/message Agent work? The one predicate both the transcript scan and the runtime boundary use. */
+export function hasAgentWork(fields: AgentWorkFields): boolean {
+  if (fields.mode === 'agent' || fields.batch) return true;
+  const workflow = fields.workflow?.skill?.workflow;
+  return !!workflow && workflow !== 'read';
+}
 
 /**
  * Does this conversation's own transcript evidence that it was used in Agent Mode?
@@ -26,9 +45,5 @@ import type { Conversation } from '../../../contracts/src/index.ts';
  */
 export function conversationHasAgentWork(conversation: Conversation | null | undefined): boolean {
   if (!conversation) return false;
-  return conversation.messages.some(message => {
-    if (message.mode === 'agent' || message.batch) return true;
-    const workflow = message.workflow?.skill?.workflow;
-    return !!workflow && workflow !== 'read';
-  });
+  return conversation.messages.some(message => hasAgentWork(message));
 }

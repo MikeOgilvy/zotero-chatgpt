@@ -5,6 +5,7 @@ import type { ActionTaskRecord, ActionTasks } from '../../../contracts/src/tasks
 import type { ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 import type { PresenterReading } from './capability.ts';
+import { traceMode } from './mode-trace.ts';
 import { deliverRequest } from './send-request.ts';
 
 /**
@@ -41,7 +42,12 @@ export interface AgentSendContext {
 }
 
 export async function executeAgentSend(context: AgentSendContext): Promise<void> {
+  // Acceptance trace: this is the only path that may acquire a task/reading port. A plain read sent
+  // from Agent mode still says so honestly instead of pretending a capability was used.
+  traceMode('[mode] agent');
+  traceMode('[executor] agent');
   if (context.acquisition) {
+    traceMode('[agent-runtime] STARTED tasks');
     const task = await (await context.ports.tasks()).planAcquisition({
       conversationId: context.conversationId,
       target: context.acquisition.target,
@@ -52,10 +58,12 @@ export async function executeAgentSend(context: AgentSendContext): Promise<void>
     return;
   }
   if (context.plan) {
+    traceMode('[agent-runtime] STARTED reading');
     const reading = await context.ports.reading(context.client);
     context.describeReading({ question: context.request.question, scopeLabel: context.scopeLabel });
     context.acceptReading(await (context.queued ? reading.enqueue(context.request, context.plan) : reading.start(context.request, context.plan)));
     return;
   }
+  traceMode('[agent-runtime] NOT STARTED (plain read; no task or reading capability)');
   await deliverRequest(context.client, context.request, context.queued);
 }

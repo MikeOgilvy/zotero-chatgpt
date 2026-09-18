@@ -3,6 +3,7 @@ import type { ReaderClient } from '../../../contracts/src/runtime.ts';
 import type { ReaderSkill } from '../../../contracts/src/workspace.ts';
 import { detectActionIntent } from '../../../core/src/chat/action-intent.ts';
 import type { ContextPlan } from '../../../core/src/context/planner.ts';
+import { traceMode } from './mode-trace.ts';
 import { deliverRequest } from './send-request.ts';
 
 /**
@@ -65,6 +66,11 @@ export function refuseChatAction(question: string): void {
 
 /** The one Chat-Mode send entry point: refuse anything that would act, then deliver one request. */
 export async function executeChatSend(context: ChatSendContext): Promise<void> {
+  // Acceptance trace: a Chat send reads context and delivers one model request. It never acquires a
+  // task/reading port, so no Agent capability (and no reading job) is started for this request.
+  traceMode('[mode] chat');
+  traceMode('[executor] chat');
+  traceMode('[agent-runtime] NOT STARTED');
   refuseChatMultiPass(context.plan);
   await deliverRequest(context.client, context.request, context.queued);
 }

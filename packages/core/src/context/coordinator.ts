@@ -28,6 +28,7 @@ const errors = {
   precedingUncertain: 'The preceding request is not confirmed. Reconcile it before continuing the queued reading task.',
   enqueueUnsupported: 'This reader connection does not support durable queuing. The task was not sent as an ordinary request.',
   batchRelease: 'The reading batch could not be safely released. Reconcile before continuing.',
+  chatMode: 'A multi-pass reading task is Agent work. Switch to Agent mode to run it.',
 } as const;
 function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Saved reading task data could not be read; it was left untouched.'); }
 function invalid(): never { throw new ReaderError('INVALID_REQUEST', 'The reading task input or plan is invalid.'); }
@@ -221,7 +222,12 @@ export class ReadingCoordinator {
     const captured = snapshot(raw), capturedPlan = snapshot(rawPlan);
     const operation = this.startQueue.then(async () => {
       void this.connected;
-      const input = validateSendInput(captured); if (input.batch) invalid(); const plan = checkedPlan(capturedPlan, input);
+      const input = validateSendInput(captured); if (input.batch) invalid();
+      // A reading job is Agent work: creating one from a Chat request would start the very task/run
+      // that Chat mode must not. The presenter's Chat path already refuses the multi-pass plan, so
+      // this only catches a caller that skipped it.
+      if ((input.mode ?? 'chat') !== 'agent') throw new ReaderError('UNSUPPORTED_INTERACTION', errors.chatMode);
+      const plan = checkedPlan(capturedPlan, input);
       const inputHash = await hash({ input, plan, ...(enqueueFirst ? { enqueueFirst: true } : {}) }); const jobId = input.requestId;
       const existing = await this.read(this.path(jobId), JOB_BYTES);
       if (existing !== undefined) {
@@ -299,7 +305,10 @@ export class ReadingCoordinator {
     return reference?.identity?.title ?? reference?.label ?? 'Referenced document';
   }
   private makeRequest(job: ReadingJob, saved: ReadingInput, step: ReadingStep): SendInput {
-    const input = clone(saved.input); input.requestId = step.requestId;
+    // Every step of a reading job is Agent work by construction, including a recovered job whose
+    // stored input predates `mode`. Stamping it here keeps the runtime boundary true for a replayed
+    // step instead of relying on whatever the original caller froze.
+    const input: SendInput = { ...clone(saved.input), mode: 'agent' }; input.requestId = step.requestId;
     const report = (budget: ContextBudget, document: DocumentContext | null, reason: string) => {
       input.contextReport = { mode: saved.plan.mode, capacity: budget.capacity, provenance: budget.provenance, reservedTokens: budget.reservations.total, textBudgetTokens: budget.textBudgetTokens, selectedPages: document?.pages.map(page => page.pageIndex) ?? [], totalPages: document?.totalPages ?? 0, reason };
     };
