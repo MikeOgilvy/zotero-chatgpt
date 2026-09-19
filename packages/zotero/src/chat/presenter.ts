@@ -16,7 +16,7 @@ import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
 import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 import type { PresenterAgent, PresenterReading } from './capability.ts';
-import { executeAgentSend, type AgentSendContext } from './agent-execution.ts';
+import { executeAgentSend, requestsCurrentPaperAnnotations, type AgentSendContext } from './agent-execution.ts';
 import { executeChatSend, refuseChatAction, refuseChatWorkflow } from './chat-execution.ts';
 import { traceMode } from './mode-trace.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
@@ -307,7 +307,7 @@ export class ConversationPresenter {
       // so selecting Agent is what starts the local read; the send path would otherwise do it and
       // make the first Agent request wait for a whole PDF.
       if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
-      void this.services.ensureAgent().then(() => this.refreshTaskState()).catch(error => {
+      void this.hydrateAgentState().catch(error => {
         if (this.state.mode === 'agent') this.reportError(this.errorText(error));
       });
     }
@@ -628,6 +628,13 @@ export class ConversationPresenter {
     const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks });
     const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs });
   }
+  private async hydrateAgentState(): Promise<void> {
+    if (this.state.mode !== 'agent') return;
+    await this.services.ensureAgent();
+    const conversation = this.state.conversation;
+    if (conversation) await this.recoverAnnotationPlans(conversation);
+    await this.refreshTaskState();
+  }
   async approveTask(id: string, selected: string[], choices: ActionTaskChoices = {}): Promise<void> { this.acceptTask(await (await this.getTasks()).approve(id, [...selected], clone(choices))); }
   async cancelTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).cancel(id)); }
   async reconcileTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).reconcile(id)); }
@@ -737,8 +744,7 @@ export class ConversationPresenter {
     } catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
     // Agent mode is the one composer state that needs Codex (for the model picker). Activating into
     // Chat never reaches this, so a reader who never leaves Chat starts no Agent runtime.
-    if (this.state.mode === 'agent') await this.services.ensureAgent().catch(error => this.reportError(this.errorText(error)));
-    await this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
+    if (this.state.mode === 'agent') await this.hydrateAgentState().catch(error => this.reportError(this.errorText(error)));
     // Adopting the saved chat clears `message`. If local preparation already failed, that would erase
     // the only signal the owner has — the panel that used to render preparation state is gone — so a
     // failure that landed before the restore is re-announced here. A later failure sets it itself.
@@ -1019,7 +1025,7 @@ export class ConversationPresenter {
       const buffered = this.buffered; this.buffered = []; this.syncing = false;
       this.update({ conversation });
       for (const event of buffered) if (event.seq > conversation.lastSeq) this.apply(event);
-      await this.recoverAnnotationPlans(conversation);
+      if (this.state.mode === 'agent') await this.recoverAnnotationPlans(conversation);
     } catch (error) { if (generation !== this.syncGeneration) return; this.syncing = false; this.buffered = []; this.update({ message: this.errorText(error) }); }
   }
   /**
@@ -1116,6 +1122,7 @@ export class ConversationPresenter {
   explain(citation: Citation): Promise<void> {
     const key = `${this.draftKey()}:${citation.id}`;
     const existing = this.explainFlights.get(key); if (existing) return existing;
+    const mode = this.state.mode;
     const context = this.contextOptions(); const frozenSettings = this.currentSettings();
     const draft = { ...clone(this.state.draft), skillId: null, references: [] }; const workspace = this.captureWorkspace(); const target = this.state.conversation;
     if (context.enabled && this.state.document.disclosure) { this.update({ pendingExplain: clone(citation) }); return Promise.resolve(); }
@@ -1125,13 +1132,13 @@ export class ConversationPresenter {
         await this.loadLocal();
         const configuration = await workspace; if (this.disposed) return;
         await this.connect();
-        // More details is an Agent request in this build: it needs the PDF context pipeline and the
-        // reading coordinator, and Chat has no transport yet. Routing it to Chat would break a
-        // working feature, so it is frozen as Agent. Once a Chat transport lands, More details can
-        // follow the composer mode like any other request without changing the router.
-        if (!await this.prepareMode('agent', { pendingExplain: kept })) return;
+        // The host routes the real hosted-Chat selection actions directly to the official page.
+        // This method remains the native conversation entry point, so it freezes the mode shown at
+        // the click and must never turn a Chat action into a Codex Agent request behind the owner's
+        // back. A host without a native Chat transport refuses through prepareMode before sending.
+        if (!await this.prepareMode(mode, { pendingExplain: kept })) return;
         const conversation = target ?? await this.ensureConversation();
-        await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration, false, 'agent');
+        await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration, false, mode);
       } catch (error) { this.update({ message: this.errorText(error) }); }
     })().finally(() => { this.explainFlights.delete(key); });
     this.explainFlights.set(key, flight);
@@ -1191,15 +1198,21 @@ export class ConversationPresenter {
       if (resolved.stale) this.update({ message: STALE_PROFILE_MESSAGE });
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
-  private frozenWorkflow(draft: WorkspaceDraft, settings: WorkspaceSettings | null): WorkflowSnapshot | undefined {
+  private frozenWorkflow(draft: WorkspaceDraft, settings: WorkspaceSettings | null, mode: RequestMode, question: string): WorkflowSnapshot | undefined {
     if (!settings) return undefined;
     // Global preferences are authoritative. A legacy persisted per-chat profile that no longer
     // resolves must not abort the send — the per-chat profile control is gone, so there would be no
     // way out — and it must not override the global preferences either. Treat it as "no profile";
     // the send path reports the degradation out loud.
     const profile = draft.profileId ? settings.profiles.find(profile => profile.id === draft.profileId) : undefined;
-    const skill = draft.skillId ? settings.skills.find(skill => skill.id === draft.skillId) : null;
+    const inferredAnnotation = !draft.skillId && mode === 'agent' && requestsCurrentPaperAnnotations(question);
+    const skill = draft.skillId
+      ? settings.skills.find(skill => skill.id === draft.skillId)
+      : inferredAnnotation
+        ? settings.skills.find(skill => skill.id === 'builtin-annotate' && skill.enabled)
+        : null;
     if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected skill is unavailable or disabled.');
+    if (inferredAnnotation && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in annotation workflow is unavailable or disabled. Enable it before asking Agent to highlight the current paper.');
     return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
   }
   /**
@@ -1271,7 +1284,7 @@ export class ConversationPresenter {
       // Last line of defence: no Chat request may reach the shared service without a Chat transport,
       // so Chat can never be routed to Codex by a path that forgot to check.
       if (mode === 'chat') { const reason = this.services.chatUnavailableReason(); if (reason) throw new ReaderError('UNSUPPORTED_INTERACTION', reason); }
-      const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace);
+      const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace, mode, input.question);
       if (workflow) input.workflow = workflow;
       const skillWorkflow = workflow?.skill?.workflow ?? null;
       // Stage 6/8: the composer's mode control is the single authority for `mode`; `workflow` never

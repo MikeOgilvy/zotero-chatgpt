@@ -376,6 +376,15 @@ describe('conversation presenter', () => {
     expect(f.sent[0]!.question).not.toMatch(/请用中文解释/u);
     expect(f.last().draft.question).toBe('草稿中的问题'); expect(f.last().draft.citations).toEqual([citationB]);
   });
+  it('a direct More details call in Chat mode never starts or borrows the Agent runtime', async () => {
+    const f = fixture(); f.services.chatUnavailableReason.mockReturnValue('Hosted Chat owns this action.');
+    await f.presenter.activate();
+    await f.presenter.explain(citationA);
+    expect(f.presenter.snapshot().mode).toBe('chat');
+    expect(f.sent).toHaveLength(0);
+    expect(f.services.ensureAgent).not.toHaveBeenCalled();
+    expect(f.last().message).toBe('Hosted Chat owns this action.');
+  });
   it('attaches bibliographic paper identity on ask even without a citation', async () => {
     const f = fixture(); await f.presenter.activate();
     f.presenter.setQuestion('这篇在讲什么方向？');
@@ -462,6 +471,7 @@ describe('conversation presenter', () => {
     const f = fixture({ signedIn: false }); await f.presenter.activate();
     // Local restore is Codex-independent: the stored chat is shown before any sign-in.
     expect(f.last().conversation).not.toBeNull(); expect(f.client.current).not.toHaveBeenCalled();
+    f.presenter.setMode('agent');
     await f.presenter.explain(citationA);
     expect(f.sent).toHaveLength(0); expect(f.services.openAuthorization).toHaveBeenCalledWith('https://auth.openai.com/authorize?x=1'); expect(f.last().pendingExplain?.id).toBe(citationA.id);
     f.setRuntime({ account: { state: 'signedIn', displayLabel: 'ChatGPT' }, models: [model] }); await settle();

@@ -340,6 +340,38 @@ it('plans completed annotation JSON once against the frozen PDF version without 
   expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
+it('routes a direct Chinese highlight request in Agent mode through the built-in annotation workflow', async () => {
+  const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+  const annotate = defaultSettings().skills.find(skill => skill.id === 'builtin-annotate')!;
+  f.workspaceSettings().skills.push(annotate);
+  await f.presenter.activate(); f.presenter.setMode('agent');
+  f.presenter.setQuestion('高亮当前论文最重要的 5 处内容，并简要说明原因。'); await f.presenter.send();
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]).toMatchObject({ mode: 'agent', workflow: { skill: { id: 'builtin-annotate', workflow: 'annotate' } } });
+  expect(f.presenter.snapshot().draft.skillId).toBeNull();
+  const requestId = f.sent[0]!.requestId;
+  const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: '核心定义' }] });
+  f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' });
+  f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
+  await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledTimes(1));
+  expect(t.port.planAnnotations).toHaveBeenCalledWith(expect.objectContaining({ question: '高亮当前论文最重要的 5 处内容，并简要说明原因。', modelRequestId: requestId }));
+  expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('reports invalid annotation candidate output and creates no review task', async () => {
+  const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+  const annotate = defaultSettings().skills.find(skill => skill.id === 'builtin-annotate')!;
+  f.workspaceSettings().skills.push(annotate);
+  await f.presenter.activate(); f.presenter.setMode('agent');
+  f.presenter.setQuestion('高亮当前论文最重要的 5 处内容，并简要说明原因。'); await f.presenter.send();
+  const requestId = f.sent[0]!.requestId;
+  f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: 'not valid candidate JSON', phase: 'final' });
+  f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: 'not valid candidate JSON' });
+  await vi.waitFor(() => expect(f.presenter.snapshot().message).toMatch(/task input is invalid/iu));
+  expect(t.port.planAnnotations).not.toHaveBeenCalled();
+  expect(f.presenter.snapshot().tasks).toEqual([]); f.presenter.dispose();
+});
+
 it('refuses a write workflow in the default Chat mode instead of sending it', async () => {
   // Invariant 3: Chat is read-only. The refusal happens in `submit` before the model, the document
   // read or the task layer is reached, so a chat request can never plan a native write.
@@ -489,15 +521,22 @@ it('keeps a background annotation completion owned by its original chat after Ne
 
 it('recovers completed annotation output after a restart gap without re-planning an existing task', async () => {
   const f = fixture({ document: true }); const original = f.conversation().id; const t = taskPort(original); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
-  f.workspaceSettings().skills.push({ ...userSkill, id: 'annotate', workflow: 'annotate' });
-  await f.presenter.activate(); await f.presenter.selectSkill('annotate'); f.presenter.setMode('agent'); f.presenter.setQuestion('Mark definitions'); await f.presenter.send();
+  f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-annotate')!);
+  await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('高亮当前论文最重要的定义。'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ quote: 'Definition', pageIndex: 0, reason: 'Useful' }] });
   f.saveConversation({ ...f.conversation(), activeRequestId: null, messages: [...f.conversation().messages, { id: 'saved-answer', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text }] });
   f.presenter.dispose();
   const restored = new ConversationPresenter(presenterContext(paperA, 'Paper A'), f.services); await restored.activate();
+  expect(restored.snapshot().mode).toBe('chat');
+  expect(t.port.planAnnotations).not.toHaveBeenCalled();
+  restored.setMode('agent');
   await vi.waitFor(() => expect(t.port.planAnnotations).toHaveBeenCalledTimes(1));
-  const unbind = restored.bind(() => {}); unbind(); await Promise.resolve(); await Promise.resolve();
-  expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); restored.dispose();
+  restored.dispose();
+  const restoredAgain = new ConversationPresenter(presenterContext(paperA, 'Paper A'), f.services); await restoredAgain.activate();
+  expect(t.port.planAnnotations).toHaveBeenCalledTimes(1);
+  restoredAgain.setMode('agent');
+  const unbind = restoredAgain.bind(() => {}); unbind(); await Promise.resolve(); await Promise.resolve();
+  expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); restoredAgain.dispose();
 });
 
 it('keeps a new chat usable during older preparation and clears only the accepted older draft', async () => {
@@ -660,4 +699,3 @@ it('refuses a multi-pass Chat request instead of silently starting a reading job
   expect(f.presenter.snapshot().message).toMatch(/Agent mode/iu);
   f.presenter.dispose();
 });
-

@@ -4,9 +4,27 @@ import type { NativeCollectionTarget } from '../../../contracts/src/native.ts';
 import type { ActionTaskRecord, ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
+import { detectActionIntent } from '../../../core/src/chat/action-intent.ts';
 import type { PresenterReading } from './capability.ts';
 import { traceMode } from './mode-trace.ts';
 import { deliverRequest } from './send-request.ts';
+
+const CHINESE_ANNOTATION_ACTION = /^(?:(?:请|请你|请帮我|帮我|麻烦|麻烦你|可以|能否)\s*)?(?:把\s*)?(?:当前|这|本)?(?:篇|份|个)?(?:论文|文章|文献|PDF)?(?:中|里|内|的)?\s*(?:高亮|标注|划线|画线|加下划线)/iu;
+const CHINESE_DOCUMENT_TARGET = /(?:当前|这|本)(?:篇|份|个)?(?:论文|文章|文献|PDF)|(?:论文|文章|文献|PDF)(?:中|里|内|的)/iu;
+
+/**
+ * Recognize the narrow natural-language form that already names the native annotation action and
+ * the current document. Agent mode may use this to select the built-in annotation workflow when the
+ * owner did not explicitly select a skill. It is deliberately deterministic and conservative: an
+ * explicit skill always wins, and questions about highlighting do not begin with an action verb.
+ */
+export function requestsCurrentPaperAnnotations(question: string): boolean {
+  if (typeof question !== 'string') return false;
+  const normalized = question.normalize('NFKC').trim();
+  const intent = detectActionIntent(normalized);
+  if (intent && ['annotate', 'highlight', 'mark', 'underline'].includes(intent.verb)) return true;
+  return CHINESE_ANNOTATION_ACTION.test(normalized) && CHINESE_DOCUMENT_TARGET.test(normalized);
+}
 
 /**
  * The Agent-Mode execution path: act, using the injected capability.
