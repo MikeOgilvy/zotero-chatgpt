@@ -27,7 +27,7 @@ function readRawOption(name) {
 }
 
 function positionalXpi() {
-  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--login-wait-seconds']);
+  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--login-wait-seconds', '--recover-organization', '--request-id', '--expected-token', '--origin-version']);
   const skip = new Set();
   const found = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -109,7 +109,8 @@ if (processes.split('\n').some((line) => line.startsWith('/Applications/Zotero.a
 if (tree.exclusiveRoot) await reserveExclusiveRoot(tree.exclusiveRoot);
 await mkdir(join(profile, 'extensions'), { recursive: true });
 await mkdir(dataDir, { recursive: true });
-await mkdir(join(pdfPath, '..'), { recursive: true });
+const recoveryOnly = tree.stage === 'recover-organization';
+if (!recoveryOnly) await mkdir(join(pdfPath, '..'), { recursive: true });
 const verificationToken = `RUN-${randomBytes(12).toString('hex')}`;
 const liveCoreFlows = argumentsList.includes('--live-core-flows') || tree.stage === 'live-core';
 const webLive = argumentsList.includes('--web-live');
@@ -127,7 +128,7 @@ const liveCorePageProse = [
     'An intervention is informative when competing models predict measurably different outcomes.',
   ],
 ];
-await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', verificationToken, liveCoreFlows ? { pageProse: liveCorePageProse } : undefined));
+if (!recoveryOnly) await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', verificationToken, liveCoreFlows ? { pageProse: liveCorePageProse } : undefined));
 // Runtime records and account state have their own lifetime. Preparing a host driver must never
 // clear them, even in the dedicated context profile. A separate, verified-new tree is required for
 // checks whose precondition is that no runtime has been prepared yet.
@@ -145,7 +146,7 @@ const prefs = {
   'extensions.startupScanScopes': 1,
   'extensions.update.enabled': false,
   'extensions.zotero.httpServer.enabled': false,
-  'extensions.zotero.integration.port': ['context', 'live-core'].includes(tree.stage) ? 50014 : tree.stage === 'embed' ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
+  'extensions.zotero.integration.port': ['context', 'live-core', 'recover-organization'].includes(tree.stage) ? 50014 : tree.stage === 'embed' ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
   'extensions.zoteroMacWordIntegration.skipInstallation': true,
   'extensions.zoteroOpenOfficeIntegration.skipInstallation': true,
   'app.update.enabled': false,
@@ -170,6 +171,7 @@ const config = {
   // True only for an atomically reserved --run-id tree that did not exist before this preparation.
   cleanRuntimeTree,
   verificationToken,
+  ...(recoveryOnly ? { recoveryConversationId: readRawOption('--recover-organization'), recoveryRequestId: readRawOption('--request-id'), recoveryToken: readRawOption('--expected-token'), recoveryOriginVersion: readRawOption('--origin-version') } : {}),
   subjectID,
   subjectVersion: twoVersion ? rollbackIdentity.version : subjectManifest.version,
   artifactHash: createHash('sha256').update(await readFile(subjectXpi)).digest('hex'),

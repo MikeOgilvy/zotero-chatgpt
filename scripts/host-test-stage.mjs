@@ -6,6 +6,7 @@ export const HOST_DRIVERS = {
   s6: 'tests/host/s6-driver.js',
   context: 'tests/host/context-driver.js',
   'live-core': 'tests/host/live-core-driver.js',
+  'recover-organization': 'tests/host/recover-organization-driver.js',
   // Embedded ChatGPT web surface: loads chatgpt.com in a Zotero browser surface and measures what the
   // host actually does. It never types, clicks a login control, or reads credentials.
   embed: 'tests/host/embed-driver.js',
@@ -13,7 +14,15 @@ export const HOST_DRIVERS = {
   'live-model': 'tests/host/live-model-driver.js',
 };
 
-const EXCLUSIVE = ['s5', 's6', 'context', 'live-core', 'embed', 'live-model'];
+const EXCLUSIVE = ['s5', 's6', 'context', 'live-core', 'recover-organization', 'embed', 'live-model'];
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+function readOption(argv, name) {
+  const positions = argv.flatMap((value, index) => value === name ? [index] : []);
+  if (positions.length === 0) return undefined;
+  if (positions.length !== 1) throw new Error(`Pass ${name} only once`);
+  const value = argv[positions[0] + 1]; if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`); return value;
+}
 
 function readRunId(argv) {
   const positions = argv.flatMap((value, index) => value === '--run-id' ? [index] : []);
@@ -46,6 +55,7 @@ export function selectHostStage(argv) {
   const runId = readRunId(argv);
   const liveCoreFlows = argv.includes('--live-core-flows');
   const liveCoreStage = selected.length === 1 && selected[0] === 'live-core';
+  const recoverOrganization = selected.length === 1 && selected[0] === 'recover-organization';
   const webLive = argv.includes('--web-live');
   const loginWaitSeconds = readLoginWaitSeconds(argv);
   if (runId && (selected.length !== 1 || selected[0] !== 'context')) throw new Error('--run-id requires --context');
@@ -54,14 +64,21 @@ export function selectHostStage(argv) {
   if (loginWaitSeconds !== undefined && !liveCoreFlows && !liveCoreStage) throw new Error('--login-wait-seconds requires --live-core-flows or --live-core');
   if (webLive && (selected.length !== 1 || selected[0] !== 'embed')) throw new Error('--web-live requires --embed');
   if (webLive && ['--watch-seconds', '--surface-probes', '--capability-probe', '--url'].some(flag => argv.includes(flag))) throw new Error('--web-live cannot be combined with URL, watch, or comparison probes');
+  if (recoverOrganization) {
+    const conversationId = readOption(argv, '--recover-organization'); const requestId = readOption(argv, '--request-id'); const token = readOption(argv, '--expected-token'); const originVersion = readOption(argv, '--origin-version');
+    if (!conversationId || !UUID.test(conversationId)) throw new Error('--recover-organization requires a valid conversation UUID');
+    if (!requestId || !UUID.test(requestId)) throw new Error('--request-id requires a valid request UUID');
+    if (!token || !/^RUN-[a-f0-9]{24}$/u.test(token)) throw new Error('--expected-token requires the exact synthetic RUN token');
+    if (!originVersion || !/^0\.4\.0a[1-9][0-9]*$/u.test(originVersion)) throw new Error('--origin-version requires the observed Zotero development version');
+  }
   if (argv.includes('--native') && (acceptance || argv.includes('--live') || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--native requires only the dedicated --context driver');
   if (argv.includes('--live') && (acceptance || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--live requires only the dedicated --context driver');
   const manualContext = acceptance && selected.length === 1 && selected[0] === 'context';
   if (acceptance && selected.length > 0 && !manualContext) throw new Error('Pass --acceptance without --s5 or --s6');
-  if (selected.length > 1) throw new Error('Pass only one of --context, --live-core, --embed, --live-model, --s5, --s6');
+  if (selected.length > 1) throw new Error('Pass only one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6');
   if (acceptance) return { stage: manualContext ? 'context' : 'acceptance', driver: null, installDriver: false };
   // No implicit default: preparing a profile rewrites its extensions, so the stage must be named.
-  if (selected.length === 0) throw new Error('Pass one of --context, --live-core, --embed, --live-model, --s5, --s6, or --acceptance');
+  if (selected.length === 0) throw new Error('Pass one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6, or --acceptance');
   const stage = selected[0];
   return { stage, driver: argv.includes('--native') ? 'tests/host/native-action-driver.ts' : HOST_DRIVERS[stage], installDriver: true };
 }
@@ -74,9 +91,9 @@ export function selectHostStage(argv) {
 export function selectHostTree(argv, repositoryRoot) {
   const { stage } = selectHostStage(argv);
   const dev = join(repositoryRoot, '.zotero-chatgpt-dev');
-  if (stage === 'context' || stage === 'live-core') {
+  if (stage === 'context' || stage === 'live-core' || stage === 'recover-organization') {
     const runId = readRunId(argv);
-    if (stage === 'live-core' && runId) throw new Error('--live-core reuses the preserved context profile and does not accept --run-id');
+    if (['live-core', 'recover-organization'].includes(stage) && runId) throw new Error(`--${stage} reuses the preserved context profile and does not accept --run-id`);
     const contextRoot = runId ? join(dev, 'context-runs', runId) : join(dev, 'context');
     return {
       stage,

@@ -27,6 +27,7 @@ async function prepareScriptSandbox(): Promise<{ root: string; script: string; x
     cp(path.join(repositoryRoot, 'tests/fixtures/create-pdf.mjs'), path.join(root, 'tests/fixtures/create-pdf.mjs')),
     cp(path.join(repositoryRoot, 'tests/host/context-driver.js'), path.join(root, 'tests/host/context-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/live-core-driver.js'), path.join(root, 'tests/host/live-core-driver.js')),
+    cp(path.join(repositoryRoot, 'tests/host/recover-organization-driver.js'), path.join(root, 'tests/host/recover-organization-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/embed-driver.js'), path.join(root, 'tests/host/embed-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/web-acceptance-actor.mjs'), path.join(root, 'tests/host/web-acceptance-actor.mjs')),
     cp(path.join(repositoryRoot, 'runtime/manifest.ts'), path.join(root, 'runtime/manifest.ts')),
@@ -222,6 +223,26 @@ describe('dedicated host-test stage selection', () => {
     } finally { await rm(sandbox.root, { recursive: true, force: true }); }
   });
 
+  it('selects a zero-model organization recovery with explicit stored identities', async () => {
+    const argv = ['--recover-organization', '63696cbf-01e2-46b6-be36-2f539813e656', '--request-id', '04e67795-84e6-4fa3-b4fb-e4d16bc52812', '--expected-token', 'RUN-9215a529dbec36ea9698a1fc', '--origin-version', '0.4.0a25'];
+    await expect(select(argv)).resolves.toEqual({ stage: 'recover-organization', driver: 'tests/host/recover-organization-driver.js', installDriver: true });
+    const tree = await selectTree(argv);
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/context/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/context/data'));
+    await expect(select(['--recover-organization', 'not-a-uuid', '--request-id', argv[3]!, '--expected-token', argv[5]!])).rejects.toThrow(/valid conversation UUID/u);
+    await expect(select(['--recover-organization', argv[1]!, '--request-id', argv[3]!])).rejects.toThrow(/expected-token/u);
+  });
+
+  it('packages organization recovery without injecting a new PDF fixture', async () => {
+    const sandbox = await prepareScriptSandbox(); const argv = ['--recover-organization', '63696cbf-01e2-46b6-be36-2f539813e656', '--request-id', '04e67795-84e6-4fa3-b4fb-e4d16bc52812', '--expected-token', 'RUN-9215a529dbec36ea9698a1fc', '--origin-version', '0.4.0a25'];
+    try {
+      await execFileAsync(process.execPath, [sandbox.script, ...argv, sandbox.xpi], { cwd: sandbox.root });
+      await expect(stat(path.join(sandbox.root, '.zotero-chatgpt-dev/context/fixtures/reading.pdf'))).rejects.toMatchObject({ code: 'ENOENT' });
+      const driverXpi = path.join(sandbox.root, '.zotero-chatgpt-dev/context/profile/extensions/zchatgpt-host-test@local.xpi'); const bootstrap = await readArchiveEntry(driverXpi, 'bootstrap.js');
+      expect(bootstrap).toContain('"recoveryConversationId":"63696cbf-01e2-46b6-be36-2f539813e656"'); expect(bootstrap).toContain('"recoveryRequestId":"04e67795-84e6-4fa3-b4fb-e4d16bc52812"'); expect(bootstrap).toContain('"recoveryOriginVersion":"0.4.0a25"');
+    } finally { await rm(sandbox.root, { recursive: true, force: true }); }
+  });
+
   it('registers the human-gated live model-catalog stage on its own isolated tree', async () => {
     await expect(select(['--live-model'])).resolves.toMatchObject({ stage: 'live-model', driver: 'tests/host/live-model-driver.js', installDriver: true });
     const { stdout } = await execFileAsync(process.execPath, [
@@ -267,7 +288,7 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();
   });
   it('refuses to prepare a profile without an explicit stage', async () => {
-    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-core, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
+    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
   });
 
   it('registers the embedded ChatGPT probe on its own isolated tree', async () => {
@@ -383,7 +404,7 @@ describe('dedicated host-test stage selection', () => {
   });
 
   it('rejects combining exclusive stage flags', async () => {
-    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
-    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
   });
 });
