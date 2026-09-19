@@ -137,10 +137,6 @@ export function summarizeOfficialPage(document, verificationToken) {
     iframe: Boolean(document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="challenge-platform"], iframe[title*="challenge" i]')),
   };
   const loginEntryPresent = Boolean(document.querySelector('a[href="/auth/login"], a[href^="/auth/login?"], [data-testid="login-button"]'));
-  // Bounded boolean only: whether the page exposes any error/limit surface near the composer. It
-  // separates "the click was ignored" from "the official service rejected the turn", without reading
-  // any page text.
-  const errorSurfaceVisible = Boolean(document.querySelector('[role="alert"], [data-testid="composer-error"], [data-testid*="error" i], [data-testid*="limit" i], [data-testid*="rate" i]'));
   const roleStructure = users.length || assistants.length ? null : [...document.querySelectorAll('main, [role="log"], [data-testid*="conversation"], [data-message-author-role]')].slice(0, 20).map(node => ({
     tag: String(node.localName ?? '').slice(0, 40) || null,
     dataTestid: attribute(node, 'data-testid'), dataMessageAuthorRole: attribute(node, 'data-message-author-role'), role: attribute(node, 'role'),
@@ -153,7 +149,6 @@ export function summarizeOfficialPage(document, verificationToken) {
     documentReadyState: readyState,
     challenge,
     loginEntryPresent,
-    errorSurfaceVisible,
     inputReady: Boolean(composer),
     sendReady: Boolean(send && !send.disabled),
     draftMatchesExactTestQuestion,

@@ -979,7 +979,7 @@ async function runHostSmoke(config) {
               ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true, currentCanonicalURL: latest?.canonicalURL ?? null,
               inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true,
               streaming: latest?.streaming === true, userMarkerMessages: Number(latest?.userMarkerMessages ?? 0), assistantMessages: Number(latest?.assistantMessages ?? 0),
-              latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, roleStructure: latest?.roleStructure ?? null, errorSurfaceVisible: latest?.errorSurfaceVisible === true,
+              latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, roleStructure: latest?.roleStructure ?? null,
             });
             if (latest?.status === 'ok' && latest.officialURL === true && latest.userMarkerMessages > baseline.userMarkerMessages && latest.assistantMessages > baseline.assistantMessages && latest.latestAssistantContainsToken === true && latest.streaming === false) break;
           } catch (error) { product.webLive.timeline.push({ ms: Date.now() - started, status: 'query-error', error: message(error).slice(0, 200) }); }
@@ -997,7 +997,7 @@ async function runHostSmoke(config) {
           officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null, currentCanonicalURL: latest?.canonicalURL ?? null,
           userMarkerDelta, assistantDelta, latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
           draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true, roleStructure: latest?.roleStructure ?? null, streamingObserved,
-          codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length, errorSurfaceVisible: latest?.errorSurfaceVisible === true,
+          codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
         };
         const passed = confirmedServiceReply && userMarkerDelta === 1 && product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com' && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0;
         product.webLive.status = passed ? 'passed' : confirmedFailure ? 'confirmed-failure' : 'unknown';
