@@ -43,6 +43,14 @@ async function setup(configure?: (options: { chatTransport?: ChatTransport }) =>
 const chatInput = (conversationId: string, n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId, action: 'ask', question: 'hello', citations: [], settings, mode: 'chat', ...overrides });
 /** Let the streamed completion and its flush timer run; `flush()` alone only drains microtasks. */
 const tick = async (ms = 5) => { await new Promise(resolve => setTimeout(resolve, ms)); await flush(); };
+async function waitForRequestState(client: ReaderClient, conversationId: string, id: string, state: string, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await client.request(conversationId, id)).state === state) return;
+    await tick(2);
+  }
+  throw new Error(`Request ${id} did not reach ${state} within ${timeoutMs} ms.`);
+}
 
 describe('Codex stays uninitialized until the Agent runtime is asked for something', () => {
   it('constructing the client performs no protocol call at all', async () => {
@@ -96,8 +104,9 @@ describe('Codex stays uninitialized until the Agent runtime is asked for somethi
     const transport = fakeChat({ fail: 'The chat backend rejected this request.' });
     const { c, p } = await setup(() => ({ chatTransport: transport }));
     const conversation = await c.newConversation(paperA, 'Chat only', settings);
-    await c.send(chatInput(conversation.id, 2));
-    await tick();
+    const input = chatInput(conversation.id, 2);
+    await c.send(input);
+    await waitForRequestState(c, conversation.id, input.requestId, 'failed');
     expect(methods(p)).toEqual([]);
     expect((await c.get(conversation.id)).messages.at(-1)).toMatchObject({ status: 'failed' });
     expect(c.snapshot().error).toBeNull();
