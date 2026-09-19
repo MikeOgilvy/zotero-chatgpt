@@ -26,18 +26,22 @@ async function runHostSmoke(config) {
     if (!/^[A-Za-z0-9-]{8,128}$/u.test(config.webResumeConversationId) || !/^RUN-[a-f0-9]{24}$/u.test(config.webResumeToken)) throw new Error('Resume identifiers invalid.');
     const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/embed)\/profile$/u);
     await check('dedicated-preserved-embed-profile', Boolean(match) && PathUtils.profileDir === profile && config.dataDir === `${match?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
+    const loadOwnedAttachment = async itemID => {
+      const attachment = Number.isSafeInteger(itemID) ? Zotero.Items.get(itemID) : null; if (!attachment) return { attachment: null, parent: null };
+      await attachment.loadAllData(); const parent = attachment.parentItem ?? null; if (parent) await parent.loadAllData(); return { attachment, parent };
+    };
     const resumePath = PathUtils.join(match[1], 'web-resume.json'); let resumeManifest = null;
     if (await IOUtils.exists(resumePath)) { try { resumeManifest = JSON.parse(await IOUtils.readUTF8(resumePath)); } catch { throw new Error('Stored web-resume manifest is unreadable.'); } }
     if (!resumeManifest) {
       let store = {}; try { const raw = Zotero.Prefs.get('extensions.zchatgpt.officialChatConversationURLs', true); if (typeof raw === 'string' && raw.length <= 128 * 1024) store = JSON.parse(raw); } catch { store = {}; }
       const matches = Object.entries(store).filter(([, entry]) => entry && typeof entry === 'object' && entry.url === targetURL); if (matches.length !== 1) throw new Error('Exact persisted official conversation binding unavailable.');
-      const [binding] = matches[0]; const itemID = Number(String(binding).split(':').at(-1)); const attachment = Number.isSafeInteger(itemID) ? Zotero.Items.get(itemID) : null; const parent = attachment?.parentItem;
+      const [binding] = matches[0]; const itemID = Number(String(binding).split(':').at(-1)); const { attachment, parent } = await loadOwnedAttachment(itemID);
       if (!attachment?.isPDFAttachment() || parent?.getField('title') !== 'ZCHATGPT embedded web surface probe') throw new Error('Persisted binding is not the owned synthetic PDF.');
       resumeManifest = { schemaVersion: 1, conversationId: config.webResumeConversationId, canonicalURL: targetURL, token: config.webResumeToken, binding, itemID, attachmentKey: attachment.key, parentKey: parent.key, parentTitle: parent.getField('title'), originVersion: config.webResumeOriginVersion, firstReplyVerified: false };
       await IOUtils.writeUTF8(resumePath, JSON.stringify(resumeManifest, null, 2));
     }
     if (resumeManifest.schemaVersion !== 1 || resumeManifest.conversationId !== config.webResumeConversationId || resumeManifest.canonicalURL !== targetURL || resumeManifest.token !== config.webResumeToken || resumeManifest.originVersion !== config.webResumeOriginVersion || !Number.isSafeInteger(resumeManifest.itemID) || typeof resumeManifest.binding !== 'string') throw new Error('Stored web-resume manifest does not match the explicit recovery scope.');
-    const binding = resumeManifest.binding; const itemID = resumeManifest.itemID; const attachment = Zotero.Items.get(itemID); const parent = attachment?.parentItem;
+    const binding = resumeManifest.binding; const itemID = resumeManifest.itemID; const { attachment, parent } = await loadOwnedAttachment(itemID);
     await check('persisted-binding-points-to-owned-synthetic-pdf', Boolean(attachment?.isPDFAttachment() && parent?.getField('title') === 'ZCHATGPT embedded web surface probe' && (!resumeManifest.attachmentKey || resumeManifest.attachmentKey === attachment.key) && (!resumeManifest.parentKey || resumeManifest.parentKey === parent.key)), { bindingMatched: true, itemID, attachmentKeyMatched: !resumeManifest.attachmentKey || resumeManifest.attachmentKey === attachment?.key, parentKeyMatched: !resumeManifest.parentKey || resumeManifest.parentKey === parent?.key, parentSynthetic: parent?.getField('title') === 'ZCHATGPT embedded web surface probe' });
     const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs'); const addon = await AddonManager.getAddonByID(config.subjectID);
     await check('installed-resume-xpi-active', addon?.isActive && addon.version === config.subjectVersion, { actualVersion: addon?.version ?? null });
