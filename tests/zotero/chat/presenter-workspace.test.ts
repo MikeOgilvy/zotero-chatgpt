@@ -6,7 +6,10 @@ import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type Reader
 import type { ReaderReference, ReaderSkill, ReaderWorkspace, PickedFile, SavedDraft, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import type { ActionTaskRecord, ActionTasks } from '../../../packages/contracts/src/tasks.ts';
 import type { NativeOrganizationItemSnapshot } from '../../../packages/contracts/src/native.ts';
+import type { NativeActionPort } from '../../../packages/contracts/src/native.ts';
 import type { ReadingJob } from '../../../packages/core/src/context/coordinator.ts';
+import { ActionTaskController } from '../../../packages/core/src/tasks/controller.ts';
+import { MemoryStorage } from '../../core/doubles.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
 import { paperA, paperB, citationA, imageA, settings } from '../../contracts/factories.ts';
 import { presenterContext } from '../presenter-context.ts';
@@ -402,7 +405,7 @@ it('freezes the native selection and routes a natural organization request into 
   f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' });
   f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
   await vi.waitFor(() => expect(t.port.planOrganization).toHaveBeenCalledTimes(1));
-  expect(t.port.planOrganization).toHaveBeenCalledWith({ conversationId: f.conversation().id, question: '按主题打标签，并归入合适的集合。', modelRequestId: requestId, selection: [selectedItem], collections: [{ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Topic A' }], proposals: [{ itemIndex: 0, tags: ['predictive-coding'], collectionIndexes: [0] }] });
+  expect(t.port.planOrganization).toHaveBeenCalledWith({ conversationId: f.conversation().id, question: '按主题打标签，并归入合适的集合。', modelRequestId: requestId, selection: [selectedItem], collections: [{ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' }], proposals: [{ itemIndex: 0, tags: ['predictive-coding'], collectionIndexes: [0] }] });
   expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
@@ -605,6 +608,33 @@ it('recovers organization proposals from the persisted frozen selection only aft
   await vi.waitFor(() => expect(t.port.planOrganization).toHaveBeenCalledTimes(1));
   expect(t.port.planOrganization).toHaveBeenCalledWith(expect.objectContaining({ modelRequestId: requestId, selection: [selectedItem] }));
   expect(f.library.selectedItems).toHaveBeenCalledTimes(1); restored.dispose();
+});
+
+it('recovers the completed live-host organization JSON through the real strict task controller', async () => {
+  const f = fixture(); const reading = readingPort(f.conversation().id); let clock = 0;
+  const controller = new ActionTaskController(new MemoryStorage(), {} as NativeActionPort, {
+    uuid: () => `organization-item-${++clock}`,
+    key: () => `ORG${String(++clock).padStart(5, '0')}`,
+    now: () => `2026-09-19T10:20:${String(clock).padStart(2, '0')}.000Z`,
+  });
+  f.services.agent = agentPort({ tasks: () => Promise.resolve(controller), reading: () => Promise.resolve(reading.reading) });
+  f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
+  await f.presenter.activate(); f.presenter.setMode('agent');
+  const question = 'Organize the selected Zotero items by adding the tag live-organized and placing both items in the named target collection. Preserve every existing tag and collection.';
+  f.presenter.setQuestion(question); await f.presenter.send();
+  const requestId = f.sent[0]!.requestId;
+  const answer = JSON.stringify({ candidates: [{ itemIndex: 0, tags: ['live-organized'], collectionIndexes: [0] }] });
+  f.saveConversation({ ...f.conversation(), activeRequestId: null, messages: [...f.conversation().messages, { id: 'saved-real-organization-json', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text: answer }] });
+  f.presenter.dispose();
+
+  const restored = new ConversationPresenter(presenterContext(paperA, 'Paper A'), f.services); await restored.activate();
+  expect(await controller.list(f.conversation().id)).toEqual([]); restored.setMode('agent');
+  await vi.waitFor(async () => expect(await controller.list(f.conversation().id)).toHaveLength(1));
+  const task = (await controller.list(f.conversation().id))[0]!;
+  expect(task).toMatchObject({ kind: 'organization', modelRequestId: requestId, state: 'review', items: [{ proposal: { tags: ['live-organized'], collections: [{ collectionKey: 'COLLECT1' }] } }] });
+  if (task.kind !== 'organization') throw new Error('Expected organization task');
+  expect(Object.keys(task.items[0]!.proposal.collections[0]!).sort()).toEqual(['clientId', 'collectionKey', 'libraryId']);
+  expect(f.sent).toHaveLength(1); restored.dispose();
 });
 
 it('keeps a new chat usable during older preparation and clears only the accepted older draft', async () => {

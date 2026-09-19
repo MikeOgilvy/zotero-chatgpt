@@ -677,7 +677,11 @@ export class ConversationPresenter {
       } else {
         if (!user.organization) throw new ReaderError('INVALID_REQUEST', 'Organization proposals have no frozen Zotero selection. Select the items and try again.');
         const proposals = parseOrganizationProposals(answer.text);
-        this.acceptTask(await tasks.planOrganization({ conversationId: conversation.id, question: user.text, modelRequestId: requestId, selection: clone(user.organization.selection), collections: clone(user.organization.collections), proposals }));
+        // Collection names are model-facing labels in the frozen request. The task controller accepts
+        // only native identity fields, so project at this trust boundary instead of weakening its
+        // strict record validator to admit display metadata.
+        const collections = user.organization.collections.map(({ clientId, libraryId, collectionKey }) => ({ clientId, libraryId, collectionKey }));
+        this.acceptTask(await tasks.planOrganization({ conversationId: conversation.id, question: user.text, modelRequestId: requestId, selection: clone(user.organization.selection), collections, proposals }));
       }
     } finally { this.planningActions.delete(key); }
   }
