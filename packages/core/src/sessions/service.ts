@@ -25,7 +25,22 @@ export interface ServiceUpstream {
   /** Reader policy breach: the runtime must stop; the service has already marked the request. */
   breach(): void;
 }
-export interface ServiceOptions { cwd: string; uuid: () => string; now: () => string; deltaFlushMs?: number; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment>; chat: ChatExecutorPort; trace?: Trace }
+export interface ServiceOptions {
+  cwd: string;
+  uuid: () => string;
+  now: () => string;
+  deltaFlushMs?: number;
+  generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment>;
+  chat: ChatExecutorPort;
+  /**
+   * Whether a supported Chat transport is integrated. False (the default in this build) makes a Chat
+   * send refuse up front with `chatUnavailable`, before any Codex readiness check, so Chat can never
+   * pull in the Agent runtime just to fail.
+   */
+  chatAvailable?: boolean;
+  chatUnavailable?: string;
+  trace?: Trace;
+}
 interface Run {
   conversationId: UUID; requestId: UUID; input: SendInput; resolved: ResolvedSettings;
   threadId: string | null; turnId: string | null; cancelWanted: boolean; interrupted: boolean; submitted: boolean; settled: boolean;
@@ -245,7 +260,10 @@ export class ReaderService {
   }
   private async recoverOnce(conversationId: UUID): Promise<Run | null> {
     if (this.recovered.has(conversationId)) return null;
-    if (this.closed || !this.upstream.ready() || !this.upstream.signedIn()) return null;
+    if (this.closed) return null;
+    // Recovery only needs the Codex upstream when the conversation actually holds Agent work. A chat
+    // with only Chat requests is restored from local records, so opening it never starts Codex.
+    if (this.hasAgentWork(await this.load(conversationId)) && (!this.upstream.ready() || !this.upstream.signedIn())) return null;
     this.recovering.add(conversationId);
     try {
       const run = await this.recover(conversationId);
@@ -310,11 +328,12 @@ export class ReaderService {
   }
   private async redeliver(conversation: StoredConversation, request: RequestRecord): Promise<Run | null> {
     const input = await this.reconstructInput(conversation, request);
-    const model = input ? this.upstream.models().find(m => m.id === input.settings.model) : undefined;
-    if (!input || !model) {
+    const agent = this.modeOf(conversation, request.requestId) === 'agent';
+    // A Chat redelivery needs no Codex catalog; an Agent redelivery needs its model descriptor.
+    const model = agent && input ? this.upstream.models().find(m => m.id === input.settings.model) : undefined;
+    if (!input || (agent && !model)) {
       // Undeliverable Agent work is uncertain (it may have native side effects); undeliverable Chat
       // work has none, so it fails rather than joining the reconciliation queue.
-      const agent = this.modeOf(conversation, request.requestId) === 'agent';
       await this.commit(conversation.id, c => {
         const rec = c.requests.find(r => r.requestId === request.requestId);
         if (rec && rec.state === 'accepted') { rec.state = agent ? 'uncertain' : 'failed'; rec.updatedAt = this.options.now(); }
@@ -322,7 +341,8 @@ export class ReaderService {
       });
       return null;
     }
-    const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved: resolveSettings(input.settings, model), threadId: conversation.upstream.threadId, turnId: request.turnId, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
+    const resolved = model ? resolveSettings(input.settings, model) : { model: input.settings.model, serviceTier: input.settings.serviceTier, effort: input.settings.effort };
+    const run: Run = { conversationId: conversation.id, requestId: request.requestId, input, resolved, threadId: conversation.upstream.threadId, turnId: request.turnId, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
     await this.commit(conversation.id, c => { c.activeRequestId = request.requestId; if (input.batch) c.activeBatchId = input.batch.id; });
     this.runs.set(run.requestId, run);
     return run;
@@ -512,6 +532,11 @@ export class ReaderService {
     // The runtime enforces the Chat/Agent boundary, not just the composer: a request that is not in
     // Agent mode may not carry Agent work, so no reading job or native task can be started as Chat.
     assertModeBoundary(input);
+    // Chat never touches the Codex upstream: not the readiness probe, not the sign-in state, not the
+    // model catalog. Without a supported transport it refuses here, before any read, hash, record or
+    // native thread — which is also what keeps using Chat free of any Codex initialization.
+    const chat = (input.mode ?? 'chat') === 'chat';
+    if (chat && !this.options.chatAvailable) throw new ReaderError('UNSUPPORTED_INTERACTION', this.options.chatUnavailable ?? 'Chat is unavailable in this build.');
     const hash = await hashInput(input);
     await this.ensureRecovered(input.conversationId);
     const outcome = await this.serial(input.conversationId, async (): Promise<{ receipt: SendReceipt; run: Run | null }> => {
@@ -521,8 +546,12 @@ export class ReaderService {
         if (existing.hash !== await hashInput(input, existing.hashVersion ?? 1)) throw new ReaderError('REQUEST_CONFLICT', 'This request ID was already used for different content.');
         return { receipt: this.receipt(existing, true), run: null };
       }
-      if (this.closed || !this.upstream.ready()) throw new ReaderError('RUNTIME_UNAVAILABLE', 'Codex is not available; retry the connection first.', true);
-      if (!this.upstream.signedIn()) throw new ReaderError('AUTH_REQUIRED', 'Sign in with ChatGPT before sending.');
+      // Agent is the only mode that needs the Codex upstream; the Chat refusal already happened
+      // before any state was read.
+      if (!chat) {
+        if (this.closed || !this.upstream.ready()) throw new ReaderError('RUNTIME_UNAVAILABLE', 'Codex is not available; retry the connection first.', true);
+        if (!this.upstream.signedIn()) throw new ReaderError('AUTH_REQUIRED', 'Sign in with ChatGPT before sending.');
+      }
       if (input.citations.some(c => paperId(c.paper) !== paperId(live.paper))) throw new ReaderError('INVALID_REQUEST', 'Citations must come from the attachment of this conversation.');
       if (input.document && paperId(input.document.paper) !== paperId(live.paper)) throw new ReaderError('INVALID_REQUEST', 'PDF context must come from the attachment of this conversation.');
       if (input.document && input.citations.some(citation => citation.documentRevision && JSON.stringify(citation.documentRevision) !== JSON.stringify(input.document!.revision))) throw new ReaderError('INVALID_REQUEST', 'A selection belongs to a different PDF version. Select the passage again before combining it with this document.');
@@ -538,11 +567,13 @@ export class ReaderService {
         if (ref.paper && ref.paper.clientId !== live.paper.clientId) throw new ReaderError('INVALID_REQUEST', 'A reference belongs to a different profile.');
         if (ref.document && live.documents?.[ref.document.id] && JSON.stringify(live.documents[ref.document.id]) !== JSON.stringify(ref.document)) throw new ReaderError('REQUEST_CONFLICT', 'A referenced snapshot identity already refers to different content.');
       }
-      const model = this.upstream.models().find(m => m.id === input.settings.model);
-      if (!model) throw new ReaderError('MODEL_UNAVAILABLE', 'The selected model is not in the current catalog.');
-      if (input.images?.length && !model.inputModalities?.includes('image')) throw new ReaderError('MODEL_UNAVAILABLE', 'This model has not reported support for image input. Choose an image-capable model.');
-      if (input.settings.effort !== null && !model.supportedReasoningEfforts.some(e => e.id === input.settings.effort)) throw new ReaderError('INVALID_REQUEST', 'The selected reasoning effort is not supported by this model.');
-      if (input.settings.serviceTier !== null && !model.serviceTiers.some(t => t.id === input.settings.serviceTier)) throw new ReaderError('INVALID_REQUEST', 'The selected speed is not supported by this model.');
+      // Model capability validation is Codex-catalog knowledge. A Chat request never reads it: its
+      // transport owns its own model configuration, so the shared service only carries the settings.
+      const model = chat ? undefined : this.upstream.models().find(m => m.id === input.settings.model);
+      if (!chat && !model) throw new ReaderError('MODEL_UNAVAILABLE', 'The selected model is not in the current catalog.');
+      if (!chat && input.images?.length && !model!.inputModalities?.includes('image')) throw new ReaderError('MODEL_UNAVAILABLE', 'This model has not reported support for image input. Choose an image-capable model.');
+      if (!chat && input.settings.effort !== null && !model!.supportedReasoningEfforts.some(e => e.id === input.settings.effort)) throw new ReaderError('INVALID_REQUEST', 'The selected reasoning effort is not supported by this model.');
+      if (!chat && input.settings.serviceTier !== null && !model!.serviceTiers.some(t => t.id === input.settings.serviceTier)) throw new ReaderError('INVALID_REQUEST', 'The selected speed is not supported by this model.');
       if (live.requests.some(r => r.state === 'uncertain')) throw new ReaderError('BUSY', 'An earlier request in this conversation could not be confirmed; start a new conversation to continue.');
       const otherBatch = live.activeBatchId && input.batch?.id !== live.activeBatchId;
       if ((live.activeRequestId || otherBatch) && !allowQueue) throw new ReaderError('BUSY', 'This conversation is still answering; wait for it or stop it first.');
@@ -573,7 +604,10 @@ export class ReaderService {
         emit({ type: 'accepted', requestId: input.requestId });
       });
       if (waiting) return { receipt: this.receipt(request, false), run: null };
-      const run: Run = { conversationId: input.conversationId, requestId: input.requestId, input, resolved: resolveSettings(input.settings, model), threadId: null, turnId: null, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
+      // A Chat run has no Codex model descriptor; its settings are the transport's configuration. The
+      // resolved triple is Agent vocabulary, so for Chat it is the settings themselves.
+      const resolved = model ? resolveSettings(input.settings, model) : { model: input.settings.model, serviceTier: input.settings.serviceTier, effort: input.settings.effort };
+      const run: Run = { conversationId: input.conversationId, requestId: input.requestId, input, resolved, threadId: null, turnId: null, cancelWanted: false, interrupted: false, submitted: false, settled: false, items: new Map(), pending: new Map(), flushTimer: null, lastEventAt: null, progressAt: 0 };
       this.runs.set(input.requestId, run);
       return { receipt: this.receipt(request, false), run };
     });
@@ -984,6 +1018,13 @@ export class ReaderService {
   /** The frozen mode recorded on a request's user message; an absent mode is Chat (D3). */
   private modeOf(conversation: StoredConversation, requestId: UUID): 'chat' | 'agent' {
     return conversation.messages.find(m => m.requestId === requestId && m.role === 'user')?.mode === 'agent' ? 'agent' : 'chat';
+  }
+  /**
+   * Whether anything in this conversation needs the Codex upstream: an Agent request record, or an
+   * Agent request that still has to be reconciled. A chat with only Chat requests stays local.
+   */
+  private hasAgentWork(conversation: StoredConversation): boolean {
+    return conversation.requests.some(request => this.modeOf(conversation, request.requestId) === 'agent' && ['accepted', 'dispatching', 'running', 'uncertain'].includes(request.state));
   }
   private nextAccepted(c: StoredConversation): RequestRecord | undefined {
     return c.requests.find(request => request.state === 'accepted' && (!c.activeBatchId || c.messages.find(message => message.requestId === request.requestId && message.role === 'user')?.batch?.id === c.activeBatchId));

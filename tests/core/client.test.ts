@@ -48,7 +48,9 @@ it('opens an attachment conversation before login using the public model catalog
   await c.refreshAccount();
   const local = await c.current(paperA, 'Full article title');
   expect(local.title).toBe('Full article title');
-  await expect(c.send({ requestId: requestId(650), conversationId: local.id, action: 'ask', question: 'x?', citations: [], settings })).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+  // Generation is an Agent action: the sign-in requirement is Codex-side and is asserted as Agent.
+  // Chat has no transport in this build, so a mode-less send would refuse for that reason instead.
+  await expect(c.send({ requestId: requestId(650), conversationId: local.id, action: 'ask', question: 'x?', citations: [], settings, mode: 'agent' })).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
   expect(methods(p)).not.toContain('turn/start');
 });
 
@@ -247,8 +249,10 @@ it('retains an already persisted image when its temporary native output path has
 describe('runtime handshake and policy', () => {
   it('handshakes, validates policy before ready, loads paginated model defaults and exposes immutable snapshots', async () => {
     const { c, p } = await setup(s => s.handlers.set('model/list', params => params.cursor ? { data: [{ ...model, model: 'second', isDefault: false }], nextCursor: null } : { data: [model], nextCursor: 'page2' }));
-    expect(methods(p).slice(0, 3)).toEqual(['initialize', 'initialized', 'config/read']);
+    // Laziness is part of the contract: constructing the client is not a handshake.
+    expect(methods(p)).toEqual([]);
     await c.refreshAccount();
+    expect(methods(p).slice(0, 3)).toEqual(['initialize', 'initialized', 'config/read']);
     expect(c.snapshot().models.map(m => m.id)).toEqual(['catalog-default', 'second']);
     const snapshot = c.snapshot(); snapshot.models.length = 0; expect(c.snapshot().models).toHaveLength(2);
     let notified = false; c.observe(() => { notified = true; })(); expect(notified).toBe(true);
@@ -262,21 +266,24 @@ describe('runtime handshake and policy', () => {
     if (violation === 'unknown-origin') fixture.origins.approval_policy!.name.type = 'enterpriseManaged';
     s.handlers.set('config/read', () => violation === 'missing-layers' ? { ...fixture, layers: null } : violation === 'chatgpt-base-url' ? { ...fixture, config: { ...fixture.config, chatgpt_base_url: 'https://example.test/' } } : fixture);
     const options = { codexVersion: '0.154.0', cwd: '/isolated', uuid, ...(violation === 'home-mismatch' ? { codexHome: '/isolated/other-account' } : {}) };
-    await expect(createReaderClient(s.p, new MemoryStorage(), options)).rejects.toThrow('policy');
+    const client = await createReaderClient(s.p, new MemoryStorage(), options); clients.push(client);
+    // The policy read happens on the first Agent request, not at construction.
+    await expect(client.refreshAccount()).rejects.toThrow('policy');
     expect(s.p.terminated).toBe(true); expect(methods(s.p)).not.toContain('account/read');
   });
   it('does not accept the expected version only inside a client-supplied user-agent suffix', async () => {
     const s = server(); s.handlers.set('initialize', () => ({ userAgent: 'codex/9.0.0 (zchatgpt; 0.154.0)', codexHome: '/isolated', platformFamily: 'unix', platformOs: 'macos' }));
-    await expect(createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid })).rejects.toThrow('version');
+    const client = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid }); clients.push(client);
+    await expect(client.refreshAccount()).rejects.toThrow('version');
     expect(s.p.terminated).toBe(true);
   });
   it('latches overflow once and stops the transport', async () => {
-    const { c, p } = await setup(); let terminations = 0; const terminate = p.terminate.bind(p); p.terminate = () => { terminations++; return terminate(); };
+    const { c, p } = await setup(); await c.refreshAccount(); let terminations = 0; const terminate = p.terminate.bind(p); p.terminate = () => { terminations++; return terminate(); };
     p.push(Array.from({ length: 10000 }, () => JSON.stringify({ method: 'thread/status/changed', params: { threadId: 'thread-1' } }) + '\n').join(''));
     await flush(); expect(terminations).toBe(1); expect(c.snapshot().runtime).toBe('error');
   });
   it('close settles a blocked server-response write without the process releasing its stdin promise', async () => {
-    const { c, p } = await setup(); p.writeStdin = () => new Promise<void>(() => undefined);
+    const { c, p } = await setup(); await c.refreshAccount(); p.writeStdin = () => new Promise<void>(() => undefined);
     p.emit({ id: 900, method: 'item/tool/call', params: {} }); await flush();
     let closed = false; const closing = c.close().then(() => { closed = true; }); await flush(); expect(closed).toBe(true); await closing;
   });

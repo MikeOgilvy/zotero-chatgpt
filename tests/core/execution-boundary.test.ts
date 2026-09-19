@@ -68,45 +68,62 @@ describe('Chat never enters the Codex Agent runtime', () => {
 
   it('A: a plain chat message never touches the Codex runtime and fails honestly', async () => {
     const lines: string[] = [];
-    const { c, p, request, state } = await setup(lines);
-    await c.send(request(1, { question: 'hello' })); await flush();
+    const { c, p, request, conversation } = await setup(lines);
+    // Chat's transport is an unresolved platform boundary in this build. The request is refused with
+    // that reason before it is hashed, recorded or routed, so it cannot silently become a Codex turn.
+    const failure: unknown = await c.send(request(1, { question: 'hello' })).catch((error: unknown) => error);
+    expect((failure as { code?: string }).code).toBe('UNSUPPORTED_INTERACTION');
+    expect((failure as Error).message).toContain('chat transport');
+    await flush();
     expect(agentEntries(p)).toEqual([]);
-    // The trace is derived from the objects the service holds, so it reads like the real path.
-    expect(lines).toEqual(['[conversation] mode=chat', '[execution-router] executor=chat', `[chat] request_started request=${request(1).requestId}`, '[agent] runtime_started=false']);
-    // Chat's transport is an unresolved platform boundary: the request fails truthfully instead of
-    // silently becoming a tool-free Codex turn.
-    expect(await state(request(1))).toBe('failed');
-    expect((await c.get(request(1).conversationId)).messages.filter(message => message.role === 'assistant')).toEqual([]);
+    // Nothing reached the conversation controller: the trace the controller writes is empty.
+    expect(lines).toEqual([]);
+    expect((await c.get(conversation.id)).messages).toEqual([]);
+    expect((await c.get(conversation.id)).activeRequestId).toBeNull();
   });
 
   it('B: a chat message with the current PDF still never touches the Codex runtime', async () => {
-    const { c, p, request, state } = await setup();
+    const { c, p, request, conversation } = await setup();
     const input = request(2, { question: 'Summarize this paper.', document: documentA });
-    await c.send(input); await flush();
+    await expect(c.send(input)).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+    await flush();
     expect(agentEntries(p)).toEqual([]);
-    expect(await state(input)).toBe('failed');
-    // The frozen document is still persisted with the request, so the shared context is intact.
-    expect((await c.get(input.conversationId)).messages).toHaveLength(1);
+    // No record, no snapshot and no assistant message: a refused Chat request has no side effects.
+    const after = await c.get(conversation.id);
+    expect(after.messages).toEqual([]); expect(after.activeRequestId).toBeNull();
   });
 
   it('C: a complex chat prompt is not escalated to Agent by its size or reasoning demand', async () => {
-    const { c, p, request, state } = await setup();
+    const { c, p, request } = await setup();
     const input = request(3, { question: 'Read all 20 pages and explain the full mathematical derivation in detail, then compare every method.' });
-    await c.send(input); await flush();
+    await expect(c.send(input)).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+    await flush();
     expect(agentEntries(p)).toEqual([]);
-    expect(await state(input)).toBe('failed');
   });
 
   it('D: a chat request that asks for an action neither writes nor switches mode', async () => {
-    const { c, p, conversation, request, state } = await setup();
+    const { c, p, conversation, request } = await setup();
     const input = request(4, { question: 'Highlight all important paragraphs.' });
-    await c.send(input); await flush();
+    await expect(c.send(input)).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+    await flush();
     expect(agentEntries(p)).toEqual([]);
-    expect(await state(input)).toBe('failed');
     // No write happened and the conversation is not left busy: the user must switch to Agent themselves.
     const after = await c.get(conversation.id);
     expect(after.activeRequestId).toBeNull();
-    expect(after.messages.filter(message => message.role === 'assistant')).toEqual([]);
+    expect(after.messages).toEqual([]);
+  });
+
+  it('I: a Chat refusal is not an auth failure, so an uninitialized Codex cannot make Chat look signed-out', async () => {
+    const s = server();
+    const c = await createReaderClient(s.p, new MemoryStorage(), { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', trace: () => undefined });
+    clients.push(c);
+    // No refreshAccount: the Codex channel was never opened, so the catalog is empty and the runtime
+    // would answer AUTH_REQUIRED to an Agent request. Chat must refuse for its own reason instead.
+    expect(c.snapshot()).toMatchObject({ runtime: 'ready', account: { state: 'signedOut' }, models: [] });
+    await expect(c.send({ requestId: requestId(8), conversationId: '33333333-0000-4000-8000-000000000008', action: 'ask', question: 'hello', citations: [], settings, mode: 'chat' })).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+    // The refusal did not start Codex: no handshake, no protocol call, no process termination.
+    expect(methods(s.p)).toEqual([]);
+    expect(s.p.terminated).toBe(false);
   });
 });
 
@@ -128,14 +145,15 @@ describe('Agent keeps entering the Codex runtime', () => {
     complete(p, 'thread-1', 'turn-1', 'item-1', 'Annotation added.'); await flush();
     const entered = agentEntries(p).length;
     const chat = request(7, { mode: 'chat', question: 'Which annotation matters most?' });
-    await c.send(chat); await flush();
+    await expect(c.send(chat)).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+    await flush();
     // Chat adds no thread, no resume and no turn on top of the Agent execution that already ran.
     expect(agentEntries(p)).toHaveLength(entered);
-    expect(await state(chat)).toBe('failed');
-    // Both requests stay in the one conversation, each with its own lifecycle and its own answer.
+    // The Agent request keeps its own lifecycle and answer in the same conversation; the refused Chat
+    // request left no record behind.
     expect(await state(agent)).toBe('completed');
     const messages = (await c.get(conversation.id)).messages;
     expect(messages.find(message => message.requestId === agent.requestId && message.role === 'assistant')?.text).toBe('Annotation added.');
-    expect(messages.find(message => message.requestId === chat.requestId && message.role === 'user')?.text).toBe('Which annotation matters most?');
+    expect(messages.some(message => message.requestId === chat.requestId)).toBe(false);
   });
 });

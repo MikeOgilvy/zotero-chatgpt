@@ -79,6 +79,8 @@ export interface ChatTransport {
 /** The Chat executor surface the router hands back. */
 export interface ChatExecutorPort {
   readonly mode: 'chat';
+  /** False when no supported ChatGPT chat transport is integrated; Chat then refuses instead of running. */
+  readonly available: boolean;
   stream(request: ChatRequest, signal: AbortSignal): AsyncIterable<ChatStreamEvent>;
   cancel(requestId: string): Promise<void>;
 }

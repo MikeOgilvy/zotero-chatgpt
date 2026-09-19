@@ -12,7 +12,11 @@ import type { ChatStreamEvent, ChatTransport } from '../../../contracts/src/exec
  * This module intentionally imports nothing from `codex/`, `sessions/`, `tasks/` or `context/`: a
  * compile-time boundary that keeps the placeholder from quietly becoming an Agent path.
  */
-const UNAVAILABLE_MESSAGE = 'Chat needs a ChatGPT chat transport, which is not integrated in this build. Use Agent mode for Codex execution, or update the plugin once a supported transport ships.';
+/**
+ * The one user-facing reason Chat cannot run in this build. Exported so the shared composer refuses
+ * a Chat send with the same words the placeholder would fail with, instead of a sign-in message.
+ */
+export const CHAT_TRANSPORT_UNAVAILABLE_MESSAGE = 'Chat needs a ChatGPT chat transport, which is not integrated in this build. Use Agent mode for Codex execution, or update the plugin once a supported transport ships.';
 
 export function unavailableChatTransport(): ChatTransport {
   return {
@@ -22,7 +26,7 @@ export function unavailableChatTransport(): ChatTransport {
         async *[Symbol.asyncIterator](): AsyncIterator<ChatStreamEvent> {
           // Async generator with an explicit await so the method is a real stream, not a sync list.
           await Promise.resolve();
-          yield { type: 'chat.failed', code: 'UNSUPPORTED_INTERACTION', message: UNAVAILABLE_MESSAGE };
+          yield { type: 'chat.failed', code: 'UNSUPPORTED_INTERACTION', message: CHAT_TRANSPORT_UNAVAILABLE_MESSAGE };
         },
       };
     },

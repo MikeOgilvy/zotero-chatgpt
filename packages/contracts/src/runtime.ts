@@ -67,6 +67,12 @@ export class RuntimeFailure extends Error {
 export interface ReaderClient {
   snapshot(): RuntimeSnapshot;
   observe(listener: (snapshot: RuntimeSnapshot) => void): () => void;
+  /** Forces the Agent runtime (Codex channel + account/model catalog); a no-op when already ready. */
+  ensureAgentReady?(): Promise<void>;
+  /** Explicit retry of the Agent runtime after a failure. Rejects when it cannot become ready. */
+  reconnect?(): Promise<void>;
+  /** Null when Chat has a supported transport; otherwise the honest reason a Chat send cannot run. */
+  chatUnavailableReason?(): string | null;
   refreshAccount(): Promise<void>;
   startLogin(): Promise<LoginFlow>;
   cancelLogin(): Promise<void>;

@@ -19,8 +19,11 @@ async function setup(configure?: (fixture: ReturnType<typeof server>) => void) {
   clients.push(client); return { ...fixture, client };
 }
 
-it('uses the supplied plugin version in the initialize handshake', async () => {
+it('uses the supplied plugin version in the initialize handshake, only once Agent readiness is requested', async () => {
   const f = await setup();
+  // Creating the client performs no Codex work at all: the handshake is lazy.
+  expect(f.p.writes).toEqual([]);
+  await f.client.refreshAccount();
   const first = JSON.parse(f.p.writes[0]!) as { params: { clientInfo: { version: string } } };
   expect(first.params.clientInfo.version).toBe('0.4.0-runtime-test');
 });
