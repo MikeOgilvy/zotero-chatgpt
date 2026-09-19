@@ -181,6 +181,8 @@ interface GeckoClipboardService {
   kGlobalClipboard?: number;
   hasDataMatchingFlavors?(flavors: string[] | string, lengthOrWhich?: number, which?: number): boolean;
   getData?(transferable: GeckoTransferable, which?: number): void;
+  /** Writing route, used to put the current PDF on the clipboard as a file (see `clipboard-file.ts`). */
+  setData?(transferable: unknown, owner: unknown, which: number): void;
 }
 
 interface GeckoTransferable {
@@ -204,7 +206,8 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 }
 
-function clipboardService(access: GeckoClipboardAccess | null | undefined): GeckoClipboardService | undefined {
+/** The pasteboard behind an access bundle, whichever way this realm reaches it. */
+export function clipboardService(access: GeckoClipboardAccess | null | undefined): GeckoClipboardService | undefined {
   if (access?.Services?.clipboard) return access.Services.clipboard;
   const service = access?.Cc?.['@mozilla.org/widget/clipboard;1']?.getService?.(access.Ci?.nsIClipboard);
   if (!service || typeof service !== 'object') return undefined;
