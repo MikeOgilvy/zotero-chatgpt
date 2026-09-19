@@ -14,6 +14,16 @@ export const HOST_DRIVERS = {
 
 const EXCLUSIVE = ['s5', 's6', 'context', 'embed', 'live-model'];
 
+function readRunId(argv) {
+  const positions = argv.flatMap((value, index) => value === '--run-id' ? [index] : []);
+  if (positions.length === 0) return undefined;
+  if (positions.length !== 1) throw new Error('Pass --run-id only once');
+  const value = argv[positions[0] + 1];
+  if (!value || value.startsWith('--')) throw new Error('--run-id requires a value');
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) throw new Error('--run-id must be a safe lowercase identifier');
+  return value;
+}
+
 /**
  * @param {string[]} argv
  * @returns {{ stage: string, driver: string | null, installDriver: boolean }}
@@ -21,6 +31,9 @@ const EXCLUSIVE = ['s5', 's6', 'context', 'embed', 'live-model'];
 export function selectHostStage(argv) {
   const acceptance = argv.includes('--acceptance');
   const selected = EXCLUSIVE.filter(name => argv.includes(`--${name}`));
+  const runId = readRunId(argv);
+  if (runId && (selected.length !== 1 || selected[0] !== 'context')) throw new Error('--run-id requires --context');
+  if (runId && argv.includes('--live')) throw new Error('--run-id cannot be combined with --live');
   if (argv.includes('--native') && (acceptance || argv.includes('--live') || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--native requires only the dedicated --context driver');
   if (argv.includes('--live') && (acceptance || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--live requires only the dedicated --context driver');
   const manualContext = acceptance && selected.length === 1 && selected[0] === 'context';
@@ -41,7 +54,19 @@ export function selectHostStage(argv) {
 export function selectHostTree(argv, repositoryRoot) {
   const { stage } = selectHostStage(argv);
   const dev = join(repositoryRoot, '.zotero-chatgpt-dev');
-  if (stage === 'context') return { stage, profile: join(dev, 'context/profile'), dataDir: join(dev, 'context/data'), reportPath: join(dev, 'context/host-report.json'), pdfPath: join(dev, 'context/fixtures/reading.pdf') };
+  if (stage === 'context') {
+    const runId = readRunId(argv);
+    const contextRoot = runId ? join(dev, 'context-runs', runId) : join(dev, 'context');
+    return {
+      stage,
+      profile: join(contextRoot, 'profile'),
+      dataDir: join(contextRoot, 'data'),
+      reportPath: join(contextRoot, 'host-report.json'),
+      pdfPath: join(contextRoot, 'fixtures', 'reading.pdf'),
+      cleanRuntimeTree: Boolean(runId),
+      ...(runId ? { exclusiveRoot: contextRoot } : {}),
+    };
+  }
   // Browser-surface embedding experiment, isolated in its own `.zotero-chatgpt-dev/embed` tree so a
   // ChatGPT session created there is never confused with the product acceptance profile.
   if (stage === 'embed') return { stage, profile: join(dev, 'embed/profile'), dataDir: join(dev, 'embed/data'), reportPath: join(dev, 'embed/host-report.json'), pdfPath: join(dev, 'embed/fixtures/reading.pdf') };

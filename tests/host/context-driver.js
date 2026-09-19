@@ -2,7 +2,8 @@
 // Current-PDF local preparation, citation source, consent, refusal, attachment identity and UI
 // performance on a real host. Only --live sends bounded synthetic requests.
 async function runHostSmoke(config) {
-  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash } };
+  const verificationToken = typeof config.verificationToken === 'string' && /^RUN-[a-f0-9]{24}$/u.test(config.verificationToken) ? config.verificationToken : 'ORCHID-72';
+  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash }, fixture: { verificationToken } };
   const delay = ms => Zotero.Promise.delay(ms);
   const save = () => Zotero.File.putContentsAsync(config.reportPath, JSON.stringify(report, null, 2));
   let step = 'startup';
@@ -30,7 +31,8 @@ async function runHostSmoke(config) {
   const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
   try {
     await Zotero.initializationPromise;
-    await check('isolated-context-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/context/profile') && Zotero.DataDirectory.dir === config.dataDir);
+    const contextProfile = String(config.profile).match(/^(.*\/\.zotero-chatgpt-dev\/(?:context|context-runs\/[a-z0-9][a-z0-9-]{0,63}))\/profile$/u);
+    await check('isolated-context-profile', PathUtils.profileDir === config.profile && Boolean(contextProfile) && config.dataDir === `${contextProfile?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
     const win = await until(() => Zotero.getMainWindow(), 'main-window');
     report.environment = { zotero: Zotero.version, width: win.innerWidth, height: win.innerHeight, devicePixelRatio: win.devicePixelRatio };
     await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library-ready');
@@ -460,8 +462,8 @@ async function runHostSmoke(config) {
     const labels = await pdf().pdfDocument.getPageLabels2();
     const pageOne = await extractPage(0); const pageTwo = await extractPage(1);
     await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
-    report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
-    await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
+    report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes(verificationToken) };
+    await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && pageTwo.includes(verificationToken) && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
     // The assertion rests only on what the product itself did: its revision gate for this file and the
     // per-page text it measured. `counts.*Expected` counts only after the driver's own disk probe, and
     // the driver has not read any of this document with the wrapper off.
@@ -704,7 +706,7 @@ async function runHostSmoke(config) {
       const answer = record.messages.filter(m => m.role === 'assistant' && m.requestId === last?.requestId).map(m => m.text).join('\n');
       report.live = { state: last?.state, latencyMs: win.performance.now() - started, answer: answer.slice(0, 1600), inputDocumentId: record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.document?.id };
       await check('real-model-answer', last?.state === 'completed' && answer.trim().length > 0, { state: last?.state, characters: answer.length });
-      await check('model-used-second-page-source', answer.includes('ORCHID-72') && !answer.includes('BAMBOO-19'));
+      await check('model-used-second-page-source', answer.includes(verificationToken) && !answer.includes('BAMBOO-19'));
       await check('full-document-in-live-request', Boolean(report.live.inputDocumentId));
       input().value = 'Explain this synthetic example in depth with ten worked examples and detailed reasoning for a beginner.';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));

@@ -1,13 +1,48 @@
 import { execFile } from 'node:child_process';
 import { readdirSync } from 'node:fs';
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import yauzl from 'yauzl';
 import { describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const stageModule = pathToFileURL(path.join(repositoryRoot, 'scripts/host-test-stage.mjs')).href;
+
+async function prepareScriptSandbox(): Promise<{ root: string; script: string; xpi: string }> {
+  const root = await mkdtemp(path.join(repositoryRoot, '.zotero-chatgpt-dev/prepare-host-test-'));
+  await Promise.all([
+    mkdir(path.join(root, 'scripts'), { recursive: true }),
+    mkdir(path.join(root, 'tests/fixtures'), { recursive: true }),
+    mkdir(path.join(root, 'tests/host'), { recursive: true }),
+    mkdir(path.join(root, 'packages/zotero'), { recursive: true }),
+    mkdir(path.join(root, 'runtime'), { recursive: true }),
+  ]);
+  await Promise.all([
+    ...['prepare-host-test.mjs', 'host-test-stage.mjs', 'install-lifecycle.mjs', 'runtime-assets.mjs']
+      .map(file => cp(path.join(repositoryRoot, 'scripts', file), path.join(root, 'scripts', file))),
+    cp(path.join(repositoryRoot, 'tests/fixtures/create-pdf.mjs'), path.join(root, 'tests/fixtures/create-pdf.mjs')),
+    cp(path.join(repositoryRoot, 'tests/host/context-driver.js'), path.join(root, 'tests/host/context-driver.js')),
+    cp(path.join(repositoryRoot, 'runtime/manifest.ts'), path.join(root, 'runtime/manifest.ts')),
+    writeFile(path.join(root, 'packages/zotero/manifest.json'), JSON.stringify({ version: '0.0.0-test' })),
+    writeFile(path.join(root, 'subject.xpi'), 'synthetic test artifact'),
+  ]);
+  return { root, script: path.join(root, 'scripts/prepare-host-test.mjs'), xpi: path.join(root, 'subject.xpi') };
+}
+
+async function readArchiveEntry(filePath: string, entryName: string): Promise<string> {
+  const zipFile = await yauzl.openPromise(filePath);
+  for await (const entry of zipFile.eachEntry()) {
+    if (entry.fileName !== entryName) continue;
+    const chunks: Buffer[] = [];
+    const stream = await zipFile.openReadStreamPromise(entry);
+    for await (const chunk of stream as AsyncIterable<Buffer>) chunks.push(chunk);
+    return Buffer.concat(chunks).toString('utf8');
+  }
+  throw new Error(`Missing archive entry ${entryName}`);
+}
 
 async function select(argv: string[]): Promise<{ stage: string; driver: string | null; installDriver: boolean }> {
   const { stdout } = await execFileAsync(process.execPath, [
@@ -18,6 +53,15 @@ async function select(argv: string[]): Promise<{ stage: string; driver: string |
   return JSON.parse(stdout) as { stage: string; driver: string | null; installDriver: boolean };
 }
 
+async function selectTree(argv: string[], root = repositoryRoot): Promise<{ stage: string; profile: string; dataDir: string; reportPath: string; pdfPath: string; cleanRuntimeTree?: boolean; exclusiveRoot?: string }> {
+  const { stdout } = await execFileAsync(process.execPath, [
+    '--input-type=module',
+    '-e',
+    `import { selectHostTree } from ${JSON.stringify(stageModule)}; console.log(JSON.stringify(selectHostTree(${JSON.stringify(argv)}, ${JSON.stringify(root)})));`,
+  ], { cwd: repositoryRoot });
+  return JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; reportPath: string; pdfPath: string; cleanRuntimeTree?: boolean; exclusiveRoot?: string };
+}
+
 function failureMessage(error: unknown): string {
   if (error instanceof Error && 'stderr' in error && typeof error.stderr === 'string') return error.stderr;
   if (error instanceof Error) return error.message;
@@ -25,6 +69,98 @@ function failureMessage(error: unknown): string {
 }
 
 describe('dedicated host-test stage selection', () => {
+  it('preserves existing private runtime records and account files during routine context preparation', async () => {
+    const sandbox = await prepareScriptSandbox();
+    const runtimeRoot = path.join(sandbox.root, '.zotero-chatgpt-dev/context/profile/zotero-chatgpt');
+    const recordPath = path.join(runtimeRoot, 'v1/records/conversations/prior.json');
+    const accountPath = path.join(runtimeRoot, 'v1/account/private.bin');
+    const dataPath = path.join(sandbox.root, '.zotero-chatgpt-dev/context/data/prior-library.bin');
+    try {
+      await Promise.all([
+        mkdir(path.dirname(recordPath), { recursive: true }),
+        mkdir(path.dirname(accountPath), { recursive: true }),
+        mkdir(path.dirname(dataPath), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(recordPath, 'prior conversation bytes'),
+        writeFile(accountPath, 'private account bytes'),
+        writeFile(dataPath, 'prior library bytes'),
+      ]);
+
+      await execFileAsync(process.execPath, [sandbox.script, '--context', '--acceptance', sandbox.xpi], { cwd: sandbox.root });
+
+      expect(await readFile(recordPath, 'utf8')).toBe('prior conversation bytes');
+      expect((await stat(accountPath)).size).toBe(Buffer.byteLength('private account bytes'));
+      expect(await readFile(dataPath, 'utf8')).toBe('prior library bytes');
+    } finally {
+      await rm(sandbox.root, { recursive: true, force: true });
+    }
+  });
+
+  it('maps an explicit run id to a verified-new context tree below the development root', async () => {
+    const tree = await selectTree(['--context', '--run-id', 'lazy-runtime-a18']);
+    const runRoot = path.join(repositoryRoot, '.zotero-chatgpt-dev/context-runs/lazy-runtime-a18');
+    expect(tree).toMatchObject({
+      stage: 'context',
+      profile: path.join(runRoot, 'profile'),
+      dataDir: path.join(runRoot, 'data'),
+      reportPath: path.join(runRoot, 'host-report.json'),
+      pdfPath: path.join(runRoot, 'fixtures/reading.pdf'),
+      cleanRuntimeTree: true,
+      exclusiveRoot: runRoot,
+    });
+  });
+
+  it('rejects unsafe or ambiguous run ids and mode combinations', async () => {
+    await expect(select(['--context', '--run-id', '../escape'])).rejects.toThrow(/safe lowercase identifier/u);
+    await expect(select(['--context', '--run-id', 'UPPER'])).rejects.toThrow(/safe lowercase identifier/u);
+    await expect(select(['--run-id', 'clean'])).rejects.toThrow(/requires --context/u);
+    await expect(select(['--context', '--live', '--run-id', 'clean'])).rejects.toThrow(/cannot be combined with --live/u);
+  });
+
+  it('refuses to prepare a named new context tree that already exists without changing it', async () => {
+    const sandbox = await prepareScriptSandbox();
+    const runRoot = path.join(sandbox.root, '.zotero-chatgpt-dev/context-runs/already-there');
+    const sentinel = path.join(runRoot, 'ownership-unknown.bin');
+    try {
+      await mkdir(runRoot, { recursive: true });
+      await writeFile(sentinel, 'do not overwrite');
+
+      await expect(execFileAsync(process.execPath, [
+        sandbox.script,
+        '--context',
+        '--acceptance',
+        '--run-id',
+        'already-there',
+        sandbox.xpi,
+      ], { cwd: sandbox.root })).rejects.toSatisfy((error: unknown) => /already exists; choose a new --run-id/u.test(failureMessage(error)));
+
+      expect(await readFile(sentinel, 'utf8')).toBe('do not overwrite');
+    } finally {
+      await rm(sandbox.root, { recursive: true, force: true });
+    }
+  });
+
+  it('gives each prepared context run a fresh PDF token and passes that exact token to the driver', async () => {
+    const sandbox = await prepareScriptSandbox();
+    try {
+      const observed: string[] = [];
+      for (const runId of ['token-one', 'token-two']) {
+        await execFileAsync(process.execPath, [sandbox.script, '--context', '--run-id', runId, sandbox.xpi], { cwd: sandbox.root });
+        const runRoot = path.join(sandbox.root, '.zotero-chatgpt-dev/context-runs', runId);
+        const pdf = (await readFile(path.join(runRoot, 'fixtures/reading.pdf'))).toString('latin1');
+        const token = /Hidden verification token on this page: (RUN-[a-f0-9]{24})\./u.exec(pdf)?.[1];
+        expect(token).toMatch(/^RUN-[a-f0-9]{24}$/u);
+        const bootstrap = await readArchiveEntry(path.join(runRoot, 'profile/extensions/zchatgpt-host-test@local.xpi'), 'bootstrap.js');
+        expect(bootstrap).toContain(`"verificationToken":"${token}"`);
+        observed.push(token!);
+      }
+      expect(new Set(observed).size).toBe(2);
+    } finally {
+      await rm(sandbox.root, { recursive: true, force: true });
+    }
+  });
+
   it('isolates full-PDF host validation from every existing profile', async () => {
     await expect(select(['--context'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/context-driver.js' });
     const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', `import { selectHostTree } from ${JSON.stringify(stageModule)}; console.log(JSON.stringify(selectHostTree(['--context'], ${JSON.stringify(repositoryRoot)})));`]);

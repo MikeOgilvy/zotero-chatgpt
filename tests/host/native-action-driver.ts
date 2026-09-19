@@ -20,6 +20,7 @@ export interface NativeSmokeConfig {
   subjectID: string;
   subjectVersion: string;
   artifactHash: string;
+  verificationToken?: string;
 }
 interface SmokeItem extends NativeHostItem {
   setField(name: string, value: string): void;
@@ -74,6 +75,7 @@ export interface NativeSmokeReport {
   environment?: { zotero: string; os: string; abi: string; width: number; height: number; dpr: number };
   driverIssuedModelRequests: 0;
   modelProposalSource: 'deterministic-synthetic-fixture';
+  verificationToken: string;
   checks: SmokeCheck[];
   notRun: Array<{ name: string; reason: string }>;
   retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string };
@@ -102,8 +104,10 @@ function tabInfo(window: SmokeWindow, id: string) { try { return window.Zotero_T
 /** Test-only entrypoint. Importing this file never runs it or opens a reader. */
 export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmokeReport> {
   await Zotero.initializationPromise;
+  const verificationToken = typeof config.verificationToken === 'string' && /^RUN-[a-f0-9]{24}$/u.test(config.verificationToken) ? config.verificationToken : 'ORCHID-72';
   const profile = safePath(config.profile); const dataDir = safePath(config.dataDir);
-  requireCheck(profile.endsWith('/.zotero-chatgpt-dev/context/profile') && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
+  const contextProfile = profile.match(/^(.*\/\.zotero-chatgpt-dev\/(?:context|context-runs\/[a-z0-9][a-z0-9-]{0,63}))\/profile$/u);
+  requireCheck(Boolean(contextProfile) && dataDir === `${contextProfile?.[1]}/data` && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
   const contextRoot = profile.slice(0, -'/profile'.length);
   requireCheck(dataDir === PathUtils.join(contextRoot, 'data') && Zotero.DataDirectory.dir === dataDir, 'DATA_GUARD_REJECTED');
   const reportPath = safePath(config.reportPath); const pdfPath = safePath(config.pdfPath); const supplementPath = safePath(config.supplementPdfPath);
@@ -123,7 +127,7 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
   const report: NativeSmokeReport = {
     schemaVersion: 1, stage: 'native-agent', runId: host.uuid(), startedAt: new Date().toISOString(), status: 'running',
     build: { expectedVersion: config.subjectVersion, expectedArtifactHash: config.artifactHash, artifactHashSource: 'prepare-script', adapterSource: 'working-tree-production-modules-in-test-driver', subjectScope: 'installed-addon-identity-only' },
-    driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', checks: [],
+    driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', verificationToken, checks: [],
     notRun: [
       { name: 'real-model-proposal', reason: 'The driver supplies explicit synthetic annotation proposals. They are not model output.' },
       { name: 'oa-pdf-acquisition-and-correspondence', reason: 'This bounded smoke does not download external PDFs. Real network evidence is limited to unsaved DOI metadata translation.' },
@@ -167,7 +171,7 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       return { value: true, details: { profileMatched: true, dataDirectoryMatched: true, addonActive: true, productionModulesBundledInTestDriver: true } };
     });
     const fixture = await step('create-isolated-synthetic-fixtures', 'real-host-api', async () => {
-      for (const [path, token] of [[pdfPath, 'ORCHID-72'], [supplementPath, 'BAMBOO-19']] as const) {
+      for (const [path, token] of [[pdfPath, verificationToken], [supplementPath, 'BAMBOO-19']] as const) {
         const stat = await host.io.stat(path); requireCheck(stat.size > 0 && stat.size < 256 * 1024, 'SYNTHETIC_FIXTURE_SIZE_INVALID');
         const contents = new TextDecoder().decode(await host.io.read(path));
         requireCheck(contents.startsWith('%PDF-') && contents.includes('Synthetic page 1 - development testing only') && contents.includes(token), 'SYNTHETIC_FIXTURE_MARKERS_MISSING');
@@ -227,7 +231,7 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       diagnostic.coverage = document.pages.map(page => ({ pageIndex: page.pageIndex, status: page.status, partial: page.partial === true, characters: page.text.length })); await save();
       const body = document.pages.map(page => page.text).join('\n');
       requireCheck(document.totalPages === 2 && document.pages.length === 2 && document.pages.every(page => page.status === 'text' && !page.partial), 'FULL_PDF_TEXT_COVERAGE_FAILED');
-      requireCheck(document.pages[0]?.pageLabel === 'i' && document.pages[1]?.pageLabel === '1' && body.includes('ORCHID-72') && !body.includes('BAMBOO-19'), 'SYNTHETIC_MAIN_TEXT_IDENTITY_FAILED');
+      requireCheck(document.pages[0]?.pageLabel === 'i' && document.pages[1]?.pageLabel === '1' && body.includes(verificationToken) && !body.includes('BAMBOO-19'), 'SYNTHETIC_MAIN_TEXT_IDENTITY_FAILED');
       requireCheck(loadedHash === fileHash && document.revision.sha256 === fileHash, 'LOADED_AND_DISK_HASH_MISMATCH');
       return { value: document, details: { pages: document.totalPages, pageLabels: document.pages.map(page => page.pageLabel), textCharacters: body.length, loadedBytes: loadedBytes.length, sha256: fileHash, loadedBytesMatchFile: true } };
     });
@@ -305,7 +309,7 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     });
     const references = createLibraryReferencePort(Zotero, { clientId, documentCache: cache, uuid: () => host.uuid(), getWindow: () => window });
     const referencePort: LibraryReferencePort = references;
-    await verifyReferenceImagesAndReaders({ report, step, host, contextRoot, window, opened, paper, supplementPaper, document, fixture, references, referencePort, until });
+    await verifyReferenceImagesAndReaders({ report, step, host, contextRoot, window, opened, paper, supplementPaper, document, fixture, references, referencePort, verificationToken, until });
     await step('native-metadata-create-and-undo-use-synthetic-data', 'real-host-api', async () => {
       const reservedKey = Zotero.Utilities.generateObjectKey(); const metadata: NativeMetadata = { itemType: 'journalArticle', title: `[SYNTHETIC METADATA FIXTURE] ${report.runId}`, creators: [], abstractNote: 'Local deterministic mock metadata, not obtained from a model or network. Tests only native item/collection writes.' };
       guard(); const created = await native.createItem({ target: { clientId, libraryId: libraryID, collectionKey: fixture.collection.key }, key: reservedKey, metadata });
@@ -347,6 +351,7 @@ type Step = <T>(name: string, evidence: Evidence, work: () => Promise<{ value: T
 async function verifyReferenceImagesAndReaders(options: {
   report: NativeSmokeReport; step: Step; host: FileHost; contextRoot: string; window: SmokeWindow; opened: SmokeReader; paper: PaperScope; supplementPaper: PaperScope; document: DocumentContext;
   fixture: { parent: SmokeItem; main: SmokeItem; supplement: SmokeItem }; references: ReturnType<typeof createLibraryReferencePort>; referencePort: LibraryReferencePort;
+  verificationToken: string;
   until<T>(this: void, read: () => T | false | undefined, code: string, timeout?: number): Promise<T>;
 }): Promise<void> {
   const { step, host, window, opened, paper, supplementPaper, fixture, references, referencePort, until } = options;
@@ -384,7 +389,7 @@ async function verifyReferenceImagesAndReaders(options: {
     } }, ['tab'], `zchatgpt-native-smoke-${options.report.runId}`);
     try {
       const value = await referencePort.read(supplement, new AbortController().signal);
-      requireCheck(value.document?.paper.attachmentKey === fixture.supplement.key && value.document.pages.some(page => page.text.includes('BAMBOO-19')) && value.document.pages.every(page => !page.text.includes('ORCHID-72')), 'ARTICLE_REFERENCE_READ_WRONG_PDF');
+      requireCheck(value.document?.paper.attachmentKey === fixture.supplement.key && value.document.pages.some(page => page.text.includes('BAMBOO-19')) && value.document.pages.every(page => !page.text.includes(options.verificationToken)), 'ARTICLE_REFERENCE_READ_WRONG_PDF');
       await until(() => !Zotero.Reader._readers.some(reader => reader.itemID === fixture.supplement.id), 'BACKGROUND_READER_NOT_RELEASED');
       await until(() => added.size > 0 && [...added].every(id => closed.has(id)), 'BACKGROUND_TAB_LIFECYCLE_NOT_OBSERVED');
       requireCheck(window.Zotero_Tabs.selectedID === selected && selectedBackground.size === 0 && Zotero.Reader._readers.every(reader => beforeReaders.has(reader)), 'BACKGROUND_REFERENCE_CHANGED_USER_TABS');
