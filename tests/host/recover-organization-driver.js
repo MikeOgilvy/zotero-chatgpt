@@ -52,7 +52,8 @@ async function runHostSmoke(config) {
       return { mode: modeSwitch()?.dataset.zchatgptMode ?? null, modeHidden: Boolean(modeSwitch()?.closest('[hidden]')), panelHidden: Boolean(panel()?.hidden || panel()?.closest('[hidden]')), runtime: panel()?.dataset.zchatgptRuntime ?? null, auth: panel()?.dataset.zchatgptAuth ?? null, conversation: panel()?.dataset.zchatgptConversation ?? null, historyHidden: history ? Boolean(history.hidden || history.closest('[hidden]')) : null, matchingRowPresent: Boolean(row), matchingRowHidden: row ? Boolean(row.hidden || row.closest('[hidden]')) : null, alertCode };
     };
     await until(() => panel()?.querySelector('[data-zchatgpt-action="history"]'), 'local-chat-controls', 60000);
-    if (panel().dataset.zchatgptConversation !== config.recoveryConversationId) {
+    const restoredAutomatically = await until(() => panel().dataset.zchatgptConversation === config.recoveryConversationId, 'automatic-stored-conversation-restore', 15000).catch(() => null);
+    if (!restoredAutomatically) {
       if (modeSwitch()?.dataset.zchatgptMode !== 'agent') click(modeButton('agent'));
       await until(() => modeSwitch()?.dataset.zchatgptMode === 'agent' && !modeSwitch()?.closest('[hidden]') && !panel()?.closest('[hidden]'), 'visible-agent-mode-for-history', 30000);
       click(panel().querySelector('[data-zchatgpt-action="history"]'));
