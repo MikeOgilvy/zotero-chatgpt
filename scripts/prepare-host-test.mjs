@@ -27,7 +27,7 @@ function readRawOption(name) {
 }
 
 function positionalXpi() {
-  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms']);
+  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds']);
   const skip = new Set();
   const found = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -154,6 +154,12 @@ const config = {
     // Off by default: the comparison probes read remote documents from privileged code and one of
     // them ends this host build's process, so the product evidence is what a default run measures.
     surfaceProbes: argumentsList.includes('--surface-probes'),
+    // Opt-in too: the capability probe loads the loopback fixture in the product's exact surface
+    // shape, parked and painted, and reports what the page could do in each. `--url` names the page.
+    capabilityProbe: argumentsList.includes('--capability-probe'),
+    // Off by default too: with a watch window the run stays alive so a human can use the hosted
+    // application while the driver observes network activity, console output and new-window requests.
+    ...(readRawOption('--watch-seconds') ? { watchSeconds: Number(readRawOption('--watch-seconds')) } : {}),
   } : {}),
   ...(supplementPdfPath ? { supplementPdfPath } : {}),
   ...(twoVersion ? {

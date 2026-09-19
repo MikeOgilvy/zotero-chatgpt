@@ -59,6 +59,13 @@ async function runHostSmoke(config) {
   // load, a CSP violation, a security-manager refusal or a Cloudflare challenge becomes evidence
   // rather than a guess.
   const consoleMessages = [];
+  /**
+   * A second, never-drained copy for the opt-in diagnostic window. It is what lets a human
+   * reproduction — a sign-in attempt, for instance — leave evidence behind: the page's own errors and
+   * warnings, in order, with the watchdog terminations counted separately because those are the
+   * difference between a page that is slow and a page whose script Gecko has already destroyed.
+   */
+  const diagnosticConsole = [];
   let consoleListener = null;
   const consoleZero = Date.now();
   const startConsole = () => {
@@ -69,7 +76,9 @@ async function runHostSmoke(config) {
             if (consoleMessages.length >= 500) return;
             const text = String((entry && (entry.message || entry.errorMessage)) || '');
             const source = String((entry && entry.sourceName) || '');
-            consoleMessages.push({ ms: Date.now() - consoleZero, source: source.slice(0, 200), text: text.slice(0, 400) });
+            const recordEntry = { ms: Date.now() - consoleZero, source: source.slice(0, 200), text: text.slice(0, 400) };
+            consoleMessages.push(recordEntry);
+            if (diagnosticConsole.length < 600) diagnosticConsole.push(recordEntry);
           } catch { /* console observers must never throw */ }
         },
       };
@@ -77,6 +86,70 @@ async function runHostSmoke(config) {
     } catch (error) { report.consoleCaptureError = message(error); }
   };
   const takeConsole = () => consoleMessages.splice(0, consoleMessages.length);
+  /**
+   * The same console with the two floods removed — Gecko's own Feature Policy notes from a challenge
+   * iframe and its locale warnings arrive in the hundreds and bury the handful of lines that are the
+   * page's own voice. This is the list to read when the question is "what did the application say".
+   */
+  const CONSOLE_NOISE = /Feature Policy: Skipping unsupported feature name|Missing resource in locale|InstallTrigger is deprecated|Layout was forced before the page was fully loaded|JavaScript Warning: "Content-Security-Policy/;
+  const diagnosticNotable = () => diagnosticConsole.filter(entry => !CONSOLE_NOISE.test(entry.text)).slice(-120);
+  /** Hostnames whose traffic explains a sign-in round trip; everything else is counted, not listed. */
+  const WATCHED_HOSTS = /(^|\.)(chatgpt\.com|openai\.com|oaistatic\.com|oaiusercontent\.com|apple\.com|icloud\.com|cloudflare\.com|google\.com|gstatic\.com)$/i;
+
+  /**
+   * Network activity of the hosted surface, observed from chrome. Only the shape of each exchange is
+   * recorded — host, a truncated path, the response status and whether the request was cancelled —
+   * never a header, query string, body or cookie, so a password typed into the page cannot end up in
+   * this report.
+   */
+  const startNetworkWatch = () => {
+    const state = { responses: [], stops: [], hosts: {}, otherHosts: 0 };
+    const note = (channel, kind) => {
+      try {
+        const uri = channel.URI;
+        const host = String(uri.host || '');
+        if (!WATCHED_HOSTS.test(host)) { state.otherHosts += 1; return; }
+        state.hosts[host] = (state.hosts[host] || 0) + 1;
+        const recordEntry = {
+          ms: Date.now() - consoleZero,
+          kind,
+          host,
+          path: String(uri.pathQueryRef || '').split('?')[0].slice(0, 120),
+          status: (() => { try { return channel.responseStatus; } catch { return null; } })(),
+          statusText: (() => { try { return String(channel.responseStatusText || '').slice(0, 40); } catch { return null; } })(),
+          canceled: (() => { try { return Boolean(channel.isCanceled); } catch { return null; } })(),
+          errorCode: (() => { try { const status = channel.status; return status === 0 || status === undefined ? null : `0x${(status >>> 0).toString(16)}`; } catch { return null; } })(),
+          contentLength: (() => { try { return channel.contentLength; } catch { return null; } })(),
+          fromCache: kind === 'cached',
+        };
+        const bucket = kind === 'stop' ? state.stops : state.responses;
+        if (bucket.length < 400) bucket.push(recordEntry);
+      } catch { /* observation must never disturb the request it observes */ }
+    };
+    const observer = {
+      observe(subject, topic) {
+        try {
+          if (topic === 'http-on-stop-request') return note(subject.QueryInterface(Ci.nsIHttpChannel), 'stop');
+          return note(subject.QueryInterface(Ci.nsIHttpChannel), topic === 'http-on-examine-response' ? 'response' : 'cached');
+        } catch { /* a channel that is not an HTTP channel is not ours */ }
+      },
+    };
+    try {
+      for (const topic of ['http-on-examine-response', 'http-on-examine-cached-response', 'http-on-examine-merged-response', 'http-on-stop-request']) Services.obs.addObserver(observer, topic);
+    } catch (error) { state.registerError = message(error); }
+    return {
+      state,
+      stop() { try { for (const topic of ['http-on-examine-response', 'http-on-examine-cached-response', 'http-on-examine-merged-response', 'http-on-stop-request']) Services.obs.removeObserver(observer, topic); } catch { /* already gone */ } },
+    };
+  };
+  /** The preferences that decide whether Gecko kills a long page script or lets a popup through. */
+  const relevantPrefs = () => {
+    const names = ['dom.max_script_run_time', 'dom.max_child_script_run_time', 'dom.max_chrome_script_run_time', 'dom.disable_open_during_load', 'privacy.cookieBehavior', 'network.cookie.cookieBehavior', 'dom.timeout.enable_budget_timer_throttling', 'dom.min_background_timeout_value'];
+    const out = {};
+    for (const name of names) { try { out[name] = Services.prefs.getPrefType(name) === 0 ? null : Services.prefs.getIntPref(name); } catch { out[name] = null; } }
+    return out;
+  };
+  const scriptTerminations = () => diagnosticConsole.filter(entry => /Script terminated by timeout|Script unresponsive|ScopeDisposedError|has been disposed/i.test(entry.text)).length;
 
   const cookieCount = (host) => {
     try { return Services.cookies.countCookiesFromHost(host); } catch (error) { return `error:${message(error)}`; }
@@ -373,6 +446,72 @@ async function runHostSmoke(config) {
     return finished;
   };
 
+  /**
+   * What a page inside our surface can actually do, and whether hiding the surface changes it.
+   *
+   * The product loads the application while its box is parked off-screen so the session survives a
+   * mode switch. Whether Gecko treats that box as a hidden document — frames stopped, timers cut to
+   * one second — decides whether the application can finish starting at all, which is the difference
+   * between "the page is slow" and "the page is standing still". The same page is therefore loaded
+   * twice, once parked and once painted, and then the parked one is shown to see whether it recovers.
+   */
+  const runCapabilityProbe = async (probeUrl, win) => {
+    const placements = ['parked', 'painted'];
+    const results = [];
+    for (const placement of placements) {
+      const born = Date.now();
+      const entry = { placement, url: probeUrl, samples: [], errors: [] };
+      let container = null;
+      let browser = null;
+      try {
+        browser = win.document.createXULElement('browser');
+        for (const [name, value] of [
+          ['type', 'content'], ['remote', 'false'], ['disableglobalhistory', 'true'],
+          ['maychangeremoteness', 'true'], ['messagemanagergroup', 'zchatgpt'], ['class', 'zchatgpt-embed-probe-browser'],
+        ]) browser.setAttribute(name, value);
+        browser.setAttribute('data-zchatgpt-embed-probe', `caps-${placement}`);
+        browser.style.cssText = 'display:block;width:100%;height:100%;border:0;';
+        container = win.document.createElement('div');
+        container.setAttribute('data-zchatgpt-embed-probe', `caps-${placement}`);
+        container.style.cssText = placement === 'parked'
+          ? 'position:fixed;left:-20000px;top:0px;width:480px;height:720px;overflow:hidden;border:0;margin:0;padding:0;background:#fff;'
+          : 'position:fixed;left:40px;top:80px;width:480px;height:720px;overflow:hidden;border:0;margin:0;padding:0;z-index:2147483000;background:#fff;';
+        browser.setAttribute('src', probeUrl);
+        container.appendChild(browser);
+        (win.document.body || win.document.documentElement).appendChild(container);
+
+        const readTitle = () => { try { return String(browser.contentTitle || ''); } catch (error) { entry.errors.push(message(error)); return ''; } };
+        const decode = value => value.replace(/^ZCAPS\s*/u, '');
+        let last = null;
+        const deadline = Date.now() + 12000;
+        while (Date.now() < deadline) {
+          await delay(500);
+          const title = decode(readTitle());
+          if (title && title !== last) { last = title; entry.samples.push({ ms: Date.now() - born, report: title.slice(0, 500) }); }
+          if (/slowImage/u.test(title)) break;
+        }
+        if (placement === 'parked') {
+          // Showing the parked box is the whole question: does the page notice, resume frames and
+          // finish the work it could not do while it was out of the viewport?
+          container.style.left = '40px';
+          container.style.top = '80px';
+          container.style.zIndex = '2147483000';
+          const shownAt = Date.now();
+          await delay(3000);
+          entry.afterShowing = { waitedMs: Date.now() - shownAt, report: decode(readTitle()).slice(0, 500) };
+        }
+        entry.final = decode(readTitle()).slice(0, 500);
+      } catch (error) {
+        entry.errors.push(message(error));
+      } finally {
+        try { container?.remove(); } catch { /* already gone */ }
+      }
+      results.push(entry);
+      await save();
+    }
+    return results;
+  };
+
   // Zotero's own supported remote-page surface: a XUL window whose <browser> loads any URI, used by
   // OAuth sign-in and by BrowserRequest challenges. Measured here as the baseline the sidebar would
   // have to match.
@@ -418,8 +557,7 @@ async function runHostSmoke(config) {
 
   try {
     await Zotero.initializationPromise;
-    startConsole();
-    await check('isolated-embed-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/embed/profile') && Zotero.DataDirectory.dir === config.dataDir, { profile: PathUtils.profileDir });
+    startConsole();    await check('isolated-embed-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/embed/profile') && Zotero.DataDirectory.dir === config.dataDir, { profile: PathUtils.profileDir });
     // Cookies already on disk when this process starts prove the jar survives a Zotero restart; that
     // is the same mechanism an authenticated ChatGPT session would depend on. Counts only.
     report.persistence = { cookiesAtStartup: { [targetHost]: cookieCount(targetHost) } };
@@ -471,6 +609,16 @@ async function runHostSmoke(config) {
       })(),
     };
     await check('reader-document-is-the-sidebar-host', Boolean(doc.getElementById('split-view')), report.reader);
+
+    // Before anything else in this run touches the window: what a page inside the product's exact
+    // surface shape can do, parked versus painted. This is the run's cheapest and most load-bearing
+    // measurement, so it happens first and is saved as soon as it finishes.
+    if (config.capabilityProbe) {
+      step = 'capability-probe';
+      report.step = step; await save();
+      report.capability = await runCapabilityProbe(config.url, win);
+      await save();
+    }
 
     // The launched window can report a size while nothing under its tab bar has been laid out yet —
     // the whole chain from `#browser` down measures zero, including the reader pane the sidebar lives
@@ -561,6 +709,23 @@ async function runHostSmoke(config) {
     await save();
 
     const surfaceBrowser = await until(() => embedBrowser(), 'product-embed-browser', 30000);
+    // A new-window request from the hosted page is how an OAuth sign-in usually leaves the document.
+    // Whether a browsing context came with it is the difference between a visible sign-in page and a
+    // request that goes nowhere the owner can see, so both are recorded.
+    const popupAttempts = [];
+    try {
+      surfaceBrowser.addEventListener('DOMWindowOpen', event => {
+        try {
+          const detail = event.detail || {};
+          popupAttempts.push({
+            ms: Date.now() - consoleZero,
+            url: String(detail.url || '').split('?')[0].slice(0, 160),
+            hasBrowsingContext: Boolean(detail.browsingContext),
+            hasWindow: Boolean(event.target && event.target !== surfaceBrowser),
+          });
+        } catch { /* observation only */ }
+      });
+    } catch (error) { product.popupListenerError = message(error); }
     // A silent surface has several possible causes — no layout yet, a hidden dock, an inactive
     // docshell, a refused navigation — and they are told apart by what changes over time, so the
     // samples are recorded rather than reduced to one final reading.
@@ -644,9 +809,14 @@ async function runHostSmoke(config) {
     click('[data-zchatgpt-action="mode-chat"]');
     await until(() => painted(), 'product-chat-repainted');
     const back = embedBrowser();
+    // The invariant is "the same element, the same document", not "the same URL": the application is
+    // free to navigate itself (a challenge interstitial becoming the app, a sign-in redirect), and
+    // that is not a reload of our surface. So the element identity, the tag written into it, and the
+    // application origin are asserted, and any same-origin navigation is reported rather than failed.
+    const backURI = String(back.currentURI?.spec || '');
     await check('product-mode-switch-keeps-the-application-document',
-      back === surfaceBrowser && back.getAttribute('data-zchatgpt-product-tag') === nonce && String(back.currentURI?.spec || '') === surfaceURI,
-      { sameElement: back === surfaceBrowser, currentURI: String(back.currentURI?.spec || '').slice(0, 200) });
+      back === surfaceBrowser && back.getAttribute('data-zchatgpt-product-tag') === nonce && backURI.startsWith('https://chatgpt.com/'),
+      { sameElement: back === surfaceBrowser, currentURI: backURI.slice(0, 200), uriWhenTagged: String(surfaceURI || '').slice(0, 200), navigatedItself: backURI !== surfaceURI });
     product.cookiesAfterChatSurface = { [targetHost]: cookieCount(targetHost) };
     await save();
 
@@ -813,6 +983,76 @@ async function runHostSmoke(config) {
       note: 'Browser-element properties only; the remote document is not walked.',
     };
     await save();
+
+    // ---- the human reproduction window (opt-in) ----------------------------------------------------
+    // Everything above is measured without a person. This section exists for the one thing a driver
+    // cannot do: use the hosted application as a signed-in human would. When `--watch-seconds` is
+    // passed, the run stays alive for that long with the network and console watchers attached, and
+    // the report then holds what the page itself did — which requests were answered, which were
+    // cancelled, whether a new window was requested and where it went, and how often Gecko terminated
+    // the page's script. Nothing is typed or clicked by this driver.
+    product.popupAttempts = popupAttempts;
+    const watchSeconds = Number(config.watchSeconds || 0);
+    if (watchSeconds > 0) {
+      step = 'diagnose-watch';
+      report.step = step; await save();
+      const network = startNetworkWatch();
+      product.diagnose = {
+        startedAt: new Date().toISOString(),
+        watchSeconds,
+        prefs: relevantPrefs(),
+        instruction: 'Use the hosted application in this window; the driver only observes.',
+      };
+      await save();
+      const deadlineMs = Date.now() + watchSeconds * 1000;
+      let lastSave = 0;
+      // One sample per cycle of what the application document is doing. A page that stays on the same
+      // URI and title for minutes while the owner waits on it is the shape of a stalled request, and
+      // the transition into or out of an interstitial is what separates "slow" from "never".
+      const surfaceTimeline = [];
+      while (Date.now() < deadlineMs) {
+        await delay(1000);
+        const sample = describeSurface();
+        const previous = surfaceTimeline[surfaceTimeline.length - 1];
+        if (!previous || previous.title !== sample.title || previous.currentURI !== sample.currentURI || previous.isLoadingDocument !== sample.isLoadingDocument) {
+          surfaceTimeline.push({ t: Math.round((Date.now() - consoleZero) / 1000), uri: sample.currentURI, title: sample.title, loading: sample.isLoadingDocument });
+        }
+        if (Date.now() - lastSave < 5000) continue;
+        lastSave = Date.now();
+        product.diagnose = {
+          ...product.diagnose,
+          secondsLeft: Math.max(0, Math.round((deadlineMs - Date.now()) / 1000)),
+          scriptTerminations: scriptTerminations(),
+          notableConsole: diagnosticNotable(),
+          consoleTail: diagnosticConsole.slice(-40),
+          surfaceTimeline: surfaceTimeline.slice(-40),
+          requests: network.state.responses.slice(-80),
+          stopped: network.state.stops.slice(-40),
+          hosts: network.state.hosts,
+          otherHostCount: network.state.otherHosts,
+          popups: popupAttempts.slice(-10),
+          surface: sample,
+        };
+        await save();
+      }
+      network.stop();
+      product.diagnose = {
+        ...product.diagnose,
+        secondsLeft: 0,
+        endedAt: new Date().toISOString(),
+        scriptTerminations: scriptTerminations(),
+        notableConsole: diagnosticNotable(),
+        consoleTail: diagnosticConsole.slice(-120),
+        surfaceTimeline: surfaceTimeline.slice(-60),
+        requests: network.state.responses.slice(-120),
+        stopped: network.state.stops.slice(-60),
+        hosts: network.state.hosts,
+        otherHostCount: network.state.otherHosts,
+        popups: popupAttempts,
+        surface: describeSurface(),
+      };
+      await save();
+    }
 
     // ---- what the host can do beyond the product path ---------------------------------------------
     // Run after the product so the destructive experiments cannot disturb what the shipped surface

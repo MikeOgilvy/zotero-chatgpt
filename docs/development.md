@@ -74,6 +74,7 @@ node scripts/prepare-host-test.mjs --context --acceptance
 | `node scripts/prepare-host-test.mjs --context --live` | 本地检查后对合成 PDF **真实调用已登录账户的模型**，检查回答来源及停止/完成竞态；会消耗实际可用额度，执行前必须有对应授权 |
 | `node scripts/prepare-host-test.mjs --context --acceptance` | 无自动 driver 的人工试用 |
 | `node scripts/prepare-host-test.mjs --embed` | Chat 档真实承载 `chatgpt.com` 的宿主观察，专用 `.zotero-chatgpt-dev/embed/{profile,data}` 树：比对 iframe / 主窗口 XUL `<browser>`（含 Zotero 自身远程页属性集）等宿主面、记录加载与 console/Cloudflare 标记、cookie 数；随后驱动**产品自己的 dock**（Chat 档托管面出现、覆盖 slot、`currentURI` 为应用、切 Agent 再回 Chat 后同一元素同一文档），并点击两条上下文控件的真实按钮，回读剪贴板确认**论文文本块**与**PDF 文件本身**确实写入。不点击登录、不输入、不发模型请求、不读认证文件；登录/会话/流式/模型选择/上传一律记 NOT RUN |
+| `node scripts/prepare-host-test.mjs --embed --watch-seconds <n>` | 同上，但在产品检查之后**留在原地观测 n 秒**（每 5 秒落盘一次报告）。这段窗口是给人工操作应用的：驱动只记录，不输入、不点击。报告里的 `product.diagnose` 含被观测主机的**响应状态与被取消的请求**（只记主机名、截断的路径、状态码、是否取消与取消码——绝不记 header、查询串、请求体或 cookie）、页面 console 尾部、`Script terminated by timeout` 计数、`DOMWindowOpen`（新窗口请求及其是否带 browsing context）、相关偏好值与当时的 surface 状态。用于把「应用自己说连接不上」变成可读的失败证据 |
 
 `--native` 不与 `--live` 或 `--acceptance` 合用。`--live` 不等于新登录测试，也不自动证明图像生成；实际模型、回答、取消结果和能力均以当次报告为准。脚本可优先选择目录中存在的 Spark，不通过改推理强度伪造速度档位，不因旧限额日期推断当前账户状态。
 
