@@ -32,6 +32,7 @@ export const CHAT_EMBED_CONTAINER_ATTR = 'data-zchatgpt-embed-container';
 export const CHAT_EMBED_BINDING_ATTR = 'data-zchatgpt-embed-binding';
 /** The application Chat mode hosts. No API key, no custom base URL, no token is involved. */
 export const CHAT_APP_URL = 'https://chatgpt.com/';
+const OFFICIAL_CHAT_AUTH_HOSTS = new Set(['auth.openai.com', 'appleid.apple.com']);
 /** Free/stale-layout safety net while the surface is painted, in milliseconds. */
 const SYNC_INTERVAL_MS = 500;
 /**
@@ -139,6 +140,17 @@ function rectOf(element: Element): Rect | null {
   if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return null;
   if (rect.width < 1 || rect.height < 1) return null;
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
+function isOfficialAuthNavigation(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && OFFICIAL_CHAT_AUTH_HOSTS.has(url.hostname)
+      && !url.username && !url.password && (!url.port || url.port === '443');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -296,12 +308,21 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
     const windowGlobal = browser.browsingContext?.currentWindowGlobal ?? null;
     if (windowGlobal !== probedWindowGlobal) {
       probedWindowGlobal = windowGlobal;
-      browser.style.pointerEvents = 'none';
-      browser.setAttribute('data-zchatgpt-bridge-ready', 'checking');
+      bridgeIdle = false;
+      if (isOfficialAuthNavigation(browser.currentURI?.spec)) {
+        // Authentication is ordinary remote-page interaction. The PDF bridge stays unavailable on
+        // this origin, but the page itself must remain clickable for account and 2FA controls.
+        browser.style.pointerEvents = 'auto';
+        browser.setAttribute('data-zchatgpt-bridge-ready', 'auth-navigation');
+        announce('Complete sign-in on the official account page. PDF context is disabled until ChatGPT returns.');
+      } else {
+        browser.style.pointerEvents = 'none';
+        browser.setAttribute('data-zchatgpt-bridge-ready', 'checking');
+      }
       bridgeProbeAfter = 0;
     }
-    if (Date.now() >= bridgeProbeAfter) void probeBridge();
-    if (pendingRestore && Date.now() >= restoreAfter) void tryRestoreConversation();
+    if (!isOfficialAuthNavigation(browser.currentURI?.spec) && Date.now() >= bridgeProbeAfter) void probeBridge();
+    if (!isOfficialAuthNavigation(browser.currentURI?.spec) && pendingRestore && Date.now() >= restoreAfter) void tryRestoreConversation();
   };
 
   const stopTimer = (): void => { if (timer !== null) { win.clearInterval(timer); timer = null; } };
@@ -321,6 +342,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
 
   const probeBridge = async (): Promise<void> => {
     if (bridgeProbeFlight) return;
+    if (isOfficialAuthNavigation(browser.currentURI?.spec)) return;
     const target = actor();
     const windowGlobal = browser.browsingContext?.currentWindowGlobal ?? null;
     if (!target || !windowGlobal) { bridgeProbeAfter = Date.now() + 2000; return; }
@@ -360,6 +382,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
   const tryRestoreConversation = async (): Promise<void> => {
     const restore = pendingRestore;
     if (!restore || restore.issued || restoreFlight || restore.generation !== conversationGeneration) return;
+    if (isOfficialAuthNavigation(browser.currentURI?.spec)) { restoreAfter = Date.now() + 5000; return; }
     if (restoreReached(restore)) { trackConversation(); return; }
     const target = actor();
     const windowGlobal = browser.browsingContext?.currentWindowGlobal ?? null;
@@ -506,9 +529,14 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
       restoreAfter = 0;
       if (pendingRestore) {
         bridgeIdle = false;
-        browser.style.pointerEvents = 'none';
-        browser.setAttribute('data-zchatgpt-bridge-ready', 'restoring');
-        void tryRestoreConversation();
+        if (isOfficialAuthNavigation(browser.currentURI?.spec)) {
+          browser.style.pointerEvents = 'auto';
+          browser.setAttribute('data-zchatgpt-bridge-ready', 'auth-navigation');
+        } else {
+          browser.style.pointerEvents = 'none';
+          browser.setAttribute('data-zchatgpt-bridge-ready', 'restoring');
+          void tryRestoreConversation();
+        }
       }
     },
     evictable() {

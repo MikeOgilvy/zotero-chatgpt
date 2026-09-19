@@ -41,6 +41,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Automatic PDF context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.': '此 ChatGPT 页面未提供受支持的输入框，自动 PDF 上下文已阻止发送；此界面不会发送任何问题。',
   'Automatic PDF context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.': '官方 ChatGPT 发送控件不受支持，自动 PDF 上下文已阻止发送。草稿已保留，未发送。',
   'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.': '已有四个论文 ChatGPT 会话包含草稿或进行中的工作。请先完成或清空其中一个，再打开新会话。',
+  'Complete sign-in on the official account page. PDF context is disabled until ChatGPT returns.': '请在官方账户页面完成登录。返回 ChatGPT 前，PDF 上下文功能保持关闭。',
   Recorded: '已记录', Stopped: '已停止', Failed: '失败', Queued: '已排队', 'Cancelled before sending': '发送前已取消',
   'Unconfirmed: the connection was interrupted. The request was not sent again.': '状态未确认：连接已中断，未重新发送此请求。',
   'No saved chats match this search.': '没有匹配的已保存对话。',

@@ -344,3 +344,36 @@ it('keeps actor readiness messages separate from clipboard-action results', () =
   expect(clipboard.textContent).toBe('Copied 2 of 2 pages — paste into ChatGPT.');
   surface.destroy();
 });
+
+it('keeps an official Apple authorization navigation interactive without exposing the PDF bridge', async () => {
+  const { win, doc } = chromeWindow();
+  const sendQuery = vi.fn(() => Promise.resolve({ status: 'ready' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  const { slot, frame } = sidebar(doc); surface.show(slot, frame);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.style.pointerEvents).toBe('auto');
+
+  const srcBeforeAuth = browser.getAttribute('src');
+  browser.currentURI = { spec: 'https://appleid.apple.com/auth/authorize?private=not-recorded' };
+  browser.browsingContext.currentWindowGlobal = { auth: true };
+  await new Promise(resolve => setTimeout(resolve, 550));
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('auth-navigation');
+  await expect(surface.submitQuestion('must stay disabled during auth')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.getAttribute('src')).toBe(srcBeforeAuth);
+
+  browser.currentURI = { spec: 'https://chatgpt.com/c/12345678-abcd' };
+  browser.browsingContext.currentWindowGlobal = { getActor: () => ({ sendQuery }) };
+  await new Promise(resolve => setTimeout(resolve, 550));
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('ready');
+  surface.destroy();
+});
