@@ -45,7 +45,7 @@ function strings(value: unknown, maxItems: number, maxLength: number, keys = fal
 function itemSnapshot(value: unknown): NativeOrganizationItemSnapshot {
   const item = record(value, ['clientId', 'libraryId', 'key', 'metadata', 'tags', 'collectionKeys', 'attachmentKeys', 'dateModified', 'contentSignature', 'organizationSignature']);
   validatePaperScope({ clientId: item.clientId, libraryId: item.libraryId, attachmentKey: key(item.key) });
-  record(item.metadata); strings(item.tags, 1000, 128); strings(item.collectionKeys, 1000, 8, true); strings(item.attachmentKeys, 1000, 8, true);
+  record(item.metadata); strings(item.tags, 256, 128); strings(item.collectionKeys, 1000, 8, true); strings(item.attachmentKeys, 1000, 8, true);
   text(item.dateModified, 128); text(item.contentSignature, 1024 * 1024); text(item.organizationSignature, 1024 * 1024);
   return clone(item) as unknown as NativeOrganizationItemSnapshot;
 }
@@ -97,7 +97,12 @@ export function validateTaskRecord(value: unknown): ActionTaskRecord {
       if (change) {
         if (!equal(itemSnapshot(change.before), before)) invalid();
         const after = itemSnapshot(change.after); if (after.clientId !== before.clientId || after.libraryId !== before.libraryId || after.key !== before.key) invalid();
-        strings(change.addedTags, 24, 128); strings(change.addedCollectionKeys, 24, 8, true);
+        const addedTags = strings(change.addedTags, 24, 128).sort(); const addedCollectionKeys = strings(change.addedCollectionKeys, 24, 8, true).sort();
+        const expectedTags = after.tags.filter(tag => !before.tags.includes(tag)).sort();
+        const expectedCollections = after.collectionKeys.filter(collectionKey => !before.collectionKeys.includes(collectionKey)).sort();
+        if (after.organizationSignature !== before.organizationSignature || !equal(after.metadata, before.metadata) || !equal(after.attachmentKeys, before.attachmentKeys)
+            || before.tags.some(tag => !after.tags.includes(tag)) || before.collectionKeys.some(collectionKey => !after.collectionKeys.includes(collectionKey))
+            || !equal(addedTags, expectedTags) || !equal(addedCollectionKeys, expectedCollections)) invalid();
       }
     }
   }

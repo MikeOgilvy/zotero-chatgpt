@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { NativeActionPort, NativeOrganizationItemSnapshot, NativeOrganizationChange } from '../../packages/contracts/src/native.ts';
 import { citationFromAnnotation, parseOrganizationProposals } from '../../packages/contracts/src/tasks.ts';
+import { validateOrganizationContext } from '../../packages/contracts/src/validation.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
 import { MemoryStorage } from './doubles.ts';
 import { clientId, paperA } from '../contracts/factories.ts';
@@ -17,6 +18,11 @@ const before = (overrides: Partial<NativeOrganizationItemSnapshot> = {}): Native
   contentSignature: 'before-full',
   organizationSignature: 'same-non-organization-fields',
   ...overrides,
+});
+
+it('accepts collection indexes beyond 49 within the frozen 1000-collection bound', () => {
+  expect(parseOrganizationProposals('{"candidates":[{"itemIndex":0,"tags":[],"collectionIndexes":[50,999]}]}')).toEqual([{ itemIndex: 0, tags: [], collectionIndexes: [50, 999] }]);
+  expect(() => parseOrganizationProposals('{"candidates":[{"itemIndex":0,"tags":[],"collectionIndexes":[1000]}]}')).toThrow();
 });
 
 function fixture() {
@@ -124,4 +130,19 @@ it('reuses an exact model request and rejects a conflicting replay without widen
   const first = await f.controller.planOrganization(f.input);
   expect(await f.controller.planOrganization(f.input)).toEqual(first);
   await expect(f.controller.planOrganization({ ...f.input, selection: [before({ key: 'ITEMTWO2' })] })).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+});
+
+it('rejects a corrupt persisted delta that claims a pre-existing tag as task-owned', async () => {
+  const f = fixture(); const task = await f.controller.planOrganization(f.input);
+  await f.controller.approve(task.id, task.items.map(item => item.id));
+  const path = `tasks/${task.id}.json`;
+  const raw = JSON.parse(new TextDecoder().decode(f.storage.files.get(path)!)) as { items: Array<{ change: { addedTags: string[] } }> };
+  raw.items[0]!.change.addedTags = ['existing']; f.storage.files.set(path, new TextEncoder().encode(JSON.stringify(raw)));
+  await expect(f.controller.get(task.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' });
+  expect(f.current().tags).toEqual(['existing', 'topic-a']);
+});
+
+it('bounds the frozen request so the tripled applied ledger remains below its record cap', () => {
+  const large = 'x'.repeat(1024 * 1024);
+  expect(() => validateOrganizationContext({ selection: [before({ contentSignature: large, organizationSignature: large })], collections: [] })).toThrowError(expect.objectContaining({ code: 'PAYLOAD_TOO_LARGE' }));
 });

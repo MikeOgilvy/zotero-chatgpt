@@ -166,7 +166,9 @@ export function validateOrganizationContext(value: unknown): OrganizationContext
   if (!Array.isArray(context.selection) || !context.selection.length || context.selection.length > 50) invalid('request.organization.selection is out of range');
   if (!Array.isArray(context.collections) || context.collections.length > 1000) invalid('request.organization.collections is out of range');
   let encoded = 0; try { encoded = new TextEncoder().encode(JSON.stringify(context)).length; } catch { invalid('request.organization is not serializable'); }
-  if (encoded > 8 * 1024 * 1024) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The selected Zotero scope is too large to freeze safely.');
+  // One applied task persists the frozen snapshot three times (item.before, change.before, change.after)
+  // under the controller's 8 MiB record cap. Keep enough headroom for proposals and ledger metadata.
+  if (encoded > 2 * 1024 * 1024) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The selected Zotero scope is too large to freeze safely.');
   const selection = context.selection.map(nativeItemSnapshot);
   const collections = context.collections.map((value, index) => {
     const collection = record(value, ['clientId', 'libraryId', 'collectionKey', 'name'], `organization collection ${index}`);

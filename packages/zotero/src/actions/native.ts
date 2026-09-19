@@ -7,8 +7,8 @@ const AI_PREFIX = NATIVE_ANNOTATION_PROVENANCE;
 const MAX_PDF_BYTES = 64 * 1024 * 1024;
 const MAX_ORGANIZATION_VALUES = 24;
 
-function organizationTags(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length > MAX_ORGANIZATION_VALUES) fail('INVALID_INPUT', 'Choose at most 24 tags for one item.');
+function organizationTags(value: unknown, max = MAX_ORGANIZATION_VALUES): string[] {
+  if (!Array.isArray(value) || value.length > max) fail('INVALID_INPUT', `Choose at most ${max} tags for one item.`);
   const result = value.map(raw => string(raw, 128).trim().normalize('NFC'));
   if (result.some(tag => !tag || /[\u0000-\u001f]/u.test(tag)) || new Set(result).size !== result.length) fail('INVALID_INPUT', 'Choose unique nonempty Zotero tags.');
   return result;
@@ -134,18 +134,29 @@ export function createNativeActionPort(support: NativeSupport, reader: NativeRea
     }),
     undoOrganization: (value, signal) => boundary(async () => {
       checkSignal(signal); const expected = clone(value.expected); support.scope(expected.after);
-      const addedTags = organizationTags(expected.addedTags);
+      support.scope(expected.before);
+      if (expected.before.clientId !== expected.after.clientId || expected.before.libraryId !== expected.after.libraryId || expected.before.key !== expected.after.key) fail('INVALID_INPUT', 'The recorded organization item identity is inconsistent.');
+      const beforeTags = organizationTags(expected.before.tags, 256).sort(); const afterTags = organizationTags(expected.after.tags, 256).sort();
+      const addedTags = organizationTags(expected.addedTags).sort();
       if (!Array.isArray(expected.addedCollectionKeys) || expected.addedCollectionKeys.length > MAX_ORGANIZATION_VALUES) fail('INVALID_INPUT', 'The recorded collection changes are invalid.');
-      expected.addedCollectionKeys.forEach(key);
+      const beforeCollections = expected.before.collectionKeys.map(value => key(value)).sort();
+      const afterCollections = expected.after.collectionKeys.map(value => key(value)).sort();
+      const addedCollectionKeys = expected.addedCollectionKeys.map(value => key(value)).sort();
+      if (new Set(beforeCollections).size !== beforeCollections.length || new Set(afterCollections).size !== afterCollections.length || new Set(addedCollectionKeys).size !== addedCollectionKeys.length
+          || expected.before.organizationSignature !== expected.after.organizationSignature || !equal(expected.before.metadata, expected.after.metadata) || !equal(expected.before.attachmentKeys, expected.after.attachmentKeys)
+          || beforeTags.some(tag => !afterTags.includes(tag)) || beforeCollections.some(collectionKey => !afterCollections.includes(collectionKey))
+          || !equal(addedTags, afterTags.filter(tag => !beforeTags.includes(tag))) || !equal(addedCollectionKeys, afterCollections.filter(collectionKey => !beforeCollections.includes(collectionKey)))) {
+        fail('INVALID_INPUT', 'The recorded organization delta is inconsistent and was not undone.');
+      }
       return z.DB.executeTransaction(async () => {
         const item = support.getItem(expected.after); if (!item) return { status: 'absent' };
         await item.loadAllData?.(); checkSignal(signal); const current = support.organizationItemSnapshot(item);
-        const presence = [...addedTags.map(tag => current.tags.includes(tag)), ...expected.addedCollectionKeys.map(collectionKey => current.collectionKeys.includes(collectionKey))];
+        const presence = [...addedTags.map(tag => current.tags.includes(tag)), ...addedCollectionKeys.map(collectionKey => current.collectionKeys.includes(collectionKey))];
         if (!presence.length || presence.every(present => !present)) return { status: 'absent' };
         if (presence.some(present => !present)) return { status: 'conflict' };
         if (!item.isEditable() || !equal(current, expected.after)) return { status: 'conflict' };
         for (const tag of addedTags) item.removeTag(tag);
-        for (const collectionKey of expected.addedCollectionKeys) item.removeFromCollection(collectionKey);
+        for (const collectionKey of addedCollectionKeys) item.removeFromCollection(collectionKey);
         try { await item.save({ skipSelect: true }); }
         catch { fail('WRITE_UNCERTAIN', 'Organization undo was not confirmed. Inspect the item before retrying.'); }
         const after = support.organizationItemSnapshot(item);

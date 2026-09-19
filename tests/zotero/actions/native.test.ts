@@ -264,6 +264,13 @@ it('treats a partially removed organization delta as conflict rather than falsel
   expect(await f.port.undoOrganization({ expected: change })).toEqual({ status: 'conflict' });
   expect(native.tags).toEqual(['topic-b']); expect(native.collections).toEqual([1]);
 });
+it('rejects a corrupt organization ledger before it can remove a pre-existing user tag', async () => {
+  const f = fixture(); const created = await createPaper(f); const native = f.items.get(created.key)!;
+  native.tags = ['human']; const before = (await f.port.inspectOrganizationItem(created))!;
+  const corrupt = { before, after: structuredClone(before), addedTags: ['human'], addedCollectionKeys: [] };
+  await expect(f.port.undoOrganization({ expected: corrupt })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  expect(native.tags).toEqual(['human']); expect(native.collections).toEqual([1]);
+});
 it('undoing an untouched created item moves it to trash instead of deleting files', async () => {
   const f = fixture(); const item = await createPaper(f);
   expect(await f.port.undoCreatedItem({ expected: item, attachments: [] })).toEqual({ status: 'trashed' });

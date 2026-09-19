@@ -13,7 +13,7 @@ export interface SelectedLibraryHostItem {
 }
 
 export interface SelectedLibraryWindow {
-  ZoteroPane?: { getSelectedItems?(): SelectedLibraryHostItem[] };
+  ZoteroPane?: { itemsView?: { getSelectedItems(asIDs?: false): SelectedLibraryHostItem[] } };
 }
 
 export interface SelectedLibraryOptions {
@@ -27,9 +27,12 @@ export interface SelectedLibraryOptions {
  * never accepted from model output; every result is immediately read back through the native port.
  */
 export async function captureSelectedLibraryItems(options: SelectedLibraryOptions): Promise<NativeOrganizationItemSnapshot[]> {
-  const pane = options.getWindow()?.ZoteroPane;
-  if (!pane?.getSelectedItems) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The active Zotero library selection is unavailable.');
-  const raw = pane.getSelectedItems();
+  // ZoteroPane.getSelectedItems() is tab-sensitive: while a Reader tab is active it returns that
+  // reader's parent item, not the rows the owner selected in the library item tree. The window-bound
+  // itemsView retains the actual library-row selection across a switch back to the Reader.
+  const itemsView = options.getWindow()?.ZoteroPane?.itemsView;
+  if (!itemsView?.getSelectedItems) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected Zotero library rows are unavailable. Return to the library, select the items, and try again.');
+  const raw = itemsView.getSelectedItems(false);
   if (!Array.isArray(raw)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The active Zotero library selection is unavailable.');
   // Copy every identity before the first await so later focus/selection changes cannot retarget the task.
   const selected = raw.filter(item => item && !item.deleted && item.isRegularItem()).map(item => ({ libraryID: item.libraryID, key: item.key }));
