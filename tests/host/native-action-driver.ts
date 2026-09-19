@@ -338,8 +338,8 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       const exercise = async (label: string) => {
         guard(); const before = new Set(Zotero.Reader._readers); const reader = await Zotero.Reader.open(fixture.main.id, undefined, { allowDuplicate: true, openInBackground: false });
         requireCheck(!before.has(reader) && reader.itemID === fixture.main.id, 'CITATION_READER_OWNERSHIP_MISMATCH'); ownedReaders.push(reader); if (reader._initPromise) await reader._initPromise;
-        const view = reader._internalReader?._primaryView ?? reader._internalReader?._lastView;
-        const viewer = view?._iframeWindow?.PDFViewerApplication?.pdfViewer as unknown as CitationViewer | undefined;
+        const ready = await until(() => { const view = reader._internalReader?._primaryView ?? reader._internalReader?._lastView; const application = view?._iframeWindow?.PDFViewerApplication; return application?.pdfDocument && application.pdfViewer ? application : undefined; }, `${label}-pdf-ready`, 60000);
+        const viewer = ready.pdfViewer as unknown as CitationViewer;
         requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
         let zoomExercised = false; try { viewer.currentScaleValue = 'page-width'; zoomExercised = viewer.currentScaleValue === 'page-width'; } catch { /* Host does not expose a writable zoom value. */ }
         let rotationExercised = false; if (typeof viewer.pagesRotation === 'number') { try { const next = (viewer.pagesRotation + 90) % 360; viewer.pagesRotation = next; rotationExercised = viewer.pagesRotation === next; } catch { /* Rotation is optional host evidence. */ } }
