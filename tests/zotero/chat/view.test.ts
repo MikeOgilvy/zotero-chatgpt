@@ -155,7 +155,7 @@ async function mountReadyChat(options: {
     subscribe: listener => { onEvent = listener; return () => undefined; }, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A', options.identity), {
-    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined,
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined,
     uuid: options.uuid ?? (() => '9a1c3e5f-7b2d-4c6e-8f0a-1b3d5f7a9c0e'), now: () => 'now',
     ...(options.document ? { document: options.document } : {}),
     ...(options.clipboardImages ? { readClipboardImage: options.clipboardImages } : {}),
@@ -906,7 +906,7 @@ it('keeps an attachment fallback title available in compact chrome without a her
     subscribe: () => () => undefined, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'PDF'), {
-    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
   const doc = documentOf();
@@ -943,7 +943,7 @@ it('shows the New chat tab at first paint without creating a chat', async () => 
     subscribe: () => () => undefined, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, title), {
-    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   const doc = documentOf();
   const body = doc.createElement('div');
@@ -1714,7 +1714,7 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
     subscribe: () => () => undefined, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
-    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
   const doc = documentOf();

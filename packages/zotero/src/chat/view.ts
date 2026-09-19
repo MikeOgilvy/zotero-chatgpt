@@ -116,6 +116,11 @@ const COPY = {
   collectionsFailed: 'Collections could not be loaded.',
   /** Shown when a live request has no readable timing: an honest unknown, never an invented duration. */
   elapsedUnknown: 'Elapsed time unavailable',
+  /**
+   * Chat mode's own status. Chat's backend is an unresolved platform boundary in this build, so the
+   * line names that instead of borrowing the Agent sign-in state.
+   */
+  chatUnavailable: 'Chat is unavailable in this build. Use Agent mode.',
   /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
   sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
   continueWithPdf: 'Continue with current PDF',
@@ -1521,7 +1526,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const list = transcriptOf(state.conversation, state.messageFocus?.messageId ?? null);
     const nextChrome = [
       state.connection, state.runtime?.revision ?? 0, state.runtime?.account.state ?? '', state.runtime?.login?.state ?? '',
-      state.generating, state.message ?? '', state.mode, state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
+      state.generating, state.message ?? '', state.mode, state.chatUnavailable ?? '', state.conversation?.id ?? '', state.conversation?.lastSeq ?? 0,
       state.conversation?.activeRequestId ?? '', state.conversations.map(c => `${c.id}:${c.title}:${c.updatedAt}:${c.messages.length}:${c.activeRequestId ?? ''}`).join('\n'),
       state.openConversations.map(c => `${c.id}:${c.title}:${c.lastSeq}:${c.activeRequestId ?? ''}`).join('\n'),
       state.draft.citations.map(c => c.id).join('\n'), state.draft.images.map(image => image.id).join('\n'), JSON.stringify(state.draft.settings), state.focusToken,
@@ -1539,13 +1544,19 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     renderMode(state);
     const account = state.runtime?.account.state ?? 'signedOut';
     const pendingLogin = state.runtime?.login?.state === 'pending';
+    // `agentMode` is already derived above for the Agent-only task surface. Sign-in and the Codex
+    // connection are Agent-only chrome too: in Chat mode the sidebar reports the Chat transport's own
+    // state, so selecting Chat never renders (or triggers) Agent readiness.
     chat.dataset.zchatgptRuntime = state.connection; chat.dataset.zchatgptAuth = account; chat.dataset.zchatgptGenerating = String(state.generating);
     chat.dataset.zchatgptConversation = state.conversation?.id ?? ''; chat.dataset.zchatgptActiveRequest = state.conversation?.activeRequestId ?? '';
-    status.textContent = state.connection === 'idle' ? STATUS_LINE.idle : state.connection === 'starting' ? STATUS_LINE.starting : state.connection === 'error' ? STATUS_LINE.error
-      : pendingLogin ? STATUS_LINE.pendingLogin : account === 'signedIn' ? (state.generating ? STATUS_LINE.generating : '') : STATUS_LINE.signedOut;
+    status.textContent = state.connection === 'error' ? STATUS_LINE.error
+      : state.connection === 'starting' ? STATUS_LINE.starting
+        : !agentMode ? (state.chatUnavailable ? COPY.chatUnavailable : state.generating ? STATUS_LINE.generating : '')
+          : state.connection === 'idle' ? STATUS_LINE.idle
+            : pendingLogin ? STATUS_LINE.pendingLogin : account === 'signedIn' ? (state.generating ? STATUS_LINE.generating : '') : STATUS_LINE.signedOut;
     status.hidden = !status.textContent;
-    login.hidden = account === 'signedIn' || pendingLogin || state.connection !== 'ready'; cancelLogin.hidden = !pendingLogin;
-    retry.hidden = state.connection !== 'error';
+    login.hidden = !agentMode || account === 'signedIn' || pendingLogin || state.connection !== 'ready'; cancelLogin.hidden = !agentMode || !pendingLogin;
+    retry.hidden = !agentMode || state.connection !== 'error';
     auth.hidden = login.hidden && cancelLogin.hidden && retry.hidden;
     // The `+` starts a chat and stays available in every state, including right after a close:
     // tying it to having a current conversation is the regression that hid it with the chat.
@@ -1667,9 +1678,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const reportKey = state.contextReport ? JSON.stringify(state.contextReport) : null;
     if (reportKey !== contextReportKey) { contextReportKey = reportKey; contextRing.report(state.contextReport ? contextDetailNodes(doc, state.contextReport) : null); }
     const hasInput = state.draft.question.trim().length > 0;
-    const canSend = state.connection === 'ready' && account === 'signedIn' && !state.generating && hasInput;
+    // Chat's send lock is the Chat transport, not the Codex sign-in; Agent's is the ChatGPT account.
+    const canSend = state.connection === 'ready' && !state.generating && hasInput && (agentMode ? signedIn : !state.chatUnavailable);
     send.disabled = !canSend; send.hidden = state.generating; stop.hidden = !state.generating;
-    queue.hidden = !state.generating; queue.disabled = !signedIn || state.queueing || !hasInput;
+    queue.hidden = !state.generating; queue.disabled = !canSend || state.queueing;
     input.disabled = false;
     if (state.focusToken !== focusToken) { focusToken = state.focusToken; input.focus(); }
     if (state.messageFocus && messages.dataset.focusToken !== String(state.messageFocus.token)) { messages.dataset.focusToken = String(state.messageFocus.token); messageNodes.get(state.messageFocus.messageId)?.scrollIntoView?.({ block: 'center' }); }

@@ -1,7 +1,14 @@
 import { mountChatView, renderReaderShell } from './chat/view.ts';
 import { ConversationPresenter, type PresenterAgent } from './chat/presenter.ts';
-import { createRuntimeSupervisor } from './runtime/supervisor.ts';
-import { createLocalServices } from './runtime/local-services.ts';
+import { createAgentRuntime, type AgentRuntime } from './runtime/agent-runtime.ts';
+import { createLocalServices, openLocalStorage } from './runtime/local-services.ts';
+import { runtimePaths } from './runtime/prepare.ts';
+import { createGeneratedImageLoader } from './runtime/generated-image.ts';
+import { createReaderClient } from '../../core/src/index.ts';
+import { CHAT_TRANSPORT_UNAVAILABLE_MESSAGE } from '../../core/src/chat/chat-transport.ts';
+import type { ReaderClient } from '../../contracts/src/runtime.ts';
+import type { ChatTransport } from '../../contracts/src/execution.ts';
+import { PINNED_RUNTIME } from '../../../runtime/manifest.ts';
 import { geckoHost } from './runtime/gecko.ts';
 import { injectReaderStyles } from './reader/dock.ts';
 import { NativeReaderPane, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
@@ -26,7 +33,20 @@ let context: PluginContext | undefined;
 let paneID = '';
 let active = false;
 let notifierID: string | undefined;
-let runtime: ReturnType<typeof createRuntimeSupervisor> | undefined;
+/**
+ * The Codex process owner. It is constructed at startup but does no work: `prepareRuntime`, spawn and
+ * the protocol handshake only happen when `connection()` is called, which only Agent actions do.
+ */
+let agent: AgentRuntime | undefined;
+/** The one shared reader client. Built from local storage; its construction performs no Codex work. */
+let clientPromise: Promise<ReaderClient> | null = null;
+let client: ReaderClient | null = null;
+/**
+ * Chat's backend is an unresolved platform boundary. There is deliberately no concrete transport in
+ * this build, so Chat fails with the honest reason instead of ever being routed through Codex. A
+ * future supported transport is injected here and nowhere else.
+ */
+const CHAT_TRANSPORT: ChatTransport | undefined = undefined;
 let documentCache: ReaderDocumentCache | undefined;
 let localServices: ReturnType<typeof createLocalServices> | undefined;
 let preferencePanes: PreferencePaneRegistrar | undefined;
@@ -68,6 +88,46 @@ function libraryPort(): ReturnType<typeof createLocalServices>['library'] & Libr
   if (!localServices) throw new Error('The local Zotero library is unavailable.');
   return { ...localServices.library, ...createFileActions(Zotero, { clientId: clientId(), uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() }) };
 }
+/**
+ * Build the shared reader client over local records. This creates directories, not Codex: the
+ * connector resolves to `agent.connection()`, which every Agent action calls and only then starts
+ * Codex. The `cwd` and generated-image roots are computed as pure paths so the client can be built
+ * before any runtime directory exists.
+ */
+function sharedClient(): Promise<ReaderClient> {
+  if (clientPromise) return clientPromise;
+  if (!active) return Promise.reject(new Error('Plugin stopped.'));
+  const { host } = geckoHost();
+  const paths = runtimePaths(host);
+  const generatedImage = createGeneratedImageLoader({ host, allowedOutputDirectories: [paths.cwd, host.join(paths.account, 'generated_images')] });
+  clientPromise = openLocalStorage(host).then(storage => createReaderClient(() => {
+    if (!agent) throw new Error('Plugin stopped.');
+    return agent.connection();
+  }, storage, {
+    codexVersion: PINNED_RUNTIME.codexVersion,
+    cwd: paths.cwd,
+    uuid: () => crypto.randomUUID(),
+    ...(context?.version ? { pluginVersion: context.version } : {}),
+    ...(CHAT_TRANSPORT ? { chatTransport: CHAT_TRANSPORT } : {}),
+    generatedImage,
+  })).then(created => {
+    if (!active) { void created.close().catch(() => undefined); throw new Error('Plugin stopped.'); }
+    client = created; return created;
+  });
+  return clientPromise;
+}
+/** Agent readiness: the one call that lazily starts Codex. Only Agent-only actions use it. */
+function ensureAgent(): Promise<void> {
+  if (!agent) return Promise.reject(new Error('Plugin stopped.'));
+  return sharedClient().then(async created => {
+    if (created.ensureAgentReady) await created.ensureAgentReady(); else await created.refreshAccount();
+  });
+}
+/**
+ * Known without starting Codex, because the transport choice is compile-time in this build. Chat
+ * mode states this itself instead of borrowing the Agent sign-in status line.
+ */
+function chatUnavailableReason(): string | null { return CHAT_TRANSPORT ? null : CHAT_TRANSPORT_UNAVAILABLE_MESSAGE; }
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
   const client = clientId();
   const paper = paperScope(client, identity); const key = paperId(paper);
@@ -81,7 +141,9 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
     }), paper);
     const local = localServices;
     presenter = new ConversationPresenter(context, {
-      ensureStarted: () => runtime ? runtime.ensureStarted() : Promise.reject(new Error('Plugin stopped.')),
+      client: sharedClient,
+      ensureAgent,
+      chatUnavailableReason,
       openAuthorization: url => Zotero.launchURL(url),
       uuid: () => crypto.randomUUID(),
       now: () => new Date().toISOString(),
@@ -235,9 +297,11 @@ function reconcile(): void {
 }
 export function startup(options: PluginContext): void {
   if (active) return;
-  if (runtime) throw new Error('The previous Codex process has not stopped. Retry shutdown before enabling the plugin.');
+  if (agent) throw new Error('The previous Codex process has not stopped. Retry shutdown before enabling the plugin.');
   context = options; active = true;
-  runtime = createRuntimeSupervisor(options.rootURI, options.version);
+  // Constructing the owner does not read the runtime directory, spawn or handshake; nothing is
+  // started until an Agent action asks for readiness.
+  agent = createAgentRuntime(options.rootURI, options.version);
   documentCache = new ReaderDocumentCache({ yield: () => new Promise(resolve => setTimeout(resolve, 0)) });
   localServices = createLocalServices(geckoHost().host, Zotero, clientId(), documentCache);
   paneID = Zotero.ItemPaneManager.registerSection({
@@ -263,13 +327,10 @@ export function startup(options: PluginContext): void {
     // One pref, one owner: the native pane and the reader opt-out read the same value.
     readAutomaticPdfText: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
     writeAutomaticPdfText: value => { Zotero.Prefs.set(AUTO_PDF_PREF, value, true); },
-    // The runtime's last live `model/list` ids, or null when it is not running. Read-only: opening
-    // the Preferences window never starts Codex, and an offerable id it reports (a GPT-5.3 Spark
-    // model) becomes selectable in the pane. Excluded families are filtered in core, not here.
-    liveModels: () => {
-      const client = runtime?.currentClient();
-      return Promise.resolve(client ? client.snapshot().models.map(model => model.id) : null);
-    },
+    // The runtime's last live `model/list` ids, or null when Agent has never loaded them. Read-only:
+    // opening the Preferences window never starts Codex, and an offerable id it reports (a GPT-5.3
+    // Spark model) becomes selectable in the pane. Excluded families are filtered in core, not here.
+    liveModels: () => Promise.resolve(client ? client.snapshot().models.map(model => model.id) : null),
   });
   preferencePanes = createPreferencePaneRegistrar({
     panes: Zotero.PreferencePanes, pluginID: options.pluginID, rootURI: options.rootURI,
@@ -343,9 +404,14 @@ export async function shutdown(): Promise<void> {
   for (const presenter of presenters.values()) { await presenter.flushDraft?.().catch(() => Zotero.logError(new Error('A chat draft could not be saved during shutdown.'))); presenter.dispose(); }
   presenters.clear();
   documentCache?.clear(); documentCache = undefined;
-  const stopping = runtime;
+  const stopping = agent;
+  const pendingClient = clientPromise; clientPromise = null;
+  if (pendingClient) { try { client = await pendingClient; } catch { /* Construction failed; nothing to close. */ } }
+  const closingClient = client; client = null;
   const local = localServices; localServices = undefined;
-  const results = await Promise.allSettled([local?.stop(), stopping?.stop()]);
-  if (results[1]?.status === 'fulfilled' && runtime === stopping) runtime = undefined;
+  // Closing the client first fails the channel, so a pending RPC cannot hold shutdown open; the
+  // owner then confirms the process exit. `agent` is only cleared once its stop resolved.
+  const results = await Promise.allSettled([local?.stop(), closingClient?.close(), stopping?.stop()]);
+  if (results[2]?.status === 'fulfilled' && agent === stopping) agent = undefined;
   if (results.some(result => result.status === 'rejected')) throw new Error('Plugin shutdown could not complete every cleanup operation. Retrying preserves ownership of any remaining Codex process.');
 }

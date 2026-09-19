@@ -38,7 +38,7 @@ it('keeps shareable diagnostics off the default sidebar; presenter still copies 
     subscribe: () => () => undefined, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
-    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
   const doc = new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;

@@ -11,6 +11,7 @@ const COPY: Readonly<Record<string, string>> = {
   'Open the Codex sidebar to connect.': '打开 Codex 侧栏以连接。', 'Starting Codex…': '正在启动 Codex…',
   'Codex is unavailable': 'Codex 暂不可用', 'Finish signing in to ChatGPT in your browser.': '请在浏览器中完成 ChatGPT 登录。',
   'Sign in with ChatGPT to ask a question.': '使用 ChatGPT 登录后即可提问。', 'Responding…': '正在回答…',
+  'Chat is unavailable in this build. Use Agent mode.': '此版本未集成 Chat 通道，请使用 Agent 模式。',
   Recorded: '已记录', Stopped: '已停止', Failed: '失败', Queued: '已排队', 'Cancelled before sending': '发送前已取消',
   'Unconfirmed: the connection was interrupted. The request was not sent again.': '状态未确认：连接已中断，未重新发送此请求。',
   'No saved chats match this search.': '没有匹配的已保存对话。',

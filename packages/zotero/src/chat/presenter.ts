@@ -27,7 +27,19 @@ const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available
  */
 export type { AgentCapability, PresenterAgent, PresenterReading } from './capability.ts';
 export interface PresenterServices {
-  ensureStarted(): Promise<ReaderClient>; openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
+  /**
+   * The one shared reader client. Obtaining it performs no Codex work: opening the sidebar, listing
+   * chats and sending in Chat mode all resolve it without starting the Agent runtime.
+   */
+  client(): Promise<ReaderClient>;
+  /**
+   * Agent readiness. Called only from Agent-only paths (Agent mode, login, retry); this is what
+   * lazily starts Codex. Chat never calls it.
+   */
+  ensureAgent(): Promise<void>;
+  /** The honest reason a Chat send cannot run in this build, or null when a transport is integrated. */
+  chatUnavailableReason(): string | null;
+  openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
   getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
@@ -72,6 +84,12 @@ export interface PresenterState {
    * it only affects the next send — recorded requests keep the mode they were frozen with.
    */
   mode: RequestMode;
+  /**
+   * The honest reason a Chat send cannot run in this build, or null when a Chat transport exists.
+   * It is Agent-independent state: it is known without starting Codex, so Chat mode can state its
+   * own status instead of borrowing the Agent sign-in line.
+   */
+  chatUnavailable: string | null;
   /** Incremented when the view should move focus into the question input. */
   focusToken: number;
   workspace: WorkspaceSettings | null;
@@ -211,7 +229,7 @@ export class ConversationPresenter {
   private modes = new Map<string, RequestMode>();
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(context: ReaderContext, private services: PresenterServices) {
-    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, mode: 'chat', focusToken: 0,
+    this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, mode: 'chat', chatUnavailable: null, focusToken: 0,
       workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: services.getWorkspace ? 'loading' : 'session', tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null, acquisitionTarget: null, collectionOptions: [],
       // The port decides the initial opt-in/disclosure; everything else comes from the reader context.
       document: { ...context, enabled: services.document?.readEnabled() ?? false, disclosure: services.document?.needsDisclosure?.() ?? false } };
@@ -265,12 +283,40 @@ export class ConversationPresenter {
     traceMode(`[mode] selected ${mode} for ${this.draftKey()}`);
     this.modes.set(this.draftKey(), mode);
     this.update({});
-    // Agent state is hydrated on demand: Chat never touches the task/reading infrastructure, so
-    // switching to Agent is what licenses the first refresh.
-    if (mode === 'agent') void this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
+    // Agent state is hydrated on demand: Chat never touches the Agent runtime or the task/reading
+    // infrastructure, so switching to Agent is what licenses the first Codex startup and refresh.
+    // Selecting Chat again is free of both.
+    if (mode === 'agent') {
+      void this.services.ensureAgent().then(() => this.refreshTaskState()).catch(error => {
+        if (this.state.mode === 'agent') this.reportError(this.errorText(error));
+      });
+    }
   }
   private errorText(error: unknown): string { return error instanceof Error && error.message ? error.message : 'Codex could not complete this action.'; }
   private signedIn(): boolean { return this.state.runtime?.account.state === 'signedIn' && (this.state.runtime?.models.length ?? 0) > 0; }
+  /**
+   * Make the frozen mode's runtime ready before a request is built.
+   *
+   * Chat never starts Codex: without a supported transport it reports the honest reason and nothing
+   * is recorded. Agent starts Codex lazily and needs the ChatGPT sign-in, sending a signed-out
+   * reader into the official login instead of failing the request.
+   *
+   * Returns false when the caller must stop: the reason is already on screen (or login is pending).
+   */
+  private async prepareMode(mode: RequestMode, options: { pendingExplain?: Citation } = {}): Promise<boolean> {
+    if (mode === 'chat') {
+      const reason = this.services.chatUnavailableReason();
+      if (!reason) return true;
+      this.update({ message: reason, ...(options.pendingExplain ? { pendingExplain: clone(options.pendingExplain) } : {}) });
+      return false;
+    }
+    try { await this.services.ensureAgent(); }
+    catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); throw error; }
+    if (this.signedIn()) return true;
+    this.update({ message: options.pendingExplain ? null : 'Sign in with ChatGPT first.', ...(options.pendingExplain ? { pendingExplain: clone(options.pendingExplain) } : {}) });
+    await this.login();
+    return false;
+  }
   private currentSettings(): GenerationSettings | null {
     const models = this.state.runtime?.models ?? [];
     const current = this.state.draft.settings ?? this.state.conversation?.settings ?? catalogDefaultSettings(models);
@@ -659,8 +705,15 @@ export class ConversationPresenter {
   async activate(): Promise<void> {
     try { await this.loadLocal(); } catch { /* Preserve unreadable records and report the local failure. */ }
     if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
-    try { await this.connect(); if (this.state.runtime?.models.length) { await this.adoptCurrent(); await this.sync(); await this.refreshList(); await this.pruneEmptyConversations(); } }
-    catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
+    // Opening the sidebar restores local chats only. The Codex-backed catalog is not a precondition
+    // for showing the reader's own history, and nothing here starts Codex.
+    try {
+      await this.connect();
+      await this.adoptCurrent(); await this.sync(); await this.refreshList(); await this.pruneEmptyConversations();
+    } catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
+    // Agent mode is the one composer state that needs Codex (for the model picker). Activating into
+    // Chat never reaches this, so a reader who never leaves Chat starts no Agent runtime.
+    if (this.state.mode === 'agent') await this.services.ensureAgent().catch(error => this.reportError(this.errorText(error)));
     await this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
     // Adopting the saved chat clears `message`. If local preparation already failed, that would erase
     // the only signal the owner has — the panel that used to render preparation state is gone — so a
@@ -731,17 +784,30 @@ export class ConversationPresenter {
     try { return await waitPreparation(prepared, signal); }
     finally { if (job) { job.consumers--; if (signal.aborted && job.consumers === 0) job.controller.abort(); } }
   }
-  async retry(): Promise<void> { this.client = null; this.unobserve?.(); this.unobserve = null; if (this.state.persistence === 'error') this.localFlight = null; this.reopenActiveOnly(); await this.activate(); }
+  /**
+   * Explicit retry after a Codex failure. It is an Agent action: the shared client stays the same,
+   * but its dead channel is replaced and the account/catalog are re-read.
+   */
+  async retry(): Promise<void> {
+    if (this.state.persistence === 'error') this.localFlight = null;
+    this.reopenActiveOnly();
+    try {
+      const client = await this.connect();
+      if (client.reconnect) await client.reconnect(); else await this.services.ensureAgent();
+    } catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); return; }
+    await this.activate();
+  }
+  /**
+   * The shared client. It is created once per plugin lifetime and its construction does not touch
+   * Codex; obtaining it here is what lets the sidebar render local chats with zero Agent work.
+   */
   private connect(): Promise<ReaderClient> {
-    if (this.client && this.client.snapshot().runtime === 'ready') return Promise.resolve(this.client);
+    if (this.client) return Promise.resolve(this.client);
     if (this.connecting) return this.connecting;
-    this.update({ connection: 'starting', message: null });
-    const previous = this.client;
-    this.connecting = this.services.ensureStarted().then(client => {
+    this.connecting = this.services.client().then(client => {
       this.client = client;
-      // A different client is a restarted runtime: its open panes would render stale transcripts.
-      if (previous && previous !== client) this.reopenActiveOnly();
       this.unobserve?.(); this.unobserve = client.observe(snapshot => this.onRuntime(snapshot));
+      this.update({ chatUnavailable: this.services.chatUnavailableReason() });
       return client;
     }).finally(() => { this.connecting = null; });
     return this.connecting;
@@ -767,7 +833,8 @@ export class ConversationPresenter {
         // Only a resumed explain needs a chat; a plain login opens no chat of its own.
         const conversation = await this.ensureConversation();
         this.update({ pendingExplain: null });
-        await this.submit(conversation, makeExplain(pending, conversation.id, this.services.uuid(), this.currentSettings() ?? conversation.settings, this.paperIdentity()), this.contextOptions(), { ...clone(this.state.draft), skillId: null, references: [] }, await this.captureWorkspace());
+        // A pending More details is always the Agent explain that queued it, so it resumes as Agent.
+        await this.submit(conversation, makeExplain(pending, conversation.id, this.services.uuid(), this.currentSettings() ?? conversation.settings, this.paperIdentity()), this.contextOptions(), { ...clone(this.state.draft), skillId: null, references: [] }, await this.captureWorkspace(), false, 'agent');
       }
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
@@ -1016,9 +1083,13 @@ export class ConversationPresenter {
         await this.loadLocal();
         const configuration = await workspace; if (this.disposed) return;
         await this.connect();
-        if (!this.signedIn()) { this.update({ pendingExplain: kept, message: null }); await this.login(); return; }
+        // More details is an Agent request in this build: it needs the PDF context pipeline and the
+        // reading coordinator, and Chat has no transport yet. Routing it to Chat would break a
+        // working feature, so it is frozen as Agent. Once a Chat transport lands, More details can
+        // follow the composer mode like any other request without changing the router.
+        if (!await this.prepareMode('agent', { pendingExplain: kept })) return;
         const conversation = target ?? await this.ensureConversation();
-        await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration);
+        await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration, false, 'agent');
       } catch (error) { this.update({ message: this.errorText(error) }); }
     })().finally(() => { this.explainFlights.delete(key); });
     this.explainFlights.set(key, flight);
@@ -1051,7 +1122,7 @@ export class ConversationPresenter {
       await this.loadLocal();
       const configuration = await workspace; if (this.disposed) return;
       await this.connect();
-      if (!this.signedIn()) { this.update({ message: 'Sign in with ChatGPT first.' }); await this.login(); return; }
+      if (!await this.prepareMode(mode)) return;
       const conversation = target ?? await this.ensureConversation();
       const resolved = ConversationPresenter.withoutStaleProfile(draft, configuration);
       const input = makeAsk(resolved.draft, conversation.id, this.services.uuid(), settings ?? conversation.settings, this.paperIdentity());
@@ -1155,6 +1226,9 @@ export class ConversationPresenter {
     if (!queued && (current.activeRequestId || current.queuedRequestIds?.length)) throw new ReaderError('BUSY', 'This conversation is still answering. Use Queue or start a new chat.');
     const controller = new AbortController(); this.submissions.set(conversation.id, controller); this.update({ message: null });
     try {
+      // Last line of defence: no Chat request may reach the shared service without a Chat transport,
+      // so Chat can never be routed to Codex by a path that forgot to check.
+      if (mode === 'chat') { const reason = this.services.chatUnavailableReason(); if (reason) throw new ReaderError('UNSUPPORTED_INTERACTION', reason); }
       const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace);
       if (workflow) input.workflow = workflow;
       const skillWorkflow = workflow?.skill?.workflow ?? null;
@@ -1424,7 +1498,9 @@ export class ConversationPresenter {
   // ---- account ----------------------------------------------------------------------------------
   async login(): Promise<void> {
     try {
+      // Login is Agent-only by definition: it opens the Codex channel that holds the ChatGPT session.
       const client = await this.connect();
+      await this.services.ensureAgent();
       if (client.snapshot().account.state === 'signedIn') return;
       const flow = await client.startLogin();
       const url = new URL(flow.authorizationUrl);

@@ -60,7 +60,7 @@ async function mountDockWithChat() {
     subscribe: () => () => undefined, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
-    ensureStarted: () => Promise.resolve(client), openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
+    client: () => Promise.resolve(client), ensureAgent: () => Promise.resolve(), chatUnavailableReason: () => null, openAuthorization: () => undefined, uuid: () => 'id', now: () => 'now',
   });
   await presenter.activate();
   const root = renderReaderShell(mounted.body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId });

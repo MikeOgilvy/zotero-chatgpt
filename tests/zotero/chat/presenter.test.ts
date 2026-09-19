@@ -75,9 +75,10 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
       storageLocation: SHAREABLE_STORAGE_LOCATION,
     })),
     subscribe: l => { listeners.add(l); return () => { listeners.delete(l); }; }, close: async () => {},
+    reconnect: vi.fn(() => Promise.resolve()),
   };
   const states: PresenterState[] = [];
-  const services = { ensureStarted: vi.fn(() => Promise.resolve(client)), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
+  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
@@ -129,14 +130,13 @@ describe('conversation presenter', () => {
     f.presenter.setQuestion('Both windows'); expect(first).toBe('Both windows'); expect(second).toBe('Both windows');
     unbindFirst(); f.presenter.setQuestion('Second window'); expect(second).toBe('Second window'); expect(first).toBe('Both windows'); unbindSecond();
   });
-  it('re-subscribes to a replaced runtime client after retry and applies its events', async () => {
+  it('retry reconnects the shared client and keeps applying its events', async () => {
     const f = fixture(); await f.presenter.activate(); await f.presenter.explain(citationA); const requestId = f.sent[0]!.requestId;
-    const replacement = new Set<(event: ReaderEvent) => void>();
-    const second: ReaderClient = { ...f.client, subscribe: listener => { replacement.add(listener); return () => { replacement.delete(listener); }; } };
-    f.services.ensureStarted.mockImplementation(() => Promise.resolve(second));
     await f.presenter.retry();
-    expect(replacement.size).toBe(1);
-    for (const listener of replacement) listener({ type: 'delta', requestId, messageId: 'a1', text: '重连', seq: 50, conversationId: f.conversation().id, at: 'now' });
+    // Retry is an Agent action on the shared client: it reconnects that client instead of replacing it.
+    expect(f.client.reconnect).toHaveBeenCalledTimes(1);
+    expect(f.services.client).toHaveBeenCalledTimes(1);
+    f.emit({ type: 'delta', requestId, messageId: 'a1', text: '重连' });
     expect(f.last().conversation?.messages.at(-1)?.text).toBe('重连');
   });
   it('keeps propagating state and never throws when one bound view fails', async () => {
@@ -401,7 +401,8 @@ describe('conversation presenter', () => {
   });
   it('when signed out, More details keeps the citation, opens the official login and resumes that single explain after login', async () => {
     const f = fixture({ signedIn: false }); await f.presenter.activate();
-    expect(f.last().conversation).toBeNull(); expect(f.client.current).not.toHaveBeenCalled();
+    // Local restore is Codex-independent: the stored chat is shown before any sign-in.
+    expect(f.last().conversation).not.toBeNull(); expect(f.client.current).not.toHaveBeenCalled();
     await f.presenter.explain(citationA);
     expect(f.sent).toHaveLength(0); expect(f.services.openAuthorization).toHaveBeenCalledWith('https://auth.openai.com/authorize?x=1'); expect(f.last().pendingExplain?.id).toBe(citationA.id);
     f.setRuntime({ account: { state: 'signedIn', displayLabel: 'ChatGPT' }, models: [model] }); await settle();
@@ -425,7 +426,7 @@ describe('conversation presenter', () => {
     await f.presenter.openConversation(original); expect(f.last().draft.citations).toEqual([citationA]); expect(f.last().draft.question).toBe('问题');
   });
   it('reports a runtime start failure and allows a deliberate retry', async () => {
-    const f = fixture(); f.services.ensureStarted.mockRejectedValueOnce(new Error('Unable to prepare the bundled Codex runtime'));
+    const f = fixture(); f.services.client.mockRejectedValueOnce(new Error('Unable to prepare the bundled Codex runtime'));
     await f.presenter.activate(); expect(f.last().connection).toBe('error'); expect(f.last().message).toContain('Unable to prepare');
     await f.presenter.retry(); expect(f.last().connection).toBe('ready'); expect(f.last().conversation).not.toBeNull();
   });
