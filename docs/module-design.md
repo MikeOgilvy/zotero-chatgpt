@@ -1,6 +1,6 @@
 # 架构与契约
 
-本文描述 **0.4.0a15 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a16 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
@@ -55,6 +55,14 @@ send()/enqueue() → ReaderService.dispatch(run)
 - 临时诊断：`ReaderOptions.trace` 注入 sink 后，每条线都从真实对象取值（冻结 mode、被选中的 executor、`run.turnId !== null`），例如 `[conversation] mode=chat`、`[execution-router] executor=chat`、`[chat] request_started request=…`、`[agent] runtime_started=false`。默认关闭。
 - 验收测试 `tests/core/execution-boundary.test.ts` 在进程边界上把 `thread/start`、`thread/resume`、`turn/start`、`turn/interrupt` 当作 Codex Agent 运行时的入口断点：chat 请求（含带 PDF、超长提示、动作指令）从不命中，agent 请求必然命中。
 
+### 惰性 Codex 启动与运行时分界（0.4.0a16）
+
+打开侧栏、列会话、在 Chat 档发送都**不启动、不连接、不握手**随包 Codex：组合根只用本地 `StoragePort` 构造唯一的共享 `ReaderClient`，构造本身不发任何 RPC。`createReaderClient` 因此不再是「构造即握手」，它接受两种 `ManagedProcess | ConnectCodex`：测试注入已生成进程，生产注入惰性连接器。
+
+- 随包 Codex 的进程与协议通道由 `zotero/src/runtime/agent-runtime.ts` 的 `AgentRuntime` 独占，并且**按需**创建。只有 Agent 档需要的路径（切到 Agent 档、`refreshAccount`、官方登录、Agent 发送、retry）才取 `connection()`；`prepareRuntime`（建私有目录、校验并解包随包可执行文件）与 spawn 也只在那一刻发生。`connection()` 复用仍然可用的通道，失败或 `restart()` 后才释放旧句柄再取新通道；`stop()` 是唯一终止入口。
+- Chat 路径没有隐藏回退。`ChatTransport` 不可用时，`ReaderService.send` 在任何 Codex 检查（账户、模型目录、线程）之前就以 `UNSUPPORTED_INTERACTION` 明确拒绝；`hasAgentWork` 让对账与补发路径对纯 Chat 会话不触达上游。缺 runtime 时本地历史、草稿、改名与删除仍然可用。
+- 运行时分界由真实宿主验证，而不是只由单元测试断言：`tests/host/context-driver.js` 在专用 profile 上先只走 Chat（断言没有任何 Codex 进程、私有运行目录不存在），再显式切到 Agent 档（断言目录与进程才出现），并在 Chat 档确认「Responding… / Waiting Ns」不被伪造点亮。证据等级与结果见[进度与验收](progress.md)。
+
 
 ## 分层与依赖方向
 
@@ -77,7 +85,7 @@ packages/zotero          Zotero 适配与 UI
   actions                写入侧：标注、条目、集合成员关系、OA 附件与精确快照撤销
   chat                   Presenter 与视图投影、统一输入、历史/任务/上下文、Markdown 与 KaTeX
   preferences            Zotero 原生偏好设置面板（pane、注册、服务、历史管理节）
-  runtime                本地服务、GeckoStorage、发行资产校验、生成图像加载、进程监督器
+  runtime                本地服务、GeckoStorage、发行资产校验、生成图像加载、按需启动的 Agent 运行时（Codex 进程与协议通道）
 ```
 
 依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。同理，Chat Mode / Agent Mode 不是两个层，而是同一层之上的两种请求策略：Chat Mode 只用只读端口（`reader`/`library`/`codex`/`context`），Agent Mode 额外接入 `core/tasks` 与 `zotero/actions`。这两条策略现在落在 `chat/chat-execution.ts` 与 `chat/agent-execution.ts`：前者不得 import `core/context/coordinator`、`core/tasks`、`zotero/actions` 或能力类型，后者才经 presenter 注入的端口触达 Agent 侧。
@@ -86,7 +94,7 @@ packages/zotero          Zotero 适配与 UI
 
 core 只依赖 contracts。bootstrap/index 负责组装；视图借用服务端口，不持有原始管道或账户目录。关闭 sidebar 或卸载某个视图不结束任务。原生任务、阅读批次和模型请求各自保存状态；它们不以一个仍然打开的阅读器窗口作为存续条件。
 
-本地工作区和原生任务记录可在运行组件未启动、离线或未登录时读取。发送模型请求仍需可用 runtime 和官方登录。监督器只管理自己启动的进程，确认退出后才替换；插件关闭分别停止本地工作和 runtime，一方清理失败不能跳过另一方，也不能提前丢掉仍待终止的进程句柄。阅读协调器停止新派发并等待自己的写入结束后才能交给替代实例。
+本地工作区和原生任务记录可在运行组件未启动、离线或未登录时读取。发送模型请求仍需可用 runtime 和官方登录。**Agent 运行时只管理自己启动的进程**，确认退出后才替换；打开侧栏或停留在 Chat 档不会创建该进程。插件关闭分别停止本地工作和 runtime，一方清理失败不能跳过另一方，也不能提前丢掉仍待终止的进程句柄。阅读协调器停止新派发并等待自己的写入结束后才能交给替代实例。
 
 ## 身份、发送与队列
 

@@ -5,6 +5,7 @@
 - 目标架构以 [模块设计](module-design.md) 与 [产品规格](zotero-chatgpt-user-flow.md) 为准；当前进度与证据边界见 [进度](progress.md)。
 - 本计划遵守 [AGENTS.md](../AGENTS.md)：不改代码、不 push、不安装、不启动 Zotero、不接触真实 profile / library / 认证文件、不读认证文件。以上描述的是 Stage 0 的只读勘察；Stage 1 的代码改动由 owner 于 2026-09-18 单独授权，Stage 2/Stage 3 同样由 owner 于 2026-09-18 授权实施（范围与约束见 §I 与 §L）。
 - 本文件最初作为 Stage 0 唯一新增的文档；Stage 1 起按 §I / §L 落地实现。
+- **历史注记（2026-09-19）**：本文件描述的是各阶段当时的仓库状态。§A.4 与 §A.5 里的 `src/runtime/supervisor.ts`、`createRuntimeSupervisor` 与「启动即建 runtime」的顺序**已不再存在**：0.4.0a16 起随包 Codex 由 `src/runtime/agent-runtime.ts` 的 `AgentRuntime` 按需启动，组合根先用本地存储构造共享 `ReaderClient`（见[模块设计](module-design.md)的“惰性 Codex 启动与运行时分界”）。此注记只标明差异，不重写历史；本文件的迁移/删除仍按 `AGENTS.md` 的“旧文档先迁移有效信息再按文件删除”处理。
 
 ---
 
