@@ -1,195 +1,115 @@
-# 架构与契约
+# 架构与数据契约
 
-本文描述 **0.4.0a18 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述当前工作树的机制，不声明产品已经通过真实服务或最终 XPI 验收。产品要求见 [zotero-chatgpt-user-flow](zotero-chatgpt-user-flow.md)，操作命令见 [development](development.md)，证据见 [progress](progress.md)。
 
-运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
-
-产品默认路径是 **Chat Mode**：在当前 PDF/附件上阅读、推理与问答。**Agent Mode** 是 Codex 执行：`core/tasks` 里的原生任务编排（候选 → 确定性校验 → 审批 → 原生动作 → 结果账本 → 撤销）只在显式工具调用与任务授权时运行。两种模式共用一个会话、一份文档上下文和一套模型展示，但**不共用执行生命周期**：Chat 不创建线程/轮次/任务/审批，也不消耗 Agent 执行额度。默认阅读路径不因 Agent Mode 的存在而改变。
-
-**Chat Mode / Agent Mode 共用同一个文档上下文层。** Reader 产生 Current Document Context（Zotero 书目与附件身份、PDF 文本、当前页、选区、邻近文本、标注、引用与页定位信息），两种模式都从它取数；区别只是该轮是否暴露 `core/tasks` + `zotero/actions` 的写入能力。不存在第二套 reader 管道，模式也不是两个层：
+## 总体边界
 
 ```text
-                               ┌ Chat Mode  → ChatExecutor  → ChatTransport（普通补全）
-Reader → Current Document Context → ExecutionRouter ┤
-                               └ Agent Mode → AgentExecutor → Codex 线程/轮次 → 工具/动作 → 结果
+Zotero Reader sidebar
+├── Chat mode  ── official chatgpt.com browser + constrained page actor
+└── Agent mode ── TypeScript core ── Gecko stdio ── bundled Codex App Server
+                                      │
+                                      └── reviewed ActionTasks ── Zotero native APIs
+
+Shared local context: attachment identity, frozen PDF revision/text, selection and settings
 ```
 
-上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-chatgpt-user-flow.md)。
+Chat 与 Agent 共用本地 Reader 上下文，但不共用远端执行生命周期。ChatGPT 页面拥有自己的登录、对话和 transcript；Agent 会话存储 Codex thread/turn。插件只能保存规范化的官方 ChatGPT conversation URL 绑定，不能把两端历史合并成一个虚构的远端会话。
 
-### Chat Mode 的实际承载：宿主内的 chatgpt.com（0.4.0a18）
+Node 24 只用于构建和测试。运行包保留 Zotero 原生界面 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。模型没有 shell、任意文件、MCP、插件、浏览器或通用 Zotero 工具；它输出的数据必须经过宿主契约。
 
-从 0.4.0a18 起，**发行的 Chat 档不是我们自己的对话实现，而是宿主里的真实 `chatgpt.com` 页面**：侧栏在 Chat 档把宿主创建的 chrome 浏览器面覆盖在 dock 的 slot 上，应用自己拥有会话列表、输入框、流式渲染、模型选择、历史与上传。因此 Chat 档的实际模型请求、流式与取消都由该应用与用户的官方会话完成，本仓库不实现、不代理、不读取这条通道。
-
-```text
-Reader(dock) → slot 几何 ──┐
-                           ├─ chat/embed.ts：主窗口 XUL <browser>（HTML div 承载，按 slot 定位）
-chatgpt.com（远程顶层文档）─┘        └ 不显示时停在屏幕外（不卸载）→ 会话与 cookie 持续
-```
-
-- 承载方式（`packages/zotero/src/chat/embed.ts`）：在主窗口（XUL 文档）用 `createXULElement('browser')` 创建 content 浏览器，带上 Zotero 自身远程页查看器使用的属性集（`type=content`、`remote=false`、`disableglobalhistory`、`maychangeremoteness`、`messagemanagergroup`），把 `src` 在创建时立即设为应用 URL（构造即开始加载），并挂在一个绝对定位的 HTML `div` 上。**为什么不用 iframe**：dock 所在的 reader 文档是 HTML，无法创建 XUL 元素，且远程页面在 iframe 里的加载被站点安全头拒绝——两者都由 `tests/host/embed-driver.js` 在同一宿主上实测记录，而不是推断。
-- 生命周期：dock 关闭、切到 Agent、切换 reader、窗口缩放都只移动那个 div 的几何；应用文档**不被重载、不被销毁**（host 断言同一元素、同一 `currentURI` 跨模式往返）。div 在不可见时停在屏幕外且保持真实尺寸，因为“渲染中的 box”才是文档保持存活的条件。窗口卸载或插件关闭才 `destroy()`。
-- 模式隔离：Chat 档不接触 Agent 执行路径。presenter 以 `chatHostedExternally: true` 装配，因此 Chat 档**不**为原生请求准备 PDF、不初始化 Codex，原生 transcript/composer 仍挂载但被隐藏且不可达（`hidden` 祖先使其无法输入）。切到 Agent 仍是原来的惰性 Codex 路径，字节与行为不变。
-- 抽象端口仍然存在但不是发行路径：`core/chat/executor.ts` + `ChatTransport`（占位、`available=false`）保留为“原生对话实现”的设计位置，本 build 的 Chat 档不经过它；任何“把 `ChatTransport` 接到 Codex 上”的改动都是被禁止的，也是不必要的。
-- **当前 PDF 上下文（Milestone B）**：远程页面是别人的文档，宿主没有受支持的注入通道，因此不采用硬编码选择器/DOM 注入；发行实现是两条**显式用户动作 + 剪贴板**路径，并把“已复制到剪贴板，请粘贴”如实写进状态行（不声称应用已收到）：
-  - `core/chat/document-brief.ts`（纯函数）：论文身份 + 本地已读页文本，超限截断并注明；`DOCUMENT_BRIEF_LIMIT` 默认 12000 字符；单页过长时截断该页而不是交出一个没有正文的块。
-  - `zotero/chat/clipboard-file.ts`：把**当前 PDF 文件本身**以 `application/x-moz-file` 放到系统剪贴板，用户在 ChatGPT 自己的输入框粘贴即可走站点自己的上传路径。写入面与读图面共用同一 `GeckoClipboardAccess` 解析（`clipboardService`），无权限的 realm 返回 `unsupported` 而不是假称已复制。
-  - 选区路径使用 Zotero 自己 `renderTextSelectionPopup` 事件给出的最近一次 citation，不二次读取 reader DOM。
-- 安全边界：页面是远程内容，本仓库不向它注入脚本、不暴露任何 Zotero 特权 API、不读它的表单或凭据；宿主侧只做“创建顶层浏览器面 + 定位 + 剪贴板写入”，cookie 与登录会话由站点自己持有（独立 `.zotero-chatgpt-dev/embed` 树仅用于宿主观察）。
-
-### Chat / Agent 执行路径与能力边界
-
-Stage 8 起，两种模式不再是同一个 `submit()` 里的分支，而是两条具名执行路径，模式调度只看当轮冻结的 `mode`：
+## 分层与依赖
 
 ```text
-submit()  ──mode=chat──▶ chat/chat-execution.ts   只读上下文 + 推理 + 回答
-          └─mode=agent─▶ chat/agent-execution.ts  任务编排 / 多轮阅读 / 工具动作
-```
-
-- `chat/chat-execution.ts` 是 Chat 路径。它拿到只读端口与一次请求，只能拒绝并发出一条请求。它**不**接受任何 Agent 能力参数，也**不** import 阅读协调器（`core/context/coordinator`）、`core/tasks` 或 `zotero/actions`，因此结构上无法创建任务或启动阅读作业。Agent-only 的 skill、明确的库/PDF 变更指令、以及需要多轮阅读的超大上下文，都在这里被拒绝并提示切换到 Agent Mode。
-- `chat/agent-execution.ts` 是 Agent 路径，是唯一会 `planAcquisition` 或 `reading.start`/`reading.enqueue` 的地方。它通过 presenter 注入的 `ports`（`tasks()`/`reading(client)`）触达能力，端口的所有权、缓存与订阅仍在 presenter。
-- `submit()` 只按冻结的 `mode` 调用上述二者之一；共享的文档准备、引用校验、上下文预算与计划仍留在 presenter，两种模式共用。
-- 边界不只由前端保证：会话服务在接受任何请求前调用 `core/chat/mode-boundary.ts` 的 `assertModeBoundary()`，任何 `mode !== 'agent'`（含缺省）却携带 Agent 工作（`batch` 多轮阅读，或非 `read` skill）的请求都以 `UNSUPPORTED_INTERACTION` 拒绝，既不落记录也不起 turn；阅读协调器 `create()` 同样拒绝 Chat 请求，其每一步 `makeRequest()` 又显式把 step 冻结为 `mode: 'agent'`（含恢复旧作业）。因此绕过 presenter 的直接调用也无法以 Chat 创建阅读作业或原生任务；带 PDF 文档、引用与图片的普通只读请求不受影响。
-- `refreshTaskState()` 只在 `state.mode === 'agent'` 时运行；`setMode('agent')` 才按需 hydrate。Chat Mode **不初始化 Agent 能力**（`ActionTasks` 或 `ReadingCoordinator`）覆盖其三条可能触达能力的路径：**发送**（`chat-execution.ts`，结构上无能力）、**刷新**（`refreshTaskState` 按模式门禁）、以及**删除**（见下）。
-- 删除会话时的「未完成原生任务 / 未完成阅读作业」忙碌检查会获取任务端口与阅读端口，因此它受一个显式条件约束：`this.state.mode === 'agent'` **或** `conversationHasAgentWork(conversation)`。后者是 `core/chat/agent-work.ts` 的纯函数，只看该会话自身记录——某个 `message.mode === 'agent'`，或（旧记录）非 `read` 的 `workflow.skill.workflow`，或 `message.batch`（只由阅读协调器写入，因此也覆盖 Stage 6–7 从 Chat 轮次升级出阅读作业那段遗留数据）。文案与拒绝行为不变：仍抛 `BUSY` 且从不调用 `cancel`/`undo`。真实数据里未完成任务/阅读作业必然伴随上述某一种消息，所以纯 Chat 会话的删除不会初始化能力，而任何真实保护都不失效。
-- `chat/capability.ts` 定义唯一的 Agent 能力接口 `AgentCapability`（组合根仍以 `PresenterAgent` 名注入）。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制：Chat 执行模块不得 import 协调器/任务/写入实现，且 `ChatSendContext` 不得含 `agent` 成员——加回该成员会让 `HasAgentMember` 类型断言编译失败。
-- 判定「这是不是一条动作指令」由 `core/chat/action-intent.ts` 的纯函数完成，无模型调用；规则保守，疑问句与主题介词一律判为普通问答。
-
-### Core 执行边界：一个 Router，两个平级 executor
-
-presenter 决定「这一轮是不是动作」；`core/sessions/service.ts`（共享会话控制器）决定「这一轮用哪个执行运行时」。二者之间只有一个选择点：
-
-```text
-send()/enqueue() → ReaderService.dispatch(run)
-                     └ ExecutionRouter.select(run.input.mode)
-                        ├ chat  → ChatExecutor → ChatTransport（抽象端口）
-                        └ agent → AgentExecutor → Codex App Server（线程 / 轮次 / 工具 / 任务）
-```
-
-- 契约在 `contracts/src/execution.ts`：`ExecutionMode`、`ChatRequest`、`ChatContext`、`ChatStreamEvent`（`chat.started` / `chat.delta` / `chat.completed` / `chat.failed` / `chat.cancelled`）、`ChatTransport`、`ChatExecutorPort`、`AgentExecutorPort`。两个 executor 是**平级**类型，没有继承也没有互相包装。
-- `core/conversation/execution-router.ts` 是唯一按 `mode` 选择运行时的地方；缺省或未知 mode 一律是 chat（D3）。别处再出现「按 mode 选运行时」的 `if` 就是把两条路径重新耦合。
-- Chat 路径（`core/chat/executor.ts`）只做一次会话式补全：没有线程、轮次、任务、审批、工具、配额与恢复。它不 import `core/codex`、`core/sessions`、`core/tasks`、`core/context/coordinator`，由 `tests/build/dependency-boundaries.test.ts` 静态强制。
-- **ChatTransport 是尚未落地的平台集成边界。** 本 build 只装 `core/chat/chat-transport.ts` 的诚实占位实现：`available=false`，请求以 `UNSUPPORTED_INTERACTION` 明确失败并提示切到 Agent Mode。它不会退回 Codex，也不是「无工具的 Codex 轮次」；等有受支持的 ChatGPT Chat 传输再实现同一端口，Router、共享控制器与 Agent 运行时都不需要改动。
-- **没有自动升级。** 长提示、整篇 PDF、复杂推导、`contextReport: multi-pass` 都不会把 Chat 变成 Agent。Chat 里出现动作指令时，`chat-action` 与 `assertModeBoundary` 在发送前拒绝并提示切换；模式只由用户显式切换。
-- **事件与取消也分开。** Chat 的响应生命周期走共享的 `ReaderEvent`（`accepted` / `delta` / `messageCompleted` / `completed` / `failed` / `cancelled`）与请求记录（`requestTiming` 的 accepted/firstText/settled、`lastEventAt`），因此「Responding… / Waiting Ns」读的是共享请求状态，不依赖 Agent 的 turn/task 事件；`usage`、`turn/*` 只属于 Agent。Stop 在 Chat 上 abort 本地流并调用 `ChatTransport.cancel`，绝不发 `turn/interrupt`。
-- **恢复策略不同。** 只有被中断的 Agent 请求是 `uncertain`（可能需要 `thread/read` 对账）；被中断的 Chat 请求没有副作用也没有可对账的线程，直接记为 `failed`，不阻塞会话。
-- 临时诊断：`ReaderOptions.trace` 注入 sink 后，每条线都从真实对象取值（冻结 mode、被选中的 executor、`run.turnId !== null`），例如 `[conversation] mode=chat`、`[execution-router] executor=chat`、`[chat] request_started request=…`、`[agent] runtime_started=false`。默认关闭。
-- 验收测试 `tests/core/execution-boundary.test.ts` 在进程边界上把 `thread/start`、`thread/resume`、`turn/start`、`turn/interrupt` 当作 Codex Agent 运行时的入口断点：chat 请求（含带 PDF、超长提示、动作指令）从不命中，agent 请求必然命中。
-
-### 惰性 Codex 启动与运行时分界（0.4.0a16/a17）
-
-打开侧栏、列会话、在 Chat 档发送都**不启动、不连接、不握手**随包 Codex：组合根只用本地 `StoragePort` 构造唯一的共享 `ReaderClient`，构造本身不发任何 RPC。`createReaderClient` 因此不再是「构造即握手」，它接受两种 `ManagedProcess | ConnectCodex`：测试注入已生成进程，生产注入惰性连接器。
-
-- 随包 Codex 的进程与协议通道由 `zotero/src/runtime/agent-runtime.ts` 的 `AgentRuntime` 独占，并且**按需**创建。只有 Agent 档需要的路径（切到 Agent 档、`refreshAccount`、官方登录、Agent 发送、retry）才取 `connection()`；`prepareRuntime`（建私有目录、校验并解包随包可执行文件）与 spawn 也只在那一刻发生。`connection()` 复用仍然可用的通道，失败或 `restart()` 后才释放旧句柄再取新通道；`stop()` 是唯一终止入口。
-- Chat 路径没有隐藏回退。`ChatTransport` 不可用时，`ReaderService.send` 在任何 Codex 检查（账户、模型目录、线程）之前就以 `UNSUPPORTED_INTERACTION` 明确拒绝；`hasAgentWork` 让对账与补发路径对纯 Chat 会话不触达上游。缺 runtime 时本地历史、草稿、改名与删除仍然可用。
-- 运行时分界由真实宿主验证，而不是只由单元测试断言：`tests/host/context-driver.js` 在专用 profile 上先只走 Chat（断言没有任何 Codex 进程、私有运行目录不存在），再显式切到 Agent 档（断言目录与进程才出现），并在 Chat 档确认「Responding… / Waiting Ns」不被伪造点亮。证据等级与结果见[进度与验收](progress.md)。
-
-
-## 分层与依赖方向
-
-目录边界就是模块边界，由 `tests/build/dependency-boundaries.test.ts` 静态强制：
-
-```text
-packages/contracts       领域契约：文献身份、消息、工作区、runtime、原生端口与动作任务
+packages/contracts       纯数据契约与边界校验
         ↑
-packages/core            与宿主无关的领域逻辑
-  codex                  Codex App Server 协议：JSONL、握手、模型/能力/用量、策略、恢复历史
-  sessions               会话、请求哈希、持久化队列、上游线程、取消与对账
-  context                全文/聚焦/分批计划、预算、来源缓存、书目格式化
-  workspace              离线历史、草稿、图片资产、偏好、研究主题、SKILL.md
-  tasks                  动作任务编排：审批、写入意图、结果账本、对账、撤销
+packages/core
+  codex                  App Server 协议、策略、模型与历史对账
+  sessions               本地会话、请求哈希、队列与恢复
+  context                PDF 预算、聚焦与多轮阅读
+  workspace              草稿、设置、skill、历史索引
+  tasks                  审批、写前意图、结果账本、对账与撤销
         ↑
-packages/zotero          Zotero 适配与 UI
-  host                   Zotero 9 私有宿主表面（items/collections/translators/HTTP/file I/O）
-  reader                 当前附件、dock/缩放/选区、文本与版本校验、原文定位、页面图像
-  library                读取侧：引用搜索、条目/附件读取、引文定位、文件名/图钉读取、页面栅格化
-  actions                写入侧：标注、条目、集合成员关系、OA 附件与精确快照撤销
-  chat                   Presenter 与视图投影、统一输入、历史/任务/上下文、Markdown 与 KaTeX
-  preferences            Zotero 原生偏好设置面板（pane、注册、服务、历史管理节）
-  runtime                本地服务、GeckoStorage、发行资产校验、生成图像加载、按需启动的 Agent 运行时（Codex 进程与协议通道）
+packages/zotero
+  reader                 当前附件、版本、选区、定位、缩放与 dock
+  library                只读库查询、选择冻结、集合列表、文件读取
+  actions                原生标注、标签、集合、条目、附件写入
+  chat                   Chat/Agent presenter、官方页面桥与任务投影
+  runtime                GeckoStorage、随包资产和惰性 Codex 进程
 ```
 
-依赖只能向上：contracts 不依赖 core/zotero；core 不依赖 zotero、DOM 或 Node；`reader`/`library` 不依赖 `actions`，`chat` 不依赖 `actions` 实现。`actions` 实现 `NativeActionPort`，其读取方法由 `library` 的 `NativeReaderPort` 提供，所以**只读构建可以完全跳过写入侧**。`agent` 不是层名：工具/动作执行就是 `core/tasks` 加 UI/skill 通过端口驱动的调用。同理，Chat Mode / Agent Mode 不是两个层，而是同一层之上的两种请求策略：Chat Mode 只用只读端口（`reader`/`library`/`codex`/`context`），Agent Mode 额外接入 `core/tasks` 与 `zotero/actions`。这两条策略现在落在 `chat/chat-execution.ts` 与 `chat/agent-execution.ts`：前者不得 import `core/context/coordinator`、`core/tasks`、`zotero/actions` 或能力类型，后者才经 presenter 注入的端口触达 Agent 侧。
+依赖只向上。contracts 不依赖 core/zotero；core 不依赖 DOM、Zotero 或 Node；reader/library/chat 不 import actions 实现。`tests/build/dependency-boundaries.test.ts` 静态检查边界。`core/tasks/controller.ts` 是审批、写入意图和账本的唯一所有者，`zotero/actions/native.ts` 是无状态执行器。
 
-`core/tasks/controller.ts` 是审批与原生写入意图的唯一所有者；`zotero/actions/native.ts` 只是无状态执行器，本身不保存审批或账本状态。
+## Chat 官方页面桥
 
-core 只依赖 contracts。bootstrap/index 负责组装；视图借用服务端口，不持有原始管道或账户目录。关闭 sidebar 或卸载某个视图不结束任务。原生任务、阅读批次和模型请求各自保存状态；它们不以一个仍然打开的阅读器窗口作为存续条件。
+宿主创建一个顶层 XUL browser 承载 `https://chatgpt.com`。页面不显示时移出视口而非销毁，以保留该隔离 profile 内的官方 cookie 和页面会话。Chat 表面与 Agent 原生 transcript 互斥显示。
 
-本地工作区和原生任务记录可在运行组件未启动、离线或未登录时读取。发送模型请求仍需可用 runtime 和官方登录。**Agent 运行时只管理自己启动的进程**，确认退出后才替换；打开侧栏或停留在 Chat 档不会创建该进程。插件关闭分别停止本地工作和 runtime，一方清理失败不能跳过另一方，也不能提前丢掉仍待终止的进程句柄。阅读协调器停止新派发并等待自己的写入结束后才能交给替代实例。
+JSWindowActor 只匹配 `https://chatgpt.com/*` 的顶层 frame。actor 模块通过只允许 content access 的窄 `resource://` substitution 暴露，XPI 中其它运行资产和记录不可读。父/子消息必须同时验证 origin、页面身份、请求 marker、消息形状和当前绑定；lookalike host、HTTP、credentials、异常端口、子 frame 和过期请求均拒绝。
 
-## 身份、发送与队列
+页面 actor 捕获官方输入框的可见发送意图。父进程在动作边界前后复核自动 PDF 文本开关，生成带覆盖说明、冻结 PDF 文本、冻结选区、原问题和随机 marker 的 prompt。actor 只把 prompt 放回可见 composer 并触发同一次官方提交；它不读取回答、认证、cookie 或 transcript。当前真实宿主探测仍未让这条 actor 链路通过，见 progress；代码存在不等于平台接入成功。
 
-`PaperScope` 是持久随机 profile `clientId`、`libraryId`、`attachmentKey` 的组合；数值 itemID 只用于当前宿主查找。标题、文件名或父条目不是附件身份，标签文字也不承担身份。正文与补充材料分别拥有会话和来源。
+官方远端历史只保存 canonical `https://chatgpt.com/c/<id>` 绑定。查询串、fragment、share URL、其它路径和其它 origin 不进入映射。Chat 新会话和 Agent 新会话分别建立各自远端身份。
 
-发送前复制问题、附件/库/profile、PDF 版本、选区、图像、引用、skill 版本、偏好和模型设置。文献内容与第三方 skill 只能提供数据，不能选择原生写入 key、集合、任意路径或新增权限。同名附件、切标签、编辑草稿和下一轮设置不改变已捕获的请求。
+## Agent 请求、运行时与恢复
 
-`requestId` 和输入 SHA-256 共同去重。新请求使用 `hashVersion: 2`，包括明确提供的书目信息；重建时保留字段缺省状态，不能补入另一个标题后改变哈希。旧 V1 哈希按旧规则核对。不同内容复用同一 ID 会被拒绝。
+`RequestMode = 'chat' | 'agent'` 在点击发送/排队时冻结并进入 `hashVersion: 3` 请求哈希。用户消息和 accepted 记录先原子保存，随后才能外发。queued 请求包含模式、PDF、引用、skill、设置及组织选择快照；等待期间 UI 变化不重定向请求。
 
-用户消息与 `accepted` 先保存，`dispatching` 在上游提交前保存，取得 turnId 后进入 `running`。仅持久化且从未派发的 accepted 请求可继续派发一次。dispatching/running 在连接中断后进入 uncertain，通过 `thread/resume` 和 `thread/read` 按请求 ID 对账；超时、重开视图和重启均不自动重发不确定写入。恢复后的上游 item ID 与本地消息绑定，避免把一段部分输出和完整输出存成两条回答。恢复历史与实时事件使用相同的工具活动边界。
+打开侧栏、读取本地会话和停留 Chat 不启动 Codex。只有显式进入 Agent、Agent 登录/发送/重试或恢复 Agent 工作才允许 `AgentRuntime.connection()` 准备私有目录、启动随包进程并握手。普通 `get/select/current` 必须保持本地读取；Chat 打开含旧 Agent 消息的会话也不能隐式恢复 thread 或任务。
 
-同一会话只有一个 activeRequestId。`enqueue` 保存下一问题的完整快照，取消等待项不影响正在执行的请求；取消活动项先检查会话归属，并等待上游终态。`activeBatchId` 使普通问题排在整个多轮阅读批次后面，而非穿插进两次阅读之间。确认取消或结束批次后释放占用；存在活动/不确定轮次时不能强行释放。
+Agent 请求状态为 accepted → dispatching → running → terminal。只对从未派发的 accepted 请求续派一次；dispatching/running 在中断后变为 uncertain，通过 `thread/resume`/`thread/read` 和 request ID 对账，不自动重发。服务端审批或未授权工具活动一律拒绝并关闭受影响连接。
 
-视图先订阅再取快照，只应用 seq 大于 lastSeq 的事件。文本增量约 80ms 合并，消息结束与整个 turn 结束分别处理。改名、分支和重新生成保留来源；新分支不重放原生写入。模型、effort、serviceTier 按轮固定，实际目录不支持的组合会被拒绝。
+## PDF 与高亮任务
 
-## 当前 PDF、引用与预算
+PDF 身份由 `PaperScope(clientId, libraryId, attachmentKey)` 和 `DocumentRevision(fingerprint,size,modifiedAt,sha256)` 共同确定。Reader 从已加载 `getData()` 计算 SHA，并与磁盘文件比较；size/mtime 不变的替换也会使旧坐标失效。
 
-默认只准备当前附件；打开 PDF 可在本地逐页读取，外发发生在发送或已授权任务边界。上下文按“轻量元数据 / 即时 reader 上下文 / 按需全文检索”分层取用，不要求每轮整篇发送；只有预算可容纳且策略允许时才纳入全部授权文本。`@article` 搜索先返回元数据，选定后才读取对应 PDF。`@chat` 是明确消息的有界快照，不递归展开嵌套引用，也不被当作文献原始证据。
+annotate 模型输出只允许 `{candidates:[{quote,pageIndex,reason}]}`。`pageIndex` 不限制搜索范围；程序在冻结 PDF 全局验证 quote 唯一性，最多可靠检查 256 页/2,000,000 规范化字符。唯一结果从 Zotero 原生字符盒生成行矩形；跨页只接受相邻两页。候选重复、历史任务仍拥有同一输出或写入结果不明时，不能分配第二个写 key。
 
-本地文本缓存最多保留 3 份结果，每份 **16 MiB UTF-8 文本**，超过上限要求缩小页范围，不静默裁剪。来源 ID 由文献身份、版本、解析器、页范围和文本摘要确定，LRU 驱逐不会把同一来源变成随机新身份。片段保留来源关联、物理页号、印刷页标签、空白/失败状态及实际覆盖；页内分块或不完整文本使用 partial。
+批准前只持久化 review。批准后先把 reserved key 与 `annotation-create` writing 意图落盘，再调用 `Annotations.saveFromJSON`，最后按 key 读回完整原生快照。适配器在写前重新解析 quote 和 revision，不信任账本坐标。恢复时 writing/unknown 先 inspect，不重发。
 
-本地上限不等于模型窗口。每轮先采用本模型/线程的有效 runtime 窗口报告，否则按固定 runtime/hash 对应的精确 model ID 目录值估算；无可靠值时明确未知。预算为指令、历史、工作流、问题、图像、输出和安全余量预留空间。UTF-8 字节近似 token、图像额度与安全余量均是保守策略，不是 tokenizer 实测、账户容量承诺或图像成本精确值。累计 total usage 不是当前上下文占用。
+原文跳转把第一页 rects 和相邻第二页 `nextPageRects` 一次传给 Reader.navigate；它不调用缩放或旋转方法。撤销要求当前标注仍精确等于写后快照且带本插件 provenance，否则 conflict。
 
-可容纳时发送全部授权文本；否则生成聚焦范围或多轮阅读计划。分批阅读固定原始问题、全部来源、设置及 request IDs，每个 map 和 reduce 使用新的上游线程；中间结果只来自已完成并保存的真实回答。reduce 只接收已完成的来源摘要，不再次堆入全部原文/图片。摘要或共享上下文超预算时暂停并说明，不能截短后冒充完成。最终 diagram 可用已验证图像作为成果；map 仍需文字证据摘要。批次状态与结果哈希另行持久化。
+## 选中文献整理任务
 
-普通连续问答可在同一上游线程复用当前来源；压缩、恢复或失败后重新提供所需来源。缓存不代表服务端永久保留上下文，也不代表免计费。
+选择只从与当前插件实例绑定的 Zotero 主窗口 `ZoteroPane.itemsView.getSelectedItems(false)` 读取。附件、笔记、已删条目和非 regular item 排除；所有 identity 在第一次 await 前复制，去重后限制为同一 library、最多 50 项。每项立即通过 `inspectOrganizationItem` 冻结书目、标签、集合、附件、时间与完整签名。
 
-## 本地记录与兼容性
+模型上下文是安全投影：`itemIndex + metadata + tags + existing collectionIndexes`，以及 `collectionIndex + name`。完整 item/collection key、时间和签名只在本地持久化并参与 v3 请求哈希。模型返回只允许 `{itemIndex,tags,collectionIndexes}`；索引必须落在冻结数组内，不能指定 native key。
 
-基础目录是 Zotero profile 下的 `zotero-chatgpt/v1/`。目录中的 v1 是命名空间，不是所有文件的 schema 版本。
+`planOrganization` 把索引映射成具体 before 快照和同库 collection targets。批准时先落 `organization-add` 意图；native transaction 重新核对 item、library 和 collection 可编辑且当前快照等于 before，然后只新增标签和集合成员关系。写后读回必须等于期望 tags/collections，且整理范围外的 signature 不变。
 
-| 路径（相对基础目录） | 内容 |
+账本保存 before、after、实际 addedTags 与 addedCollectionKeys。撤销前先验证这个 delta 与 before/after 语义一致，再要求当前状态精确等于 after；只删除实际新增值。后续人工编辑、部分人工删除、丢失写后快照或无法证明所有权分别成为 conflict/uncertain，不采用当前“看起来相同”的值。
+
+当前范围只包含已有可编辑集合。创建/重命名/删除集合、删除标签、移动或删除条目、改元数据和操作附件不属于整理任务授权。
+
+## 文献获取任务
+
+acquire 输入只接受 DOI/公开 URL 和一个明确 collection。预览阶段不保存 translator 结果；先查 DOI 重复。批准后可创建固定字段白名单条目，或只给已存在条目新增 collection membership。OA 下载逐跳验证公网 URL、MIME、大小、第一页标题/DOI、补充材料标志和哈希；无法确认不创建附件。
+
+## 持久化与兼容
+
+根目录为 profile 下 `zotero-chatgpt/v1/`：
+
+| 路径 | 内容 |
 | --- | --- |
-| `records/papers/<client>-<library>-<attachment>.json` | 附件的会话索引 |
-| `records/conversations/<conversation>.json`、同名 `.jsonl` | 会话快照与顺序请求状态日志 |
-| `records/conversations/<conversation>.<document>.source.json` | 同一会话内不可变来源正文；消息保存来源摘要和引用关联 |
-| `records/workspace/settings.json` | 偏好、研究主题、外观及 skill 注册元数据 |
-| `records/workspace/skills/<skill-id>/SKILL.md` | 用户/导入 skill 的唯一正文 |
-| `records/workspace/drafts/<client>-<library>-<attachment>-<conversation-or-unbound>.json` | 草稿、引用、设置、滚动位置和页范围 |
-| `records/workspace/assets/<sha256>.json` | 按内容去重的草稿图片资产 |
-| `records/tasks/<task>.json` | 原生任务候选、审批、写入意图与精确结果快照 |
-| `records/reading/<job>.json`、`<job>.input.json`、`<job>.cancel.json` | 阅读批次状态、独立冻结输入/计划和取消标记 |
-| `account/` | 插件专用 Codex home 和官方授权数据；生成输出只允许显式子目录 |
-| `home/`、`scratch/`、`tmp/` | 运行环境、受限工作目录与临时文件，彼此为同级目录 |
+| `records/papers/*.json` | 附件会话索引 |
+| `records/conversations/*.json/.jsonl` | schema 1/2/3 会话与请求日志 |
+| `records/conversations/*.<document>.source.json` | 不可变 PDF 来源正文 |
+| `records/workspace/settings.json`、`skills/*/SKILL.md`、`drafts/*` | 设置、skill 与草稿 |
+| `records/tasks/*.json` | 原生任务 review、意图、结果与撤销账本 |
+| `records/reading/*` | 多轮阅读任务 |
+| `account/` | 插件专用 Codex home 与官方授权数据 |
+| `home/`、`scratch/`、`tmp/` | 运行环境、受限工作目录与临时文件 |
 
-新会话和新发送写 schema 3；读取兼容 schema 1、2、3。schema 1 的旧消息不要求文献正文；schema 2 的独立 source 文件结构继续使用；schema 3 增加工作流、引用来源、批次、用量、生成图像和上游消息关联。原生任务、阅读任务和工作区使用各自 schema，不跟随会话版本编号变化。`+` / New chat 标签在第一次发送之前不调用 `store.create`：未发送的 composer 只占屏幕上的 unbound 草稿，store 按调用方给出的标题原样写入，不再从兄弟记录派生 “讨论 N”。
+schema 1/2/3 会话继续可读；缺失字段不被补写后冒充旧格式。新字段均为可选，旧 v3 请求在没有 organization 时保持原哈希。`NativeItemSnapshot` 保持旧 acquisition 形状，组织任务使用扩展 `NativeOrganizationItemSnapshot`。未知 task kind、损坏文件或哈希不匹配安全拒绝并保留原文件。
 
-加载时校验来源身份、引用关联、哈希和数据形状。缺失/损坏文件、未知 schema 与不支持的旧二进制会明确拒绝，保留原文件，不重置为空；这叫安全拒绝，不是“旧版本可继续写新记录”。降级/回滚的实际行为必须在隔离副本上验证。GeckoStorage 使用受限相对路径、符号链接检查、原子快照和 flush；请求日志支持坏尾恢复，但不宣称断电时目录级 fsync 或跨文件事务保证。
+GeckoStorage 使用受限相对路径、符号链接检查、原子替换和 flush；不承诺断电目录级 fsync 或跨文件事务。账户目录不进入普通备份或诊断。
 
-SKILL.md 正文与注册表不再维护两份副本。读取时从文件重新解析有限 frontmatter 和正文；UI 编辑与外部编辑通过 revision 冲突检查。旧内嵌正文迁移到 SKILL.md 后从注册表移除。内置 skill 来自随包定义，可启停，修改需复制。导入默认不启用；脚本、MCP、依赖等未支持能力不会执行，不能因导入或声明 permissions 获得权限。
+## 宿主适配与安全
 
-## 原生任务与撤销
+- `getPageData({pageIndex})` / `getPageLabels2()` 提供字符与页标签；跨 realm 参数复制，`partial` 的 Zotero 基础数据语义不冒充文本截断。
+- `Reader.open` 和后台引用保留已有用户 tab；只关闭插件仍拥有且未被用户接管的临时 tab。
+- PDF.js Xray 只对已确认宿主页对象 waive；渲染不改变缩放、焦点或当前页。
+- 原生标注调用自身 `saveTx`，不能再套外层 DB transaction；标签/集合整理使用一个 native transaction 和一次 item save。
+- strict config 禁用 shell、网络搜索、外部工具、MCP、插件、记忆、多 agent 和任意环境继承；diagram 仅在明确选择时临时开启已核实的图像能力。
+- 资料、网页、PDF、模型和 skill 都不能授予权限。诊断只输出白名单状态，不输出正文、签名、认证或原始 stdio。
 
-标注先将严格的模型候选 JSON 解析为原文引用，再按冻结 PDF 版本校验唯一文字位置和真实矩形。无法定位、歧义或几何不可靠时只保留建议。`planAnnotations` 按 modelRequestId 持久化去重；再次打开视图或恢复同一模型请求不会复制候选任务。准备阶段的取消会忽略迟到的只读结果。
-
-只有任务批准后才执行被选中的写入。每次原生操作先保存 writing 意图；创建条目/标注先保留 key，修改已有条目保存其原快照。PDF 附件的 key 由宿主生成，账本先保存父条目和获取意图，成功后记录实际附件 key；结果不明时不能假定未写入而重试。`Annotations.saveFromJSON` 是按 key 更新的接口，适配器拒绝陌生已有 key；它自行调用 saveTx，不能外套另一个 DB transaction。原生写入有单独账本，不伪造为 assistant 消息。
-
-获取流程使用显式 DOI/链接和目标 collection：原生翻译器返回未保存元数据 → DOI 查重 → 用户选择 → 创建或添加已有条目的集合成员关系 → 尝试 OA 附件。批准的元数据只接受固定字段，不携带 notes、tags、relations、路径或执行权限。下载只使用原生 OA 结果和经过逐跳校验的匿名 HTTP；PDF 类型、首页标题/DOI、补充材料标志及哈希不能确认时，保留正确元数据并报告未获取/不确定。OA 解析器提供的版本标签不冒充独立版本鉴定。
-
-撤销只处理账本中仍与精确快照一致的输出：标注保护后续文字/颜色/标签等编辑；集合撤销只移除本任务添加的成员关系；新条目和附件在字段、文件哈希及子标注检查后移入原生垃圾箱，保留文件。未知写入先检查保留 key/结果，不盲目重试。丢失完整写后快照、无法判断后续人工修改的结果保持 uncertain，不把当前人工内容重新认作可撤销的任务成果。
-
-## 运行时、图像与宿主适配
-
-固定运行时由 `runtime/manifest.ts` 锁定 **Codex 0.154.0 / darwin arm64**、归档/二进制 SHA-256 和许可证。`app-server --strict-config`、配置值与来源校验、空执行环境目录、`CODEX_EXEC_SERVER_URL=none` 禁用 shell、外部工具、MCP、插件、记忆和任意环境继承。普通阅读不启用图像生成；明确选择 diagram 后才开启对应线程能力，并用运行时特性报告核实。下一次普通阅读恢复禁止生成，实时和恢复历史中的未授权工具活动都关闭连接。
-
-输入图像每张 **2 MiB**，生成输出每张 **16 MiB**，不为适配上限自动缩图。输出只接受已完成 imageGeneration 的可验证 PNG/JPEG/WebP 内联数据或显式白名单目录中的文件，校验编码、magic、大小、路径和符号链接；未识别的编码不算成功。生成图与原文截图有不同 origin。已保存且验证过的生成图优先用于恢复，不能因运行时临时文件过期抹去已确认成果。侧栏附图走 `pickFile`（原生多选：文本文件成为 reference 正文，PNG/JPEG/GIF/WebP 成为图像附件）和剪贴板/拖放；`captureRegion` 已删除。剪贴板读按路由继续：reader 窗口的 `nsIClipboard` 抛错不得吞掉后续的插件 realm 读取；macOS 截图 TIFF 仅在 `imgITools` 能解码并编码为 PNG 时附加，否则诚实拒绝。`capturePage` 端口仍保留给 native-action 驱动。
-
-Zotero 9.0.6 的关键适配集中在 reader：
-
-- `getPageData({pageIndex})` / `getPageLabels2()` 提供原生字符和标签，跨 realm 参数通过 Cu.cloneInto 传递。getPageData 的 native `partial: true` 恒指基础页面数据尚未增加引用/overlay 信息；它不表示字符提取被截断。适配器只映射已知字符/边界，不转发这个不同语义的标志。
-- 通过 `await getData()` 取得已加载 PDF 字节，在插件 realm 计算一次 SHA；每次捕获/校验比较磁盘 SHA，防止 size/mtime 不变的替换。选区和页面图像保留 documentRevision；旧坐标不能落到新文件上。
-- Reader.open 的 tabID 指向已有容器。后台引用先通过原生 Tabs.add 保留容器，再打开 reader；只关闭仍由自己拥有、未被用户接管的标签。已有用户标签保持原状。
-- await 得到的 PDFPageProxy 可能被 Xray 隐去 getViewport/render/view；只对已确认的宿主页对象用 Cu.waiveXrays，再以原生坐标渲染，不改变 PDF 缩放或焦点。
-- 原生 Preferences 面板注册 `defaultXUL: true`；pane 脚本 `mount` 包在 try/catch 里，onload 抛错不能中断 Zotero 的 `_loadPane` 切走其它面板（否则侧栏高亮本插件、内容仍是上一面板）。
-
-已有 **12 项 native 驱动通过**的证据来自工作树生产模块被打包进独立测试 driver（`tests/host/native-action-driver.ts`）。它证明对应原生 API 流程，不等于最终 0.4 XPI 的 UI 接线、真实图像生成、升级或完整平台验收；详情仅在[进度与验收](progress.md)维护。
-
-账户、缓存、历史、原生标注、删除聊天和卸载相互独立。诊断只输出白名单版本/状态/错误码，不含正文、图像、认证或原始管道内容。认证目录不进入普通备份/报告；没有跨设备同步承诺。
+历史阶段、旧产物和旧证据从 Git 基线 `3ea1070` 及其父提交查询；当前文档不再复制阶段流水。
