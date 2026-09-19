@@ -21,6 +21,7 @@ async function runHostSmoke(config) {
     try { return await Promise.race([global.getActor(actor).sendQuery(name, data), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${actor} ${name} timed out.`)), timeout); })]); }
     finally { if (timer !== null) clearTimeout(timer); }
   };
+  const canonicalURL = value => { try { const url = new URL(String(value || '')); return url.protocol === 'https:' && url.hostname === 'chatgpt.com' && !url.username && !url.password && (!url.port || url.port === '443') ? `${url.origin}${url.pathname.replace(/\/$/u, '')}` : null; } catch { return null; } };
   try {
     await Zotero.initializationPromise;
     if (!/^[A-Za-z0-9-]{8,128}$/u.test(config.webResumeConversationId) || !/^RUN-[a-f0-9]{24}$/u.test(config.webResumeToken)) throw new Error('Resume identifiers invalid.');
@@ -53,7 +54,22 @@ async function runHostSmoke(config) {
     await until(() => doc()?.querySelector('[data-zchatgpt-toggle]'), 'toolbar-toggle'); doc().querySelector('[data-zchatgpt-toggle]').click();
     await until(() => { const section = doc()?.querySelector('[data-zchatgpt-embed]'); return section && !section.hidden ? section : null; }, 'hosted-chat-visible', 60000);
     const browser = await until(() => [...win.document.querySelectorAll('[data-zchatgpt-embed-browser]')].find(node => node.getAttribute('data-zchatgpt-context-binding') === binding), 'bound-official-browser', 60000);
-    await until(() => String(browser.currentURI?.spec || '').replace(/\/$/u, '') === targetURL, 'persisted-official-conversation-restored', 120000);
+    step = 'persisted-official-conversation-restored'; const restoreStarted = Date.now(); let restored = false; let lastSave = 0; const restoreSamples = [];
+    while (Date.now() - restoreStarted < 120000) {
+      const current = canonicalURL(browser.currentURI?.spec || ''); let productStatus = 'unavailable'; let structure = null;
+      try { const value = await boundedQuery(browser, 'ZoteroChatGPTOfficialChat', 'probe', {}, 5000); productStatus = typeof value?.status === 'string' ? value.status : 'invalid-response'; } catch { productStatus = 'unavailable'; }
+      try {
+        const value = await boundedQuery(browser, 'ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.webResumeToken }, 5000);
+        structure = value?.status === 'ok' ? { draftLength: Number(value.draftLength ?? 0), streaming: value.streaming === true, inputReady: value.inputReady === true, sendReady: value.sendReady === true } : { status: value?.status ?? 'invalid-response' };
+      } catch { structure = { status: 'unavailable' }; }
+      const mode = doc()?.querySelector('[data-zchatgpt-mode-switch]')?.dataset.zchatgptMode ?? null;
+      const sample = { ms: Date.now() - restoreStarted, currentCanonicalURL: current, targetMatched: current === targetURL, bindingMatched: browser.getAttribute('data-zchatgpt-context-binding') === binding, mode, productStatus, structure };
+      const prior = restoreSamples.at(-1); if (!prior || JSON.stringify({ ...prior, ms: 0 }) !== JSON.stringify({ ...sample, ms: 0 })) restoreSamples.push(sample);
+      report.restoreDiagnostics = { status: current === targetURL ? 'restored' : 'waiting', samples: restoreSamples.slice(-60), latest: sample };
+      if (Date.now() - lastSave >= 5000 || current === targetURL) { lastSave = Date.now(); await save(); }
+      if (current === targetURL) { restored = true; break; } await delay(500);
+    }
+    if (!restored) throw new Error('Timed out: persisted-official-conversation-restored');
     const codexBefore = await ownCodexProcesses(profile);
     const baseline = await until(async () => {
       try {
