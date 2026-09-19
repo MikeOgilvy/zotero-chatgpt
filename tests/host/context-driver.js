@@ -355,7 +355,11 @@ async function runHostSmoke(config) {
     if (codexBefore !== null) {
       await check('chat-only-sidebar-use-starts-no-codex-process', codexBefore.length === 0, { matches: codexBefore, runtimeRoot });
       const chatOnlyDirs = { home: await runtimeDir('home'), scratch: await runtimeDir('scratch'), account: await runtimeDir('account'), tmp: await runtimeDir('tmp') };
-      await check('chat-only-sidebar-use-does-not-prepare-codex', Object.values(chatOnlyDirs).every(exists => exists === false), { runtimeRoot, ...chatOnlyDirs });
+      // A `--live` run is already signed in, so that tree existed before the sidebar opened and its
+      // presence proves nothing about lazy startup. Report that instead of asserting a precondition
+      // the run does not satisfy; the process check above still applies unchanged.
+      if (config.cleanRuntimeTree === true) await check('chat-only-sidebar-use-does-not-prepare-codex', Object.values(chatOnlyDirs).every(exists => exists === false), { runtimeRoot, ...chatOnlyDirs });
+      else await skip('chat-only-sidebar-use-does-not-prepare-codex', `The private runtime tree must already exist for this run (signed in for --live), so the virgin-tree precondition does not hold: ${JSON.stringify(chatOnlyDirs)}`);
     }
     click(modeButton('agent'));
     await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'mode-agent-selected');
@@ -378,6 +382,13 @@ async function runHostSmoke(config) {
     await check('chat-mode-keeps-its-own-status-after-agent',
       CHAT_UNAVAILABLE_COPY.includes(statusLine()?.textContent ?? '') && authButton('login')?.hidden === true,
       { status: statusLine()?.textContent ?? null, loginHidden: authButton('login')?.hidden ?? null });
+    // Every request boundary below this point is an Agent request. This build has no ChatTransport,
+    // so a Chat send can only be refused before it reaches any request logic; the blank-context
+    // refusal and the live model turn must therefore run with Agent selected. Selecting it here is
+    // also harmless in a signed-out run: the runtime is already started and is reused.
+    click(modeButton('agent'));
+    await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'mode-agent-restored-for-request-boundaries');
+    await check('agent-mode-restored-before-request-boundaries', pressed('agent') && !pressed('chat'), { mode: modeSwitch().dataset.zchatgptMode });
     // The unsent tab is the New chat copy in either interface language. It must not be named after
     // the paper: paper identity is carried by the attachment/context system, not by a tab label.
     const unsentTab = () => panel()?.querySelector('[data-zchatgpt-current-title]');
