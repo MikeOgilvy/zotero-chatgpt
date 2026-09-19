@@ -18,10 +18,17 @@ describe('citation', () => {
     const value = validateCitation(citationA);
     expect(value).toEqual(citationA); expect(value).not.toBe(citationA); expect(value.positions[0]!.rects).not.toBe(citationA.positions[0]!.rects);
   });
+  it('keeps an ordered two-page selection for a native annotation spanning adjacent pages', () => {
+    const positions = [citationA.positions[0]!, { pageIndex: citationA.positions[0]!.pageIndex + 1, rects: [[0, 0, 1, 1] as [number, number, number, number]] }];
+    const value = validateCitation({ ...citationA, positions });
+    expect(value.positions).toEqual(positions); expect(value.positions).not.toBe(positions);
+  });
   it.each<[string, (c: Citation) => unknown]>([
     ['empty text', c => ({ ...c, text: '' })],
     ['text over 8000 code points', c => ({ ...c, text: '文'.repeat(8001) })],
-    ['two page positions', c => ({ ...c, positions: [c.positions[0], { pageIndex: 4, rects: [[0, 0, 1, 1]] }] })],
+    ['nonadjacent page positions', c => ({ ...c, positions: [c.positions[0], { pageIndex: c.positions[0]!.pageIndex + 2, rects: [[0, 0, 1, 1]] }] })],
+    ['duplicate page positions', c => ({ ...c, positions: [c.positions[0], { pageIndex: c.positions[0]!.pageIndex, rects: [[0, 0, 1, 1]] }] })],
+    ['three page positions', c => ({ ...c, positions: [c.positions[0], { pageIndex: c.positions[0]!.pageIndex + 1, rects: [[0, 0, 1, 1]] }, { pageIndex: c.positions[0]!.pageIndex + 2, rects: [[0, 0, 1, 1]] }] })],
     ['no positions', c => ({ ...c, positions: [] })],
     ['no rects', c => ({ ...c, positions: [{ pageIndex: 3, rects: [] }] })],
     ['non-finite rect', c => ({ ...c, positions: [{ pageIndex: 3, rects: [[0, 0, Number.NaN, 1]] }] })],
