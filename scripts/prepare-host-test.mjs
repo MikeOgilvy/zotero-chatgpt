@@ -111,7 +111,22 @@ await mkdir(join(profile, 'extensions'), { recursive: true });
 await mkdir(dataDir, { recursive: true });
 await mkdir(join(pdfPath, '..'), { recursive: true });
 const verificationToken = `RUN-${randomBytes(12).toString('hex')}`;
-await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', verificationToken));
+const liveCoreFlows = argumentsList.includes('--live-core-flows');
+const liveCorePageProse = [
+  [
+    'The prior distribution weights plausible latent states before the synthetic observation arrives.',
+    'The likelihood scores that observation under each candidate state.',
+    'Bayes rule combines the prior and likelihood into a normalized posterior distribution.',
+    'Posterior uncertainty remains high when several states explain the observation similarly.',
+  ],
+  [
+    'A posterior predictive distribution turns latent uncertainty into predictions for later observations.',
+    'Calibration compares predicted probabilities with long-run empirical frequencies.',
+    'A systematic prediction error can expose a misspecified likelihood or a missing latent state.',
+    'An intervention is informative when competing models predict measurably different outcomes.',
+  ],
+];
+await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', verificationToken, liveCoreFlows ? { pageProse: liveCorePageProse } : undefined));
 // Runtime records and account state have their own lifetime. Preparing a host driver must never
 // clear them, even in the dedicated context profile. A separate, verified-new tree is required for
 // checks whose precondition is that no runtime has been prepared yet.
@@ -148,7 +163,7 @@ if (twoVersion) {
 }
 const config = {
   live: liveRun,
-  liveCoreFlows: argumentsList.includes('--live-core-flows'),
+  liveCoreFlows,
   loginWaitSeconds: Number(readRawOption('--login-wait-seconds') ?? 0),
   // True only for an atomically reserved --run-id tree that did not exist before this preparation.
   cleanRuntimeTree,

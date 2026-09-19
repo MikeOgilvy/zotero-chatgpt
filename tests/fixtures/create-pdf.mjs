@@ -5,24 +5,27 @@ import { fileURLToPath } from 'node:url';
 
 const escapePdf = (text) => text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
 
-export function createFixturePdf(title = 'ZCHATGPT synthetic reading fixture', verificationToken = 'ORCHID-72') {
+export function createFixturePdf(title = 'ZCHATGPT synthetic reading fixture', verificationToken = 'ORCHID-72', options = {}) {
+  const defaultProse = [
+    'A prior describes beliefs before a measurement is observed.',
+    'A likelihood describes the measurement under each candidate state.',
+    'The posterior combines both quantities and is normalized.',
+    '',
+    'This paragraph is a stable anchor for sidebar layout tests.',
+    'Opening the sidebar should keep the current passage in view.',
+    'Closing it must not jump back to a previously visited page.',
+    '',
+    'The source title and attachment identity are separate values.',
+    'Two PDF attachments may belong to the same bibliographic item.',
+    'They must keep separate reader contexts.',
+  ];
   const streams = [0, 1].map((page) => {
     const lines = [
       title,
       `Synthetic page ${page + 1} - development testing only`,
       page === 1 ? `Hidden verification token on this page: ${verificationToken}.` : 'Calibration constant for this synthetic example: 37.',
       '',
-      'A prior describes beliefs before a measurement is observed.',
-      'A likelihood describes the measurement under each candidate state.',
-      'The posterior combines both quantities and is normalized.',
-      '',
-      'This paragraph is a stable anchor for sidebar layout tests.',
-      'Opening the sidebar should keep the current passage in view.',
-      'Closing it must not jump back to a previously visited page.',
-      '',
-      'The source title and attachment identity are separate values.',
-      'Two PDF attachments may belong to the same bibliographic item.',
-      'They must keep separate reader contexts.',
+      ...(options.pageProse?.[page] ?? defaultProse),
       '',
       ...Array.from({ length: 14 }, (_, i) => `Anchor line ${page + 1}.${i + 1}: preserve selection and reading position.`),
     ];
