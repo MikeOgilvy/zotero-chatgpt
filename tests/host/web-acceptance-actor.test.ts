@@ -39,6 +39,7 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     },
   });
   expect(Object.keys(result)).not.toEqual(expect.arrayContaining(['transcript', 'text', 'formValue', 'cookie', 'href', 'pathname', 'search']));
+  expect(JSON.stringify(result)).not.toMatch(/hidden transcript text|temporary=secret|Send message|Start voice mode/u);
 });
 
 it('rejects a lookalike origin and an invalid expected token without inspecting messages', () => {
