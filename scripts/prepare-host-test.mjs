@@ -112,6 +112,7 @@ await mkdir(dataDir, { recursive: true });
 await mkdir(join(pdfPath, '..'), { recursive: true });
 const verificationToken = `RUN-${randomBytes(12).toString('hex')}`;
 const liveCoreFlows = argumentsList.includes('--live-core-flows');
+const webLive = argumentsList.includes('--web-live');
 const liveCorePageProse = [
   [
     'The prior distribution weights plausible latent states before the synthetic observation arrives.',
@@ -164,6 +165,7 @@ if (twoVersion) {
 const config = {
   live: liveRun,
   liveCoreFlows,
+  webLive,
   loginWaitSeconds: Number(readRawOption('--login-wait-seconds') ?? 0),
   // True only for an atomically reserved --run-id tree that did not exist before this preparation.
   cleanRuntimeTree,
@@ -208,24 +210,42 @@ if (installDriver) {
   if (!driverPath) throw new Error('Host stage is missing its driver');
   const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZchatgptHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
   const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZchatgptHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
+  const webAcceptanceContents = webLive ? await readFile(join(root, 'tests/host/web-acceptance-actor.mjs')) : null;
   const driverSourceHash = createHash('sha256').update(driverContents).digest('hex');
   config.driverSourceHash = driverSourceHash;
-  const driverVersion = `0.0.${(Number.parseInt(driverSourceHash.slice(0, 8), 16) % 2147483646) + 1}`;
+  if (webAcceptanceContents) config.webAcceptanceSourceHash = createHash('sha256').update(webAcceptanceContents).digest('hex');
+  const packagedDriverHash = createHash('sha256').update(driverContents).update(webAcceptanceContents ?? '').digest('hex');
+  const driverVersion = `0.0.${(Number.parseInt(packagedDriverHash.slice(0, 8), 16) % 2147483646) + 1}`;
   const manifest = {
     manifest_version: 2,
     name: 'ZCHATGPT isolated host test driver',
     version: driverVersion,
     applications: { zotero: { id: 'zchatgpt-host-test@local', update_url: 'https://zotero-chatgpt-dev.invalid/driver-updates.json', strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
   };
+  const webAcceptanceStartup = webLive ? `
+    const resource = Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler);
+    const resourceFlags = Ci.nsISubstitutingProtocolHandler.ALLOW_CONTENT_ACCESS | Ci.nsISubstitutingProtocolHandler.RESOLVE_JAR_URI;
+    resource.setSubstitutionWithFlags("zotero-chatgpt-web-acceptance", Services.io.newURI(data.rootURI + "content/web-acceptance/"), resourceFlags);
+    try { ChromeUtils.unregisterWindowActor("ZoteroChatGPTWebAcceptance"); } catch {}
+    ChromeUtils.registerWindowActor("ZoteroChatGPTWebAcceptance", {
+      parent: { esModuleURI: "resource://zotero-chatgpt-web-acceptance/web-acceptance-actor.mjs" },
+      child: { esModuleURI: "resource://zotero-chatgpt-web-acceptance/web-acceptance-actor.mjs" },
+      matches: ["https://chatgpt.com/*"], messageManagerGroups: ["zchatgpt"], allFrames: false,
+    });` : '';
+  const webAcceptanceShutdown = webLive ? `
+  try { ChromeUtils.unregisterWindowActor("ZoteroChatGPTWebAcceptance"); } catch {}
+  try { Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler).setSubstitution("zotero-chatgpt-web-acceptance", null); } catch {}` : '';
   const bootstrap = `function startup(data) {
   Zotero.initializationPromise.then(async () => {
     Components.utils.importGlobalProperties(['AbortController', 'atob', 'btoa']);
     const scope = { Zotero, ChromeUtils, PathUtils, IOUtils, Services, TextDecoder, TextEncoder, crypto, URL, fetch, AbortController, atob, btoa, setTimeout, clearTimeout, Cu: Components.utils, Cc: Components.classes, Ci: Components.interfaces };
+    ${webAcceptanceStartup}
     Services.scriptloader.loadSubScriptWithOptions(data.rootURI + "driver.js", { target: scope, ignoreCache: true });
     await scope.runHostSmoke(${JSON.stringify(config)});
   }).catch(error => Zotero.logError(error));
 }
-function shutdown() {}
+function shutdown() {${webAcceptanceShutdown}
+}
 function install() {}
 function uninstall() {}
 `;
@@ -234,6 +254,7 @@ function uninstall() {}
     ['manifest.json', JSON.stringify(manifest)],
     ['bootstrap.js', bootstrap],
     ['driver.js', driverContents],
+    ...(webAcceptanceContents ? [['content/web-acceptance/web-acceptance-actor.mjs', webAcceptanceContents]] : []),
   ]) zip.addBuffer(Buffer.isBuffer(contents) ? contents : Buffer.from(contents), name);
   const written = pipeline(zip.outputStream, createWriteStream(driverOut));
   zip.end();

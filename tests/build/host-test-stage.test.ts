@@ -26,6 +26,8 @@ async function prepareScriptSandbox(): Promise<{ root: string; script: string; x
       .map(file => cp(path.join(repositoryRoot, 'scripts', file), path.join(root, 'scripts', file))),
     cp(path.join(repositoryRoot, 'tests/fixtures/create-pdf.mjs'), path.join(root, 'tests/fixtures/create-pdf.mjs')),
     cp(path.join(repositoryRoot, 'tests/host/context-driver.js'), path.join(root, 'tests/host/context-driver.js')),
+    cp(path.join(repositoryRoot, 'tests/host/embed-driver.js'), path.join(root, 'tests/host/embed-driver.js')),
+    cp(path.join(repositoryRoot, 'tests/host/web-acceptance-actor.mjs'), path.join(root, 'tests/host/web-acceptance-actor.mjs')),
     cp(path.join(repositoryRoot, 'runtime/manifest.ts'), path.join(root, 'runtime/manifest.ts')),
     writeFile(path.join(root, 'packages/zotero/manifest.json'), JSON.stringify({ version: '0.0.0-test' })),
     writeFile(path.join(root, 'subject.xpi'), 'synthetic test artifact'),
@@ -43,6 +45,13 @@ async function readArchiveEntry(filePath: string, entryName: string): Promise<st
     return Buffer.concat(chunks).toString('utf8');
   }
   throw new Error(`Missing archive entry ${entryName}`);
+}
+
+async function listArchiveEntries(filePath: string): Promise<string[]> {
+  const zipFile = await yauzl.openPromise(filePath);
+  const entries: string[] = [];
+  for await (const entry of zipFile.eachEntry()) entries.push(entry.fileName);
+  return entries;
 }
 
 async function select(argv: string[]): Promise<{ stage: string; driver: string | null; installDriver: boolean }> {
@@ -261,6 +270,32 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--embed', '--native'])).rejects.toThrow();
     await expect(select(['--embed', '--live'])).rejects.toThrow();
     await expect(select(['--context', '--embed'])).rejects.toThrow();
+  });
+
+  it('gates one official-web acceptance turn behind an explicit isolated embed mode', async () => {
+    await expect(select(['--embed', '--web-live'])).resolves.toMatchObject({ stage: 'embed', driver: 'tests/host/embed-driver.js', installDriver: true });
+    await expect(select(['--web-live'])).rejects.toThrow(/requires --embed/u);
+    await expect(select(['--context', '--web-live'])).rejects.toThrow(/requires --embed/u);
+    await expect(select(['--embed', '--web-live', '--watch-seconds', '30'])).rejects.toThrow(/cannot be combined/u);
+  });
+
+  it('packages the test-only web actor only for the explicit web-live run', async () => {
+    const sandbox = await prepareScriptSandbox();
+    try {
+      const driverXpi = path.join(sandbox.root, '.zotero-chatgpt-dev/embed/profile/extensions/zchatgpt-host-test@local.xpi');
+      await execFileAsync(process.execPath, [sandbox.script, '--embed', sandbox.xpi], { cwd: sandbox.root });
+      expect(await listArchiveEntries(driverXpi)).not.toContain('content/web-acceptance/web-acceptance-actor.mjs');
+
+      await execFileAsync(process.execPath, [sandbox.script, '--embed', '--web-live', sandbox.xpi], { cwd: sandbox.root });
+      expect(await listArchiveEntries(driverXpi)).toContain('content/web-acceptance/web-acceptance-actor.mjs');
+      const bootstrap = await readArchiveEntry(driverXpi, 'bootstrap.js');
+      expect(bootstrap).toContain('ZoteroChatGPTWebAcceptance');
+      expect(bootstrap).toContain('resource://zotero-chatgpt-web-acceptance/web-acceptance-actor.mjs');
+      expect(bootstrap).toContain('setSubstitutionWithFlags');
+      expect(bootstrap).toContain('"webLive":true');
+    } finally {
+      await rm(sandbox.root, { recursive: true, force: true });
+    }
   });
 
   it('selects the S5 restart driver', async () => {

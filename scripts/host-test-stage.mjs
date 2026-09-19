@@ -44,11 +44,14 @@ export function selectHostStage(argv) {
   const selected = EXCLUSIVE.filter(name => argv.includes(`--${name}`));
   const runId = readRunId(argv);
   const liveCoreFlows = argv.includes('--live-core-flows');
+  const webLive = argv.includes('--web-live');
   const loginWaitSeconds = readLoginWaitSeconds(argv);
   if (runId && (selected.length !== 1 || selected[0] !== 'context')) throw new Error('--run-id requires --context');
   if (runId && argv.includes('--live')) throw new Error('--run-id cannot be combined with --live');
   if (liveCoreFlows && (selected.length !== 1 || selected[0] !== 'context' || !argv.includes('--live'))) throw new Error('--live-core-flows requires --context --live');
   if (loginWaitSeconds !== undefined && !liveCoreFlows) throw new Error('--login-wait-seconds requires --live-core-flows');
+  if (webLive && (selected.length !== 1 || selected[0] !== 'embed')) throw new Error('--web-live requires --embed');
+  if (webLive && ['--watch-seconds', '--surface-probes', '--capability-probe', '--url'].some(flag => argv.includes(flag))) throw new Error('--web-live cannot be combined with URL, watch, or comparison probes');
   if (argv.includes('--native') && (acceptance || argv.includes('--live') || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--native requires only the dedicated --context driver');
   if (argv.includes('--live') && (acceptance || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--live requires only the dedicated --context driver');
   const manualContext = acceptance && selected.length === 1 && selected[0] === 'context';

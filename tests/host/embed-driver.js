@@ -843,6 +843,89 @@ async function runHostSmoke(config) {
     await check('product-official-chat-actor-reaches-the-composer',
       product.actorProbe.status === 'ready' && product.actorProbe.error === null,
       product.actorProbe);
+    if (config.webLive) {
+      report.step = 'product-official-chat-web-live';
+      product.webLive = { status: 'checking-readiness', maxModelTurns: 1, modelTurnsStarted: 0, transcriptReturned: false, authDataRead: false, cookieDataRead: false, timeline: [] };
+      const boundedQuery = async (actorName, name, data, timeout = 5000) => {
+        const browser = embedBrowser(); const global = browser?.browsingContext?.currentWindowGlobal;
+        if (!global) throw new Error('The hosted page has no current WindowGlobal.');
+        let timer = null;
+        try {
+          const value = await Promise.race([
+            global.getActor(actorName).sendQuery(name, data),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${actorName} ${name} timed out.`)), timeout); }),
+          ]);
+          return { value, global, browser };
+        } finally { if (timer !== null) clearTimeout(timer); }
+      };
+      const ownCodexProcesses = async () => {
+        const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
+        const child = await Subprocess.call({ command: '/bin/ps', arguments: ['-axo', 'pid=,args='], stderr: 'pipe' });
+        const decoder = new TextDecoder(); let output = '';
+        for (let bytes = await child.stdout.read(); bytes.byteLength !== 0; bytes = await child.stdout.read()) output += decoder.decode(bytes, { stream: true });
+        output += decoder.decode(); await child.wait();
+        return output.split('\n').filter(line => line.includes(`${config.profile}/zotero-chatgpt/`) && line.includes(' app-server')).map(line => line.trim().slice(0, 220));
+      };
+      const before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+      const baseline = before.value;
+      product.webLive.baseline = baseline;
+      const ready = baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true && baseline.sendReady === true;
+      if (!ready) {
+        product.webLive.status = 'blocked'; product.webLive.blockedStage = 'official-input-send-readiness'; product.webLive.reason = baseline?.reason ?? 'official-input-or-send-unavailable';
+        product.notRun.push('conversation-send', 'streaming-render'); await save();
+      } else {
+        const consent = doc.querySelector('[data-zchatgpt-action="continue-with-pdf"]');
+        if (consent && !consent.hidden) { consent.click(); await until(() => consent.hidden, 'web-live-pdf-disclosure-acknowledged', 30000); product.webLive.pdfDisclosureAcknowledged = true; }
+        else product.webLive.pdfDisclosureAcknowledged = false;
+        const codexBefore = await ownCodexProcesses();
+        const globalBeforeSubmit = before.global;
+        const question = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
+        product.webLive.status = 'submitting'; product.webLive.modelTurnsStarted = 1; await save();
+        const submitted = await boundedQuery('ZoteroChatGPTOfficialChat', 'submitQuestion', { question }, 90000);
+        product.webLive.productSubmit = submitted.value && typeof submitted.value === 'object'
+          ? { status: submitted.value.status ?? 'invalid-response', reason: submitted.value.reason ?? null }
+          : { status: 'invalid-response', reason: null };
+        product.webLive.sameWindowGlobalAtSubmit = submitted.global === globalBeforeSubmit;
+        if (submitted.value?.status === 'blocked') {
+          product.webLive.status = 'blocked'; product.webLive.blockedStage = 'product-submit'; product.webLive.reason = submitted.value.reason ?? 'blocked'; await save();
+        } else {
+          await check('product-web-live-submission-accepted', submitted.value?.status === 'accepted', { ...product.webLive.productSubmit, sameWindowGlobalAtSubmit: product.webLive.sameWindowGlobalAtSubmit });
+          product.notRun = product.notRun.filter(name => !['conversation-send', 'streaming-render'].includes(name));
+          product.webLive.status = 'waiting-for-official-assistant';
+          const started = Date.now(); const deadline = started + 180000; let latest = baseline;
+          while (Date.now() < deadline) {
+            try {
+              const sample = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+              latest = sample.value;
+              product.webLive.timeline.push({
+                ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true,
+                inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, streaming: latest?.streaming === true,
+                userMarkerMessages: Number(latest?.userMarkerMessages ?? 0), assistantMessages: Number(latest?.assistantMessages ?? 0),
+                latestAssistantContainsToken: latest?.latestAssistantContainsToken === true,
+              });
+              if (latest?.status === 'ok' && latest.officialURL === true && latest.userMarkerMessages > baseline.userMarkerMessages && latest.assistantMessages > baseline.assistantMessages && latest.latestAssistantContainsToken === true && latest.streaming === false) break;
+            } catch (error) { product.webLive.timeline.push({ ms: Date.now() - started, status: 'query-error', error: message(error).slice(0, 200) }); }
+            product.webLive.timeline = product.webLive.timeline.slice(-120); await save(); await delay(500);
+          }
+          const codexAfter = await ownCodexProcesses();
+          product.webLive.timeline = product.webLive.timeline.slice(-120);
+          product.webLive.result = {
+            officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null,
+            userMarkerDelta: Number(latest?.userMarkerMessages ?? 0) - Number(baseline.userMarkerMessages ?? 0),
+            assistantDelta: Number(latest?.assistantMessages ?? 0) - Number(baseline.assistantMessages ?? 0),
+            latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
+            codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
+          };
+          await check('product-web-live-official-answer-uses-random-pdf-token',
+            product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com'
+            && product.webLive.result.userMarkerDelta === 1 && product.webLive.result.assistantDelta >= 1
+            && product.webLive.result.latestAssistantContainsToken && !product.webLive.result.streaming
+            && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0,
+            product.webLive.result);
+          product.webLive.status = 'passed'; await save();
+        }
+      }
+    }
     // Recorded, not asserted: hit testing a chrome document over an out-of-process frame is not a
     // stable contract, so the composited result is what the human step looks at.
     try {
@@ -1135,7 +1218,7 @@ async function runHostSmoke(config) {
       await save();
     }
 
-    report.status = 'completed';
+    report.status = report.product?.webLive?.status === 'blocked' ? 'blocked' : 'completed';
     report.finishedAt = new Date().toISOString();
     await save();
   } catch (error) {
