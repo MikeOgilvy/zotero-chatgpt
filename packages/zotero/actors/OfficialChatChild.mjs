@@ -22,6 +22,17 @@ function inside(node, container) {
   return node === container || Boolean(node && container?.contains?.(node));
 }
 
+/**
+ * The rich-text composer is re-rendered from the page's own editor state after `insertText`, and that
+ * re-render rewrites block/line whitespace (in one observed host the newline between two blocks was
+ * dropped entirely). Comparing the two readings exactly would therefore read the page's own
+ * formatting as an owner edit. Only whitespace is ignored; any real character change still fails the
+ * comparison, and the request marker is required separately.
+ */
+function sameRenderedText(left, right) {
+  return String(left).replace(/\s+/gu, '') === String(right).replace(/\s+/gu, '');
+}
+
 function safeMobileForm(document, composer) {
   if (composer?.localName !== 'textarea' || composer.id !== MOBILE_COMPOSER_ID) return null;
   const form = composer.closest?.('form');
@@ -208,9 +219,9 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
         this.sendAsyncMessage('status', { status: 'context-blocked', marker: prepared.marker, reason: 'invalid-response' });
         return { status: 'blocked', reason: 'invalid-response' };
       }
-      const button = await this.waitForSend(originalDocument, originalWindow, composer, insertedText);
+      const button = await this.waitForSend(originalDocument, originalWindow, composer, insertedText, prepared.marker);
       if (!button) {
-        const reason = readChatGPTComposer(composer) === text ? 'submit-missing' : 'draft-changed';
+        const reason = sameRenderedText(readChatGPTComposer(composer), text) ? 'submit-missing' : 'draft-changed';
         this.sendAsyncMessage('status', { status: reason === 'submit-missing' ? 'submit-missing' : 'context-blocked', marker: prepared.marker ?? null, reason });
         return { status: 'blocked', reason };
       }
@@ -231,7 +242,7 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
       clickSend();
       if (!await this.waitForConsumption(prepared.marker, originalDocument, originalWindow, composer, insertedText)) {
         const retry = sendButton(originalDocument, composer);
-        if (retry && !retry.disabled && readChatGPTComposer(composer) === insertedText) {
+        if (retry && !retry.disabled && sameRenderedText(readChatGPTComposer(composer), insertedText)) {
           this.replaying = true;
           try { retry.click(); }
           finally { originalWindow.setTimeout(() => { this.replaying = false; }, 0); }
@@ -255,7 +266,7 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
         if (this.document !== originalDocument || this.contentWindow !== originalWindow || !isChatGPTDocument(originalDocument)) { resolve(true); return; }
         if (hasAcceptedRequestMarker(originalDocument, marker)) { resolve(true); return; }
         if (originalDocument.querySelector(STOP_SELECTOR)) { resolve(true); return; }
-        if (readChatGPTComposer(composer) !== expectedText) { resolve(true); return; }
+        if (!sameRenderedText(readChatGPTComposer(composer), expectedText)) { resolve(true); return; }
         if (Date.now() - started >= CONSUME_WINDOW_MS) { resolve(false); return; }
         originalWindow.setTimeout(check, 50);
       };
@@ -276,12 +287,15 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
     });
   }
 
-  waitForSend(originalDocument, originalWindow, composer, expectedText) {
+  waitForSend(originalDocument, originalWindow, composer, expectedText, marker) {
     const started = Date.now();
     return new Promise(resolve => {
       const check = () => {
         if (this.document !== originalDocument || this.contentWindow !== originalWindow || !isChatGPTDocument(originalDocument)) { resolve(null); return; }
-        if (readChatGPTComposer(composer) !== expectedText) { resolve(null); return; }
+        const current = readChatGPTComposer(composer);
+        // The marker, not raw equality, proves this is still our own frozen submission.
+        if (!current.includes(`[Zotero request ${marker}]`)) { resolve(null); return; }
+        if (!sameRenderedText(current, expectedText)) { resolve(null); return; }
         const button = sendButton(originalDocument, composer);
         if (button && !button.disabled) { resolve(button); return; }
         if (Date.now() - started >= SEND_READY_TIMEOUT_MS) { resolve(null); return; }

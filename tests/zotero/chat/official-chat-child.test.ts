@@ -205,4 +205,36 @@ describe('official ChatGPT child send transaction', () => {
     await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted', attempts: 1 });
     expect(clicks).toBe(1);
   });
+
+  it('accepts the page re-rendering the inserted rich text before the send control appears', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen\n\nwith\n\n\nbreaks [Zotero request marker-normalized]', marker: 'marker-normalized' });
+    current.send.remove();
+    // The real rich-text editor re-renders from its own state after insertText and collapses the
+    // blank lines. That is the page's own formatting, not an owner edit.
+    current.window.setTimeout(() => {
+      current.composer.textContent = 'frozen\nwith\nbreaks [Zotero request marker-normalized]';
+      const late = current.composer.ownerDocument.createElement('button'); late.dataset.testid = 'send-button';
+      late.addEventListener('click', () => {
+        const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user';
+        message.textContent = '[Zotero request marker-normalized]'; current.doc.body.append(message);
+      });
+      current.composer.closest('form')!.append(late);
+    }, 60);
+
+    await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted', attempts: 1 });
+  });
+
+  it('still refuses to send when the page replaced the frozen text with real different words', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-edited]', marker: 'marker-edited' });
+    current.send.remove();
+    current.window.setTimeout(() => {
+      current.composer.textContent = 'the owner typed something else entirely';
+      const late = current.composer.ownerDocument.createElement('button'); late.dataset.testid = 'send-button';
+      current.composer.closest('form')!.append(late);
+    }, 40);
+
+    await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'blocked', reason: 'draft-changed' });
+  });
 });
