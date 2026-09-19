@@ -5,6 +5,7 @@ import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/
 import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type ReaderEvent, type SendInput } from '../../../packages/contracts/src/index.ts';
 import type { ReaderReference, ReaderSkill, ReaderWorkspace, PickedFile, SavedDraft, WorkspaceSettings } from '../../../packages/contracts/src/workspace.ts';
 import type { ActionTaskRecord, ActionTasks } from '../../../packages/contracts/src/tasks.ts';
+import type { NativeOrganizationItemSnapshot } from '../../../packages/contracts/src/native.ts';
 import type { ReadingJob } from '../../../packages/core/src/context/coordinator.ts';
 import { defaultSettings } from '../../../packages/core/src/workspace/skills.ts';
 import { paperA, paperB, citationA, imageA, settings } from '../../contracts/factories.ts';
@@ -13,6 +14,7 @@ import { documentA } from '../../contracts/document-fixture.ts';
 
 const userSkill: ReaderSkill = { id: 'user-study', name: 'Study', description: 'Study the supplied source', version: '1.0', revision: 'revision-one', markdown: '# Study\nPreserve notation.', origin: 'user', enabled: true, workflow: 'read', permissions: [], unsupportedDependencies: [] };
 const reference: ReaderReference = { id: 'other-paper', kind: 'article', label: 'Paper B', paper: paperB, identity: { title: 'Paper B', authors: [] }, capturedAt: '2026-09-12T00:00:00Z' };
+const selectedItem: NativeOrganizationItemSnapshot = { clientId: paperA.clientId, libraryId: paperA.libraryId, key: 'ITEMONE1', metadata: { itemType: 'journalArticle', title: 'Selected paper', creators: [{ creatorType: 'author', name: 'Ada' }] }, tags: ['existing'], collectionKeys: [], attachmentKeys: [], dateModified: 'now', contentSignature: 'full-native-snapshot', organizationSignature: 'non-organization-fields' };
 const copy = <T>(value: T): T => structuredClone(value);
 /** Assemble only the Agent halves a test needs, the way the composition root supplies both. */
 const agentPort = (overrides: Partial<PresenterAgent>): PresenterAgent => ({
@@ -47,7 +49,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     snapshot: () => copy(runtime), observe: listener => { listener(copy(runtime)); return () => undefined; }, refreshAccount: () => Promise.resolve(), startLogin: () => Promise.reject(new Error('No login in tests')), cancelLogin: () => Promise.resolve(),
     current: vi.fn(() => Promise.resolve(copy(conversation))), peekCurrent: vi.fn(() => Promise.resolve(copy(conversation))), newConversation: vi.fn(() => { saveConversation({ ...conversation, id: 'aaaaaaaa-0000-4000-8000-000000000002', messages: [], activeRequestId: null, queuedRequestIds: [], lastSeq: 0 }); return Promise.resolve(copy(conversation)); }),
     list: () => Promise.resolve(copy([...conversations.values()].filter(item => item.paper.attachmentKey === paperA.attachmentKey))), get: id => { const found = conversations.get(id); return found ? Promise.resolve(copy(found)) : Promise.reject(new ReaderError('NOT_FOUND', 'Unknown')); }, select: (_paper, id) => { const value = conversations.get(id); if (!value) return Promise.reject(new Error('Unknown')); conversation = value; return Promise.resolve(copy(value)); },
-    send: vi.fn<ReaderClient['send']>(input => { const target = conversations.get(input.conversationId)!; sent.push(copy(input)); persistConversation({ ...target, activeRequestId: input.requestId, lastSeq: target.lastSeq + 1, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, text: input.question, settings: input.settings, citations: input.citations, status: 'completed', ...(input.images ? { images: input.images } : {}), ...(input.mode ? { mode: input.mode } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.document ? { document: { id: input.document.id, revision: input.document.revision, parserVersion: input.document.parserVersion, totalPages: input.document.totalPages, pages: input.document.pages.map(page => ({ pageIndex: page.pageIndex, pageLabel: page.pageLabel, status: page.status })), textBytes: input.document.pages.reduce((sum, page) => sum + new TextEncoder().encode(page.text).length, 0) } } : {}), ...(input.references ? { references: input.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; }) } : {}) }] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
+    send: vi.fn<ReaderClient['send']>(input => { const target = conversations.get(input.conversationId)!; sent.push(copy(input)); persistConversation({ ...target, activeRequestId: input.requestId, lastSeq: target.lastSeq + 1, messages: [...target.messages, { id: `u-${sent.length}`, requestId: input.requestId, role: 'user', phase: null, text: input.question, settings: input.settings, citations: input.citations, status: 'completed', ...(input.images ? { images: input.images } : {}), ...(input.mode ? { mode: input.mode } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.organization ? { organization: input.organization } : {}), ...(input.document ? { document: { id: input.document.id, revision: input.document.revision, parserVersion: input.document.parserVersion, totalPages: input.document.totalPages, pages: input.document.pages.map(page => ({ pageIndex: page.pageIndex, pageLabel: page.pageLabel, status: page.status })), textBytes: input.document.pages.reduce((sum, page) => sum + new TextEncoder().encode(page.text).length, 0) } } : {}), ...(input.references ? { references: input.references.map(reference => { const metadata = { ...reference }; delete metadata.document; return metadata; }) } : {}) }] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
     enqueue: vi.fn<NonNullable<ReaderClient['enqueue']>>(input => { queued.push(copy(input)); saveConversation({ ...conversation, queuedRequestIds: [...(conversation.queuedRequestIds ?? []), input.requestId] }); return Promise.resolve({ requestId: input.requestId, state: 'accepted' as const, replay: false }); }),
     request: (_conversation, requestId) => Promise.resolve({ requestId, state: 'completed', replay: false }), cancel: vi.fn<ReaderClient['cancel']>((_conversation, requestId) => Promise.resolve({ requestId, state: 'cancelled' as const, replay: false })),
     deleteConversation: () => Promise.resolve(copy(conversation)),
@@ -55,7 +57,7 @@ function fixture(options: { offline?: boolean; document?: boolean; searchTimeout
     branchConversation: vi.fn<NonNullable<ReaderClient['branchConversation']>>((_id, messageId) => { saveConversation({ ...conversation, id: 'bbbbbbbb-0000-4000-8000-000000000003', activeRequestId: null, parentConversationId: conversation.id, forkMessageId: messageId, messages: [] }); return Promise.resolve(copy(conversation)); }),
     diagnostics: () => Promise.resolve({ pluginVersion: 'test', runtimeVersion: 'test', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }), subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, close: () => Promise.resolve(),
   };
-  const library = { search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportImage: vi.fn(() => Promise.resolve()) };
+  const library = { selectedItems: vi.fn(() => Promise.resolve([copy(selectedItem)])), collections: vi.fn(() => Promise.resolve([{ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Topic A' }, { clientId: paperA.clientId, libraryId: 99, collectionKey: 'OTHER001', name: 'Other library' }])), search: vi.fn(() => Promise.resolve([copy(reference)])), read: vi.fn((value: ReaderReference) => Promise.resolve({ ...copy(value), document: { ...copy(documentA), paper: paperB } })), open: vi.fn(() => Promise.resolve()), pickFile: vi.fn<() => Promise<PickedFile>>(() => Promise.resolve({ references: [], images: [] })), exportImage: vi.fn(() => Promise.resolve()) };
   let id = 0;
   const services: PresenterServices = { client: vi.fn(() => options.offline ? Promise.reject(new Error('Runtime unavailable')) : Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: () => null, openAuthorization: () => undefined, uuid: () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++id).padStart(12, '0')}`, now: () => '2026-09-12T00:00:00Z', getWorkspace: () => Promise.resolve(workspace), library, openHistory: vi.fn(() => Promise.resolve()), ...(options.searchTimeoutMs === undefined ? {} : { searchTimeoutMs: options.searchTimeoutMs }), ...(options.document ? { document: { prepare: () => Promise.resolve(copy(documentA)), validate: () => Promise.resolve(), readEnabled: () => true, writeEnabled: () => {} } } : {}) };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Paper A'), services);
@@ -250,7 +252,7 @@ function readingPort(conversationId: string) {
 function taskPort(conversationId: string) {
   const tasks: ActionTaskRecord[] = [];
   const base = () => ({ schemaVersion: 1 as const, id: 'aaaaaaaa-1111-4000-8000-000000000001', conversationId, question: '', state: 'review' as const, createdAt: 'now', updatedAt: 'now', revision: 1 });
-  const port: ActionTasks = { list: () => Promise.resolve(copy(tasks)), get: id => Promise.resolve(copy(tasks.find(task => task.id === id)!)), subscribe: () => () => {}, planAnnotations: vi.fn<ActionTasks['planAnnotations']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'annotations', paper: input.paper, documentRevision: input.revision, ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planAcquisition: vi.fn<ActionTasks['planAcquisition']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'acquisition', target: input.target, items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), approve: vi.fn<ActionTasks['approve']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), cancel: vi.fn<ActionTasks['cancel']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), reconcile: vi.fn<ActionTasks['reconcile']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), undo: vi.fn<ActionTasks['undo']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))) };
+  const port: ActionTasks = { list: () => Promise.resolve(copy(tasks)), get: id => Promise.resolve(copy(tasks.find(task => task.id === id)!)), subscribe: () => () => {}, planAnnotations: vi.fn<ActionTasks['planAnnotations']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'annotations', paper: input.paper, documentRevision: input.revision, ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planAcquisition: vi.fn<ActionTasks['planAcquisition']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'acquisition', target: input.target, items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), planOrganization: vi.fn<ActionTasks['planOrganization']>(input => { const task: ActionTaskRecord = { ...base(), question: input.question, kind: 'organization', ...(input.modelRequestId ? { modelRequestId: input.modelRequestId } : {}), items: [] }; tasks.push(task); return Promise.resolve(copy(task)); }), approve: vi.fn<ActionTasks['approve']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), cancel: vi.fn<ActionTasks['cancel']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), reconcile: vi.fn<ActionTasks['reconcile']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))), undo: vi.fn<ActionTasks['undo']>(id => Promise.resolve(copy(tasks.find(task => task.id === id)!))) };
   return { port, tasks };
 }
 function smallBudget(): ReturnType<NonNullable<PresenterServices['contextBudget']>> {
@@ -370,6 +372,42 @@ it('reports invalid annotation candidate output and creates no review task', asy
   await vi.waitFor(() => expect(f.presenter.snapshot().message).toMatch(/task input is invalid/iu));
   expect(t.port.planAnnotations).not.toHaveBeenCalled();
   expect(f.presenter.snapshot().tasks).toEqual([]); f.presenter.dispose();
+});
+
+it('freezes the native selection and routes a natural organization request into one review task', async () => {
+  const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+  f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
+  await f.presenter.activate(); f.presenter.setMode('agent');
+  f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
+  expect(f.library.selectedItems).toHaveBeenCalledTimes(1); expect(f.library.collections).toHaveBeenCalledTimes(1);
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]).toMatchObject({ mode: 'agent', workflow: { skill: { id: 'builtin-organize', workflow: 'organize' } }, organization: { selection: [selectedItem], collections: [{ collectionKey: 'COLLECT1', name: 'Research / Topic A' }] } });
+  expect(f.sent[0]).not.toHaveProperty('document');
+  expect(f.presenter.snapshot().draft.skillId).toBeNull();
+  const requestId = f.sent[0]!.requestId;
+  const text = JSON.stringify({ candidates: [{ itemIndex: 0, tags: ['predictive-coding'], collectionIndexes: [0] }] });
+  f.emit({ type: 'messageCompleted', requestId, messageId: 'answer', finalText: text, phase: 'final' });
+  f.emit({ type: 'completed', requestId, messageId: 'answer', finalText: text });
+  await vi.waitFor(() => expect(t.port.planOrganization).toHaveBeenCalledTimes(1));
+  expect(t.port.planOrganization).toHaveBeenCalledWith({ conversationId: f.conversation().id, question: '按主题打标签，并归入合适的集合。', modelRequestId: requestId, selection: [selectedItem], collections: [{ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Topic A' }], proposals: [{ itemIndex: 0, tags: ['predictive-coding'], collectionIndexes: [0] }] });
+  expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
+it('freezes Agent mode and the native organization scope when Queue is clicked', async () => {
+  const f = fixture(); f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
+  await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('按主题打标签，并归入合适的集合。');
+  const queued = f.presenter.queueDraft(); f.presenter.setMode('chat'); await queued;
+  expect(f.queued).toHaveLength(1);
+  expect(f.queued[0]).toMatchObject({ mode: 'agent', organization: { selection: [selectedItem], collections: [{ collectionKey: 'COLLECT1' }] }, workflow: { skill: { workflow: 'organize' } } });
+  expect(f.library.selectedItems).toHaveBeenCalledTimes(1); f.presenter.dispose();
+});
+
+it('reports a failed selection freeze and keeps the organization draft', async () => {
+  const f = fixture(); f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
+  f.library.selectedItems.mockRejectedValueOnce(new ReaderError('INVALID_REQUEST', 'Select Zotero items first.'));
+  await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
+  expect(f.sent).toHaveLength(0); expect(f.presenter.snapshot().draft.question).toBe('按主题打标签，并归入合适的集合。');
+  expect(f.presenter.snapshot().message).toBe('Select Zotero items first.'); f.presenter.dispose();
 });
 
 it('refuses a write workflow in the default Chat mode instead of sending it', async () => {
@@ -537,6 +575,20 @@ it('recovers completed annotation output after a restart gap without re-planning
   restoredAgain.setMode('agent');
   const unbind = restoredAgain.bind(() => {}); unbind(); await Promise.resolve(); await Promise.resolve();
   expect(t.port.planAnnotations).toHaveBeenCalledTimes(1); restoredAgain.dispose();
+});
+
+it('recovers organization proposals from the persisted frozen selection only after entering Agent mode', async () => {
+  const f = fixture(); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+  f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
+  await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
+  const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ itemIndex: 0, tags: ['topic-a'], collectionIndexes: [0] }] });
+  f.saveConversation({ ...f.conversation(), activeRequestId: null, messages: [...f.conversation().messages, { id: 'saved-organization-answer', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text }] });
+  f.presenter.dispose(); f.library.selectedItems.mockResolvedValue([{ ...selectedItem, key: 'ITEMTWO2' }]);
+  const restored = new ConversationPresenter(presenterContext(paperA, 'Paper A'), f.services); await restored.activate();
+  expect(t.port.planOrganization).not.toHaveBeenCalled(); restored.setMode('agent');
+  await vi.waitFor(() => expect(t.port.planOrganization).toHaveBeenCalledTimes(1));
+  expect(t.port.planOrganization).toHaveBeenCalledWith(expect.objectContaining({ modelRequestId: requestId, selection: [selectedItem] }));
+  expect(f.library.selectedItems).toHaveBeenCalledTimes(1); restored.dispose();
 });
 
 it('keeps a new chat usable during older preparation and clears only the accepted older draft', async () => {

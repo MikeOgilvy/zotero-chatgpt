@@ -78,7 +78,7 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
     reconnect: vi.fn(() => Promise.resolve()),
   };
   const states: PresenterState[] = [];
-  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
+  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn<() => string | null>(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;

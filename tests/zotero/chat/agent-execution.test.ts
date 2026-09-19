@@ -6,7 +6,7 @@ import type { ActionTasks } from '../../../packages/contracts/src/tasks.ts';
 import type { ContextPlan } from '../../../packages/core/src/context/planner.ts';
 import type { ReadingJob } from '../../../packages/core/src/context/coordinator.ts';
 import type { PresenterReading } from '../../../packages/zotero/src/chat/capability.ts';
-import { executeAgentSend, requestsCurrentPaperAnnotations, type AgentSendContext } from '../../../packages/zotero/src/chat/agent-execution.ts';
+import { executeAgentSend, requestsCurrentPaperAnnotations, requestsSelectionOrganization, type AgentSendContext } from '../../../packages/zotero/src/chat/agent-execution.ts';
 
 const request: SendInput = { question: 'Summarize all pages', requestId: 'r1' } as SendInput;
 const plan = { mode: 'multi-pass' } as unknown as ContextPlan;
@@ -41,6 +41,23 @@ describe('Agent execution path', () => {
       'Highlight this button.',
       '总结当前论文最重要的 5 处内容。',
     ]) expect(requestsCurrentPaperAnnotations(question), question).toBe(false);
+  });
+
+  it('recognizes additive selection organization requests without treating organization questions as actions', () => {
+    for (const question of [
+      '按主题打标签，并归入合适的集合。',
+      '请给选中的文献添加主题标签。',
+      'Tag these papers by topic.',
+      'Organize the selected items into appropriate collections.',
+      'Add topic tags to the selected papers.',
+    ]) expect(requestsSelectionOrganization(question), question).toBe(true);
+    for (const question of [
+      '如何给文献打标签？',
+      '什么是 Zotero 集合？',
+      'Explain how to organize a collection.',
+      'Create a collection for later.',
+      'Summarize the selected papers.',
+    ]) expect(requestsSelectionOrganization(question), question).toBe(false);
   });
 
   it('turns a multi-pass plan into a reading job through the injected capability', async () => {

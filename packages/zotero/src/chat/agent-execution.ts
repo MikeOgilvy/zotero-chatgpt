@@ -11,6 +11,8 @@ import { deliverRequest } from './send-request.ts';
 
 const CHINESE_ANNOTATION_ACTION = /^(?:(?:请|请你|请帮我|帮我|麻烦|麻烦你|可以|能否)\s*)?(?:把\s*)?(?:当前|这|本)?(?:篇|份|个)?(?:论文|文章|文献|PDF)?(?:中|里|内|的)?\s*(?:高亮|标注|划线|画线|加下划线)/iu;
 const CHINESE_DOCUMENT_TARGET = /(?:当前|这|本)(?:篇|份|个)?(?:论文|文章|文献|PDF)|(?:论文|文章|文献|PDF)(?:中|里|内|的)/iu;
+const CHINESE_ORGANIZATION_ACTION = /(?:打|添加|增加|加上|设置|设定).{0,12}标签|(?:归入|放入|加入|整理到|分类到).{0,12}集合/iu;
+const CHINESE_QUESTION = /(?:如何|怎么|怎样|什么|为何|为什么|是否|能不能).*(?:标签|集合)|[?？]/iu;
 
 /**
  * Recognize the narrow natural-language form that already names the native annotation action and
@@ -24,6 +26,15 @@ export function requestsCurrentPaperAnnotations(question: string): boolean {
   const intent = detectActionIntent(normalized);
   if (intent && ['annotate', 'highlight', 'mark', 'underline'].includes(intent.verb)) return true;
   return CHINESE_ANNOTATION_ACTION.test(normalized) && CHINESE_DOCUMENT_TARGET.test(normalized);
+}
+
+/** Recognize a bounded additive tag/collection request for the current native Zotero selection. */
+export function requestsSelectionOrganization(question: string): boolean {
+  if (typeof question !== 'string') return false;
+  const normalized = question.normalize('NFKC').trim();
+  const intent = detectActionIntent(normalized);
+  if (intent && (['group', 'organise', 'organize', 'sort', 'tag'].includes(intent.verb) || (intent.verb === 'add' && ['tag', 'tags'].includes(intent.target)))) return true;
+  return !CHINESE_QUESTION.test(normalized) && CHINESE_ORGANIZATION_ACTION.test(normalized);
 }
 
 /**
