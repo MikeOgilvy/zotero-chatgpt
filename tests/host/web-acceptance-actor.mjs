@@ -3,6 +3,7 @@
 const OFFICIAL_ORIGIN = 'https://chatgpt.com';
 const TOKEN = /^RUN-[a-f0-9]{24}$/u;
 const REQUEST_MARKER = /\[Zotero request [0-9a-z-]{1,80}\]/iu;
+const HARNESS_QUESTION = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
 
 function trustedOfficialDocument(document) {
   try {
@@ -69,6 +70,9 @@ export function summarizeOfficialPage(document, verificationToken) {
   if (typeof verificationToken !== 'string' || !TOKEN.test(verificationToken)) return { status: 'blocked', reason: 'invalid-token' };
   const composer = document.querySelector('#prompt-textarea, #mobile-composer-prompt');
   const send = knownSendButton(composer);
+  const draftMatchesExactTestQuestion = composer
+    ? (composer.localName === 'textarea' ? String(composer.value ?? '') : String(composer.textContent ?? '')) === HARNESS_QUESTION
+    : false;
   const users = [...document.querySelectorAll('[data-message-author-role="user"]')];
   const assistants = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
   const latestAssistant = assistants.at(-1);
@@ -78,6 +82,7 @@ export function summarizeOfficialPage(document, verificationToken) {
     canonicalOrigin: OFFICIAL_ORIGIN,
     inputReady: Boolean(composer),
     sendReady: Boolean(send && !send.disabled),
+    draftMatchesExactTestQuestion,
     userMessages: users.length,
     assistantMessages: assistants.length,
     userMarkerMessages: users.filter(node => REQUEST_MARKER.test(String(node.textContent ?? ''))).length,

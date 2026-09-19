@@ -4,11 +4,12 @@ import { summarizeOfficialPage } from './web-acceptance-actor.mjs';
 
 it('returns only bounded official-page booleans and counts for web acceptance', () => {
   const token = 'RUN-0123456789abcdef01234567';
+  const harnessQuestion = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
   const window = new HappyWindow({ url: 'https://chatgpt.com/c/synthetic?temporary=secret' });
   const document = window.document;
   document.body.innerHTML = `
     <form id="composer-form" data-testid="composer-form">
-      <textarea id="mobile-composer-prompt"></textarea>
+      <textarea id="mobile-composer-prompt">${harnessQuestion}</textarea>
       <button type="submit" aria-label="Send message"></button>
       <button type="button" aria-label="Start voice mode"></button>
     </form>
@@ -25,6 +26,7 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     canonicalOrigin: 'https://chatgpt.com',
     inputReady: true,
     sendReady: true,
+    draftMatchesExactTestQuestion: true,
     userMessages: 1,
     assistantMessages: 1,
     userMarkerMessages: 1,
@@ -40,6 +42,14 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
   });
   expect(Object.keys(result)).not.toEqual(expect.arrayContaining(['transcript', 'text', 'formValue', 'cookie', 'href', 'pathname', 'search']));
   expect(JSON.stringify(result)).not.toMatch(/hidden transcript text|temporary=secret|Send message|Start voice mode/u);
+});
+
+it('reports only false for an unrelated existing draft and never returns its text', () => {
+  const document = new HappyWindow({ url: 'https://chatgpt.com/' }).document;
+  document.body.innerHTML = '<form><textarea id="mobile-composer-prompt">private owner draft</textarea><button type="submit" aria-label="Send message"></button></form>';
+  const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
+  expect(result.draftMatchesExactTestQuestion).toBe(false);
+  expect(JSON.stringify(result)).not.toContain('private owner draft');
 });
 
 it('rejects a lookalike origin and an invalid expected token without inspecting messages', () => {

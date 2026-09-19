@@ -863,7 +863,7 @@ async function runHostSmoke(config) {
           out.currentURI = safeWebURL(browser.currentURI?.spec || '');
           out.contentPid = global.osPid ?? null;
           out.timeline.push({ ms: Date.now() - started, status, currentURI: out.currentURI, contentPid: out.contentPid });
-          if (status === 'ready' || status === 'composer-ready') break;
+          if (status === 'ready' || status === 'composer-ready' || status === 'draft') break;
         } catch (error) {
           out.error = message(error);
           out.timeline.push({ ms: Date.now() - started, status: 'error', error: out.error });
@@ -875,7 +875,7 @@ async function runHostSmoke(config) {
       out.elapsedMs = Date.now() - started;
       return out;
     })();
-    const productActorReady = ['ready', 'composer-ready'].includes(product.actorProbe.status) && product.actorProbe.error === null;
+    const productActorReady = ['ready', 'composer-ready', 'draft'].includes(product.actorProbe.status) && product.actorProbe.error === null;
     const manualWatch = Number(config.watchSeconds || 0) > 0;
     if (config.webLive) { product.actorProbe.webLiveReadinessGate = productActorReady; await save(); }
     else if (manualWatch) { product.actorProbe.manualLoginReadiness = productActorReady ? 'available' : 'unavailable'; await save(); }
@@ -906,9 +906,10 @@ async function runHostSmoke(config) {
       const before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
       const baseline = before.value;
       product.webLive.baseline = baseline;
-      const contextReady = productActorReady && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true;
+      const draftSafe = product.actorProbe.status !== 'draft' || baseline?.draftMatchesExactTestQuestion === true;
+      const contextReady = productActorReady && draftSafe && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true;
       if (!contextReady) {
-        product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (baseline?.reason ?? 'official-input-unavailable') : (product.actorProbe.status ?? 'product-actor-unavailable');
+        product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (!draftSafe ? 'unrelated-existing-draft' : (baseline?.reason ?? 'official-input-unavailable')) : (product.actorProbe.status ?? 'product-actor-unavailable');
         product.notRun.push('conversation-send', 'streaming-render'); await save();
       } else {
         const consent = doc.querySelector('[data-zchatgpt-action="continue-with-pdf"]');
@@ -917,15 +918,15 @@ async function runHostSmoke(config) {
         const question = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
         let postStage = baseline;
         if (!postStage.sendReady) {
-          product.webLive.status = 'staging-question'; await save();
-          const staged = await boundedQuery('ZoteroChatGPTOfficialChat', 'stage', { text: question }, 10000);
-          product.webLive.productStage = staged.value && typeof staged.value === 'object' ? { status: staged.value.status ?? 'invalid-response', reason: staged.value.reason ?? null } : { status: 'invalid-response', reason: null };
-          if (staged.value?.status === 'staged') {
-            const stageStarted = Date.now();
-            while (Date.now() - stageStarted < 10000) {
-              const observed = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken }); postStage = observed.value;
-              product.webLive.postStage = postStage; await save(); if (postStage?.status === 'ok' && postStage.sendReady === true) break; await delay(250);
-            }
+          if (product.actorProbe.status !== 'draft') {
+            product.webLive.status = 'staging-question'; await save();
+            const staged = await boundedQuery('ZoteroChatGPTOfficialChat', 'stage', { text: question }, 10000);
+            product.webLive.productStage = staged.value && typeof staged.value === 'object' ? { status: staged.value.status ?? 'invalid-response', reason: staged.value.reason ?? null } : { status: 'invalid-response', reason: null };
+          } else product.webLive.productStage = { status: 'existing-exact-harness-draft', reason: null };
+          const stageStarted = Date.now();
+          while (Date.now() - stageStarted < 10000) {
+            const observed = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken }); postStage = observed.value;
+            product.webLive.postStage = postStage; await save(); if (postStage?.status === 'ok' && postStage.sendReady === true && postStage.draftMatchesExactTestQuestion === true) break; await delay(250);
           }
         }
         if (postStage?.status !== 'ok' || postStage.sendReady !== true) {
