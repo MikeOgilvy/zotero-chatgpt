@@ -35,9 +35,19 @@ function structuralObservations(document) {
     id: attribute(node, 'id'), role: attribute(node, 'role'), contenteditable: attribute(node, 'contenteditable'),
     parent: structuralNode(node.parentElement), form: structuralNode(node.closest('form')),
   }));
-  const buttons = [...document.querySelectorAll('button[data-testid], button[type]')].slice(0, 20).map(node => ({
+  const composer = document.querySelector('#prompt-textarea, #mobile-composer-prompt');
+  const form = composer?.closest?.('form') ?? null;
+  const category = node => {
+    const value = `${attribute(node, 'data-testid') ?? ''} ${attribute(node, 'aria-label') ?? ''}`.toLocaleLowerCase();
+    if (/send|submit/u.test(value)) return 'send';
+    if (/stop|cancel/u.test(value)) return 'stop';
+    if (/voice|speech|microphone/u.test(value)) return 'voice';
+    if (/upload|attach|file/u.test(value)) return 'upload';
+    return 'other';
+  };
+  const buttons = [...(form?.querySelectorAll('button') ?? [])].slice(0, 20).map(node => ({
     tag: String(node.localName ?? '').slice(0, 40) || null,
-    dataTestid: attribute(node, 'data-testid'), type: attribute(node, 'type'), disabled: node.disabled === true,
+    id: attribute(node, 'id'), dataTestid: attribute(node, 'data-testid'), type: attribute(node, 'type'), disabled: node.disabled === true, ariaLabelCategory: category(node),
   }));
   return { editables, buttons };
 }
@@ -46,8 +56,8 @@ function structuralObservations(document) {
 export function summarizeOfficialPage(document, verificationToken) {
   if (!trustedOfficialDocument(document)) return { status: 'blocked', reason: 'untrusted-origin' };
   if (typeof verificationToken !== 'string' || !TOKEN.test(verificationToken)) return { status: 'blocked', reason: 'invalid-token' };
-  const composer = document.querySelector('#prompt-textarea, textarea[name="prompt"], [contenteditable="true"][data-testid*="composer"]');
-  const send = document.querySelector('button[data-testid="send-button"]');
+  const composer = document.querySelector('#prompt-textarea, #mobile-composer-prompt');
+  const send = composer?.closest?.('form')?.querySelector('button[data-testid="send-button"]') ?? null;
   const users = [...document.querySelectorAll('[data-message-author-role="user"]')];
   const assistants = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
   const latestAssistant = assistants.at(-1);

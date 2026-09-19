@@ -7,8 +7,11 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
   const window = new HappyWindow({ url: 'https://chatgpt.com/c/synthetic?temporary=secret' });
   const document = window.document;
   document.body.innerHTML = `
-    <div id="prompt-textarea" contenteditable="true"></div>
-    <button data-testid="send-button"></button>
+    <form id="composer-form" data-testid="composer-form">
+      <textarea id="mobile-composer-prompt"></textarea>
+      <button data-testid="send-button" aria-label="Send message"></button>
+      <button type="button" aria-label="Start voice mode"></button>
+    </form>
     <button data-testid="stop-button"></button>
     <article data-message-author-role="user">Question [Zotero request marker-one]</article>
     <article data-message-author-role="assistant">The token is ${token}; hidden transcript text.</article>
@@ -28,10 +31,10 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     latestAssistantContainsToken: true,
     streaming: true,
     observations: {
-      editables: [{ tag: 'div', id: 'prompt-textarea', role: null, contenteditable: 'true', parent: { tag: 'body', id: null, role: null, dataTestid: null }, form: null }],
+      editables: [{ tag: 'textarea', id: 'mobile-composer-prompt', role: null, contenteditable: null, parent: { tag: 'form', id: 'composer-form', role: null, dataTestid: 'composer-form' }, form: { tag: 'form', id: 'composer-form', role: null, dataTestid: 'composer-form' } }],
       buttons: [
-        { tag: 'button', dataTestid: 'send-button', type: null, disabled: false },
-        { tag: 'button', dataTestid: 'stop-button', type: null, disabled: false },
+        { tag: 'button', id: null, dataTestid: 'send-button', type: null, disabled: false, ariaLabelCategory: 'send' },
+        { tag: 'button', id: null, dataTestid: null, type: 'button', disabled: false, ariaLabelCategory: 'voice' },
       ],
     },
   });

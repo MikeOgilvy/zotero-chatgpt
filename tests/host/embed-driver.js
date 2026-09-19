@@ -55,9 +55,8 @@ async function runHostSmoke(config) {
   };
   const check = async (name, ok, details = {}) => { step = name; report.checks.push({ name, ok: Boolean(ok), details }); await save(); if (!ok) throw new Error(`Check failed: ${name}`); };
 
-  // Every console message while the probe runs, unfiltered and capped. This is how a refused frame
-  // load, a CSP violation, a security-manager refusal or a Cloudflare challenge becomes evidence
-  // rather than a guess.
+  // Remote console prose may contain page or account data. Keep only allowlisted error classes and
+  // HTTP(S) origin/path with query and fragment discarded; never retain arbitrary message text.
   const consoleMessages = [];
   /**
    * A second, never-drained copy for the opt-in diagnostic window. It is what lets a human
@@ -69,6 +68,23 @@ async function runHostSmoke(config) {
   let consoleListener = null;
   let productNetwork = null;
   const consoleZero = Date.now();
+  const consoleClass = text => {
+    if (/Script terminated by timeout|Script unresponsive|ScopeDisposedError|has been disposed/iu.test(text)) return 'script-timeout';
+    if (/cloudflare|challenge|turnstile|captcha|verify you are human|just a moment/iu.test(text)) return 'challenge';
+    if (/Content-Security-Policy|\bCSP\b|blocked.*(?:script|frame|resource)/iu.test(text)) return 'csp';
+    if (/security manager|permission denied|denied to access|unsafe|principal/iu.test(text)) return 'security';
+    if (/module|import|resource:\/\/|trusted scheme/iu.test(text)) return 'module-load';
+    if (/failed to load|network|NS_ERROR|connection|request/iu.test(text)) return 'network-load';
+    if (/Feature Policy: Skipping unsupported feature name|Missing resource in locale|InstallTrigger is deprecated|Layout was forced before the page was fully loaded/iu.test(text)) return 'noise';
+    return 'other';
+  };
+  const consoleSource = value => {
+    try {
+      const url = new URL(String(value || ''));
+      if (!['http:', 'https:'].includes(url.protocol)) return { scheme: url.protocol.slice(0, 24), origin: null, path: null };
+      return { scheme: url.protocol, origin: url.origin.slice(0, 160), path: url.pathname.slice(0, 160) };
+    } catch { return { scheme: null, origin: null, path: null }; }
+  };
   const startConsole = () => {
     try {
       consoleListener = {
@@ -77,14 +93,14 @@ async function runHostSmoke(config) {
             if (consoleMessages.length >= 500) return;
             const text = String((entry && (entry.message || entry.errorMessage)) || '');
             const source = String((entry && entry.sourceName) || '');
-            const recordEntry = { ms: Date.now() - consoleZero, source: source.slice(0, 200), text: text.slice(0, 400) };
+            const recordEntry = { ms: Date.now() - consoleZero, class: consoleClass(text), ...consoleSource(source) };
             consoleMessages.push(recordEntry);
             if (diagnosticConsole.length < 600) diagnosticConsole.push(recordEntry);
           } catch { /* console observers must never throw */ }
         },
       };
       Services.console.registerListener(consoleListener);
-    } catch (error) { report.consoleCaptureError = message(error); }
+    } catch (error) { report.consoleCaptureError = consoleClass(message(error)); }
   };
   const takeConsole = () => consoleMessages.splice(0, consoleMessages.length);
   /**
@@ -92,10 +108,9 @@ async function runHostSmoke(config) {
    * iframe and its locale warnings arrive in the hundreds and bury the handful of lines that are the
    * page's own voice. This is the list to read when the question is "what did the application say".
    */
-  const CONSOLE_NOISE = /Feature Policy: Skipping unsupported feature name|Missing resource in locale|InstallTrigger is deprecated|Layout was forced before the page was fully loaded|JavaScript Warning: "Content-Security-Policy/;
-  const diagnosticNotable = () => diagnosticConsole.filter(entry => !CONSOLE_NOISE.test(entry.text)).slice(-120);
-  const redactQuery = value => String(value || '').replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/giu, '$1?[redacted]');
-  const safeConsole = entries => entries.map(entry => ({ ms: entry.ms, source: redactQuery(entry.source).slice(0, 200), text: redactQuery(entry.text).slice(0, 400) }));
+  const diagnosticNotable = () => diagnosticConsole.filter(entry => !['noise', 'other'].includes(entry.class)).slice(-120);
+  const safeConsole = entries => entries.map(entry => ({ ms: entry.ms, class: entry.class, scheme: entry.scheme, origin: entry.origin, path: entry.path }));
+  const consoleClassCounts = () => diagnosticConsole.reduce((counts, entry) => ({ ...counts, [entry.class]: (counts[entry.class] ?? 0) + 1 }), {});
   /** Hostnames whose traffic explains a sign-in round trip; everything else is counted, not listed. */
   const WATCHED_HOSTS = /(^|\.)(chatgpt\.com|openai\.com|oaistatic\.com|oaiusercontent\.com|apple\.com|icloud\.com|cloudflare\.com|google\.com|gstatic\.com)$/i;
 
@@ -152,7 +167,7 @@ async function runHostSmoke(config) {
     for (const name of names) { try { out[name] = Services.prefs.getPrefType(name) === 0 ? null : Services.prefs.getIntPref(name); } catch { out[name] = null; } }
     return out;
   };
-  const scriptTerminations = () => diagnosticConsole.filter(entry => /Script terminated by timeout|Script unresponsive|ScopeDisposedError|has been disposed/i.test(entry.text)).length;
+  const scriptTerminations = () => diagnosticConsole.filter(entry => entry.class === 'script-timeout').length;
 
   const cookieCount = (host) => {
     try { return Services.cookies.countCookiesFromHost(host); } catch (error) { return `error:${message(error)}`; }
@@ -306,9 +321,7 @@ async function runHostSmoke(config) {
     if (fallbackUsed) entry.fallbackUsed = fallbackUsed;
     entry.console = takeConsole();
     entry.cookiesAfter = { [targetHost]: cookieCount(targetHost) };
-    entry.challengeMarkers = entry.console
-      .filter(({ text }) => /cloudflare|challenge|turnstile|just a moment|captcha|verify you are human/i.test(text))
-      .slice(0, 10);
+    entry.challengeMarkers = entry.console.filter(item => item.class === 'challenge').slice(0, 10);
     entry.fixtureCookieFromThisRun = fixtureCookieMatches();
     entry.scriptRanThisLoad = titleProvesScript(entry);
     entry.verdict = (() => {
@@ -840,7 +853,7 @@ async function runHostSmoke(config) {
       out.elapsedMs = Date.now() - started;
       return out;
     })();
-    const productActorReady = product.actorProbe.status === 'ready' && product.actorProbe.error === null;
+    const productActorReady = ['ready', 'composer-ready'].includes(product.actorProbe.status) && product.actorProbe.error === null;
     if (config.webLive) { product.actorProbe.webLiveReadinessGate = productActorReady; await save(); }
     else await check('product-official-chat-actor-reaches-the-composer', productActorReady, product.actorProbe);
     if (config.webLive) {
@@ -869,17 +882,33 @@ async function runHostSmoke(config) {
       const before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
       const baseline = before.value;
       product.webLive.baseline = baseline;
-      const ready = productActorReady && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true && baseline.sendReady === true;
-      if (!ready) {
-        product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-send-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (baseline?.reason ?? 'official-input-or-send-unavailable') : (product.actorProbe.status ?? 'product-actor-unavailable');
+      const contextReady = productActorReady && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true;
+      if (!contextReady) {
+        product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (baseline?.reason ?? 'official-input-unavailable') : (product.actorProbe.status ?? 'product-actor-unavailable');
         product.notRun.push('conversation-send', 'streaming-render'); await save();
       } else {
         const consent = doc.querySelector('[data-zchatgpt-action="continue-with-pdf"]');
         if (consent && !consent.hidden) { consent.click(); await until(() => consent.hidden, 'web-live-pdf-disclosure-acknowledged', 30000); product.webLive.pdfDisclosureAcknowledged = true; }
         else product.webLive.pdfDisclosureAcknowledged = false;
+        const question = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
+        let postStage = baseline;
+        if (!postStage.sendReady) {
+          product.webLive.status = 'staging-question'; await save();
+          const staged = await boundedQuery('ZoteroChatGPTOfficialChat', 'stage', { text: question }, 10000);
+          product.webLive.productStage = staged.value && typeof staged.value === 'object' ? { status: staged.value.status ?? 'invalid-response', reason: staged.value.reason ?? null } : { status: 'invalid-response', reason: null };
+          if (staged.value?.status === 'staged') {
+            const stageStarted = Date.now();
+            while (Date.now() - stageStarted < 10000) {
+              const observed = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken }); postStage = observed.value;
+              product.webLive.postStage = postStage; await save(); if (postStage?.status === 'ok' && postStage.sendReady === true) break; await delay(250);
+            }
+          }
+        }
+        if (postStage?.status !== 'ok' || postStage.sendReady !== true) {
+          product.webLive.status = 'blocked'; product.webLive.blockedStage = 'official-send-readiness-after-stage'; product.webLive.reason = product.webLive.productStage?.reason ?? product.webLive.productStage?.status ?? 'send-unavailable'; await save();
+        } else {
         const codexBefore = await ownCodexProcesses();
         const globalBeforeSubmit = before.global;
-        const question = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
         product.webLive.status = 'submitting'; product.webLive.modelTurnsStarted = 1; await save();
         const submitted = await boundedQuery('ZoteroChatGPTOfficialChat', 'submitQuestion', { question }, 90000);
         product.webLive.productSubmit = submitted.value && typeof submitted.value === 'object'
@@ -923,6 +952,7 @@ async function runHostSmoke(config) {
             && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0,
             product.webLive.result);
           product.webLive.status = 'passed'; await save();
+        }
         }
       }
     }
@@ -1163,8 +1193,9 @@ async function runHostSmoke(config) {
           ...product.diagnose,
           secondsLeft: Math.max(0, Math.round((deadlineMs - Date.now()) / 1000)),
           scriptTerminations: scriptTerminations(),
-          notableConsole: diagnosticNotable(),
-          consoleTail: diagnosticConsole.slice(-40),
+          consoleClassCounts: consoleClassCounts(),
+          notableConsole: safeConsole(diagnosticNotable()),
+          consoleTail: safeConsole(diagnosticConsole.slice(-40)),
           surfaceTimeline: surfaceTimeline.slice(-40),
           requests: network.state.responses.slice(-80),
           stopped: network.state.stops.slice(-40),
@@ -1181,8 +1212,9 @@ async function runHostSmoke(config) {
         secondsLeft: 0,
         endedAt: new Date().toISOString(),
         scriptTerminations: scriptTerminations(),
-        notableConsole: diagnosticNotable(),
-        consoleTail: diagnosticConsole.slice(-120),
+        consoleClassCounts: consoleClassCounts(),
+        notableConsole: safeConsole(diagnosticNotable()),
+        consoleTail: safeConsole(diagnosticConsole.slice(-120)),
         surfaceTimeline: surfaceTimeline.slice(-60),
         requests: network.state.responses.slice(-120),
         stopped: network.state.stops.slice(-60),
@@ -1232,8 +1264,7 @@ async function runHostSmoke(config) {
     }
     report.status = 'failed';
     report.failure = {
-      step, message: redactQuery(message(error)),
-      stack: String((error && error.stack) || '').split('\n').slice(0, 6).map(line => redactQuery(line.trim())),
+      step, class: consoleClass(message(error)), consoleClassCounts: consoleClassCounts(),
       notableConsole: safeConsole(diagnosticNotable()),
       consoleTail: safeConsole(diagnosticConsole.slice(-80)),
     };
