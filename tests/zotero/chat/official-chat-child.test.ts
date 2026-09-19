@@ -44,6 +44,37 @@ function acceptedOnClick(current: { doc: Document; send: { addEventListener(type
 }
 
 describe('official ChatGPT child send transaction', () => {
+  it('leaves ordinary upload, voice and menu buttons usable beside a nonempty known composer', () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'draft';
+    for (const label of ['Upload', 'Voice', 'Menu']) {
+      const control = current.composer.ownerDocument.createElement('button'); control.type = 'button'; control.setAttribute('aria-label', label); current.composer.closest('form')!.append(control);
+      const preventDefault = vi.fn(); const stopImmediatePropagation = vi.fn();
+      actor.handleEvent({ type: 'click', isTrusted: true, target: control, preventDefault, stopImmediatePropagation });
+      expect(preventDefault, label).not.toHaveBeenCalled();
+      expect(stopImmediatePropagation, label).not.toHaveBeenCalled();
+    }
+  });
+
+  it('blocks only actual submit semantics for an unknown composer', () => {
+    const current = page(); const actor = actorFor(current); current.composer.id = 'changed-site-editor'; current.composer.textContent = 'draft';
+    const ordinary = current.composer.ownerDocument.createElement('button'); ordinary.type = 'button'; current.composer.closest('form')!.append(ordinary);
+    const ordinaryPrevent = vi.fn(); actor.handleEvent({ type: 'click', isTrusted: true, target: ordinary, preventDefault: ordinaryPrevent, stopImmediatePropagation: vi.fn() });
+    expect(ordinaryPrevent).not.toHaveBeenCalled();
+    current.send.type = 'submit';
+    const preventDefault = vi.fn(); const stopImmediatePropagation = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: current.send, preventDefault, stopImmediatePropagation });
+    expect(preventDefault).toHaveBeenCalledTimes(1); expect(stopImmediatePropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it('intercepts the resolved mobile submit button exactly once', () => {
+    const current = mobilePage(); const actor = actorFor(current); current.composer.value = 'question';
+    const submit = vi.fn(() => Promise.resolve({ status: 'accepted' })); actor.submitQuestion = submit;
+    const preventDefault = vi.fn(); const stopImmediatePropagation = vi.fn();
+    actor.handleEvent({ type: 'click', isTrusted: true, target: current.send, preventDefault, stopImmediatePropagation });
+    expect(preventDefault).toHaveBeenCalledTimes(1); expect(stopImmediatePropagation).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1); expect(submit).toHaveBeenCalledWith('question');
+  });
+
   it('reports an unknown editor as unsupported so the parent can fail closed', async () => {
     const current = page(); const actor = actorFor(current);
     current.composer.id = 'changed-site-editor';

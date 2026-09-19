@@ -47,6 +47,14 @@ function sendButton(document, composer = findChatGPTComposer(document)) {
   return button?.localName === 'button' ? button : null;
 }
 
+function hasSubmissionSemantics(button) {
+  if (!button || button.localName !== 'button') return false;
+  const type = String(button.type || button.getAttribute?.('type') || '').toLowerCase();
+  if (type === 'submit' || button.matches?.(SEND_SELECTOR)) return true;
+  const label = String(button.getAttribute?.('aria-label') || '').trim().toLowerCase();
+  return ['send', 'send message', 'send prompt'].includes(label);
+}
+
 function safeStructure(document) {
   const editors = [...document.querySelectorAll('textarea, [contenteditable="true"]')].slice(0, 8).map(element => ({
     tag: String(element.localName || '').slice(0, 24),
@@ -58,13 +66,13 @@ function safeStructure(document) {
   return { editors, knownSendButtons: document.querySelectorAll(SEND_SELECTOR).length };
 }
 
-function isSubmission(event, composer) {
+function isSubmission(event, composer, document) {
   if (!event.isTrusted || event.isComposing) return false;
   if (event.type === 'keydown') {
     return event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
       && inside(event.target, composer);
   }
-  if (event.type === 'click') return Boolean(event.target?.closest?.(SEND_SELECTOR));
+  if (event.type === 'click') return event.target?.closest?.('button') === sendButton(document, composer);
   if (event.type === 'submit') return inside(composer, event.target);
   return false;
 }
@@ -80,9 +88,10 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
       const unknown = this.document.querySelector('textarea, [contenteditable="true"]');
       if (!unknown) return;
       const form = unknown.closest?.('form');
+      const clicked = event.target?.closest?.('button');
       const unknownSubmit = event.isTrusted && (
-        (event.type === 'keydown' && event.key === 'Enter' && !event.shiftKey && inside(event.target, unknown))
-        || (event.type === 'click' && Boolean(event.target?.closest?.('button')) && Boolean(form?.contains(event.target?.closest?.('button'))))
+        (event.type === 'keydown' && event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !event.isComposing && inside(event.target, unknown))
+        || (event.type === 'click' && hasSubmissionSemantics(clicked) && Boolean(form?.contains(clicked)))
         || (event.type === 'submit' && inside(unknown, event.target))
       );
       if (event.type === 'input' && inside(event.target, unknown)) this.sendAsyncMessage('readiness', { status: 'unsupported-send' });
@@ -102,13 +111,13 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
     if (event.isTrusted && event.type === 'click' && readChatGPTComposer(composer).trim()) {
       const button = event.target?.closest?.('button');
       const form = composer.closest?.('form');
-      if (button && form?.contains(button) && button !== sendButton(this.document, composer)) {
+      if (button && form?.contains(button) && hasSubmissionSemantics(button) && button !== sendButton(this.document, composer)) {
         event.preventDefault(); event.stopImmediatePropagation();
         this.sendAsyncMessage('readiness', { status: 'unsupported-send' });
         return;
       }
     }
-    if (!isSubmission(event, composer)) return;
+    if (!isSubmission(event, composer, this.document)) return;
     // A second Enter/click while PDF preparation awaits is consumed, never queued as a duplicate.
     if (this.inFlight) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     const question = readChatGPTComposer(composer);
