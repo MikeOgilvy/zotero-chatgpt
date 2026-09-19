@@ -6,28 +6,35 @@
 
 当前状态是**部分完成，尚未交付可宣称端到端可用的最终 XPI**。
 
-- Agent 高亮和选中文献整理的受控链路已经落到代码：自然语言识别 → 冻结上下文 → 真实模型的严格 JSON 候选接口 → review → 原生写入 → 读回 → 对账/撤销。自动测试和部分真实 Zotero native API 证据存在。
-- Chat 官方页面 actor 方案已实现代码和自动测试，但当前真实宿主探测仍失败，未证明真实问题、PDF 上下文和回复处于同一官方 ChatGPT 对话。
+- **a25 自动、产物、可复现构建和干净安装已通过**：`0.4.0a25` XPI SHA-256 为 `3019db5e379b1e141c7f245093b29b73659c43b6c1d7563ec3f4ffddd51c28a6`，87 个文件；独立 detached worktree 重建逐字节相同；最终 a25 clean context 宿主报告 46/46 PASS，启动 PATH 不含 Node。
+- **当前代码/产物候选已升到 a27**：`0.4.0a27` XPI SHA-256 为 `338407a177df879641776636beef41295e330564cc6ebe79438aad24093e7374`，87 个文件；typecheck、lint、100 files / 1317 tests / 0 skipped（`--maxWorkers=4`，断言未变）、package 和 artifact verification PASS。a25 的 clean install / byte-for-byte 证据不自动继承给 a27。
+- **真实 Agent 高亮已经跑通一轮完整链路**：真实 `gpt-6-astra` / medium 返回 5 个候选，review 前 0 写入，批准后创建并读回 5 个原生标注，撤销读回 PASS。
+- **真实 Agent 整理仍未完成，但已恢复到 review**：同一 a25 live-core 运行冻结了正确的 2 条目范围，真实模型返回 2 条严格 JSON 候选；a26 从保存的真实响应恢复出 production organization task，状态为 `review`、2 candidates、0 写入。恢复 driver 两次分别停在多余的 `agent-runtime-ready` gate 与 `stored-conversation-history-row`，均早于 review UI 操作；批准、原生写入、读回和撤销仍待执行。
+- **Chat 真实服务仍未通过**：a25 pointer gate 问题由 `98cdbda` 修复；a26 watch 结束后，用户手工确认经典 Apple 邮箱/密码登录成功，该手工 PASS 不是 watch 自动证据。passkey 路径在 Zotero 的 Gecko ESR 140.12.0 宿主中 BLOCKED。a27 真实 nonce 提交在同一 WindowGlobal 下返回 `not-accepted`，未观察到 question/answer token，因此真实 Chat 流程为 FAIL。
 - Chat 和 Agent 的远端历史已经按不同服务建模，不再声称共享一个远端 session。Chat 本地恢复不应启动 Codex；显式进入 Agent 才允许恢复 Agent 工作。
-- 最终版本号、最终 XPI、完整全量门禁和最终宿主复验仍在进行。工作树 manifest 候选号或目录里存在的旧 XPI 都不能当最终交付身份。
+- 当前机器可读摘要为 `.zotero-chatgpt-dev/verification/delivery-20260919/acceptance-current.json`；只含白名单状态/计数/请求 provenance，不含正文、认证、cookie、URL 或完整 native signatures。
 
 ## 当前证据矩阵
 
-以下为本轮已经明确提供的证据；最终复跑结果到达前不补写预计数字。
+以下只列实际已运行证据；代码修复与复验结果分开记录。
 
 | 层级 | 状态 | 已观察结果 | 不能推出什么 |
 | --- | --- | --- | --- |
-| 变更前自动基线 | **PASS** | 1210 tests PASS | 不覆盖本轮 actor、自然语言高亮、整理和恢复改动 |
-| 本轮定向自动回归 | **PASS** | 高亮路由/恢复、组织选择冻结/队列/策略、task controller、native doubles、跨页跳转等定向测试已通过；typecheck 在中间整合点通过 | 最终全仓计数和最终构建仍待统一复跑 |
-| 本轮中间全量自动门禁 | **FAIL** | 运行到 1266 PASS / 3 FAIL；失败随后分别定位并修复 | 修复后尚未统一复跑，旧失败不能改写为 PASS |
-| 最新 HEAD 全量自动门禁 | **NOT RUN** | 尚无同一 HEAD 的 typecheck/lint/test:unit/package/verify 全套结果 | 定向回归不能替代完整门禁 |
-| 最新 native 整轮 | **PASS** | `.zotero-chatgpt-dev/context-runs/native-a21-r2/host-report.json` 为 17/17：组织 review/写入/读回/冲突撤销；全局歧义拒绝；两处全局唯一 MULTILINE quote 产生至少 2 个原生 rect，并验证保存/幂等/撤销；重开引用后缩放与旋转保持 | driver 编译工作树生产模块，subject 只提供 a21 身份；候选不是模型输出，也不是最终 XPI UI 接线证明。此前失败报告继续保留 |
-| Chat actor a19 宿主探测 | **FAIL** | trusted-scheme 路径失败 | 未抵达真实 ChatGPT 提交或回答 |
-| Chat actor a20 宿主探测 | **FAIL** | 页面停在 `about:blank` 并加载超时 | 未抵达官方登录、composer 或服务响应 |
-| Chat actor a21 宿主探测 | **FAIL** | actor 已在真实宿主注册并响应，但 30 秒内返回 `unsupported-composer`，没有发送 | 只证明桥已抵达页面 actor；下一步需真实 DOM 诊断，不能写成 Chat 可用 |
-| 真实 ChatGPT 服务 | **NOT RUN** | 没有一次完整 PASS 证明随机合成 PDF token 被真实回答引用 | 页面/actor 单测和 browser 可见均不能替代 |
-| 真实 Codex 高亮/整理服务 | **NOT RUN** | 没有一份完整报告同时证明真实模型候选、review、原生写入、读回和撤销全部通过 | native driver 的合成候选不能替代模型证据；局部 host check 不能替代整轮 |
-| 最终候选 XPI | **NOT RUN** | manifest 候选仍在推进；最终可能继续升版 | 旧 a18/a19/a20 产物和当前候选号都不是最终交付物 |
+| a25 自动门禁 | **PASS** | typecheck、lint、package、artifact verification PASS；100 files / 1310 tests / 0 skipped；XPI 87 files | 自动测试不是宿主/服务证据 |
+| a25 可复现构建 | **PASS** | clean detached worktree commit `c195011…` 重建 SHA 与根 a25 XPI 完全相同，`cmp` PASS | 只证明给定 commit/依赖/runtime 在本机可逐字复现 |
+| a25 clean install / context | **PASS** | `.zotero-chatgpt-dev/context-runs/final-a25-install/host-report.json`：46/46，Zotero 9.0.6，2 页提取，4578 bytes，9 次自动 PDF 偏好读取，0 模型请求；启动 PATH 不含 Node | 不含真实登录或模型请求 |
+| a26 自动门禁/产物 | **PASS** | typecheck、lint、package、artifact verification PASS；100 files / 1315 tests / 0 skipped；XPI 87 files，SHA-256 `5ec41bd…3037` | 尚无 a26 clean-source byte-for-byte 重建；自动测试不是服务证据 |
+| a27 自动门禁/产物 | **PASS** | typecheck、lint、package、artifact verification PASS；100 files / 1317 tests / 0 skipped（4 workers）；XPI 87 files，SHA-256 `338407a…7374` | 尚无 a27 clean install / byte-for-byte 重建；自动测试不是服务证据 |
+| native adapter 整轮 | **PASS** | `native-a21-PASS-17.json`：17/17，组织 review/写入/读回/冲突撤销、歧义拒绝、跨页坐标、引用导航等 | adapter 由 driver 编译工作树模块；候选为 deterministic fixture，不是模型输出，也不证明最终 XPI UI 接线 |
+| a25 真实 Agent 高亮 | **PASS** | 请求 `5fc2…29a9`：agent / annotate / `gpt-6-astra` / medium；5 候选，review 前 0 写入，创建读回 5，撤销读回 PASS | 仅该高亮请求通过；不能把后续整理失败抹掉 |
+| a25 真实 Agent 整理 | **FAIL** | 请求 `04e6…2812`：agent / organize / `gpt-6-astra` / medium；冻结 2 条目，返回 item indexes 0/1 的 2 条 JSON 候选；进入 review 前被 named collection 严格校验拒绝 | `c89a45b` 为代码修复；尚无恢复后 review/写入/读回/撤销 PASS |
+| a25 Chat 页面/actor 加载 | **PASS** | 官方页面加载，actor probe 到 `draft`；操作者截图/观察确认页面可见 | 只证明页面/actor 组件；a25 pointer gate 仍阻断交互，不能推出服务回答 |
+| a26 整理任务恢复到 review | **PASS** | 保存请求/2 条 scope/2 候选/native prewrite 状态与安装 XPI 均核对；production task 已为 `review`、2 candidates、0 写入 | 只证明缓存真实响应恢复为 review，不证明批准/原生变更完成 |
+| a26/a27 整理 recovery driver | **FAIL** | 三次 driver 分别在 `agent-runtime-ready`、`stored-conversation-history-row`、`visible-stored-conversation-history-row` 提前失败 | driver FAIL 必须保留，不能用 production task 状态覆盖 |
+| 整理批准/原生写入/读回/撤销 | **NOT RUN** | production task 尚未批准，native writes=0 | review 不是完成 |
+| a26 Chat pointer/login gate | **PASS** | `98cdbda` 修复 pointer gate；a26 已安装，actor probe=`ready`、pointer events inline/computed=`auto`；用户在 watch 结束后手工确认经典 Apple 邮箱/密码登录成功 | 登录 PASS 为手工证据；没有证明问题/回答 |
+| Apple passkey 登录 | **BLOCKED** | Zotero Gecko ESR 140.12.0 有 WebAuthn backend，但缺少 Firefox `browser.js` prompt handler / `PopupNotifications`；本次尝试未捕获 `webauthn-prompt` | 经典邮箱/密码登录成功不能推出 passkey 可用；也不能把本次 spinner 的事件级原因写成已证明 |
+| a27 真实 ChatGPT nonce 问答 | **FAIL** | `a27-web-live-not-accepted.json`：提交时仍是同一 WindowGlobal，但结果为 `not-accepted`；question/answer token 均未观察到 | 页面、actor、登录和截图都不能替代真实回答；未发生可验证回复 |
 | 公开发行 | **NOT RUN** | 未 push、未发布、未建立有效更新频道 | 开发 XPI 不等于签名公开发行 |
 
 失败报告必须保留；后续成功用新的 run id 写新报告，不能覆盖上述 a19/a20 或 native 整轮失败。
@@ -40,7 +47,7 @@
 - 受限 JSWindowActor 只允许精确官方 origin，设计为在可见发送动作上冻结 PDF/选区并回填同一 composer；不读取回答或认证。
 - Chat More details / Ask 与 Agent presenter 分路，Chat 快捷动作不能静默启动 Codex。
 - 官方 `/c/<id>` 绑定与 Agent conversation/thread 分开；插件不保存官方 transcript。
-- 当前真实宿主 actor 链路仍 FAIL，因此 Chat 完整产品流未通过。
+- a26 已证明官方页面、actor、pointer gate 和经典 Apple 邮箱/密码登录可用；a27 真实提交为 `not-accepted`，passkey 仍 BLOCKED，因此 Chat 完整产品流仍未通过。
 
 ### Agent 高亮
 
@@ -67,12 +74,11 @@
 
 ## 当前阻塞与下一门槛
 
-1. 让官方页面 actor 在隔离 Zotero 宿主真实加载，保留 strict origin/resource 限制；不得通过关闭安全机制制造成功。
-2. 由操作者在命名专用 profile 完成官方 ChatGPT 登录，验证一次带随机 PDF token 的真实提问、回复、流式、停止、历史和重启恢复。
-3. 用 `--context --live --live-core-flows --login-wait-seconds ...` 完成一次完整真实 Codex 高亮与整理报告；任何 fixture/driver 失败都使整轮 FAIL。
-4. 在最新 HEAD 运行 typecheck、lint、完整 unit、package、artifact verification，并记录唯一最终 XPI 的版本、大小和 SHA-256。
-5. 用最终 XPI 重新执行 context/native/embed/服务所需阶段；工作树 adapter PASS 不能继承给包内 UI 接线。
-6. 完成干净 checkout、无 Node 环境、安装/升级/回退和必要人工 UI（IME、焦点、缩放、窄窗、多窗口）验收。
+1. 继续已恢复的 organization review：必须批准并完成原生写入、读回和撤销全部 PASS；同时让 recovery driver 越过 `visible-stored-conversation-history-row` 并完成相同断言，不得把 review 当作任务成功。
+2. 诊断 a27 同一 WindowGlobal 下的 `not-accepted`，重新验证 PDF token、回复、流式、停止、历史和重启恢复。经典 Apple 邮箱/密码登录已由用户手工确认，passkey 仍单独 BLOCKED。
+3. 用最终版本 XPI 重跑所需 context/native/embed/服务阶段；a21 adapter PASS 和 a25 高亮 PASS 不能自动继承给新包。
+4. 为最终版本补 clean install 与独立 clean-source byte-for-byte 重建；a27 自动门禁已经通过，但 a25 的安装/重建 hash 不能继承。
+5. 完成必要人工 UI（IME、焦点、缩放、窄窗、多窗口）与安装/升级/回退验收；保持 Chat/Agent、自动/宿主/真实服务证据分层。
 
 ## 安全状态
 
