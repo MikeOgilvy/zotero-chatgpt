@@ -768,6 +768,8 @@ async function runHostSmoke(config) {
       const browser = embedBrowser();
       if (!browser) return { missing: true, surfaces: win.document.querySelectorAll('[data-zchatgpt-embed-browser]').length };
       const probe = value => { try { return typeof value === 'function' ? value() : value; } catch (error) { return message(error); } };
+      const pointer = value => ['', 'auto', 'none'].includes(String(value ?? '')) ? String(value ?? '') : 'other';
+      const centerHitOwnedBrowser = probe(() => { const rect = browser.getBoundingClientRect(); if (rect.width < 1 || rect.height < 1) return false; const hit = win.document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2); return hit === browser || browser.contains?.(hit) === true; });
       return {
         state: String(browser.getAttribute('data-zchatgpt-embed-state') || ''),
         painted: painted(),
@@ -777,6 +779,8 @@ async function runHostSmoke(config) {
         contentPid: probe(() => browser.browsingContext?.currentWindowGlobal?.osPid ?? null),
         title: probe(() => String(browser.contentTitle ?? '').slice(0, 80)),
         parent: String(browser.parentElement?.localName || ''),
+        pointerEvents: { inline: pointer(browser.style.pointerEvents), computed: pointer(win.getComputedStyle(browser).pointerEvents) },
+        centerHitOwnedBrowser,
         rect: rectOfNode(browser),
         containerStyle: String(browser.parentElement?.getAttribute('style') || '').slice(0, 200),
         slotRect: rectOfNode(slot),
