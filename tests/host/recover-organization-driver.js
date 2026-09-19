@@ -13,6 +13,7 @@ async function runHostSmoke(config) {
   const check = async (name, ok, details = {}) => { step = name; report.checks.push({ name, ok: Boolean(ok), details }); await save(); if (!ok) throw new Error(`Check failed: ${name}`); };
   const click = node => { if (!node || node.hidden || node.closest?.('[hidden]')) throw new Error('Expected visible UI control is missing.'); node.focus(); node.click(); };
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u; const TOKEN = /^RUN-[a-f0-9]{24}$/u;
+  let diagnosticState = () => ({ unavailable: true });
   try {
     await Zotero.initializationPromise;
     if (!UUID.test(config.recoveryConversationId) || !UUID.test(config.recoveryRequestId) || !TOKEN.test(config.recoveryToken)) throw new Error('Recovery identifiers are invalid.');
@@ -44,13 +45,25 @@ async function runHostSmoke(config) {
     const shell = () => doc()?.querySelector('[data-zchatgpt-sidebar]'); const panel = () => doc()?.querySelector('[data-zchatgpt-chat]'); const toggle = () => doc()?.querySelector('[data-zchatgpt-toggle]');
     await until(() => toggle(), 'toolbar-toggle'); toggle().click(); await until(() => shell(), 'sidebar-shell', 60000);
     const modeSwitch = () => shell()?.querySelector('[data-zchatgpt-mode-switch]'); const modeButton = mode => modeSwitch()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
-    if (modeSwitch()?.dataset.zchatgptMode !== 'agent') click(modeButton('agent'));
-    await until(() => modeSwitch()?.dataset.zchatgptMode === 'agent' && !modeSwitch()?.closest('[hidden]'), 'visible-agent-mode', 30000);
+    const historyPanel = () => panel()?.querySelector('[data-zchatgpt-history]'); const historyRow = () => historyPanel()?.querySelector(`[data-zchatgpt-conversation-id="${config.recoveryConversationId}"]`);
+    diagnosticState = () => {
+      const row = historyRow(); const history = historyPanel(); const visibleAlert = [...(panel()?.querySelectorAll('[role="alert"]') ?? [])].find(node => !node.hidden && !node.closest('[hidden]'));
+      const alertText = String(visibleAlert?.textContent ?? ''); const alertCode = /\b[A-Z][A-Z0-9_]{2,63}\b/u.exec(alertText)?.[0] ?? (visibleAlert ? 'PRESENT' : null);
+      return { mode: modeSwitch()?.dataset.zchatgptMode ?? null, modeHidden: Boolean(modeSwitch()?.closest('[hidden]')), panelHidden: Boolean(panel()?.hidden || panel()?.closest('[hidden]')), runtime: panel()?.dataset.zchatgptRuntime ?? null, auth: panel()?.dataset.zchatgptAuth ?? null, conversation: panel()?.dataset.zchatgptConversation ?? null, historyHidden: history ? Boolean(history.hidden || history.closest('[hidden]')) : null, matchingRowPresent: Boolean(row), matchingRowHidden: row ? Boolean(row.hidden || row.closest('[hidden]')) : null, alertCode };
+    };
+    await until(() => panel()?.querySelector('[data-zchatgpt-action="history"]'), 'local-chat-controls', 60000);
     if (panel().dataset.zchatgptConversation !== config.recoveryConversationId) {
+      if (modeSwitch()?.dataset.zchatgptMode !== 'agent') click(modeButton('agent'));
+      await until(() => modeSwitch()?.dataset.zchatgptMode === 'agent' && !modeSwitch()?.closest('[hidden]') && !panel()?.closest('[hidden]'), 'visible-agent-mode-for-history', 30000);
       click(panel().querySelector('[data-zchatgpt-action="history"]'));
-      const row = await until(() => panel().querySelector(`[data-zchatgpt-history] [data-zchatgpt-conversation-id="${config.recoveryConversationId}"]`), 'stored-conversation-history-row', 60000); click(row);
+      await until(() => { const history = historyPanel(); return history && !history.hidden && !history.closest('[hidden]') ? history : null; }, 'visible-history-panel', 60000);
+      const row = await until(() => { const value = historyRow(); return value && !value.hidden && !value.closest('[hidden]') ? value : null; }, 'visible-stored-conversation-history-row', 60000); click(row);
       await until(() => panel().dataset.zchatgptConversation === config.recoveryConversationId, 'stored-conversation-open', 60000);
     }
+    report.localRestore = diagnosticState(); await save();
+    if (modeSwitch()?.dataset.zchatgptMode !== 'agent') click(modeButton('agent'));
+    await until(() => modeSwitch()?.dataset.zchatgptMode === 'agent' && !modeSwitch()?.closest('[hidden]') && panel().dataset.zchatgptConversation === config.recoveryConversationId, 'visible-agent-mode-on-stored-conversation', 30000);
+    await delay(750); await check('late-local-hydration-keeps-explicit-agent-mode', modeSwitch()?.dataset.zchatgptMode === 'agent' && panel().dataset.zchatgptConversation === config.recoveryConversationId, diagnosticState());
     const taskCard = () => [...panel().querySelectorAll('[data-zchatgpt-task-id]')].find(card => card.dataset.zchatgptTaskId === config.recoveryRequestId || String(card.querySelector('summary')?.textContent ?? '').includes('Organize library'));
     const card = await until(() => { const value = taskCard(); return value?.dataset.state === 'review' ? value : null; }, 'recovered-organization-review', 120000);
     const requestAfterRecovery = JSON.parse(await IOUtils.readUTF8(conversationPath));
@@ -68,7 +81,8 @@ async function runHostSmoke(config) {
     await check('recovery-starts-zero-model-turns', report.modelTurnsStarted === 0 && JSON.stringify(requestIDsAfter) === JSON.stringify(requestIDsBefore), { modelTurnsStarted: 0, requestsBefore: requestIDsBefore.length, requestsAfter: requestIDsAfter.length, originalRequest: { requestId: config.recoveryRequestId, state: request.state, workflow: user.workflow.skill.workflow, model: user.settings.model } });
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
   } catch (error) {
-    report.status = 'failed'; report.failedStep = step; report.failureClass = String(error?.name ?? 'Error').slice(0, 80); report.finishedAt = new Date().toISOString();
+    const text = String(error?.message ?? error); const failureCode = /Expected visible UI control/iu.test(text) ? 'VISIBLE_CONTROL_MISSING' : /Timed out/iu.test(text) ? 'TIMEOUT' : /dead object|can't access/iu.test(text) ? 'DEAD_OBJECT' : /selector/iu.test(text) ? 'SELECTOR' : 'OTHER';
+    report.status = 'failed'; report.failedStep = step; report.failureClass = String(error?.name ?? 'Error').slice(0, 80); report.failureCode = failureCode; report.diagnosticState = diagnosticState(); report.finishedAt = new Date().toISOString();
     try { await save(); } catch { /* no remaining evidence channel */ }
   }
 }
