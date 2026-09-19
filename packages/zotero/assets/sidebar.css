@@ -104,6 +104,11 @@ body.zchatgpt-dock-open #split-view .primary-view,
   --zchatgpt-toolbar-button-radius: 5px;
   --zchatgpt-border: var(--color-panedivider, color-mix(in srgb, CanvasText 14%, transparent));
   --zchatgpt-control-font-size: 12px;
+  /* Plugin-level fallbacks for hosts that lack the native semantic tokens. The light/dark pair keeps
+     the secondary text at a readable contrast instead of falling back to GrayText. */
+  --zchatgpt-text-primary: var(--fill-primary, light-dark(#1F2328, #ECEEF2));
+  --zchatgpt-text-secondary: var(--fill-secondary, light-dark(#5C6470, #B0B5BF));
+  --zchatgpt-surface: var(--material-background, var(--color-background, Canvas));
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -145,16 +150,115 @@ body.zchatgpt-dock-open #split-view .primary-view,
   min-width: 0;
 }
 
+/* Common shell (UI-01/UI-02): one toolbar with the fixed mode switch, then one clickable context
+   summary line. It is shared by the official Chat surface and the native Agent surface, so the
+   switch never moves between them. */
+.zchatgpt-shell {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+  --zchatgpt-shell-bar-height: 44px;
+  background: var(--material-background, var(--color-background, Canvas));
+  border-bottom: 1px solid var(--zchatgpt-border);
+}
+/* The shell owns controls that are toggled with `hidden` (nav, title, rename popover, context
+   panel). A component display rule must never keep one of them on screen, so the shell guarantees
+   it the same way `.zchatgpt-chat` does. */
+.zchatgpt-shell [hidden] { display: none !important; }
 .zchatgpt-chrome {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 0;
+  min-height: 44px;
+  padding: 4px 8px;
   box-sizing: border-box;
   background: var(--material-background, var(--color-background, Canvas));
 }
+/* The single local binding title shown while the hosted page owns the conversation. Single line,
+   truncated, full name in the tooltip; it takes the space the tab strip leaves. */
+.zchatgpt-shell-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1));
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--fill-primary, CanvasText);
+}
+.zchatgpt-shell-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 2px 8px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--zchatgpt-text-secondary);
+  font: inherit;
+  font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1));
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.zchatgpt-shell-context:hover { color: var(--zchatgpt-text-primary); }
+.zchatgpt-shell-context[aria-expanded="true"] { color: var(--fill-primary, CanvasText); }
+.zchatgpt-shell-context-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zchatgpt-shell-context-chevron { flex: 0 0 auto; display: inline-flex; }
+.zchatgpt-shell-context-chevron svg { display: block; width: 12px; height: 12px; }
+/* Neutral ring, never the platform accent, matching the transcript's other controls. */
+.zchatgpt-shell-context:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
+
+/* Context details: an anchored panel under the summary, opaque like the other popovers, scrollable
+   inside the dock, and never a full-screen replacement for the conversation. */
+.zchatgpt-context-panel {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  right: 8px;
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  color: var(--fill-primary, CanvasText);
+  font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1));
+  line-height: 17px;
+  background-color: Canvas;
+  background-image: linear-gradient(var(--material-menu, var(--material-background, Canvas)), var(--material-menu, var(--material-background, Canvas)));
+  border: 1px solid var(--zchatgpt-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 18%, transparent);
+}
+.zchatgpt-context-panel[hidden] { display: none; }
+.zchatgpt-context-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.zchatgpt-context-panel-title { font-weight: 600; }
+.zchatgpt-context-panel-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.zchatgpt-context-row { margin: 0; overflow-wrap: anywhere; }
+.zchatgpt-context-row-label { color: var(--zchatgpt-text-secondary); }
+.zchatgpt-context-row-value { color: var(--fill-primary, CanvasText); }
+.zchatgpt-context-panel-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.zchatgpt-context-panel-note, .zchatgpt-context-panel-status { margin: 0; color: var(--zchatgpt-text-secondary); overflow-wrap: anywhere; }
+.zchatgpt-context-panel-error { margin: 0; color: var(--fill-primary, CanvasText); overflow-wrap: anywhere; }
+.zchatgpt-context-panel-error[hidden], .zchatgpt-context-panel-status[hidden], .zchatgpt-context-panel-note[hidden] { display: none; }
+
 .zchatgpt-chrome-source, .zchatgpt-context-citation {
   display: flex;
   flex-wrap: nowrap;
@@ -387,15 +491,56 @@ body.zchatgpt-dock-open #split-view .primary-view,
   min-height: var(--zchatgpt-toolbar-button-size, 28px);
   opacity: .75;
 }
-/* Local reading status. Quiet by default: it states a fact about this PDF, not an alert. */
-.zchatgpt-document-status {
-  flex: 0 0 auto;
-  margin: 0 10px 6px;
-  color: var(--fill-secondary, GrayText);
-  font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1));
-  line-height: 1.4;
+/* Agent's empty state (UI-05). A compact explanatory panel centered in the empty transcript: a
+   short title, one purpose line and three lightweight entries. It is an overlay so it never
+   reflows the transcript, and it is hidden the instant a message or draft exists. */
+.zchatgpt-agent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: none;
 }
-.zchatgpt-document-status[hidden] { display: none; }
+.zchatgpt-agent-empty[hidden] { display: none; }
+.zchatgpt-agent-empty-card {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 340px;
+  box-sizing: border-box;
+  text-align: start;
+}
+.zchatgpt-agent-empty-title { margin: 0; font-size: calc(14px * var(--zchatgpt-chat-text-scale, 1)); font-weight: 600; color: var(--fill-primary, CanvasText); }
+.zchatgpt-agent-empty-body { margin: 0; font-size: calc(12px * var(--zchatgpt-chat-text-scale, 1)); line-height: 17px; color: var(--zchatgpt-text-secondary); }
+.zchatgpt-agent-empty-actions { display: flex; flex-direction: column; gap: 4px; }
+.zchatgpt-agent-empty-action {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--zchatgpt-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.zchatgpt-agent-empty-action:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-agent-empty-action:focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: -2px; }
+.zchatgpt-agent-empty-action-title { font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1)); color: var(--fill-primary, CanvasText); }
+.zchatgpt-agent-empty-action-hint { font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); line-height: 15px; color: var(--zchatgpt-text-secondary); }
+.zchatgpt-agent-empty-note { margin: 0; font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); color: var(--zchatgpt-text-secondary); }
+.zchatgpt-agent-empty-note[hidden] { display: none; }
+/* The transcript is the positioning context for the empty overlay and the new-content button. */
 .zchatgpt-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: calc(13px * var(--zchatgpt-chat-text-scale, 1)); }
 .zchatgpt-message-text.zchatgpt-rendered { white-space: normal; }
 .zchatgpt-message-text.zchatgpt-rendered p { margin: 0 0 .55em; }
@@ -538,7 +683,7 @@ body.zchatgpt-dock-open #split-view .primary-view,
    same top offset the toolbar-height variable defines. */
 .zchatgpt-rename-form {
   position: absolute;
-  top: calc(var(--zchatgpt-toolbar-button-size, 28px) + 8px);
+  top: calc(var(--zchatgpt-shell-bar-height, 44px) + 4px);
   right: 0;
   z-index: 7;
   width: min(280px, 100%);
@@ -581,8 +726,8 @@ body.zchatgpt-dock-open #split-view .primary-view,
 .zchatgpt-mode-option {
   appearance: none;
   margin: 0;
-  padding: 3px 8px;
-  min-height: 20px;
+  padding: 4px 10px;
+  min-height: 26px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -847,8 +992,20 @@ body.zchatgpt-dock-open #split-view .primary-view,
   text-align: start;
   cursor: pointer;
 }
-/* Single-line title: truncate rather than wrap into a second line. */
+/* Single-line title: truncate rather than wrap into a second line. The second line carries the
+   paper, the last activity time and a provable source label. */
+.zchatgpt-history-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 1px; }
 .zchatgpt-history-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zchatgpt-history-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--zchatgpt-text-secondary);
+  font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1));
+  line-height: 15px;
+}
+.zchatgpt-history-meta[hidden] { display: none; }
 /* A neutral ring, not the accent outline the owner rejected. */
 .zchatgpt-history-item:focus-visible {
   outline-width: 2px;
@@ -920,3 +1077,105 @@ body.zchatgpt-dock-open #split-view .primary-view,
 .zchatgpt-command-description { color: var(--fill-secondary, GrayText); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
 .zchatgpt-command-status { margin: 4px 8px; font-size: 12px; overflow-wrap: anywhere; }
 .zchatgpt-command-menu :focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+
+/*
+ * Native Zotero Preferences pane. The pane is one aligned column of labelled rows with hairline
+ * group breaks: no heavy fieldset chrome, no oversized intro copy, no unfilled white text boxes.
+ * Everything is scoped under `.zchatgpt-preferences`, so Zotero's own Preferences UI is untouched.
+ */
+.zchatgpt-preferences {
+  --zchatgpt-pref-border: var(--color-panedivider, color-mix(in srgb, CanvasText 14%, transparent));
+  --zchatgpt-pref-muted: var(--fill-secondary, GrayText);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 760px;
+  padding: 4px 0 16px;
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fill-primary, CanvasText);
+}
+.zchatgpt-preferences fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.zchatgpt-preferences legend {
+  padding: 0 0 6px;
+  border: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fill-primary, CanvasText);
+}
+.zchatgpt-preferences label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: 13px;
+}
+/* A multi-line field stacks its label above the box so the box aligns with the column, not with a
+   title that wraps around it. */
+.zchatgpt-preferences label:has(> textarea) { flex-direction: column; align-items: stretch; gap: 6px; }
+.zchatgpt-preferences .zchatgpt-preferences-muted { margin: 0; color: var(--zchatgpt-pref-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.zchatgpt-preferences .zchatgpt-preferences-subhead { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--fill-primary, CanvasText); }
+.zchatgpt-preferences input[type="text"],
+.zchatgpt-preferences input[type="number"],
+.zchatgpt-preferences input[type="search"],
+.zchatgpt-preferences select,
+.zchatgpt-preferences textarea {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  color: inherit;
+  background: var(--material-background, Field);
+  border: 1px solid var(--zchatgpt-pref-border);
+  border-radius: 6px;
+  font: inherit;
+}
+.zchatgpt-preferences input[type="number"] { width: 88px; }
+.zchatgpt-preferences textarea { width: 100%; min-height: 120px; max-height: 200px; resize: vertical; line-height: 1.45; }
+.zchatgpt-preferences button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--zchatgpt-pref-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.zchatgpt-preferences button:hover { background: var(--fill-quinary, ButtonFace); }
+.zchatgpt-preferences button:disabled { opacity: .5; cursor: default; }
+.zchatgpt-preferences :focus-visible { outline: 2px solid var(--fill-secondary, GrayText); outline-offset: 1px; }
+.zchatgpt-preferences-save-row { display: flex; align-items: center; gap: 10px; }
+.zchatgpt-preferences-details { min-width: 0; }
+.zchatgpt-preferences-details > summary { cursor: pointer; color: var(--zchatgpt-pref-muted); font-size: 12px; }
+.zchatgpt-preferences-model,
+.zchatgpt-preferences-skill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--zchatgpt-pref-border);
+}
+.zchatgpt-preferences-model:first-of-type,
+.zchatgpt-preferences-skill:first-of-type { border-top: 0; }
+.zchatgpt-preferences-model > label,
+.zchatgpt-preferences-skill > label { justify-content: flex-start; gap: 8px; }
+.zchatgpt-preferences-model code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.zchatgpt-preferences-history-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.zchatgpt-preferences-history-filters input[type="search"] { flex: 1 1 180px; }
+.zchatgpt-preferences-history-row { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--zchatgpt-pref-border); }
+.zchatgpt-preferences-history-bulk,
+.zchatgpt-preferences-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

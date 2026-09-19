@@ -108,7 +108,7 @@ it('saves interface language and chat text scale through the store and reports f
   await vi.waitFor(() => expect(find<HTMLElement>('[data-zchatgpt-pref="error"]').hidden).toBe(false));
   await settle();
   // The UI language is already zh, so the refusal is rendered in the language the pane now shows.
-  expect(find<HTMLElement>('[data-zchatgpt-pref="error"]').textContent).toBe('请选择 0.5 到 3 之间的聊天字号。');
+  expect(find<HTMLElement>('[data-zchatgpt-pref="error"]').textContent).toBe('请选择 0.5 到 3 之间的 Agent 文字大小。');
   expect(save).toHaveBeenCalledTimes(2);
   expect(scale.value).toBe('1.5');
 });
@@ -266,7 +266,7 @@ it('renders only the offerable model families as labelled checkbox rows with exa
   // says the two things only the rows cannot: checking is what offers a model, and the id is sent.
   const note = find('[data-zchatgpt-pref="models-note"]').textContent ?? '';
   expect(note).toMatch(/bundled catalog, not your account/u);
-  expect(note).toMatch(/Checked models are offered in chats/u);
+  expect(note).toMatch(/Checked models are offered in Agent requests/u);
   expect(note).toMatch(/exact id is what is sent/u);
 });
 
@@ -428,12 +428,12 @@ it('renders the pane copy in the stored UI language and never translates identif
   const { ready, root, find } = mount(host);
   await ready;
   const label = (pref: string): string => find(`[data-zchatgpt-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
-  expect([...find('[data-zchatgpt-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['外观', 'PDF 文本', '模型', 'Codex 指令', '已安装的 skill']);
+  expect([...find('[data-zchatgpt-pref="form"]').querySelectorAll('legend')].map(node => node.textContent)).toEqual(['通用', '对话', 'Agent']);
   // The model note is stateful copy that follows the stored language; the key now exists, so it is
   // asserted exactly instead of accepting the untranslated English source.
-  expect(find('[data-zchatgpt-pref="models-note"]').textContent).toBe('勾选的模型会在对话中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。');
+  expect(find('[data-zchatgpt-pref="models-note"]').textContent).toBe('勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。');
   expect(label('uiLanguage')).toBe('界面语言');
-  expect(label('textScale')).toBe('聊天字号（0.5–3）');
+  expect(label('textScale')).toBe('Agent 文字大小（0.5–3）');
   expect(label('automatic-pdf-text')).toBe('自动使用当前 PDF 文本');
   expect(label('preference-background')).toBe('指令');
   // The withdrawn builtin rows are simply absent; the owner's own workflows still render.
@@ -461,14 +461,14 @@ it('follows a language change in both directions and reports the outcome in that
   await ready;
   const label = (pref: string): string => find(`[data-zchatgpt-pref="${pref}"]`).closest('label')?.firstChild?.textContent ?? '';
   expect(label('uiLanguage')).toBe('Interface language');
-  expect(label('textScale')).toBe('Chat text scale (0.5–3)');
+  expect(label('textScale')).toBe('Agent text size (0.5–3)');
   expect(label('preference-background')).toBe('Instructions');
   const language = find<HTMLSelectElement>('[data-zchatgpt-pref="uiLanguage"]');
   language.value = 'zh'; change(language);
   await settle();
   expect(current().uiLanguage).toBe('zh');
   expect(label('uiLanguage')).toBe('界面语言');
-  expect(label('textScale')).toBe('聊天字号（0.5–3）');
+  expect(label('textScale')).toBe('Agent 文字大小（0.5–3）');
   expect(label('preference-background')).toBe('指令');
   expect(find<HTMLButtonElement>('[data-zchatgpt-pref="save-preferences"]').textContent).toBe('保存');
   // The pane announces its own write in the language it is now showing.
@@ -483,7 +483,41 @@ it('follows a language change in both directions and reports the outcome in that
   expect(current().uiLanguage).toBe('en');
   expect(current().textScale).toBe(1.5);
   expect(label('uiLanguage')).toBe('Interface language');
-  expect(label('textScale')).toBe('Chat text scale (0.5–3)');
+  expect(label('textScale')).toBe('Agent text size (0.5–3)');
   expect(find<HTMLInputElement>('[data-zchatgpt-pref="textScale"]').value).toBe('1.5');
   expect(find<HTMLButtonElement>('[data-zchatgpt-pref="save-preferences"]').textContent).toBe('Save');
+});
+
+it('shows an unsaved indicator only while the instructions box differs from the store', async () => {
+  const { host } = fixture();
+  const { ready, find } = mount(host);
+  await ready;
+  const control = find('[data-zchatgpt-pref="form"]');
+  const unsaved = find<HTMLElement>('[data-zchatgpt-pref="unsaved"]');
+  expect(unsaved.hidden).toBe(true);
+  const box = find<HTMLTextAreaElement>('[data-zchatgpt-pref="preference-background"]');
+  box.value = 'Prefer SI units and define every symbol.';
+  box.dispatchEvent(new (control.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event('input', { bubbles: true }));
+  expect(unsaved.hidden).toBe(false);
+  find<HTMLButtonElement>('[data-zchatgpt-pref="save-preferences"]').click();
+  // Saving re-reads the store, and the indicator only clears once the stored value actually matches.
+  await vi.waitFor(() => expect(unsaved.hidden).toBe(true));
+});
+
+it('puts the Agent instructions heading, scope note and Save row around the box in reading order', async () => {
+  const { host } = fixture();
+  const { ready, find } = mount(host);
+  await ready;
+  const agent = find('[data-zchatgpt-pref="instructions-note"]').closest('fieldset')!;
+  const children = [...agent.children];
+  const order = children.map(node => node.getAttribute('data-zchatgpt-pref') ?? node.tagName.toLowerCase());
+  const note = order.indexOf('instructions-note');
+  const box = order.indexOf('label');
+  expect(note).toBeGreaterThanOrEqual(0);
+  // The heading and scope note precede the box; the Save row that owns the button follows it.
+  expect(box).toBeGreaterThan(note);
+  const saveIndex = children.findIndex(node => node.querySelector('[data-zchatgpt-pref="save-preferences"]'));
+  expect(saveIndex).toBeGreaterThan(box);
+  expect(find('[data-zchatgpt-pref="instructions-note"]').textContent).toBe('Applies only to Agent requests.');
+  expect(find('[data-zchatgpt-pref="save-preferences"]').closest('.zchatgpt-preferences-save-row')).not.toBeNull();
 });

@@ -68,8 +68,8 @@ function offeredSkill(skill: ReaderSkill): boolean {
  * the GPT-5.3 Spark family is not in the bundled catalog and can only arrive from the runtime.
  * Both sentences are exact keys in `chat/ui-locale.ts`.
  */
-const MODELS_NOTE_BUNDLED = 'Checked models are offered in chats; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.';
-const MODELS_NOTE_LIVE = 'Checked models are offered in chats; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.';
+const MODELS_NOTE_BUNDLED = 'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.';
+const MODELS_NOTE_LIVE = 'Checked models are offered in Agent requests; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.';
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : 'The action could not be completed.';
@@ -179,6 +179,8 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     /** The one editable preference: the free-text instructions carried by `background`. */
     instructions: HTMLTextAreaElement;
     savePreferences: HTMLButtonElement;
+    /** Shown only while the box differs from the stored instructions: never a false "saved". */
+    unsaved: HTMLElement;
     models: HTMLElement;
     skills: HTMLElement;
   }
@@ -197,62 +199,93 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     error.setAttribute('role', 'alert');
     error.hidden = true;
 
-    // Appearance holds the interface language and the chat text scale; both are about how the reader
-    // looks, and neither is a model or research preference.
-    const appearance = fieldset(doc, container, 'Appearance');
-    const language = labelled(doc, appearance, 'Interface language', 'uiLanguage', 'select', [['en', 'English'], ['zh', '中文']]);
+    // General holds the shared plugin preferences: how the reader looks and whether the current PDF
+    // is read locally. None of it is a model or a research preference.
+    const general = fieldset(doc, container, 'General');
+    const language = labelled(doc, general, 'Interface language', 'uiLanguage', 'select', [['en', 'English'], ['zh', '中文']]);
     const uiLanguage = language.querySelector('select') as HTMLSelectElement;
-    const scaleLabel = labelled(doc, appearance, `Chat text scale (${CHAT_TEXT_SCALE_MIN}–${CHAT_TEXT_SCALE_MAX})`, 'textScale', 'input');
+    // The text scale only affects the native Agent text. Naming it `Agent text size` keeps it from
+    // implying control over the official web page or the PDF zoom, which it never had.
+    const scaleLabel = labelled(doc, general, `Agent text size (${CHAT_TEXT_SCALE_MIN}–${CHAT_TEXT_SCALE_MAX})`, 'textScale', 'input');
     const textScale = scaleLabel.querySelector('input') as HTMLInputElement;
     textScale.type = 'number'; textScale.min = String(CHAT_TEXT_SCALE_MIN); textScale.max = String(CHAT_TEXT_SCALE_MAX); textScale.step = '0.05';
 
     // PDF text holds the automatic-PDF-text opt-out. It is a plugin preference, not a workspace
     // field: the pane reads and writes `extensions.zchatgpt.automaticPdfText` directly so it is the
     // single source of truth for every reader, including an already-open sidebar.
-    const pdfText = fieldset(doc, container, 'PDF text');
     const automaticPdfLabel = element(doc, 'label', 'Use current PDF text automatically');
     const automaticPdfText = element(doc, 'input');
     automaticPdfText.type = 'checkbox'; automaticPdfText.dataset.zchatgptPref = 'automatic-pdf-text';
     automaticPdfLabel.append(automaticPdfText);
-    pdfText.append(automaticPdfLabel);
+    general.append(automaticPdfLabel);
 
-    // The allowlist is a checkbox list, not a multi-select: the pane's existing controls are labels
-    // plus checkboxes (skills, automatic PDF text), and a long model list stays keyboard-operable,
-    // themeable and readable with name and exact id on every row. The legend names the fieldset's
-    // own contents; the note is rewritten by `syncModels` to state where the rows came from.
-    const modelsField = fieldset(doc, container, 'Models');
+    // Chat is an explanation, not a second settings surface: the official website owns its account,
+    // models and conversations, so there is nothing here that could control them.
+    const chatSection = fieldset(doc, container, 'Chat');
+    const chatNote = element(doc, 'p', 'Chat opens the official ChatGPT website in the sidebar. Its account, models, conversations and limits are managed by ChatGPT, not by this plugin.');
+    chatNote.className = 'zchatgpt-preferences-muted';
+    chatNote.dataset.zchatgptPref = 'chat-note';
+    const chatWebNote = element(doc, 'p', 'The plugin adds only the paper context it may attach to a message you send there. It never sends a Codex request for Chat.');
+    chatWebNote.className = 'zchatgpt-preferences-muted';
+    chatWebNote.dataset.zchatgptPref = 'chat-note-web';
+    chatSection.append(chatNote, chatWebNote);
+
+    // Agent groups everything that belongs to Codex: its connection, the model allowlist, the
+    // instructions box and the installed skills. Opening this pane never starts Codex.
+    const agentSection = fieldset(doc, container, 'Agent');
+    const agentNote = element(doc, 'p', 'Codex starts only when you use Agent. Opening this window reads local settings and any cached model report; it never connects.');
+    agentNote.className = 'zchatgpt-preferences-muted';
+    agentNote.dataset.zchatgptPref = 'agent-note';
+    agentSection.append(agentNote);
+
+    const modelsHeading = element(doc, 'div', 'Models');
+    modelsHeading.className = 'zchatgpt-preferences-subhead';
+    // The allowlist is a checkbox list, not a multi-select: a long model list stays keyboard-operable,
+    // themeable and readable with name and exact id on every row. The note is rewritten by
+    // `syncModels` to state where the rows came from.
     const note = element(doc, 'p', MODELS_NOTE_BUNDLED);
     note.className = 'zchatgpt-preferences-muted';
     note.dataset.zchatgptPref = 'models-note';
     modelsNote = note;
     const models = element(doc, 'div');
     models.dataset.zchatgptPref = 'models';
-    modelsField.append(note, models);
+    agentSection.append(modelsHeading, note, models);
 
-    // The Codex shape: a title, one description line and one multi-line instructions box with Save.
-    // The single box is the whole section; the instructions persist in `background` and reach every
-    // request in the frozen `workflow.preferences` snapshot.
-    const research = fieldset(doc, container, 'Codex instructions');
-    // The one thing the legend and the field label cannot say: the box is global, not per chat.
-    const instructionNote = element(doc, 'p', 'Applies to every chat.');
+    // The single instructions box is Agent-scoped: it persists in `background` and reaches every
+    // Agent request in the frozen `workflow.preferences` snapshot. Chat and the official web page
+    // never see it. The sub-heading, the scope note and the Save row are appended in reading order
+    // around the field, so the box never ends up above its own heading.
+    const instructionsHeading = element(doc, 'div', 'Agent instructions');
+    instructionsHeading.className = 'zchatgpt-preferences-subhead';
+    const instructionNote = element(doc, 'p', 'Applies only to Agent requests.');
     instructionNote.className = 'zchatgpt-preferences-muted';
-    research.append(instructionNote);
-    const instructionsLabel = labelled(doc, research, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
+    instructionNote.dataset.zchatgptPref = 'instructions-note';
+    agentSection.append(instructionsHeading, instructionNote);
+    const instructionsLabel = labelled(doc, agentSection, 'Instructions', `preference-${INSTRUCTIONS_FIELD}`, 'textarea');
     const instructions = instructionsLabel.querySelector('textarea') as HTMLTextAreaElement;
-    instructions.rows = 5;
+    instructions.rows = 4;
     instructions.maxLength = INSTRUCTIONS_MAX;
+    const saveRow = element(doc, 'div');
+    saveRow.className = 'zchatgpt-preferences-save-row';
+    const unsaved = element(doc, 'span', 'Unsaved changes');
+    unsaved.className = 'zchatgpt-preferences-muted';
+    unsaved.dataset.zchatgptPref = 'unsaved';
+    unsaved.hidden = true;
     const savePreferences = element(doc, 'button', 'Save');
     savePreferences.type = 'button'; savePreferences.dataset.zchatgptPref = 'save-preferences';
-    research.append(savePreferences);
+    saveRow.append(savePreferences, unsaved);
+    agentSection.append(saveRow);
 
     // The builtin list is withdrawn to `annotate` for now (see `OFFERED_BUILTIN_SKILLS`); the
     // definitions stay installed and the owner's own user/imported workflows still list here.
-    const workflows = fieldset(doc, container, 'Installed skills');
+    const skillsHeading = element(doc, 'div', 'Installed skills');
+    skillsHeading.className = 'zchatgpt-preferences-subhead';
     const skills = element(doc, 'div');
     skills.dataset.zchatgptPref = 'skills';
-    workflows.append(skills);
+    agentSection.append(skillsHeading, skills);
 
-    // History management sits last so listing it never delays the settings form above it.
+    // Data management is the history listing's own fieldset; its legend names the group. It sits last
+    // so listing it never delays the settings form above it.
     if (host.readHistory && host.deleteHistory) {
       historySection = createHistorySection(doc, {
         readHistory: query => host.readHistory!(query),
@@ -261,7 +294,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       container.append(historySection.element);
     }
 
-    return { form: container, uiLanguage, textScale, automaticPdfText, instructions, savePreferences, models, skills };
+    return { form: container, uiLanguage, textScale, automaticPdfText, instructions, savePreferences, unsaved, models, skills };
   }
 
   let controls: Controls | null = null;
@@ -304,7 +337,12 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     const detail = element(doc, 'span');
     detail.className = 'zchatgpt-preferences-muted';
     label.append(toggle, name);
-    row.append(label, detail);
+    // Secondary provenance (origin, version, workflow) lives behind a small disclosure so the row
+    // reads as a name plus an enabled state, not a stack of raw identifiers.
+    const details = element(doc, 'details');
+    details.className = 'zchatgpt-preferences-details';
+    details.append(element(doc, 'summary', 'Details'), detail);
+    row.append(label, details);
     listen(toggle, 'change', () => { void toggleSkill(skill.id, toggle.checked); });
     const update = (next: ReaderSkill): void => {
       toggle.checked = next.enabled;
@@ -359,7 +397,12 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     idLine.className = 'zchatgpt-preferences-muted';
     idLine.dataset.zchatgptUi = 'false';
     idLine.append(element(doc, 'code', candidate.id));
-    row.append(label, idLine);
+    // The name is the row; the exact id is secondary detail, still verbatim because that id is what
+    // is actually sent.
+    const details = element(doc, 'details');
+    details.className = 'zchatgpt-preferences-details';
+    details.append(element(doc, 'summary', 'Details'), idLine);
+    row.append(label, details);
     listen(toggle, 'change', () => { void saveAllowedModels(); });
     return {
       row,
@@ -387,6 +430,9 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     controls.instructions.value = current.preferences[INSTRUCTIONS_FIELD] ?? '';
     syncSkills(current);
     syncModels(current);
+    // The unsaved indicator is a fact about the box versus the store, so it is recomputed here and on
+    // every keystroke: a failed or refused write can never leave "saved" showing.
+    controls.unsaved.hidden = controls.instructions.value === current.preferences[INSTRUCTIONS_FIELD];
     // Language changes and every re-read both land here, so the copy follows the stored setting.
     // Runs after the skill rows exist so one pass covers the whole pane deterministically.
     localizer?.update(current.uiLanguage);
@@ -535,6 +581,7 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
       automaticPdfText: form.querySelector('[data-zchatgpt-pref="automatic-pdf-text"]') as HTMLInputElement,
       instructions: form.querySelector(`[data-zchatgpt-pref="preference-${INSTRUCTIONS_FIELD}"]`) as HTMLTextAreaElement,
       savePreferences: form.querySelector('[data-zchatgpt-pref="save-preferences"]') as HTMLButtonElement,
+      unsaved: form.querySelector('[data-zchatgpt-pref="unsaved"]') as HTMLElement,
       models: form.querySelector('[data-zchatgpt-pref="models"]') as HTMLElement,
       skills: form.querySelector('[data-zchatgpt-pref="skills"]') as HTMLElement,
     };
@@ -547,13 +594,17 @@ export function createPreferencesPane(host: PreferencesPaneHost): PreferencesPan
     listen(controls.textScale, 'change', () => {
       const requested = Number(controls!.textScale.value);
       if (!Number.isFinite(requested) || requested < CHAT_TEXT_SCALE_MIN || requested > CHAT_TEXT_SCALE_MAX) {
-        fail(`Choose a chat text scale from ${CHAT_TEXT_SCALE_MIN} to ${CHAT_TEXT_SCALE_MAX}.`);
+        fail(`Choose an Agent text size from ${CHAT_TEXT_SCALE_MIN} to ${CHAT_TEXT_SCALE_MAX}.`);
         if (current) controls!.textScale.value = String(current.textScale);
         return;
       }
-      void commit(settings => ({ ...settings, textScale: clampChatTextScale(requested) }), 'Chat text scale saved.');
+      void commit(settings => ({ ...settings, textScale: clampChatTextScale(requested) }), 'Agent text size saved.');
     });
     listen(controls.automaticPdfText, 'change', () => { saveAutomaticPdfText(controls!.automaticPdfText.checked); });
+    listen(controls.instructions, 'input', () => {
+      if (!controls || !current) return;
+      controls.unsaved.hidden = controls.instructions.value === current.preferences[INSTRUCTIONS_FIELD];
+    });
     listen(controls.savePreferences, 'click', () => {
       if (!current) return;
       const preferences = formPreferences(current);

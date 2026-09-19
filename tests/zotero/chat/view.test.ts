@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { ConversationPresenter } from '../../../packages/zotero/src/chat/presenter.ts';
 import type { DocumentServices } from '../../../packages/zotero/src/reader/context.ts';
 import { documentA } from '../../contracts/document-fixture.ts';
-import { groupHistory, historyGroup, HISTORY_BUCKETS, mountChatView, renderReaderShell } from '../../../packages/zotero/src/chat/view.ts';
+import { groupHistory, historyGroup, HISTORY_BUCKETS, mountChatView, renderReaderShell, conversationSource } from '../../../packages/zotero/src/chat/view.ts';
 import { UNLOCATED_SOURCE_TEXT } from '../../../packages/zotero/src/chat/source-links.ts';
 import { messageTimeLabel } from '../../../packages/zotero/src/chat/message-time.ts';
 import { workspaceDraft } from '../../../packages/zotero/src/chat/draft.ts';
@@ -297,7 +297,7 @@ it('shows the local read of this PDF so a successful auto-read is not invisible'
   });
   const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   await vi.waitFor(() => expect(status.hidden).toBe(false));
-  expect(status.textContent).toBe('Read all 2 pages locally');
+  expect(status.textContent).toBe('Current PDF · all 2 pages read locally');
 });
 
 it('reports reading in progress instead of leaving the owner with no evidence at all', async () => {
@@ -306,7 +306,7 @@ it('reports reading in progress instead of leaving the owner with no evidence at
   });
   const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   await vi.waitFor(() => expect(status.hidden).toBe(false));
-  expect(status.textContent).toBe('Reading this PDF…');
+  expect(status.textContent).toBe('Preparing current PDF text…');
 });
 
 it('claims only the pages that really carried text when part of the PDF is scanned', async () => {
@@ -319,17 +319,19 @@ it('claims only the pages that really carried text when part of the PDF is scann
   });
   const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   await vi.waitFor(() => expect(status.hidden).toBe(false));
-  expect(status.textContent).toBe('Read 1 of 2 pages locally');
+  expect(status.textContent).toBe('Current PDF · excerpts from 1 of 2 pages');
 });
 
-it('shows no reading status at all when the owner has switched the local read off', async () => {
+it('states that automatic PDF context is off instead of leaving the summary blank', async () => {
   const { root } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
   });
   await new Promise(resolve => setTimeout(resolve, 0));
   const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
-  expect(status.hidden).toBe(true);
-  expect(status.textContent).toBe('');
+  // UI-03: the summary must answer what the next send carries; an off switch is a real scope fact,
+  // not a blank line, so the owner can tell nothing from this PDF will be attached.
+  expect(status.hidden).toBe(false);
+  expect(status.textContent).toBe('Automatic PDF context is off');
 });
 
 it('sends every field the reader read in the paper identity instead of a four-field subset', async () => {
@@ -876,7 +878,8 @@ it('defaults visible sidebar copy to English', async () => {
   expect(root.querySelector('[data-zchatgpt-history]')?.getAttribute('aria-label')).toBe('Chat history');
   expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')?.placeholder).toBe('Ask a question…');
   const send = root.querySelector('[data-zchatgpt-action="send"]');
-  expect(send?.getAttribute('aria-label')).toBe('Send');
+  // An empty composer disables send and the control names the reason instead of a bare grey arrow.
+  expect(send?.getAttribute('aria-label')).toBe('Enter a question to send.');
   expect(send?.textContent?.trim()).toBe('');
   expect(root.textContent).not.toMatch(/Preview|preview|development preview/u);
   expect(root.textContent).not.toMatch(/对话历史|新对话|输入问题|发送|复制诊断|返回原文|开发预览/u);
@@ -998,7 +1001,10 @@ it('renders an empty transcript as plain, scrollable space with no mark and a wo
   expect(root.querySelector('[data-zchatgpt-empty]')).toBeNull();
   expect(transcript.querySelectorAll('svg')).toHaveLength(0);
   expect(root.textContent).not.toMatch(/Select text in the PDF|ask a question\./iu);
-  expect(root.textContent).not.toMatch(/@ chats|\/ skills|highlight/iu);
+  // The Agent empty state is mounted but hidden while Chat is the selected mode; it carries no
+  // '@ chats' or '/ skills' legacy hints.
+  expect(root.querySelector<HTMLElement>('[data-zchatgpt-agent-empty]')?.hidden).toBe(true);
+  expect(root.textContent).not.toMatch(/@ chats|\/ skills/iu);
   // The transcript keeps its layout and scroll container.
   const styles = (node: HTMLElement) => root.ownerDocument.defaultView!.getComputedStyle(node);
   expect(styles(transcript).display).toBe('flex');
@@ -1923,11 +1929,15 @@ it('renders single-line history rows with a per-status glyph and keeps the dropp
     const active = agedConversation('aaaaaaaa-0000-4000-8000-000000000013', 'Active chat', '2026-09-10T09:10:00.000Z', { activeRequestId: 'live-request' });
     const { root } = await mountReadyChat({ messages: [], conversations: [draft, done, active] });
     const item = root.querySelector<HTMLButtonElement>(`[data-zchatgpt-history] button.zchatgpt-history-item[data-zchatgpt-conversation-id="${done.id}"]`)!;
-    // One line: the title only, no preview line or other inline block.
+    // The primary line is the title; the second line carries the paper and the last activity, never
+    // the dropped preview text.
     expect(item.querySelectorAll('.zchatgpt-history-title')).toHaveLength(1);
     expect(item.querySelector('.zchatgpt-history-preview')).toBeNull();
     expect(item.querySelectorAll('small, br')).toHaveLength(0);
-    expect(item.textContent?.trim()).toBe('Finished chat');
+    expect(item.querySelector('.zchatgpt-history-title')?.textContent).toBe('Finished chat');
+    const meta = item.querySelector('.zchatgpt-history-meta')!;
+    expect(meta.textContent).toContain('Distinct PDF Title');
+    expect(meta.textContent).not.toContain('A preview body that used to sit on a second line.');
     // The PDF title and preview survive for assistive tech and hover instead of being deleted.
     expect(item.getAttribute('aria-label')).toContain('Distinct PDF Title');
     expect(item.getAttribute('aria-label')).toContain('A preview body that used to sit on a second line.');
@@ -2064,7 +2074,7 @@ it('keeps history search filtering and keyboard navigation working in the single
   trigger.click();
   search.value = 'Beta';
   search.dispatchEvent(new view.Event('input', { bubbles: true }));
-  const rowOf = (title: string) => rows().find(row => row.textContent?.trim() === title)!.closest('.zchatgpt-history-row');
+  const rowOf = (title: string) => rows().find(row => row.querySelector('.zchatgpt-history-title')?.textContent === title)?.closest('.zchatgpt-history-row');
   expect(rowOf('Alpha notes')?.hasAttribute('hidden')).toBe(true);
   expect(rowOf('Beta notes')?.hasAttribute('hidden')).toBe(false);
   search.value = '';
@@ -2594,13 +2604,15 @@ it('closes the model popover on Escape and click outside', async () => {
   expect(menu.hidden).toBe(true);
 });
 
-it('keeps the plus at the composer start and removes the attach and @ buttons', async () => {
+it('keeps the plus at the composer start and puts the one mode switch in the shell bar', async () => {
   const { root } = await mountReadyChat();
   const leading = root.querySelector<HTMLElement>('[data-zchatgpt-composer-leading]')!;
   const controls = [...leading.querySelectorAll<HTMLButtonElement>('button')];
-  // The plus is still the first control; Stage 6 added the Chat / Agent selector beside it.
-  expect(controls[0]!.dataset.zchatgptAction).toBe('composer-plus');
-  expect(controls.slice(1).map(node => node.dataset.zchatgptAction)).toEqual(['mode-chat', 'mode-agent']);
+  // The plus is the only control at the composer's start now: the mode switch is not duplicated
+  // here, it lives once in the shared shell bar.
+  expect(controls.map(node => node.dataset.zchatgptAction)).toEqual(['composer-plus']);
+  expect(root.querySelector('[data-zchatgpt-composer-leading] [data-zchatgpt-mode-switch]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-shell-bar] [data-zchatgpt-mode-switch]')).not.toBeNull();
   const plus = controls[0]!;
   expect(plus.dataset.zchatgptPlus).toBe('');
   expect(plus.getAttribute('aria-label')).toBe('Add images or context');
@@ -2722,4 +2734,56 @@ it('opens every attachment route from the plus menu and closes it after a choice
   expect(menu.hidden).toBe(false);
   root.ownerDocument.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true }));
   expect(menu.hidden).toBe(true);
+});
+
+it('opens the context details from the one-line summary and returns focus on Escape', async () => {
+  const { root } = await mountReadyChat({
+    messages: [],
+    document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+  });
+  const summary = root.querySelector<HTMLButtonElement>('[data-zchatgpt-shell-context]')!;
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-context-panel]')!;
+  expect(summary.getAttribute('aria-expanded')).toBe('false');
+  expect(panel.hidden).toBe(true);
+  // The shell keeps exactly one summary line: there is no second permanent reading-status row.
+  expect(root.querySelectorAll('[data-zchatgpt-document-status]')).toHaveLength(1);
+  await vi.waitFor(() => expect(summary.textContent).toBe('Current PDF · all 2 pages read locally'));
+  summary.click();
+  expect(panel.hidden).toBe(false);
+  expect(summary.getAttribute('aria-expanded')).toBe('true');
+  expect(panel.textContent).toContain('Context for the next message');
+  expect(panel.textContent).toContain('Synthetic Paper A');
+  // The automatic-PDF state is shown as a fact, never as a fake toggle that is not wired.
+  expect(panel.textContent).toContain('Automatic PDF context');
+  panel.dispatchEvent(new root.ownerDocument.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(panel.hidden).toBe(true);
+  expect(root.ownerDocument.activeElement).toBe(summary);
+});
+
+it('shows a compact Agent empty state whose entries only prepare a draft', async () => {
+  const sent: SendInput[] = [];
+  const { root, presenter } = await mountReadyChat({ messages: [], sent });
+  presenter.setMode('agent');
+  await vi.waitFor(() => expect(root.querySelector<HTMLElement>('[data-zchatgpt-agent-empty]')?.hidden).toBe(false));
+  const empty = root.querySelector<HTMLElement>('[data-zchatgpt-agent-empty]')!;
+  // Compact copy, not a hero: no oversized heading element, no logo.
+  expect(empty.querySelectorAll('h1, h2')).toHaveLength(0);
+  const highlight = empty.querySelector<HTMLButtonElement>('[data-zchatgpt-action="empty-highlight"]')!;
+  expect(highlight).not.toBeNull();
+  highlight.click();
+  // The entry prepares an editable draft; it never sends, connects or writes.
+  expect(sent).toHaveLength(0);
+  expect(presenter.snapshot().draft.question).toMatch(/Highlight/u);
+  await vi.waitFor(() => expect(root.querySelector<HTMLTextAreaElement>('[data-zchatgpt-input]')!.value).toMatch(/Highlight/u));
+  // Once the draft exists the empty state steps out of the way.
+  await vi.waitFor(() => expect(empty.hidden).toBe(true));
+});
+
+it('derives a provable history source and never promotes a legacy chat', () => {
+  const messagesOf = (modes: Array<'chat' | 'agent'>) => ({ messages: modes.map(mode => ({ mode })) }) as unknown as Pick<Conversation, 'messages'>;
+  expect(conversationSource(messagesOf([]))).toBeUndefined();
+  expect(conversationSource(messagesOf(['agent', 'agent']))).toBe('Agent');
+  // An old `mode: chat` record is the historic Codex read-only path, never an official web chat.
+  expect(conversationSource(messagesOf(['chat']))).toBe('Legacy');
+  expect(conversationSource(messagesOf(['chat', 'agent']))).toBe('Mixed');
 });

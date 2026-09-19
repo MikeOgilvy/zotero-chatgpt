@@ -347,7 +347,7 @@ it('floats the rename popover under the chrome with the opaque menu treatment', 
   expect(cs(form).position).toBe('absolute');
   const rule = shippedRule(doc, '.zchatgpt-rename-form');
   // It hangs below the toolbar row rather than over it, so the title stays visible while renaming.
-  expect(rule.cssText).toContain('--zchatgpt-toolbar-button-size');
+  expect(rule.cssText).toContain('--zchatgpt-shell-bar-height');
   expect(rule.cssText).toContain('var(--zchatgpt-border');
   // happy-dom drops the gradient, so the opaque menu base is pinned in the shipped text.
   expect(shippedCss()).toMatch(/\.zchatgpt-rename-form\s*\{[^}]*var\(--material-menu/u);
@@ -447,3 +447,15 @@ it('centers a scaled muted timestamp divider and keeps transcript type on the ch
   expect(shippedRule(doc, '.zchatgpt-message-time').cssText).toContain('var(--fill-secondary');
 });
 
+
+it('hides shell controls marked hidden even when a component display rule would keep them on screen', () => {
+  // The rename popover, the nav buttons and the title are toggled with `hidden`; a `.zchatgpt-*`
+  // display rule would otherwise win over the UA `[hidden]` rule once they live in the shell.
+  expect(shippedCss()).toMatch(/\.zchatgpt-shell\s*\[hidden\]\s*\{[^}]*display:\s*none\s*!important/u);
+});
+
+it('anchors the rename popover below the 44px shell bar instead of overlapping it', () => {
+  const rule = shippedRule(stylesheetDom().doc, '.zchatgpt-rename-form');
+  expect(rule.cssText).toContain('--zchatgpt-shell-bar-height');
+  expect(shippedCss()).toMatch(/\.zchatgpt-shell\s*\{[^}]*--zchatgpt-shell-bar-height:\s*44px/u);
+});

@@ -715,10 +715,13 @@ async function runHostSmoke(config) {
       }
       return out;
     };
-    const barSwitch = doc.querySelector('[data-zchatgpt-embed-bar] [data-zchatgpt-mode-switch]');
+    // UI-01: the switch is fixed in the common shell bar in both modes, never inside the bar that
+    // belongs to the hosted surface.
+    const shellSwitch = doc.querySelector('[data-zchatgpt-shell-bar] [data-zchatgpt-mode-switch]');
+    const embedBarSwitch = doc.querySelector('[data-zchatgpt-embed-bar] [data-zchatgpt-mode-switch]');
     await check('product-chat-mode-shows-the-hosted-surface',
-      Boolean(slot) && Boolean(nativeChat && nativeChat.hidden === true) && Boolean(barSwitch),
-      { nativeChatHidden: nativeChat ? nativeChat.hidden : null, modeSwitchInEmbedBar: Boolean(barSwitch) });
+      Boolean(slot) && Boolean(nativeChat && nativeChat.hidden === true) && Boolean(shellSwitch) && !embedBarSwitch,
+      { nativeChatHidden: nativeChat ? nativeChat.hidden : null, modeSwitchInShellBar: Boolean(shellSwitch), modeSwitchInEmbedBar: Boolean(embedBarSwitch) });
     // The dock lives in the reader's HTML document, which cannot create XUL elements at all, so the
     // surface must be the host's chrome browser in the main window rather than an element beside it.
     await check('product-chat-surface-is-not-an-element-in-the-reader-document', !doc.querySelector('[data-zchatgpt-embed-browser]'));
@@ -1019,7 +1022,7 @@ async function runHostSmoke(config) {
     click('[data-zchatgpt-action="mode-agent"]');
     await until(() => { const node = doc.querySelector('[data-zchatgpt-embed]'); return node && node.hasAttribute('hidden'); }, 'product-agent-mode-surface-hidden');
     await check('product-agent-mode-restores-the-native-chat',
-      doc.querySelector('[data-zchatgpt-chat]').hidden === false && doc.querySelector('[data-zchatgpt-composer-leading] [data-zchatgpt-mode-switch]') !== null && painted() === '',
+      doc.querySelector('[data-zchatgpt-chat]').hidden === false && doc.querySelector('[data-zchatgpt-shell-bar] [data-zchatgpt-mode-switch]') !== null && doc.querySelector('[data-zchatgpt-composer-leading] [data-zchatgpt-mode-switch]') === null && painted() === '',
       { nativeChatHidden: doc.querySelector('[data-zchatgpt-chat]').hidden, painted: painted() });
     click('[data-zchatgpt-action="mode-chat"]');
     await until(() => painted(), 'product-chat-repainted');

@@ -86,17 +86,21 @@ it('never shows the Agent composer, approvals or task surface in hosted Chat mod
   expect(root.dataset.zchatgptEmbedActive).toBe('true');
 });
 
-it('keeps exactly one mode control, and moves it to the surface that can use it', () => {
+it('keeps exactly one mode control, fixed in the common shell in both modes', () => {
   const { root, presenter, embed } = mount('chat');
   const switches = () => root.querySelectorAll('[data-zchatgpt-mode-switch]');
   expect(switches()).toHaveLength(1);
-  expect(root.querySelector('[data-zchatgpt-embed-bar]')!.contains(switches()[0]!)).toBe(true);
+  // The one switch lives in the shared shell bar, not in the hosted bar and not in the composer.
+  const bar = root.querySelector('[data-zchatgpt-shell-bar]')!;
+  expect(bar.contains(switches()[0]!)).toBe(true);
+  expect(root.querySelector('[data-zchatgpt-embed-bar]')!.contains(switches()[0]!)).toBe(false);
   expect(root.querySelector('[data-zchatgpt-composer-leading]')!.contains(switches()[0]!)).toBe(false);
   (root.querySelector('[data-zchatgpt-action="mode-agent"]') as HTMLButtonElement).click();
   expect(presenter.snapshot().mode).toBe('agent');
-  // Agent mode is the native surface again: the same control, back with the composer it belongs to.
+  // Agent mode is the native surface again: the same control stays exactly where it was.
   expect(switches()).toHaveLength(1);
-  expect(root.querySelector('[data-zchatgpt-composer-leading]')!.contains(switches()[0]!)).toBe(true);
+  expect(root.querySelector('[data-zchatgpt-shell-bar]')!.contains(switches()[0]!)).toBe(true);
+  expect(root.querySelector('[data-zchatgpt-composer-leading]')!.contains(switches()[0]!)).toBe(false);
   expect(root.querySelector('[data-zchatgpt-embed]')!.hasAttribute('hidden')).toBe(true);
   expect(root.querySelector<HTMLElement>('[data-zchatgpt-chat]')!.hidden).toBe(false);
   expect(embed.hide).toHaveBeenCalled();
@@ -222,4 +226,14 @@ it('stops painting the hosted surface when the view is torn down', () => {
   teardown();
   expect(embed.hide).toHaveBeenCalledTimes(1);
   expect(embed.show).not.toHaveBeenCalled();
+});
+
+it('names the clipboard action for what it does, never as an upload or attachment', () => {
+  const { root } = mount('chat');
+  const file = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!;
+  // UI-04: the control copies the real PDF to the clipboard; the paste into ChatGPT is the owner's
+  // own step, so the label must not claim the file was attached or uploaded.
+  expect(file.textContent).toBe('Copy PDF file…');
+  expect(file.getAttribute('aria-label')).toBe('Copy PDF file…');
+  expect(file.textContent).not.toMatch(/attach|upload/iu);
 });

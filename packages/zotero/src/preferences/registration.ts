@@ -17,6 +17,8 @@ export interface PreferencePaneOptions {
   label: string;
   src: string;
   scripts: string[];
+  /** The plugin's own stylesheet, so the pane is styled by the same tokens as the sidebar. */
+  stylesheets: string[];
   /** Built-in Zotero panes set this; a thrown load then cannot leave the previous pane on screen. */
   defaultXUL: boolean;
 }
@@ -52,6 +54,7 @@ export function createPreferencePaneRegistrar(host: PreferencePaneRegistrarHost)
     label: PREFERENCES_PANE_LABEL,
     src: `${host.rootURI}${PREFERENCES_PANE_SOURCE}`,
     scripts: [`${host.rootURI}${PREFERENCES_PANE_SCRIPT}`],
+    stylesheets: [`${host.rootURI}content/assets/sidebar.css`],
     defaultXUL: true,
   });
   const register = async (): Promise<string> => host.panes!.register(options());

@@ -339,7 +339,9 @@ it('renders the history copy in the stored UI language', async () => {
   const { ready, find } = mount(host);
   await ready;
   const legend = find<HTMLElement>('[data-zchatgpt-pref="history"]').querySelector('legend');
-  expect(legend?.textContent).toBe('对话历史');
+  // Preferences is data management now; the legend says so, and the intro states the delete scope.
+  expect(legend?.textContent).toBe('本地数据');
+  expect(find('[data-zchatgpt-history="intro"]').textContent).toContain('官方 ChatGPT 对话');
   expect(find('[data-zchatgpt-history="search"]').getAttribute('aria-label')).toBe('搜索对话…');
   expect(find<HTMLButtonElement>('[data-zchatgpt-history="delete-selected"]').textContent).toBe('删除所选项');
 

@@ -79,6 +79,9 @@ const COPY = {
   cancelLogin: 'Cancel sign-in',
   retry: 'Reconnect',
   newChat: 'New chat',
+  // Agent sessions are Codex work, so the unbound Agent session says so instead of borrowing the
+  // Chat name. The label follows the selected mode; it never rewrites a stored conversation title.
+  newAgent: 'New agent',
   openChats: 'Open chats',
   untitled: 'Untitled',
   history: 'Chat history',
@@ -92,6 +95,12 @@ const COPY = {
   modeChat: 'Chat',
   modeAgent: 'Agent',
   askPlaceholder: 'Ask a question…',
+  // A disabled send/picker states why, so a grey arrow or an unlabeled dot is never the only signal.
+  sendNeedsQuestion: 'Enter a question to send.',
+  sendNeedsSignIn: 'Sign in with ChatGPT to send.',
+  sendNeedsConnection: 'Codex is not connected yet.',
+  settingsNeedsSignIn: 'Model and generation settings (sign in to Codex to change them)',
+  inputKeys: 'Enter to send · Shift+Enter for a new line',
   question: 'Question',
   send: 'Send',
   stop: 'Stop',
@@ -140,6 +149,44 @@ const COPY = {
   documentReadAll: (total: number) => `Read all ${total} pages locally`,
   documentReadSome: (read: number, total: number) => `Read ${read} of ${total} pages locally`,
   documentReadNone: 'No text could be read from this PDF locally',
+  // One-line context summary in the common shell (UI-02/UI-03). It answers "what will the next
+  // message carry", and keeps the four facts apart: what was extracted locally, what is queued for
+  // the next send, whether the page accepted the last submission, and whether a real answer exists.
+  // Only the first two belong on this line; acceptance and answers stay with their own request.
+  contextLineSelected: (pageLabel: string) => `Selected text · page ${pageLabel}`,
+  contextLineSelectedOff: 'Selected text · automatic PDF context off',
+  contextLineOff: 'Automatic PDF context is off',
+  contextLinePreparing: 'Preparing current PDF text…',
+  contextLinePreparingPages: (done: number, total: number) => `Preparing current PDF text… ${done} of ${total} pages`,
+  contextLineReadyAll: (total: number) => `Current PDF · all ${total} pages read locally`,
+  contextLineReadySome: (read: number, total: number) => `Current PDF · excerpts from ${read} of ${total} pages`,
+  contextLineUnavailable: 'PDF text unavailable',
+  contextLineUnprepared: 'Current PDF · text not prepared yet',
+  contextLineNone: 'No PDF context',
+  contextPanelTitle: 'Context for the next message',
+  contextPanelSource: 'Source',
+  contextPanelNextSend: 'Next send',
+  contextPanelLocalRead: 'Read locally',
+  contextPanelLocalReadValue: (read: number, total: number) => `${read} of ${total} pages have text`,
+  contextPanelAutomatic: 'Automatic PDF context',
+  contextPanelAutomaticOn: 'On',
+  contextPanelAutomaticOff: 'Off',
+  contextPanelNoReport: 'The last request did not record a coverage report.',
+  reReadPdf: 'Re-read current PDF',
+  closeContextPanel: 'Close context details',
+  // Agent empty state (UI-05). Purpose copy plus three lightweight entries that only prepare a draft
+  // or open the scope the task needs; none of them sends, connects to a model, downloads or writes.
+  agentEmptyTitle: 'Ask Codex about this paper',
+  agentEmptyBody: 'Answers stay in this sidebar. Highlighting, article retrieval and library organization only run after you review and approve a proposed task.',
+  agentEmptyHighlight: 'Highlight key points',
+  agentEmptyHighlightHint: 'Draft a request for the current PDF',
+  agentEmptyAcquire: 'Get an article',
+  agentEmptyAcquireHint: 'Draft a request for a DOI or public URL',
+  agentEmptyOrganize: 'Organize selected items',
+  agentEmptyOrganizeHint: 'Uses the selection in the Zotero main window',
+  agentEmptyHighlightMissing: 'Open a PDF in the reader before asking for highlights.',
+  agentEmptyOrganizeMissing: 'Select items in the Zotero main window first.',
+  agentEmptyDraftReady: 'Draft prepared below. Nothing has been sent.',
   imageSaveFailed: 'The image could not be saved.',
   imageClipboardFailed: 'The clipboard image could not be attached.',
   // An image really was on the pasteboard or in the drop; these name why it was refused. They are
@@ -160,7 +207,10 @@ const COPY = {
   // the bar only carries what the web app cannot know about this host, which is the paper it has open.
   embedLabel: 'Reload ChatGPT',
   embedCopyContext: 'Copy paper context',
-  embedAttachPdf: 'Attach current PDF',
+  // The file route puts the actual PDF on the clipboard; it never uploads anything, so the control is
+  // named for what it does. The application's own paste-to-attach path is the upload step, and it
+  // happens inside ChatGPT, not here.
+  embedAttachPdf: 'Copy PDF file…',
   embedCopySelection: 'Copy selection',
   embedFileCopied: 'The PDF file is on your clipboard — paste it into ChatGPT to attach it.',
   embedFileUnavailable: 'Copying the PDF file is unavailable here.',
@@ -216,6 +266,7 @@ const ICONS = {
   historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
   historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
   reload: 'M13.1 8a5.1 5.1 0 1 1-1.5-3.6M13.1 2.4v2.5h-2.5',
+  chevron: 'M4 6.5 8 10.5l4-4',
 } as const;
 /** The unbound composer tab. It is not a stored conversation id; the first send creates the record. */
 const NEW_CHAT_TAB_ID = 'new-chat';
@@ -376,9 +427,23 @@ interface HistoryRowSource {
   status: HistoryStatus;
   updatedAt: string;
   current: boolean;
+  /** A source label that can be proven from the record; absent means the row shows no source. */
+  source?: string;
   open(): void;
   /** Present only where the row can be deleted; the workspace history port owns no delete today. */
   remove?: () => void;
+}
+/**
+ * A provable source label for a stored conversation, or undefined. Only a record whose messages all
+ * carry one mode can be labelled: a `chat` message is the legacy Codex read-only path, never an
+ * official web conversation, so it is named that way instead of being promoted to `Chat`.
+ */
+export function conversationSource(conversation: Pick<Conversation, 'messages'>): string | undefined {
+  const modes = conversation.messages.map(message => message.mode).filter((mode): mode is RequestMode => !!mode);
+  if (!modes.length) return undefined;
+  const unique = new Set(modes);
+  if (unique.size > 1) return 'Mixed';
+  return unique.has('agent') ? 'Agent' : 'Legacy';
 }
 export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentity): HTMLElement {
   const doc = body.ownerDocument;
@@ -494,10 +559,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
   };
   root.querySelector('[data-zchatgpt-chat]')?.remove();
-  const chat = el('section', 'zchatgpt-chat'); chat.dataset.zchatgptChat = '';
-  const chrome = el('div', 'zchatgpt-chrome');
   /**
-   * Cursor-style agent tabs live in the chrome: every open chat is a named tab, the unbound composer
+   * One common shell for both modes (UI-01/UI-02): a single toolbar with the fixed mode switch at its
+   * start, then one context summary line. The two surfaces only swap what is below it, so the switch
+   * never moves between a composer and the hosted Chat bar.
+   */
+  const shell = el('div', 'zchatgpt-shell'); shell.dataset.zchatgptShell = '';
+  const chat = el('section', 'zchatgpt-chat'); chat.dataset.zchatgptChat = '';
+  const chrome = el('div', 'zchatgpt-chrome'); chrome.dataset.zchatgptShellBar = '';
+  /**
+   * Cursor-style agent tabs live in the toolbar: every open chat is a named tab, the unbound composer
    * is a tab, and the selected tab carries the close cross. On first open — no named tab yet — that
    * unbound tab shows the article title immediately, before a conversation is restored or created.
    * Pressing `+` beside an already-open named chat is the New chat copy. `+` and history stay on the
@@ -509,21 +580,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   panes.dataset.zchatgptPanes = '';
   panes.setAttribute('role', 'tablist');
   panes.setAttribute('aria-label', COPY.openChats);
+  /** The single-line local binding shown while the official web surface owns the conversation. */
+  const shellTitle = el('span', 'zchatgpt-shell-title'); shellTitle.dataset.zchatgptShellTitle = ''; shellTitle.hidden = true;
   const paneNodes = new Map<string, HTMLElement>();
   /** The selected tab's title control; the rename popover hangs off it. */
   let renameTrigger: HTMLElement | null = null;
+  // The active citation's own line. It lives in the context panel now: the shell summary states the
+  // next send in one line, and the citation's page and its back-to-source control sit in the details.
   const contextSource = el('div', 'zchatgpt-chrome-source');
   contextSource.dataset.zchatgptContextSource = '';
-  // The paper's declared metadata is still read in the background and frozen into every request
-  // (`presenter.paperIdentity()`), but it is deliberately not written out on screen: the owner asked
-  // for a silent read, not a card above the transcript.
-  // The local read of this PDF is the only on-screen evidence that the article was read at all, so it
-  // reports counts from the prepared document rather than a spinner.
-  const documentStatus = el('p', 'zchatgpt-document-status');
-  documentStatus.dataset.zchatgptDocumentStatus = '';
-  documentStatus.hidden = true;
-  // The first outbound scope notice stays even though the PDF coverage panel is gone: it is the only
-  // way to acknowledge the disclosure, and without it an explain that needs consent can never send.
+  contextSource.hidden = true;
+  // The first outbound scope notice stays: it is the only way to acknowledge the disclosure, and
+  // without it an explain that needs consent can never send. It is a state, not a permanent banner.
   const scopeNotice = el('div', 'zchatgpt-context-disclosure');
   scopeNotice.dataset.zchatgptContextDisclosure = '';
   const scopeNoticeCopy = el('p', '', COPY.sendScope);
@@ -537,7 +605,61 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historyBtn.setAttribute('aria-expanded', 'false');
   historyBtn.setAttribute('aria-controls', `${viewId}-history`);
   actions.append(fresh, historyBtn);
-  chrome.append(panes, actions);
+  /**
+   * The routing mode for the next request. Per chat: the selected state is painted from presenter
+   * state, so a switch is shown only once the presenter accepted it, and it never rewrites an
+   * already recorded request. It is created once, appended once, and never reparented: the one copy
+   * of this control is what keeps the switch in the same place in both modes.
+   */
+  const modeSwitch = el('div', 'zchatgpt-mode-switch');
+  modeSwitch.dataset.zchatgptModeSwitch = '';
+  modeSwitch.setAttribute('role', 'group');
+  modeSwitch.setAttribute('aria-label', COPY.mode);
+  modeSwitch.dataset.zchatgptUi = 'true';
+  const modeButtons: Array<{ mode: RequestMode; node: HTMLButtonElement }> = (['chat', 'agent'] as const).map(mode => {
+    const node = button(mode === 'chat' ? COPY.modeChat : COPY.modeAgent, `mode-${mode}`, () => presenter.setMode(mode), undefined, 'zchatgpt-mode-option');
+    node.setAttribute('aria-pressed', String(mode === 'chat'));
+    return { mode, node };
+  });
+  modeSwitch.append(...modeButtons.map(entry => entry.node));
+  chrome.append(modeSwitch, panes, shellTitle, actions);
+  /**
+   * The context summary (UI-02/UI-03). One line answers "what will the next message carry"; clicking
+   * it opens an anchored panel with the full source, the concrete read coverage and the actions that
+   * do not belong on a permanent toolbar row. The summary never borrows a previous request's
+   * acceptance or answer state.
+   */
+  const shellContext = el('button', 'zchatgpt-shell-context');
+  shellContext.type = 'button';
+  shellContext.dataset.zchatgptShellContext = '';
+  shellContext.setAttribute('aria-expanded', 'false');
+  shellContext.setAttribute('aria-controls', `${viewId}-context`);
+  const shellContextText = el('span', 'zchatgpt-shell-context-text');
+  shellContextText.dataset.zchatgptDocumentStatus = '';
+  shellContextText.dataset.zchatgptContextLine = '';
+  const shellContextChevron = el('span', 'zchatgpt-shell-context-chevron'); shellContextChevron.setAttribute('aria-hidden', 'true');
+  shellContextChevron.append(icon('chevron'));
+  shellContext.append(shellContextText, shellContextChevron);
+  const contextPanel = el('div', 'zchatgpt-context-panel');
+  contextPanel.id = `${viewId}-context`;
+  contextPanel.dataset.zchatgptContextPanel = '';
+  contextPanel.setAttribute('role', 'dialog');
+  contextPanel.setAttribute('aria-label', COPY.contextPanelTitle);
+  contextPanel.hidden = true;
+  const contextPanelBody = el('div', 'zchatgpt-context-panel-body');
+  // The active citation's own line is owned by the panel from the start (hidden until a selection
+  // exists) so its page + return-to-source contract is stable whether or not the panel is expanded.
+  contextPanelBody.append(contextSource);
+  // A local, assertive live region rather than `role="alert"`: it belongs to the panel, and it must
+  // not be mistaken for the presenter's own error alert elsewhere in the sidebar.
+  const contextPanelError = el('p', 'zchatgpt-context-panel-error'); contextPanelError.setAttribute('aria-live', 'assertive'); contextPanelError.hidden = true;
+  const contextPanelStatus = el('p', 'zchatgpt-context-panel-status');
+  contextPanelStatus.setAttribute('role', 'status');
+  contextPanelStatus.setAttribute('aria-live', 'polite');
+  contextPanelStatus.hidden = true;
+  contextPanel.append(contextPanelBody, contextPanelStatus, contextPanelError);
+  shell.append(chrome, shellContext, contextPanel);
+  root.append(shell);
   // Renaming hangs off the selected tab's title, the same place the owner already looks for the
   // chat's name. The form is a small popover under the chrome.
   const renameForm = el('div', 'zchatgpt-rename-form'); renameForm.dataset.zchatgptRenameForm = ''; renameForm.hidden = true;
@@ -637,6 +759,37 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     presenter.setScrollTop(messages.scrollTop);
   });
   transcript.append(messages, newContent);
+  /**
+   * Agent's empty state (UI-05). Compact and explanatory, not a marketing hero: a short title, one
+   * purpose line, and three lightweight entries. Each entry only prepares a draft for the owner to
+   * edit and send — none of them connects a model, downloads, writes, or submits anything.
+   */
+  const empty = el('div', 'zchatgpt-agent-empty'); empty.dataset.zchatgptAgentEmpty = ''; empty.hidden = true;
+  const emptyCard = el('div', 'zchatgpt-agent-empty-card');
+  const emptyTitle = el('div', 'zchatgpt-agent-empty-title', COPY.agentEmptyTitle);
+  const emptyBody = el('p', 'zchatgpt-agent-empty-body', COPY.agentEmptyBody);
+  const emptyActions = el('div', 'zchatgpt-agent-empty-actions');
+  const emptyNote = el('p', 'zchatgpt-agent-empty-note'); emptyNote.setAttribute('role', 'status'); emptyNote.hidden = true;
+  const emptyAction = (title: string, hint: string, question: string, action: string) => {
+    const node = el('button', 'zchatgpt-agent-empty-action');
+    node.type = 'button'; node.dataset.zchatgptAction = action;
+    node.append(el('span', 'zchatgpt-agent-empty-action-title', title), el('span', 'zchatgpt-agent-empty-action-hint', hint));
+    node.addEventListener('click', () => {
+      // Prepare the draft only. The owner still edits and sends it; nothing is submitted here.
+      presenter.setQuestion(question);
+      emptyNote.textContent = COPY.agentEmptyDraftReady; emptyNote.hidden = false;
+      presenter.focusInput();
+    });
+    return node;
+  };
+  emptyActions.append(
+    emptyAction(COPY.agentEmptyHighlight, COPY.agentEmptyHighlightHint, 'Highlight the most important passages in the current PDF and explain each one briefly.', 'empty-highlight'),
+    emptyAction(COPY.agentEmptyAcquire, COPY.agentEmptyAcquireHint, 'Save this article to a collection and download an available PDF: ', 'empty-acquire'),
+    emptyAction(COPY.agentEmptyOrganize, COPY.agentEmptyOrganizeHint, 'Tag the items I selected in the Zotero window and add them to suitable existing collections.', 'empty-organize'),
+  );
+  emptyCard.append(emptyTitle, emptyBody, emptyActions, emptyNote);
+  empty.append(emptyCard);
+  transcript.append(empty);
   const draft = el('div', 'zchatgpt-draft');
   const draftCitations = el('div', 'zchatgpt-draft-citations'); draftCitations.dataset.zchatgptDraftCitations = '';
   const draftImages = el('div', 'zchatgpt-draft-images'); draftImages.dataset.zchatgptDraftImages = '';
@@ -677,7 +830,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    */
   const columns = el('div', 'zchatgpt-columns');
   columns.append(main);
-  chat.append(chrome, renameForm, contextSource, documentStatus, scopeNotice, columns); root.append(chat);
+  // `renameForm` hangs off the toolbar, so it belongs to the shell; the context citation line lives
+  // inside the context panel; the native surface keeps only the consent state and the columns.
+  shell.append(renameForm);
+  chat.append(scopeNotice, columns); root.append(chat);
   /**
    * Chat mode's chrome when the host hosts the real ChatGPT application. It holds the one mode
    * control (so Agent stays reachable) and the slot the host paints the web surface over; ChatGPT's
@@ -795,21 +951,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   );
   plusMenu.append(attachGroup, referenceGroup, skillGroup);
   composer.append(plusMenu);
-  // The routing mode for the next request, beside `+` at the composer's start in the same control
-  // style. It is per chat: the selected state is painted from presenter state, so a switch is shown
-  // only once the presenter accepted it, and it never rewrites an already recorded request.
-  const modeSwitch = el('div', 'zchatgpt-mode-switch');
-  modeSwitch.dataset.zchatgptModeSwitch = '';
-  modeSwitch.setAttribute('role', 'group');
-  modeSwitch.setAttribute('aria-label', COPY.mode);
-  modeSwitch.dataset.zchatgptUi = 'true';
-  const modeButtons: Array<{ mode: RequestMode; node: HTMLButtonElement }> = (['chat', 'agent'] as const).map(mode => {
-    const node = button(mode === 'chat' ? COPY.modeChat : COPY.modeAgent, `mode-${mode}`, () => presenter.setMode(mode), undefined, 'zchatgpt-mode-option');
-    node.setAttribute('aria-pressed', String(mode === 'chat'));
-    return { mode, node };
-  });
-  modeSwitch.append(...modeButtons.map(entry => entry.node));
-  leading.append(plus, modeSwitch);
+  // Agent keeps only the attachment `+` at the composer's start: the one Chat/Agent switch lives in
+  // the common shell above, never here and never twice.
+  leading.append(plus);
   const acquisition = el('label', 'zchatgpt-acquisition-target', 'Save literature to'); acquisition.hidden = true;
   const collection = el('select'); collection.dataset.zchatgptCollectionTarget = ''; collection.setAttribute('aria-label', 'Target collection'); acquisition.append(collection); composerContext.append(acquisition);
   collection.addEventListener('change', () => { const selected = presenter.snapshot().collectionOptions.find(item => `${item.libraryId}:${item.collectionKey}` === collection.value); if (selected) presenter.setAcquisitionTarget({ clientId: selected.clientId, libraryId: selected.libraryId, collectionKey: selected.collectionKey }); else presenter.setAcquisitionTarget(null); });
@@ -858,11 +1002,28 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       applyChatTextScale(root);
       return () => undefined;
     })();
+  /**
+   * The context summary's details panel. It is an inline anchored panel, not a second transcript:
+   * opening it never reflows or replaces the conversation, and closing it returns focus to the
+   * summary button so the affordance stays keyboard-reachable.
+   */
+  const toggleContext = (open?: boolean) => {
+    const next = open ?? contextPanel.hidden;
+    contextPanel.hidden = !next;
+    shellContext.setAttribute('aria-expanded', String(next));
+    if (next) {
+      contextPanelError.hidden = true; contextPanelStatus.hidden = true;
+      togglePicker(false); toggleHistory(false); toggleRename(false); togglePlus(false);
+      renderContextSummary(latestViewState);
+      focusMenu(contextPanel);
+    }
+  };
+  shellContext.addEventListener('click', () => toggleContext());
   const togglePicker = (open?: boolean) => {
     const next = open ?? menu.hidden;
     menu.hidden = !next;
     picker.setAttribute('aria-expanded', String(next));
-    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); toggleRename(false); togglePlus(false); }
+    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); toggleRename(false); togglePlus(false); contextPanel.hidden = true; shellContext.setAttribute('aria-expanded', 'false'); }
   };
   /**
    * The rename popover hangs off the selected tab's title. Opening it fills the field from the live
@@ -1061,6 +1222,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   bindMenuKeys(renameForm, { focus() { renameTrigger?.focus(); } }, () => toggleRename(false));
   bindMenuKeys(historyPanel, historyBtn, () => toggleHistory(false));
   bindMenuKeys(plusMenu, plus, () => togglePlus(false));
+  bindMenuKeys(contextPanel, shellContext, () => toggleContext(false));
   for (const [trigger, panel, open] of [
     [picker, menu, () => togglePicker(true)],
     [historyBtn, historyPanel, () => toggleHistory(true)],
@@ -1102,10 +1264,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!historyPanel.hidden && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
     if (!renameForm.hidden && !renameForm.contains(target) && !renameTrigger?.contains(target)) toggleRename(false);
     if (!plusMenu.hidden && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
+    if (!contextPanel.hidden && !contextPanel.contains(target) && !shellContext.contains(target)) toggleContext(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
-    if (!plusMenu.hidden) { event.preventDefault(); togglePlus(false); plus.focus(); }
+    if (!contextPanel.hidden) { event.preventDefault(); toggleContext(false); shellContext.focus(); }
+    else if (!plusMenu.hidden) { event.preventDefault(); togglePlus(false); plus.focus(); }
     else if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
     else if (!renameForm.hidden) { event.preventDefault(); toggleRename(false); renameTrigger?.focus(); }
     else if (!historyPanel.hidden) { event.preventDefault(); toggleHistory(false); historyBtn.focus(); }
@@ -1259,25 +1423,105 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   let focusToken = 0; let contentKey = ''; let chromeKey = ''; let messageTimeKey = '';
   /**
-   * The local reading status. Counts come from the prepared pages, so "read all N pages" is only said
-   * when every page really carried text: a scanned page reported as empty still counts against the
-   * total. A failed read stays silent here because the composer already announces the coded error,
-   * and a read the owner switched off is not reported as a reading at all.
+   * The one-line answer to "what will the next message carry" (UI-02/UI-03). The four facts stay
+   * separate: this line reports the local read and the next send, never whether the last page
+   * submission was accepted or whether a model answered. Counts come from the prepared pages, so
+   * "all N" is only said when every page really carried text: a scanned page reported as empty still
+   * counts against the total, and a partial read is never rounded up into a full one.
    */
-  let documentStatusKey: string | null = null;
-  const renderDocumentStatus = (state: PresenterState) => {
+  const contextSummaryText = (state: PresenterState): string => {
     const { enabled, phase, prepared, progress } = state.document;
-    const pages = prepared?.pages ?? [];
-    const read = pages.filter(page => page.status === 'text' && page.text.length > 0).length;
-    const text = !enabled || phase === 'error' ? ''
-      : phase === 'preparing' ? (progress.total > 0 ? COPY.documentReadingPages(progress.done, progress.total) : COPY.documentReading)
-      : phase === 'ready' && prepared ? (read === 0 ? COPY.documentReadNone : read >= prepared.totalPages ? COPY.documentReadAll(prepared.totalPages) : COPY.documentReadSome(read, prepared.totalPages))
-      : '';
-    const key = `${phase}:${text}`;
-    if (key === documentStatusKey) return;
-    documentStatusKey = key;
-    documentStatus.hidden = text === '';
-    if (text) documentStatus.textContent = text; else documentStatus.replaceChildren();
+    // Only the draft's own citation is queued for the next send. A citation recorded on an earlier
+    // turn keeps its own return-to-source line in the panel, but it must not be reported as the
+    // scope of the next message.
+    const pending = state.draft.citations.at(-1) ?? null;
+    if (pending) return enabled ? COPY.contextLineSelected(pageLabel(pending)) : COPY.contextLineSelectedOff;
+    if (!enabled) return COPY.contextLineOff;
+    if (phase === 'preparing') return progress.total > 0 ? COPY.contextLinePreparingPages(progress.done, progress.total) : COPY.contextLinePreparing;
+    if (phase === 'error') return COPY.contextLineUnavailable;
+    if (prepared) {
+      const read = prepared.pages.filter(page => page.status === 'text' && page.text.length > 0).length;
+      if (read === 0) return COPY.contextLineUnavailable;
+      return read >= prepared.totalPages ? COPY.contextLineReadyAll(prepared.totalPages) : COPY.contextLineReadySome(read, prepared.totalPages);
+    }
+    return phase === 'ready' ? COPY.contextLineUnavailable : COPY.contextLineUnprepared;
+  };
+  let contextLineKey: string | null = null;
+  /**
+   * The details panel behind the summary. It holds only what does not belong on a permanent row:
+   * the full source, the concrete read coverage, the automatic-PDF state (shown, never a fake
+   * toggle), the clipboard/primary-source actions the owner asked for, and the planner's own
+   * coverage report when one exists. It is rebuilt only while it is open.
+   */
+  const renderContextPanel = (state: PresenterState, summary: string) => {
+    const citation = activeCitation(state.draft.citations, state.conversation?.messages ?? []);
+    const { enabled, prepared, phase } = state.document;
+    const read = prepared ? prepared.pages.filter(page => page.status === 'text' && page.text.length > 0).length : 0;
+    const row = (label: string, value: string, content = false): HTMLElement => {
+      const line = el('p', 'zchatgpt-context-row');
+      const name = el('span', 'zchatgpt-context-row-label', label); name.setAttribute('data-zchatgpt-ui', 'true');
+      const text = el('span', 'zchatgpt-context-row-value', value);
+      if (content) text.dataset.zchatgptUi = 'false'; else text.setAttribute('data-zchatgpt-ui', 'true');
+      line.append(name, doc.createTextNode(' '), text);
+      return line;
+    };
+    const nodes: HTMLElement[] = [];
+    const head = el('div', 'zchatgpt-context-panel-head');
+    const title = el('span', 'zchatgpt-context-panel-title', COPY.contextPanelTitle); title.setAttribute('data-zchatgpt-ui', 'true');
+    const close = button(COPY.closeContextPanel, 'close-context-panel', () => toggleContext(false), 'remove');
+    head.append(title, close);
+    nodes.push(head);
+    nodes.push(row(COPY.contextPanelSource, state.document.identity.title || state.document.attachment.title, true));
+    nodes.push(row(COPY.contextPanelNextSend, summary));
+    if (prepared) nodes.push(row(COPY.contextPanelLocalRead, COPY.contextPanelLocalReadValue(read, prepared.totalPages)));
+    nodes.push(row(COPY.contextPanelAutomatic, enabled ? COPY.contextPanelAutomaticOn : COPY.contextPanelAutomaticOff));
+    // The active citation's page and its back-to-source control keep their own node so the reader
+    // navigation contract is unchanged; it is hidden whenever the draft carries no selection.
+    nodes.push(contextSource);
+    if (phase === 'error' && state.document.error) nodes.push(el('p', 'zchatgpt-context-panel-error', state.document.error));
+    const actionsRow = el('div', 'zchatgpt-context-panel-actions');
+    if (hooks.chatEmbed && state.mode === 'chat') {
+      const embedCopy = (label: string, action: string, run: () => Promise<EmbedClipboardOutcome>) => button(label, action, () => {
+        contextPanelStatus.hidden = true;
+        void run().then(outcome => {
+          contextPanelStatus.textContent = !outcome.copied
+            ? (outcome.reason === 'unavailable' ? COPY.embedContextUnavailable
+              : outcome.reason === 'no-text' ? COPY.embedContextEmpty
+              : outcome.reason === 'no-selection' ? COPY.embedSelectionMissing
+              : outcome.reason === 'no-file' ? COPY.embedFileMissing
+              : COPY.embedContextFailed)
+            : outcome.kind === 'selection' ? COPY.embedSelectionCopied(outcome.pageLabel)
+              : outcome.kind === 'file' ? COPY.embedFileCopied
+              : outcome.truncated ? COPY.embedContextShortened(outcome.pages, outcome.totalPages)
+              : COPY.embedContextCopied(outcome.pages, outcome.totalPages);
+          contextPanelStatus.hidden = false;
+        }).catch(() => { contextPanelStatus.textContent = COPY.embedContextFailed; contextPanelStatus.hidden = false; });
+      });
+      actionsRow.append(
+        embedCopy(COPY.embedCopyContext, 'panel-copy-context', () => hooks.chatEmbed?.copyContext?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
+        embedCopy(COPY.embedCopySelection, 'panel-copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
+      );
+    }
+    actionsRow.append(button(COPY.reReadPdf, 're-read-pdf', () => {
+      contextPanelError.hidden = true;
+      void presenter.prepareContext().catch(error => { contextPanelError.textContent = actionFailure(error); contextPanelError.hidden = false; });
+    }));
+    nodes.push(actionsRow);
+    if (state.contextReport) nodes.push(contextDetailNodes(doc, state.contextReport));
+    else { const note = el('p', 'zchatgpt-context-panel-note', COPY.contextPanelNoReport); note.setAttribute('data-zchatgpt-ui', 'true'); nodes.push(note); }
+    contextPanelBody.replaceChildren(...nodes);
+    contextSource.hidden = !citation;
+  };
+  const renderContextSummary = (state: PresenterState) => {
+    const text = contextSummaryText(state);
+    const expanded = !contextPanel.hidden;
+    if (text !== contextLineKey) { contextLineKey = text; shellContextText.textContent = text; }
+    shellContext.setAttribute('aria-expanded', String(expanded));
+    // The accessible name is the summary itself, so it is translated by the same patterns as the
+    // visible text; `aria-expanded` already says the control discloses more.
+    shellContext.setAttribute('aria-label', text);
+    shellContext.title = text;
+    if (expanded) renderContextPanel(state, text);
   };
   /**
    * Paint the mode the presenter will freeze onto the next request. `aria-pressed` is set from
@@ -1287,6 +1531,14 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const renderMode = (state: PresenterState) => {
     for (const entry of modeButtons) entry.node.setAttribute('aria-pressed', String(entry.mode === state.mode));
     modeSwitch.dataset.zchatgptMode = state.mode;
+    // New sessions belong to the selected mode's name: the native surface is Agent work, so its
+    // unbound session says `New agent`, while the non-embedded Chat stub keeps `New chat`. The
+    // control stays icon-only; the mode-specific name is its accessible name and tooltip.
+    const freshLabel = state.mode === 'agent' ? COPY.newAgent : COPY.newChat;
+    if (fresh.dataset.zchatgptUiCopy !== freshLabel) {
+      fresh.dataset.zchatgptUiCopy = freshLabel;
+      fresh.setAttribute('aria-label', freshLabel); fresh.title = freshLabel;
+    }
   };
   const updateContext = (state: PresenterState) => {
     if (!state.conversation && !renameForm.hidden) toggleRename(false);
@@ -1303,7 +1555,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }
     }
     contextSource.hidden = !citation;
-    renderDocumentStatus(state);
+    renderContextSummary(state);
   };
   /**
    * Reconcile the Cursor-style tab strip. A chip is kept by id instead of rebuilt, so a click or an
@@ -1314,7 +1566,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    * that tab is still not a record.
    */
   const renderPanes = (state: PresenterState) => {
-    panes.hidden = false;
+    // The hosted Chat page owns its own conversation list, so the native tab strip is not shown
+    // beside it; the shell shows the single local binding title instead.
+    panes.hidden = root.dataset.zchatgptEmbedActive === 'true';
     const models: Array<{ id: string; label: string; title: string; conversation: Conversation | null; localize: boolean }> = state.openConversations.map(conversation => ({
       id: conversation.id,
       label: conversationLabel(conversation, state.conversations),
@@ -1423,7 +1677,23 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // is the same clock the timing line uses.
     mark.append(icon(source.status === 'done' ? 'historyDone' : source.status === 'draft' ? 'historyDraft' : 'clock'));
     const title = el('span', 'zchatgpt-history-title', source.title);
-    choice.append(mark, title);
+    // The second line carries the paper and the last activity, plus a source label only when the
+    // record proves one. The time is data (its own span); the source label is copy and is translated.
+    const meta = el('span', 'zchatgpt-history-meta');
+    const metaText = (text: string, content: boolean) => {
+      if (meta.childNodes.length) meta.append(doc.createTextNode(' · '));
+      const node = el('span', '', text);
+      if (content) node.dataset.zchatgptUi = 'false'; else node.setAttribute('data-zchatgpt-ui', 'true');
+      meta.append(node);
+    };
+    if (source.paperTitle && source.paperTitle !== source.title) metaText(source.paperTitle, true);
+    const when = messageTimeLabel(source.updatedAt, Date.now(), 'en');
+    if (when) metaText(when, true);
+    if (source.source) metaText(source.source, false);
+    meta.hidden = meta.childNodes.length === 0;
+    const text = el('span', 'zchatgpt-history-text');
+    text.append(title, meta);
+    choice.append(mark, text);
     const description = historyRowDescription({ title: source.title, paperTitle: source.paperTitle, preview: source.preview });
     choice.setAttribute('aria-label', description);
     choice.title = description;
@@ -1447,17 +1717,21 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     open: () => { void presenter.openHistoryEntry(entry.id); },
     remove: () => { void presenter.deleteConversation(entry.id); },
   });
-  const conversationHistoryRow = (conversation: Conversation, state: PresenterState): HistoryRowSource => ({
-    id: conversation.id,
-    title: conversationLabel(conversation, state.conversations),
-    paperTitle: conversation.paperIdentity?.title ?? '',
-    preview: conversation.messages.at(-1)?.text ?? '',
-    status: historyStatus(conversation),
-    updatedAt: conversation.updatedAt || conversation.createdAt,
-    current: conversation.id === state.conversation?.id,
-    open: () => { void presenter.openConversation(conversation.id); },
-    remove: () => { void presenter.deleteConversation(conversation.id); },
-  });
+  const conversationHistoryRow = (conversation: Conversation, state: PresenterState): HistoryRowSource => {
+    const source = conversationSource(conversation);
+    return {
+      id: conversation.id,
+      title: conversationLabel(conversation, state.conversations),
+      paperTitle: conversation.paperIdentity?.title ?? '',
+      preview: conversation.messages.at(-1)?.text ?? '',
+      status: historyStatus(conversation),
+      updatedAt: conversation.updatedAt || conversation.createdAt,
+      ...(source !== undefined ? { source } : {}),
+      current: conversation.id === state.conversation?.id,
+      open: () => { void presenter.openConversation(conversation.id); },
+      remove: () => { void presenter.deleteConversation(conversation.id); },
+    };
+  };
   /**
    * Both history paths render through the same row shape and differ only in their source. Neither
    * partitions any more: a stored `archivedAt` is not a scope, so every chat is an ordinary row.
@@ -1615,17 +1889,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     latestViewState = state;
     paintTiming(state);
     /**
-     * Chat mode with a host surface is the real ChatGPT application. The native chrome stays mounted
-     * (so a switch back rebuilds nothing) but is hidden, and the one mode control moves between the
-     * composer and the embed bar so exactly one control is ever visible.
+     * Chat mode with a host surface is the real ChatGPT application. The native surface stays mounted
+     * (so a switch back rebuilds nothing) but is hidden; the common shell above it — including the
+     * one mode switch and the context summary — stays visible in both modes.
      */
     const embedActive = !!hooks.chatEmbed && state.mode === 'chat';
     if (embedSection && embedBar && embedSlot && hooks.chatEmbed) {
       root.dataset.zchatgptEmbedActive = String(embedActive);
       embedSection.hidden = !embedActive;
       chat.hidden = embedActive;
+      // The official page owns its own conversation list and tabs, so the native tab strip is not
+      // shown beside it; a single local paper binding stands in as the session title instead.
+      panes.hidden = embedActive;
+      shellTitle.hidden = !embedActive;
+      // New/History act on the native local records, so they stay out of the hosted Chat bar rather
+      // than pretending to belong to the official page's own new-chat and history controls.
+      fresh.hidden = embedActive;
+      historyBtn.hidden = embedActive;
       if (embedActive) {
-        if (modeSwitch.parentElement !== embedBar) embedBar.append(modeSwitch);
         if (embedContextNotice && embedConsent) {
           const disclosure = state.document.enabled && state.document.disclosure;
           embedContextNotice.textContent = disclosure ? COPY.embedAutomaticDisclosure
@@ -1634,7 +1915,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
         }
         hooks.chatEmbed.show(embedSlot);
       } else {
-        if (modeSwitch.parentElement !== leading) leading.append(modeSwitch);
         hooks.chatEmbed.hide();
       }
     }
@@ -1710,10 +1990,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     login.hidden = !agentMode || account === 'signedIn' || pendingLogin || state.connection !== 'ready'; cancelLogin.hidden = !agentMode || !pendingLogin;
     retry.hidden = !agentMode || state.connection !== 'error';
     auth.hidden = login.hidden && cancelLogin.hidden && retry.hidden;
-    // The `+` starts a chat and stays available in every state, including right after a close:
-    // tying it to having a current conversation is the regression that hid it with the chat.
-    fresh.hidden = false;
-    historyBtn.hidden = false;
+    // The `+` starts a native chat and stays available in every native state, including right after
+    // a close: tying it to having a current conversation is the regression that hid it with the chat.
+    // While the hosted Chat page is active it is hidden above, because that page owns new/history.
+    fresh.hidden = embedActive;
+    historyBtn.hidden = embedActive;
+    // The single-line binding title shown while the hosted page owns the conversation.
+    const shellTitleText = state.document.identity.title || state.document.attachment.title || COPY.untitled;
+    if (shellTitle.textContent !== shellTitleText) shellTitle.textContent = shellTitleText;
+    if (shellTitle.title !== shellTitleText) shellTitle.title = shellTitleText;
     alert.textContent = state.message ?? ''; alert.hidden = !state.message;
     updateContext(state);
     renderPanes(state);
@@ -1772,6 +2057,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     if (messages.lastElementChild !== taskPanel) messages.append(taskPanel);
     taskPanel.hidden = !visibleTasks.length && !state.readingJobs.length;
+    // Agent's empty state is shown only while the surface really is empty: no transcript, no task
+    // card, no draft work and nothing generating. It never covers an answer or an in-flight request.
+    const hasDraftWork = !!state.draft.question.trim() || state.draft.citations.length > 0
+      || state.draft.images.length > 0 || state.draft.references.length > 0;
+    empty.hidden = !(agentMode && list.length === 0 && !state.generating && !visibleTasks.length && !state.readingJobs.length && !hasDraftWork);
+    if (empty.hidden) { emptyNote.hidden = true; emptyNote.textContent = ''; }
     const nextKey = list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text.length}:${m.generatedImages?.map(image => image.id).join(',') ?? ''}`).join('\n');
     const contentChanged = nextKey !== contentKey;
     const follow = followAnswerScroll(nearBottom, contentChanged && contentKey !== '');
@@ -1833,8 +2124,18 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     // Chat's send lock is the Chat transport, not the Codex sign-in; Agent's is the ChatGPT account.
     const canSend = state.connection === 'ready' && !state.generating && hasInput && (agentMode ? signedIn : !state.chatUnavailable);
     send.disabled = !canSend; send.hidden = state.generating; stop.hidden = !state.generating;
+    // A disabled control says why, so the owner is never left with only a grey arrow.
+    const sendReason = hasInput
+      ? (state.connection !== 'ready' ? COPY.sendNeedsConnection : agentMode && !signedIn ? COPY.sendNeedsSignIn : !agentMode && state.chatUnavailable ? state.chatUnavailable : null)
+      : COPY.sendNeedsQuestion;
+    // One label only: the reason is a dictionary string, so it localizes; the enabled label is Send.
+    const sendLabel = send.disabled && sendReason ? sendReason : COPY.send;
+    if (send.title !== sendLabel) { send.title = sendLabel; send.setAttribute('aria-label', sendLabel); }
     queue.hidden = !state.generating; queue.disabled = !canSend || state.queueing;
     input.disabled = false;
+    if (input.title !== COPY.inputKeys) input.title = COPY.inputKeys;
+    const settingsReason = signedIn ? COPY.settings : COPY.settingsNeedsSignIn;
+    if (picker.title !== settingsReason) { picker.title = settingsReason; picker.setAttribute('aria-label', settingsReason); }
     if (state.focusToken !== focusToken) { focusToken = state.focusToken; input.focus(); }
     if (state.messageFocus && messages.dataset.focusToken !== String(state.messageFocus.token)) { messages.dataset.focusToken = String(state.messageFocus.token); messageNodes.get(state.messageFocus.messageId)?.scrollIntoView?.({ block: 'center' }); }
   };

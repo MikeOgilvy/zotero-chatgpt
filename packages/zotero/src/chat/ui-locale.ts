@@ -7,6 +7,11 @@ const COPY: Readonly<Record<string, string>> = {
   'New content': '新内容', 'Ask a question…': '提出问题…', Question: '问题', Send: '发送', Stop: '停止',
   'Account usage': '账户用量', 'Return to source': '返回原文', Remove: '移除', You: '你', Copy: '复制',
   'Model and generation settings': '模型与生成设置', Effort: '推理强度', Options: '选项', Fast: '快速', Model: '模型',
+  'Enter a question to send.': '请输入问题后再发送。',
+  'Sign in with ChatGPT to send.': '使用 ChatGPT 登录后即可发送。',
+  'Codex is not connected yet.': 'Codex 尚未连接。',
+  'Model and generation settings (sign in to Codex to change them)': '模型与生成设置（登录 Codex 后可更改）',
+  'Enter to send · Shift+Enter for a new line': 'Enter 发送 · Shift+Enter 换行',
   Low: '低', Medium: '中', High: '高', 'Extra High': '极高', Today: '今天', Yesterday: '昨天', 'Previous 7 days': '过去 7 天', Older: '更早',
   'Open the Codex sidebar to connect.': '打开 Codex 侧栏以连接。', 'Starting Codex…': '正在启动 Codex…',
   'Codex is unavailable': 'Codex 暂不可用', 'Finish signing in to ChatGPT in your browser.': '请在浏览器中完成 ChatGPT 登录。',
@@ -45,6 +50,10 @@ const COPY: Readonly<Record<string, string>> = {
   Recorded: '已记录', Stopped: '已停止', Failed: '失败', Queued: '已排队', 'Cancelled before sending': '发送前已取消',
   'Unconfirmed: the connection was interrupted. The request was not sent again.': '状态未确认：连接已中断，未重新发送此请求。',
   'No saved chats match this search.': '没有匹配的已保存对话。',
+  // A history row's provable source label. `Agent` is a product name and stays verbatim; a legacy
+  // `mode: chat` record is the old Codex read-only path, never an official web conversation.
+  Legacy: '旧版',
+  Mixed: '混合',
   Appearance: '外观', 'Interface language': '界面语言',
   'Queue question': '将问题加入队列', 'Cancel queued question': '取消排队的问题',
   'Regenerate in new chat': '在新对话中重新生成', 'Edit in new chat': '在新对话中编辑',
@@ -71,6 +80,34 @@ const COPY: Readonly<Record<string, string>> = {
   'Move image earlier': '将图片前移',
   'Use current PDF text automatically': '自动使用当前 PDF 文本',
   'Continue with current PDF': '继续使用当前 PDF',
+  'New agent': '新建 Agent 会话',
+  'Copy PDF file…': '复制 PDF 文件…',
+  // Context summary and details (UI-02/UI-03). Dynamic sentences with counts are handled by
+  // `progress()`; these are the fixed phrases.
+  'Automatic PDF context is off': '自动 PDF 上下文已关闭',
+  'PDF text unavailable': 'PDF 文本不可用',
+  'Current PDF · text not prepared yet': '当前 PDF · 文本尚未准备',
+  'No PDF context': '没有 PDF 上下文',
+  'Context for the next message': '下一条消息的上下文',
+  Source: '来源',
+  'Next send': '下次发送',
+  'Read locally': '本地已读取',
+  'Automatic PDF context': '自动 PDF 上下文',
+  On: '开启',
+  Off: '关闭',
+  'The last request did not record a coverage report.': '上次请求未记录覆盖报告。',
+  'Re-read current PDF': '重新读取当前 PDF',
+  'Close context details': '关闭上下文详情',
+  // Agent empty state (UI-05). Purpose copy for the native surface; the entries only prepare drafts.
+  'Ask Codex about this paper': '向 Codex 提问这篇论文',
+  'Answers stay in this sidebar. Highlighting, article retrieval and library organization only run after you review and approve a proposed task.': '回答显示在此侧栏中。高亮、获取文章和整理文献库只会在你审核并批准候选任务后执行。',
+  'Highlight key points': '高亮重点',
+  'Draft a request for the current PDF': '为当前 PDF 起草请求',
+  'Get an article': '获取文章',
+  'Draft a request for a DOI or public URL': '为 DOI 或公开 URL 起草请求',
+  'Organize selected items': '整理选中条目',
+  'Uses the selection in the Zotero main window': '使用 Zotero 主窗口中的选中条目',
+  'Draft prepared below. Nothing has been sent.': '草稿已准备在下方，尚未发送任何内容。',
   'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.': '发送时，此 PDF 的提取文本、选中文本和附加图片将通过你的 ChatGPT 账户发送至 Codex。打开侧栏仅会在本地准备文本。你可以在 Zotero 的偏好设置窗口中关闭自动使用 PDF 文本。',
   'This action could not be completed.': '此操作未能完成。',
   'The source could not be opened.': '无法打开原文。',
@@ -126,11 +163,22 @@ const COPY: Readonly<Record<string, string>> = {
   // Native Zotero Preferences pane (preferences/pane.ts). Messages the store raises
   // through the same text reach the sidebar too, so the key is deliberately shared.
   Chat: '对话',
-  Models: '模型', 'PDF text': 'PDF 文本',
-  'Checked models are offered in chats; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.': '勾选的模型会在对话中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。',
-  'Checked models are offered in chats; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.': '勾选的模型会在对话中提供；右侧确切 id 就是实际发送的 id。来源：正在运行的运行时的报告与随包目录。',
-  'Applies to every chat.': '适用于所有对话。',
-  'Interface language saved.': '界面语言已保存。', 'Chat text scale saved.': '聊天字号已保存。',
+  // The pane's groups. `Chat` stays the product name; `Agent` stays `Agent`.
+  General: '通用',
+  Agent: 'Agent',
+  'Local data': '本地数据',
+  Details: '详情',
+  'Agent instructions': 'Agent 指令',
+  Models: '模型',
+  'Checked models are offered in Agent requests; the exact id is what is sent. Source: the bundled catalog, not your account\'s live entitlements, plus any GPT-5.3-Spark the running runtime reports.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：随包目录（并非你账户的实时权限），外加正在运行的运行时报告的任何 GPT-5.3-Spark。',
+  'Checked models are offered in Agent requests; the exact id is what is sent. Source: the running runtime\'s report plus the bundled catalog.': '勾选的模型会在 Agent 请求中提供；右侧确切 id 就是实际发送的 id。来源：正在运行的运行时的报告与随包目录。',
+  'Applies only to Agent requests.': '仅用于 Agent 请求。',
+  'Chat opens the official ChatGPT website in the sidebar. Its account, models, conversations and limits are managed by ChatGPT, not by this plugin.': 'Chat 会在侧栏中打开官方 ChatGPT 网站。其账户、模型、对话与限额由 ChatGPT 管理，不由本插件管理。',
+  'The plugin adds only the paper context it may attach to a message you send there. It never sends a Codex request for Chat.': '插件只会在你于该网站发送消息时附加它可附加的论文上下文。Chat 不会发起任何 Codex 请求。',
+  'Codex starts only when you use Agent. Opening this window reads local settings and any cached model report; it never connects.': '只有在使用 Agent 时才会启动 Codex。打开此窗口只读取本地设置和缓存的模型报告，不会连接。',
+  'Manage the conversations this plugin saved on this computer. Deleting a local chat never deletes the official ChatGPT conversation, and never undoes a native annotation.': '管理本插件保存在这台电脑上的对话。删除本地对话不会删除官方 ChatGPT 对话，也不会撤销原生标注。',
+  'Unsaved changes': '未保存的更改',
+  'Interface language saved.': '界面语言已保存。', 'Agent text size saved.': 'Agent 文字大小已保存。',
   'Automatic PDF text preparation is on.': '已开启自动准备 PDF 文本。', 'Automatic PDF text preparation is off.': '已关闭自动准备 PDF 文本。',
   'Skill updated.': 'skill 已更新。',
   'The stored preferences could not be read.': '无法读取已保存的偏好。',
@@ -159,8 +207,9 @@ const COPY: Readonly<Record<string, string>> = {
 const CONTENT = [
   '.zchatgpt-message-text', '.zchatgpt-rendered', '.zchatgpt-citation-text', '.zchatgpt-current-title', '.zchatgpt-initial-title',
   // An open-chat chip shows the chat's own title: a chat named "Send" must not be renamed on screen.
-  '.zchatgpt-pane-tab-label',
-  '.zchatgpt-history-item', '.zchatgpt-message-reference', '.zchatgpt-command-option', '.zchatgpt-command-label', '.zchatgpt-command-description',
+  // The shell's binding title is the paper's own title, so it is data too.
+  '.zchatgpt-pane-tab-label', '.zchatgpt-shell-title',
+  '.zchatgpt-history-title', '.zchatgpt-message-reference', '.zchatgpt-command-option', '.zchatgpt-command-label', '.zchatgpt-command-description',
   '.zchatgpt-task-question', '.zchatgpt-task-quote', '.zchatgpt-task-scope', '.zchatgpt-workspace-preview pre', '.zchatgpt-workspace-preview-title strong',
   'script', 'style', 'svg', 'math', '[data-zchatgpt-ui="false"]',
 ].join(',');
@@ -174,16 +223,21 @@ const TEXT = [
   '.zchatgpt-task-card > summary', '.zchatgpt-task-row-header > .zchatgpt-task-muted', '.zchatgpt-task-check', '.zchatgpt-task-field',
   '.zchatgpt-task-field option[value=""]', '.zchatgpt-task-counts', '.zchatgpt-task-body > .zchatgpt-task-muted',
   '[data-zchatgpt-reading-job] .zchatgpt-task-row > p:first-child', '[data-zchatgpt-ui="true"]',   '.zchatgpt-context-ring', '.zchatgpt-request-timing-text',
-  // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
-  '.zchatgpt-document-status',
+  // Context summary and details (UI-02/UI-03): the dynamic summary line is re-emitted with its counts
+  // by `progress`; the panel's fixed phrases are dictionary keys.
+  '.zchatgpt-shell-context-text', '.zchatgpt-context-panel-title',
+  // Agent empty state (UI-05). Drafts prepared into the composer are data and stay verbatim.
+  '.zchatgpt-agent-empty-title', '.zchatgpt-agent-empty-body',
+  '.zchatgpt-agent-empty-action-title', '.zchatgpt-agent-empty-action-hint', '.zchatgpt-agent-empty-note',
   // The hosted-application bar's answer line: page counts and labels are re-emitted verbatim.
   '.zchatgpt-embed-status', '.zchatgpt-embed-bridge-status', '.zchatgpt-embed-context-notice',
   // The unbound New chat tab is copy, unlike named chat titles.
   '.zchatgpt-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
-  '.zchatgpt-preferences legend', '.zchatgpt-preferences label', '.zchatgpt-preferences [data-zchatgpt-pref="uiLanguage"] option',
+  '.zchatgpt-preferences legend', '.zchatgpt-preferences label', '.zchatgpt-preferences summary', '.zchatgpt-preferences [data-zchatgpt-pref="uiLanguage"] option',
   '.zchatgpt-preferences [data-zchatgpt-pref="status"]', '.zchatgpt-preferences [data-zchatgpt-pref="error"]', '.zchatgpt-preferences .zchatgpt-preferences-muted',
   // History management section: its own status, select-all count, confirmation lines, paper options.
+  '.zchatgpt-preferences [data-zchatgpt-history="intro"]',
   '.zchatgpt-preferences [data-zchatgpt-history="error"]', '.zchatgpt-preferences [data-zchatgpt-history="status"]',
   '.zchatgpt-preferences [data-zchatgpt-history="confirm-text"]', '.zchatgpt-preferences [data-zchatgpt-history="selected-count"]',
   '.zchatgpt-preferences [data-zchatgpt-history="paper"] option',
@@ -195,6 +249,7 @@ const ATTRIBUTES = [
   '[data-zchatgpt-pane-tab][data-zchatgpt-conversation-id="new-chat"]',
   '.zchatgpt-pane-tab-new',
   '.zchatgpt-plus-menu input', '.zchatgpt-rename-form input', '[data-zchatgpt-collection-target]', '.zchatgpt-workspace-preview',
+  '.zchatgpt-shell-context', '.zchatgpt-context-panel',
   '.zchatgpt-workspace-preview input', '.zchatgpt-workspace-search', '.zchatgpt-image-preview', '.zchatgpt-command-list', '.zchatgpt-task-view', '.zchatgpt-task-check input', '[data-zchatgpt-ui="true"]', '.zchatgpt-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.
   '.zchatgpt-preferences [data-zchatgpt-history="search"]',
@@ -237,6 +292,21 @@ function progress(text: string): string {
   if (match) return `已在本地读取 ${match[2]} 页中的 ${match[1]} 页`;
   match = /^No text could be read from this PDF locally$/u.exec(text);
   if (match) return '无法在本地从此 PDF 提取到文本';
+  // Context summary (shell). Every count and page label is captured and re-emitted verbatim.
+  match = /^Selected text · page (.+)$/u.exec(text);
+  if (match) return `选中文本 · 第 ${match[1]} 页`;
+  match = /^Preparing current PDF text…$/u.exec(text);
+  if (match) return '正在准备当前 PDF 文本……';
+  match = /^Preparing current PDF text… (\d+) of (\d+) pages$/u.exec(text);
+  if (match) return `正在准备当前 PDF 文本……第 ${match[1]}/${match[2]} 页`;
+  match = /^Current PDF · all (\d+) pages read locally$/u.exec(text);
+  if (match) return `当前 PDF · 已在本地读取全部 ${match[1]} 页`;
+  match = /^Current PDF · excerpts from (\d+) of (\d+) pages$/u.exec(text);
+  if (match) return `当前 PDF · ${match[2]} 页中的 ${match[1]} 页摘录`;
+  match = /^(\d+) of (\d+) pages have text$/u.exec(text);
+  if (match) return `${match[2]} 页中有 ${match[1]} 页含文本`;
+  match = /^p\. (.+)$/u.exec(text);
+  if (match) return `第 ${match[1]} 页`;
   // Clipboard answers from Chat mode's hosted-application bar. Every page count, page label and
   // total is data and is re-emitted verbatim; only the sentence around it is translated.
   match = /^Copied a shortened (\d+) of (\d+) pages — paste into ChatGPT\.$/u.exec(text);
@@ -297,10 +367,10 @@ function progress(text: string): string {
     return `元数据已保存；PDF 不可用（${reason[match[1]!]!}）`;
   }
   // Native Preferences pane. Values, ids and workflow names stay verbatim.
-  match = /^Chat text scale \(([\d.]+)–([\d.]+)\)$/u.exec(text);
-  if (match) return `聊天字号（${match[1]}–${match[2]}）`;
-  match = /^Choose a chat text scale from ([\d.]+) to ([\d.]+)\.$/u.exec(text);
-  if (match) return `请选择 ${match[1]} 到 ${match[2]} 之间的聊天字号。`;
+  match = /^Agent text size \(([\d.]+)–([\d.]+)\)$/u.exec(text);
+  if (match) return `Agent 文字大小（${match[1]}–${match[2]}）`;
+  match = /^Choose an Agent text size from ([\d.]+) to ([\d.]+)\.$/u.exec(text);
+  if (match) return `请选择 ${match[1]} 到 ${match[2]} 之间的 Agent 文字大小。`;
   match = /^(.*) · Unavailable: (.+)$/u.exec(text);
   if (match) return `${match[1]} · 不可用：${match[2]}`;
   return text;
@@ -320,7 +390,9 @@ function actionLabel(text: string): string {
     ['Preview ', '预览 '], ['Remove ', '移除 '], ['Confirm delete ', '确认删除 '], ['Cancel delete ', '取消删除 '],
     ['Duplicate ', '创建副本：'], ['Export ', '导出 '], ['Edit ', '编辑 '], ['Delete ', '删除 '],
   ] as const) if (text.startsWith(source)) return target + text.slice(source.length);
-  return text;
+  // Dynamic accessible names (for example the context summary) reuse the same patterns as the
+  // visible text; a value no pattern matches is returned unchanged.
+  return progress(text);
 }
 
 interface Original { source: string; rendered: string }

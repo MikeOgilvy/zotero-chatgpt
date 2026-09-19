@@ -47,7 +47,7 @@ it('translates the open-chat strip name while a chat named like a control stays 
 
 it('never translates source, chat, history, candidate, profile or workflow content even when it matches a control', () => {
   const { root, add } = setup(); const protectedNodes: HTMLElement[] = [];
-  for (const className of ['zchatgpt-current-title', 'zchatgpt-initial-title', 'zchatgpt-history-item', 'zchatgpt-pane-tab-label', 'zchatgpt-command-option', 'zchatgpt-message-text', 'zchatgpt-message-reference', 'zchatgpt-citation-text', 'zchatgpt-task-question', 'zchatgpt-task-quote', 'zchatgpt-task-scope']) {
+  for (const className of ['zchatgpt-current-title', 'zchatgpt-initial-title', 'zchatgpt-history-title', 'zchatgpt-pane-tab-label', 'zchatgpt-command-option', 'zchatgpt-message-text', 'zchatgpt-message-reference', 'zchatgpt-citation-text', 'zchatgpt-task-question', 'zchatgpt-task-quote', 'zchatgpt-task-scope']) {
     const node = add('div', className, 'Send'); node.setAttribute('aria-label', 'Send'); protectedNodes.push(node);
     const embedded = add('button', 'zchatgpt-button', 'Stop', node); embedded.dataset.zchatgptAction = 'send'; protectedNodes.push(embedded);
   }
@@ -59,7 +59,7 @@ it('never translates source, chat, history, candidate, profile or workflow conte
   const row = add('div', 'zchatgpt-task-row'); protectedNodes.push(add('p', 'zchatgpt-task-muted', 'Completed', row));
   const model = add('button', 'zchatgpt-picker-option'); model.dataset.zchatgptSetting = 'model'; protectedNodes.push(add('span', 'zchatgpt-picker-option-label', 'High', model));
   const before = protectedNodes.map(node => node.textContent); const locale = mountUILocale(root); locale.update('zh');
-  expect(protectedNodes.map(node => node.textContent)).toEqual(before); expect(root.querySelector('.zchatgpt-history-item')!.getAttribute('aria-label')).toBe('Send');
+  expect(protectedNodes.map(node => node.textContent)).toEqual(before); expect(root.querySelector('.zchatgpt-history-title')!.getAttribute('aria-label')).toBe('Send');
   expect(chipName.title).toBe('预览 Send'); locale.update('en'); expect(chipName.title).toBe('Preview Send'); locale.dispose();
 });
 
@@ -214,21 +214,25 @@ it('localizes the close-chat control without touching the destructive delete lab
   expect(close.title).toBe('Close chat'); locale.dispose();
 });
 
-it('translates the local reading status and re-emits every page count verbatim', () => {
+it('translates the context summary and re-emits every page count verbatim', () => {
   const { root, add } = setup();
-  const all = add('p', 'zchatgpt-document-status', 'Read all 12 pages locally');
-  const some = add('p', 'zchatgpt-document-status', 'Read 8 of 12 pages locally');
-  const waiting = add('p', 'zchatgpt-document-status', 'Reading this PDF… 3 of 12 pages');
-  const alone = add('p', 'zchatgpt-document-status', 'Reading this PDF…');
-  const none = add('p', 'zchatgpt-document-status', 'No text could be read from this PDF locally');
+  const all = add('span', 'zchatgpt-shell-context-text', 'Current PDF · all 12 pages read locally');
+  const some = add('span', 'zchatgpt-shell-context-text', 'Current PDF · excerpts from 8 of 12 pages');
+  const waiting = add('span', 'zchatgpt-shell-context-text', 'Preparing current PDF text… 3 of 12 pages');
+  const alone = add('span', 'zchatgpt-shell-context-text', 'Preparing current PDF text…');
+  const off = add('span', 'zchatgpt-shell-context-text', 'Automatic PDF context is off');
+  const selected = add('span', 'zchatgpt-shell-context-text', 'Selected text · page 5');
+  const none = add('span', 'zchatgpt-shell-context-text', 'PDF text unavailable');
   const locale = mountUILocale(root); locale.update('zh');
-  expect(all.textContent).toBe('已在本地读取全部 12 页');
-  expect(some.textContent).toBe('已在本地读取 12 页中的 8 页');
-  expect(waiting.textContent).toBe('正在读取此 PDF……第 3/12 页');
-  expect(alone.textContent).toBe('正在读取此 PDF……');
-  expect(none.textContent).toBe('无法在本地从此 PDF 提取到文本');
+  expect(all.textContent).toBe('当前 PDF · 已在本地读取全部 12 页');
+  expect(some.textContent).toBe('当前 PDF · 12 页中的 8 页摘录');
+  expect(waiting.textContent).toBe('正在准备当前 PDF 文本……第 3/12 页');
+  expect(alone.textContent).toBe('正在准备当前 PDF 文本……');
+  expect(off.textContent).toBe('自动 PDF 上下文已关闭');
+  expect(selected.textContent).toBe('选中文本 · 第 5 页');
+  expect(none.textContent).toBe('PDF 文本不可用');
   locale.update('en');
-  expect(some.textContent).toBe('Read 8 of 12 pages locally'); locale.dispose();
+  expect(some.textContent).toBe('Current PDF · excerpts from 8 of 12 pages'); locale.dispose();
 });
 
 it('stays inside its pane and stops observing after disposal', async () => {

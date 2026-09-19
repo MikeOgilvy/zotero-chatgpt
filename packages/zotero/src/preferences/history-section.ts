@@ -108,6 +108,11 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   const box = el(doc, 'fieldset');
   box.dataset.zchatgptPref = 'history';
   const legend = el(doc, 'legend');
+  // The Preferences section is data management, not a daily chat workspace. The descriptive line
+  // says exactly what is deleted (local records) and what is not (official conversations, annotations).
+  const intro = el(doc, 'p', 'Manage the conversations this plugin saved on this computer. Deleting a local chat never deletes the official ChatGPT conversation, and never undoes a native annotation.');
+  intro.className = 'zchatgpt-preferences-muted';
+  intro.dataset.zchatgptHistory = 'intro';
   const counts = el(doc, 'p');
   counts.className = 'zchatgpt-preferences-muted';
   counts.dataset.zchatgptHistory = 'counts';
@@ -186,7 +191,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
   confirmButtons.append(confirmDelete, cancel);
   confirm.append(confirmText, confirmButtons);
 
-  box.append(legend, counts, filters, bulk, list, truncated, empty, failure, status, confirm);
+  box.append(legend, intro, counts, filters, bulk, list, truncated, empty, failure, status, confirm);
 
   /** Drop listeners whose element is no longer part of the section, so refreshes cannot leak them. */
   function pruneListeners(): void {
@@ -375,7 +380,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
 
   /** Static chrome and control copy. Every literal here is a key or pattern in `chat/ui-locale.ts`. */
   function renderChrome(): void {
-    legend.textContent = 'Chat history';
+    legend.textContent = 'Local data';
     search.placeholder = 'Search chats…';
     search.setAttribute('aria-label', 'Search chats…');
     paperText.data = 'Paper';
