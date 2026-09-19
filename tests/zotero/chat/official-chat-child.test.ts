@@ -1,0 +1,105 @@
+import { Window } from 'happy-dom';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+let Child: typeof import('../../../packages/zotero/actors/OfficialChatChild.mjs').ZoteroChatGPTOfficialChatChild;
+
+beforeAll(async () => {
+  vi.stubGlobal('JSWindowActorChild', class {});
+  ({ ZoteroChatGPTOfficialChatChild: Child } = await import('../../../packages/zotero/actors/OfficialChatChild.mjs'));
+});
+afterAll(() => { vi.unstubAllGlobals(); });
+
+function page() {
+  const window = new Window({ url: 'https://chatgpt.com/' });
+  const doc = window.document;
+  const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true';
+  const send = doc.createElement('button'); send.dataset.testid = 'send-button';
+  const form = doc.createElement('form'); form.append(composer, send); doc.body.append(form);
+  return { window, doc: doc as unknown as Document, composer, send };
+}
+
+function actorFor(current: ReturnType<typeof page>) {
+  const actor = new Child();
+  actor.document = current.doc;
+  actor.contentWindow = current.window;
+  actor.sendAsyncMessage = vi.fn();
+  return actor;
+}
+
+function acceptedOnClick(current: ReturnType<typeof page>, marker: string): void {
+  current.send.addEventListener('click', () => {
+    const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user';
+    message.textContent = `accepted [Zotero request ${marker}]`; current.doc.body.append(message);
+  });
+}
+
+describe('official ChatGPT child send transaction', () => {
+  it('reports an unknown editor as unsupported so the parent can fail closed', async () => {
+    const current = page(); const actor = actorFor(current);
+    current.composer.id = 'changed-site-editor';
+    await expect(actor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'unsupported-composer' });
+    const preventDefault = vi.fn(); const stopImmediatePropagation = vi.fn();
+    actor.handleEvent({ type: 'keydown', key: 'Enter', shiftKey: false, isTrusted: true, target: current.composer, preventDefault, stopImmediatePropagation });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(stopImmediatePropagation).toHaveBeenCalledTimes(1);
+    current.composer.remove();
+    await expect(actor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'composer-missing' });
+  });
+
+  it('gates a double submission while the frozen context is being prepared', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    let finish!: (value: unknown) => void;
+    const sendQuery = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    actor.sendQuery = sendQuery;
+    const first = actor.submitQuestion('question');
+    await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'blocked', reason: 'busy' });
+    acceptedOnClick(current, 'marker-1');
+    finish({ status: 'prepared', text: 'frozen [Zotero request marker-1]', marker: 'marker-1' });
+    await expect(first).resolves.toEqual({ status: 'accepted' });
+    expect(sendQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves newer composer edits instead of overwriting them after extraction', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    let finish!: (value: unknown) => void;
+    actor.sendQuery = () => new Promise(resolve => { finish = resolve; });
+    const submission = actor.submitQuestion('question');
+    current.composer.textContent = 'question plus a new thought';
+    finish({ status: 'prepared', text: 'stale frozen prompt', marker: 'marker-2' });
+    await expect(submission).resolves.toEqual({ status: 'blocked', reason: 'draft-changed' });
+    expect(current.composer.textContent).toBe('question plus a new thought');
+  });
+
+  it('does not replay into a new document after navigation completes during extraction', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    let finish!: (value: unknown) => void;
+    actor.sendQuery = () => new Promise(resolve => { finish = resolve; });
+    const submission = actor.submitQuestion('question');
+    const navigated = page(); actor.document = navigated.doc; actor.contentWindow = navigated.window;
+    finish({ status: 'prepared', text: 'stale frozen prompt', marker: 'marker-3' });
+    await expect(submission).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+    expect(navigated.composer.textContent).toBe('');
+  });
+
+  it('confirms an opt-out send by a non-content marker before reporting accepted', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    const status = vi.fn(); actor.sendAsyncMessage = (name, data) => { status(name, data); };
+    actor.sendQuery = () => Promise.resolve({ status: 'allow', marker: 'marker-off' });
+    acceptedOnClick(current, 'marker-off');
+    await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'accepted' });
+    expect(status).toHaveBeenCalledWith('status', { status: 'accepted-without-context', marker: 'marker-off' });
+  });
+
+  it('waits for the official form send button to render after a controlled-textarea update', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    current.send.remove();
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-late]', marker: 'marker-late' });
+    const submission = actor.submitQuestion('question');
+    const late = current.composer.ownerDocument.createElement('button'); late.dataset.testid = 'send-button';
+    late.addEventListener('click', () => {
+      const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user'; message.textContent = '[Zotero request marker-late]'; current.doc.body.append(message);
+    });
+    current.composer.closest('form')!.append(late);
+    await expect(submission).resolves.toEqual({ status: 'accepted' });
+  });
+});
