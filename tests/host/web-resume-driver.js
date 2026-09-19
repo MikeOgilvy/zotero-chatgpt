@@ -26,7 +26,7 @@ async function runHostSmoke(config) {
     if (!/^[A-Za-z0-9-]{8,128}$/u.test(config.webResumeConversationId) || !/^RUN-[a-f0-9]{24}$/u.test(config.webResumeToken)) throw new Error('Resume identifiers invalid.');
     const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/embed)\/profile$/u);
     await check('dedicated-preserved-embed-profile', Boolean(match) && PathUtils.profileDir === profile && config.dataDir === `${match?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
-    const resumePath = PathUtils.join(PathUtils.parent(profile), 'web-resume.json'); let resumeManifest = null;
+    const resumePath = PathUtils.join(match[1], 'web-resume.json'); let resumeManifest = null;
     if (await IOUtils.exists(resumePath)) { try { resumeManifest = JSON.parse(await IOUtils.readUTF8(resumePath)); } catch { throw new Error('Stored web-resume manifest is unreadable.'); } }
     if (!resumeManifest) {
       let store = {}; try { const raw = Zotero.Prefs.get('extensions.zchatgpt.officialChatConversationURLs', true); if (typeof raw === 'string' && raw.length <= 128 * 1024) store = JSON.parse(raw); } catch { store = {}; }
