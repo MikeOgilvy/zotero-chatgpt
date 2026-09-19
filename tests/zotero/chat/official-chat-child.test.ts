@@ -15,6 +15,9 @@ function page() {
   const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true';
   const send = doc.createElement('button'); send.dataset.testid = 'send-button';
   const form = doc.createElement('form'); form.append(composer, send); doc.body.append(form);
+  Object.assign(doc, { execCommand: (_command: string, _showUI: boolean, value: string) => {
+    composer.textContent = value; composer.dispatchEvent(new doc.defaultView!.InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' })); return true;
+  } });
   return { window, doc: doc as unknown as Document, composer, send };
 }
 

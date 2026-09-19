@@ -41,13 +41,27 @@ export function replaceChatGPTComposer(composer, text) {
     const prototype = composer.ownerDocument?.defaultView?.HTMLTextAreaElement?.prototype;
     const setter = prototype ? Object.getOwnPropertyDescriptor(prototype, 'value')?.set : null;
     if (setter) setter.call(composer, text); else composer.value = text;
+    const EventCtor = composer.ownerDocument?.defaultView?.InputEvent ?? composer.ownerDocument?.defaultView?.Event;
+    if (!EventCtor) return false;
+    composer.dispatchEvent(new EventCtor('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
+    return true;
   }
-  else if (composer.getAttribute('contenteditable') === 'true') composer.textContent = text;
-  else return false;
-  const EventCtor = composer.ownerDocument?.defaultView?.InputEvent ?? composer.ownerDocument?.defaultView?.Event;
-  if (!EventCtor) return false;
-  composer.dispatchEvent(new EventCtor('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
-  return true;
+  if (composer.getAttribute('contenteditable') !== 'true') return false;
+  const document = composer.ownerDocument;
+  const view = document?.defaultView;
+  const selection = view?.getSelection?.();
+  if (!document || !selection || typeof document.createRange !== 'function' || typeof document.execCommand !== 'function') return false;
+  try {
+    composer.focus?.();
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    selection.removeAllRanges(); selection.addRange(range);
+    // Gecko's native editing command produces the trusted beforeinput/input sequence ProseMirror uses
+    // to update its state. Direct textContent plus a synthetic InputEvent only changes visible DOM.
+    return document.execCommand('insertText', false, text) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Boolean-only acknowledgement: no page transcript or account data crosses into the parent. */

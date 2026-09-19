@@ -119,11 +119,41 @@ describe('official ChatGPT DOM adapter', () => {
     const password = doc.createElement('input'); password.type = 'password'; password.value = 'do-not-read-or-change';
     const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true'; composer.textContent = 'old';
     const input = vi.fn(); composer.addEventListener('input', input);
+    Object.assign(doc, { execCommand: (_command: string, _showUI: boolean, value: string) => {
+      composer.textContent = value; composer.dispatchEvent(new doc.defaultView!.InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' })); return true;
+    } });
     doc.body.append(password, composer);
     expect(dom.replaceChatGPTComposer(composer, 'frozen prompt')).toBe(true);
     expect(composer.textContent).toBe('frozen prompt');
     expect(input).toHaveBeenCalledTimes(1);
     expect(password.value).toBe('do-not-read-or-change');
+  });
+
+  it('updates a known rich-text composer through one browser-native editing transaction', async () => {
+    const dom = await import('../../../packages/zotero/actors/chatgpt-dom.mjs');
+    const doc = new Window({ url: 'https://chatgpt.com/' }).document;
+    const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true'; composer.textContent = 'old'; doc.body.append(composer);
+    const model = { text: 'old' };
+    const execCommand = vi.fn((command: string, _showUI: boolean, value: string) => {
+      if (command !== 'insertText') return false;
+      model.text = value; composer.textContent = value;
+      composer.dispatchEvent(new doc.defaultView!.InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+      return true;
+    });
+    Object.assign(doc, { execCommand });
+    expect(dom.replaceChatGPTComposer(composer, 'frozen rich text')).toBe(true);
+    expect(execCommand).toHaveBeenCalledTimes(1);
+    expect(execCommand).toHaveBeenCalledWith('insertText', false, 'frozen rich text');
+    expect(model.text).toBe('frozen rich text');
+  });
+
+  it('fails closed without changing rich text when Gecko refuses the native editing command', async () => {
+    const dom = await import('../../../packages/zotero/actors/chatgpt-dom.mjs');
+    const doc = new Window({ url: 'https://chatgpt.com/' }).document;
+    const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true'; composer.textContent = 'keep this draft'; doc.body.append(composer);
+    Object.assign(doc, { execCommand: vi.fn(() => false) });
+    expect(dom.replaceChatGPTComposer(composer, 'must not appear')).toBe(false);
+    expect(composer.textContent).toBe('keep this draft');
   });
 
   it('supports the exact mobile composer observed in a narrow Zotero dock', async () => {
