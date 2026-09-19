@@ -444,7 +444,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
     }
     if (detail.kind !== 'prepare' || typeof detail.question !== 'string' || typeof detail.transaction !== 'string' || typeof detail.respond !== 'function') return;
     const respond = detail.respond as (value: unknown) => void;
-    if (pendingRestore) { respond({ status: 'blocked', reason: 'context-changed' }); return; }
+    if (pendingRestore) { respond({ status: 'blocked', reason: 'context-changed', marker: detail.transaction }); return; }
     const question = detail.question;
     const generation = contextGeneration;
     const binding = contextBinding;

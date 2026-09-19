@@ -351,7 +351,7 @@ it('blocks composer preparation and parent submission while a saved conversation
   }));
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  expect(response).toEqual({ status: 'blocked', reason: 'context-changed' });
+  expect(response).toEqual({ status: 'blocked', reason: 'context-changed', marker: 'restore-pending' });
   expect(provider).not.toHaveBeenCalled();
   expect(sendQuery.mock.calls.filter(([name]) => name !== 'probe')).toEqual([]);
   expect(browser.getAttribute('src')).toBe(CHAT_APP_URL);
