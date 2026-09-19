@@ -134,4 +134,12 @@ describe('module dependency boundaries', () => {
     const chatSurfaceHasNoAgent: HasAgentMember<ChatSendContext> = false;
     expect(chatSurfaceHasNoAgent).toBe(false);
   });
+
+  // Chat and Agent are sibling execution experiences, so the Chat execution modules must be unable to
+  // name the Agent runtime at all. This is the compile-time half of the platform boundary: the Chat
+  // transport is abstract precisely so that adding a Codex call here becomes a test failure, not a
+  // quiet fallback. `core/src/conversation/execution-router.ts` is the only place mode picks a runtime.
+  it('keeps the core Chat execution modules free of the Agent runtime', () => {
+    expect(violations(file => file.startsWith('packages/core/src/chat/'), /^packages\/core\/src\/(codex|sessions|tasks|agent)\/|^packages\/core\/src\/context\/coordinator/u)).toEqual([]);
+  });
 });
