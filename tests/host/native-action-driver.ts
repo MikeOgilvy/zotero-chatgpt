@@ -1,4 +1,4 @@
-import { NativeOperationError, type NativeActionPort, type NativeMetadata } from '../../packages/contracts/src/native.ts';
+import { NativeOperationError, type NativeActionPort, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
 import { ReaderError, type DocumentContext, type PaperScope } from '../../packages/contracts/src/index.ts';
 import type { LibraryReferencePort } from '../../packages/contracts/src/workspace.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
@@ -30,7 +30,7 @@ interface SmokeItem extends NativeHostItem {
 }
 interface SmokeCollection extends NativeHostCollection { name: string; saveTx(): Promise<number | boolean> }
 interface SmokeWindow extends ZoteroWindow {
-  ZoteroPane?: { loaded?: boolean; itemsView?: unknown };
+  ZoteroPane?: { loaded?: boolean; itemsView?: unknown; getSelectedItems(): SmokeItem[] };
   Zotero_Tabs: { selectedID: string; getTabInfo(id: string): { id?: string; data?: { itemID?: number } }; select(id: string): void };
 }
 interface SmokeReader extends HostReader { tabID: string; _window: SmokeWindow; _initPromise?: Promise<void>; close(): void }
@@ -78,7 +78,7 @@ export interface NativeSmokeReport {
   verificationToken: string;
   checks: SmokeCheck[];
   notRun: Array<{ name: string; reason: string }>;
-  retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string };
+  retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string; organizationItemKeys?: string[]; organizationCollectionKey?: string };
 }
 class SmokeFailure extends Error { constructor(readonly code: string) { super(code); this.name = 'NativeSmokeFailure'; } }
 function requireCheck(ok: unknown, code: string): asserts ok { if (!ok) throw new SmokeFailure(code); }
@@ -177,12 +177,13 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
         requireCheck(contents.startsWith('%PDF-') && contents.includes('Synthetic page 1 - development testing only') && contents.includes(token), 'SYNTHETIC_FIXTURE_MARKERS_MISSING');
       }
       guard(); const collection = new Zotero.Collection(); collection.libraryID = libraryID; collection.name = `[Synthetic native smoke] ${report.runId}`; await collection.saveTx();
-      guard(); const parent = new Zotero.Item('journalArticle'); parent.libraryID = libraryID; parent.setField('title', `[Synthetic native smoke] ${report.runId}`); parent.setField('abstractNote', 'Local synthetic fixture. No model or network metadata provenance.'); parent.addToCollection(collection.key); await parent.saveTx({ skipSelect: true });
+      guard(); const parent = new Zotero.Item('journalArticle'); parent.libraryID = libraryID; parent.setField('title', `[Synthetic native smoke] ${report.runId}`); parent.setField('abstractNote', 'Local synthetic fixture. No model or network metadata provenance.'); parent.addTag('preserve-existing-parent'); parent.addToCollection(collection.key); await parent.saveTx({ skipSelect: true });
+      guard(); const peer = new Zotero.Item('journalArticle'); peer.libraryID = libraryID; peer.setField('title', `[Synthetic organization peer] ${report.runId}`); peer.setField('abstractNote', 'Second local synthetic item for a bounded organization batch.'); peer.addTag('preserve-existing-peer'); peer.addToCollection(collection.key); await peer.saveTx({ skipSelect: true });
       guard(); const main = await Zotero.Attachments.importFromFile({ file: pdfPath, parentItemID: parent.id, title: 'Synthetic main PDF', saveOptions: { skipSelect: true } });
       guard(); const supplement = await Zotero.Attachments.importFromFile({ file: supplementPath, parentItemID: parent.id, title: 'Synthetic supplement PDF', saveOptions: { skipSelect: true } });
-      await Promise.all([parent.loadAllData(), main.loadAllData(), supplement.loadAllData()]);
+      await Promise.all([parent.loadAllData(), peer.loadAllData(), main.loadAllData(), supplement.loadAllData()]);
       requireCheck(main.key !== supplement.key && main.parentID === parent.id && supplement.parentID === parent.id && main.getAnnotations().length === 0 && supplement.getAnnotations().length === 0, 'SYNTHETIC_ATTACHMENT_IDENTITY_FAILED');
-      return { value: { collection, parent, main, supplement }, details: { parentKey: parent.key, collectionKey: collection.key, attachmentKeys: [main.key, supplement.key], modelGenerated: false, networkImported: false } };
+      return { value: { collection, parent, peer, main, supplement }, details: { parentKey: parent.key, peerKey: peer.key, collectionKey: collection.key, attachmentKeys: [main.key, supplement.key], modelGenerated: false, networkImported: false } };
     });
     requireCheck(fixture, 'FIXTURES_NOT_CREATED');
     currentStage = 'open-synthetic-main-reader';
@@ -209,7 +210,39 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     currentStage = 'construct-task-controller';
     const storage = new GeckoStorage(host, ledger);
     tasks = new ActionTaskController(storage, native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
-    report.retained = { parentKey: fixture.parent.key, attachmentKeys: [fixture.main.key, fixture.supplement.key], collectionKey: fixture.collection.key, taskIds: [], ledger: ledgerName };
+    report.retained = { parentKey: fixture.parent.key, attachmentKeys: [fixture.main.key, fixture.supplement.key], collectionKey: fixture.collection.key, taskIds: [], ledger: ledgerName, organizationItemKeys: [fixture.parent.key, fixture.peer.key] };
+    const organizationReview = await step('organization-review-freezes-two-selected-items-without-writing', 'synthetic-proposal-real-host-write', async () => {
+      guard(); const targetCollection = new Zotero.Collection(); targetCollection.libraryID = libraryID; targetCollection.name = `[Synthetic organization target] ${report.runId}`; await targetCollection.saveTx();
+      const refs = [fixture.parent, fixture.peer].map(item => ({ clientId, libraryId: libraryID, key: item.key }));
+      const selection: NativeOrganizationItemSnapshot[] = []; for (const ref of refs) { const snapshot = await native.inspectOrganizationItem(ref); requireCheck(snapshot, 'ORGANIZATION_SELECTION_SNAPSHOT_MISSING'); selection.push(snapshot); }
+      const target = { clientId, libraryId: libraryID, collectionKey: targetCollection.key };
+      const tag = `synthetic-organization-${report.runId}`;
+      const task = await taskController.planOrganization({ conversationId: host.uuid(), question: 'Synthetic smoke: add one tag and one collection to both frozen selected items.', modelRequestId: host.uuid(), selection, collections: [target], proposals: selection.map((_item, itemIndex) => ({ itemIndex, tags: [tag], collectionIndexes: [0] })) });
+      requireCheck(task.kind === 'organization' && task.state === 'review' && task.items.length === 2 && task.items.every((item, index) => item.sourceIndex === index && item.status === 'candidate' && item.before.key === selection[index]?.key), 'ORGANIZATION_REVIEW_NOT_FROZEN');
+      const unchanged = await Promise.all(refs.map(ref => native.inspectOrganizationItem(ref)));
+      requireCheck(unchanged.every((item, index) => item && !item.tags.includes(tag) && !item.collectionKeys.includes(target.collectionKey) && item.contentSignature === selection[index]?.contentSignature), 'ORGANIZATION_PREAPPROVAL_WRITE_DETECTED');
+      if (report.retained) report.retained.organizationCollectionKey = target.collectionKey;
+      return { value: { task, selection, target, tag }, details: { selectedItems: selection.length, frozenSourceIndexes: task.items.map(item => item.sourceIndex), proposedTagsPerItem: 1, proposedCollectionsPerItem: 1, nativeWritesBeforeApproval: 0 } };
+    });
+    requireCheck(organizationReview, 'ORGANIZATION_REVIEW_UNAVAILABLE');
+    const organizationApplied = await step('organization-approval-adds-and-reads-back-without-replacing-existing-values', 'synthetic-proposal-real-host-write', async () => {
+      const approved = await taskController.approve(organizationReview.task.id, organizationReview.task.items.map(item => item.id));
+      requireCheck(approved.kind === 'organization' && approved.state === 'completed' && approved.items.every(item => item.status === 'applied' && item.change), 'ORGANIZATION_APPROVAL_FAILED');
+      const readback = await Promise.all(organizationReview.selection.map(item => native.inspectOrganizationItem(item)));
+      requireCheck(readback.every((item, index) => item && item.tags.includes(organizationReview.tag) && item.tags.includes(organizationReview.selection[index]!.tags[0]!) && item.collectionKeys.includes(organizationReview.target.collectionKey) && item.collectionKeys.includes(fixture.collection.key)), 'ORGANIZATION_ADDITIVE_READBACK_FAILED');
+      requireCheck(approved.items.every((item, index) => item.kind === 'organization' && item.change && item.change.addedTags.length === 1 && item.change.addedCollectionKeys.length === 1 && item.change.after.contentSignature === readback[index]?.contentSignature), 'ORGANIZATION_LEDGER_READBACK_MISMATCH');
+      return { value: approved, details: { taskId: approved.id, selectedItems: approved.items.length, verifiedReadbacks: readback.length, existingTagsPreserved: true, existingCollectionsPreserved: true, additiveOnly: true } };
+    });
+    requireCheck(organizationApplied, 'ORGANIZATION_APPLY_UNAVAILABLE');
+    await step('organization-undo-removes-unchanged-additions-and-preserves-a-later-edit', 'synthetic-user-edit-real-host-api', async () => {
+      const laterTag = `synthetic-later-edit-${report.runId}`; guard(); const peer = Zotero.Items.getByLibraryAndKey(libraryID, fixture.peer.key); requireCheck(peer, 'ORGANIZATION_EDIT_TARGET_MISSING'); peer.addTag(laterTag); await peer.saveTx({ skipSelect: true });
+      const result = await taskController.undo(organizationApplied.id); requireCheck(result.kind === 'organization' && result.state === 'conflict', 'ORGANIZATION_UNDO_CONFLICT_NOT_REPORTED');
+      const parentResult = result.items.find(item => item.before.key === fixture.parent.key); const peerResult = result.items.find(item => item.before.key === fixture.peer.key);
+      const parentAfter = await native.inspectOrganizationItem({ clientId, libraryId: libraryID, key: fixture.parent.key }); const peerAfter = await native.inspectOrganizationItem({ clientId, libraryId: libraryID, key: fixture.peer.key });
+      requireCheck(parentResult?.status === 'undone' && parentAfter && parentAfter.tags.includes('preserve-existing-parent') && !parentAfter.tags.includes(organizationReview.tag) && parentAfter.collectionKeys.includes(fixture.collection.key) && !parentAfter.collectionKeys.includes(organizationReview.target.collectionKey), 'ORGANIZATION_SAFE_UNDO_FAILED');
+      requireCheck(peerResult?.status === 'conflict' && peerResult.errorCode === 'OUTPUT_CHANGED' && peerAfter && peerAfter.tags.includes('preserve-existing-peer') && peerAfter.tags.includes(organizationReview.tag) && peerAfter.tags.includes(laterTag) && peerAfter.collectionKeys.includes(fixture.collection.key) && peerAfter.collectionKeys.includes(organizationReview.target.collectionKey), 'ORGANIZATION_UNDO_OVERWROTE_LATER_EDIT');
+      return { value: true, details: { unchangedItemUndoVerified: true, laterNativeEditPreserved: true, conflictingItemKey: fixture.peer.key, conflictCode: peerResult.errorCode, existingTagsPreserved: true, existingCollectionsPreserved: true } };
+    });
     const document = await step('native-whole-pdf-text-and-loaded-file-sha256', 'real-host-api', async () => {
       const pdf = (opened._internalReader?._primaryView ?? opened._internalReader?._lastView)?._iframeWindow?.PDFViewerApplication?.pdfDocument;
       const globals = globalThis as unknown as { IOUtils?: { stat?: unknown }; Cu?: { cloneInto?: unknown }; crypto?: { subtle?: { digest?: unknown } } };
@@ -290,22 +323,32 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     // Bounded real-host check of the citation path: production locate + native navigate on the
     // frozen revision, with an explicit synthetic fixture quote. No library write and no model output.
     await step('citation-quote-navigation-on-frozen-revision', 'real-host-api', async () => {
-      const view = opened._internalReader?._primaryView ?? opened._internalReader?._lastView;
-      const viewer = view?._iframeWindow?.PDFViewerApplication?.pdfViewer as unknown as { currentPageNumber?: number } | undefined;
-      requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
       const annotationsBefore = fixture.main.getAnnotations().length;
-      guard(); await opened.navigate({ pageIndex: 1 });
-      await until(() => viewer?.currentPageNumber === 2, 'READER_DID_NOT_MOVE_TO_SECOND_PAGE');
-      const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => opened, paper);
       const quote = 'A prior describes beliefs before a measurement is observed.';
-      const outcome = await openSourcePage(navigator, { paper, revision: document.revision }, 0, quote);
-      await until(() => viewer?.currentPageNumber === 1, 'READER_DID_NOT_NAVIGATE_TO_CITATION_PAGE');
-      const missQuote = 'SYNTHETIC ABSENT QUOTE 9F3K';
-      const miss = await openSourcePage(navigator, { paper, revision: document.revision }, 0, missQuote);
+      type CitationViewer = { currentPageNumber?: number; currentScaleValue?: string | number; pagesRotation?: number };
+      const exercise = async (label: string) => {
+        guard(); const before = new Set(Zotero.Reader._readers); const reader = await Zotero.Reader.open(fixture.main.id, undefined, { allowDuplicate: true, openInBackground: false });
+        requireCheck(!before.has(reader) && reader.itemID === fixture.main.id, 'CITATION_READER_OWNERSHIP_MISMATCH'); ownedReaders.push(reader); if (reader._initPromise) await reader._initPromise;
+        const view = reader._internalReader?._primaryView ?? reader._internalReader?._lastView;
+        const viewer = view?._iframeWindow?.PDFViewerApplication?.pdfViewer as unknown as CitationViewer | undefined;
+        requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
+        let zoomExercised = false; try { viewer.currentScaleValue = 'page-width'; zoomExercised = viewer.currentScaleValue === 'page-width'; } catch { /* Host does not expose a writable zoom value. */ }
+        let rotationExercised = false; if (typeof viewer.pagesRotation === 'number') { try { const next = (viewer.pagesRotation + 90) % 360; viewer.pagesRotation = next; rotationExercised = viewer.pagesRotation === next; } catch { /* Rotation is optional host evidence. */ } }
+        const scaleBefore = viewer.currentScaleValue; const rotationBefore = viewer.pagesRotation;
+        await reader.navigate({ pageIndex: 1 }); await until(() => viewer.currentPageNumber === 2, `${label}-move-to-second-page`);
+        const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => reader, paper);
+        const outcome = await openSourcePage(navigator, { paper, revision: document.revision }, 0, quote);
+        await until(() => viewer.currentPageNumber === 1, `${label}-navigate-to-citation-page`);
+        requireCheck(outcome === 'highlighted' && viewer.currentScaleValue === scaleBefore && viewer.pagesRotation === rotationBefore, 'CITATION_NAVIGATION_CHANGED_VIEW_STATE');
+        reader.close(); await until(() => !Zotero.Reader._readers.includes(reader), `${label}-reader-close`); window!.Zotero_Tabs.select(opened.tabID);
+        return { outcome, zoomExercised, rotationExercised, scalePreserved: true, rotationPreserved: true };
+      };
+      const first = await exercise('citation-first-open'); const reopened = await exercise('citation-reopen');
+      const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => opened, paper); const missQuote = 'SYNTHETIC ABSENT QUOTE 9F3K'; const miss = await openSourcePage(navigator, { paper, revision: document.revision }, 0, missQuote);
       guard(); await fixture.main.loadAllData();
-      requireCheck(outcome === 'highlighted' && miss === 'unlocated', 'CITATION_PATH_OUTCOME_UNEXPECTED');
+      requireCheck(first.outcome === 'highlighted' && reopened.outcome === 'highlighted' && miss === 'unlocated', 'CITATION_PATH_OUTCOME_UNEXPECTED');
       requireCheck(fixture.main.getAnnotations().length === annotationsBefore, 'CITATION_PATH_WROTE_TO_LIBRARY');
-      return { value: true, details: { outcome, missOutcome: miss, currentPageNumber: viewer?.currentPageNumber, navigationPageIndex: 0, quoteIsSyntheticFixture: true, modelProducedQuote: false, libraryWrite: false, annotationsBefore, annotationsAfter: fixture.main.getAnnotations().length } };
+      return { value: true, details: { firstOpen: first, reopened, missOutcome: miss, navigationPageIndex: 0, quoteIsSyntheticFixture: true, modelProducedQuote: false, libraryWrite: false, annotationsBefore, annotationsAfter: fixture.main.getAnnotations().length } };
     });
     const references = createLibraryReferencePort(Zotero, { clientId, documentCache: cache, uuid: () => host.uuid(), getWindow: () => window });
     const referencePort: LibraryReferencePort = references;
