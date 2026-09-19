@@ -74,7 +74,12 @@ export async function openCitation(zotero: ZoteroHost, citation: Citation, curre
   if (!citation.documentRevision) { await open.navigate({ pageIndex: position.pageIndex }); return; }
   const current = await nativeDocumentSource(zotero, () => open, citation.paper).capture();
   if (JSON.stringify(current.revision) !== JSON.stringify(citation.documentRevision)) throw new ReaderError('INVALID_REQUEST', 'The cited PDF version changed. Reopen and select the passage again.');
-  await open.navigate({ position: { pageIndex: position.pageIndex, rects: position.rects.map(r => [...r]) } });
+  const next = citation.positions[1];
+  await open.navigate({ position: {
+    pageIndex: position.pageIndex,
+    rects: position.rects.map(r => [...r]),
+    ...(next ? { nextPageRects: next.rects.map(r => [...r]) } : {}),
+  } });
 }
 /**
  * Zotero item fields read from the parent item (or the attachment when it stands alone). Every field

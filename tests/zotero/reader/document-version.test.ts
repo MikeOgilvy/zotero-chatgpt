@@ -10,7 +10,7 @@ function fixture(replaced = false) {
   const getData = vi.fn(() => Promise.resolve(loaded));
   const pdf = { numPages: 1, fingerprints: ['unchanged'], getData, getPageLabels2: () => Promise.resolve(['1']), getPageData: () => Promise.resolve({ chars: [{ c: 'A' }] }) };
   const navigate = vi.fn();
-  const reader = { itemID: 1, navigate, _internalReader: { _primaryView: { _iframeWindow: { PDFViewerApplication: { pdfDocument: pdf } } } } } as unknown as HostReader;
+  const reader = { itemID: 1, navigate, _internalReader: { _primaryView: { _iframeWindow: { PDFViewerApplication: { pdfDocument: pdf, pdfViewer: { currentScale: 1, currentScaleValue: 1, scrollPageIntoView: () => undefined } } } } } } as unknown as HostReader;
   const zotero = { Reader: { _readers: [reader] }, Items: { get: () => ({ key: paperA.attachmentKey, libraryID: paperA.libraryId, getFilePathAsync: () => Promise.resolve('/synthetic/fixture.pdf') }) } } as unknown as ZoteroHost;
   vi.stubGlobal('Cu', { cloneInto: (value: unknown) => value });
   vi.stubGlobal('IOUtils', { stat: () => Promise.resolve({ size: loaded.length, lastModified: 1000 }), computeHexDigest: () => Promise.resolve(createHash('sha256').update(disk).digest('hex')) });
@@ -95,4 +95,14 @@ it('freezes citation bytes before the action and refuses old coordinates after a
   expect(citation.documentRevision?.sha256).toHaveLength(64);
   f.replace(); await expect(openCitation(f.zotero, citation, paperA.clientId)).rejects.toThrow(/changed|reopen/i);
   expect(f.navigate).not.toHaveBeenCalled();
+});
+it('passes both adjacent-page rectangle sets to native navigation without changing reader scale', async () => {
+  const f = fixture(); const source = await f.source.capture();
+  const viewer = f.reader._internalReader!._primaryView!._iframeWindow!.PDFViewerApplication!.pdfViewer;
+  viewer.currentScale = 1.75; viewer.currentScaleValue = 1.75;
+  const first = citationA.positions[0]!;
+  const citation = { ...citationA, documentRevision: source.revision, positions: [first, { pageIndex: first.pageIndex + 1, rects: [[5, 6, 7, 8] as [number, number, number, number]] }] };
+  await openCitation(f.zotero, citation, paperA.clientId);
+  expect(f.navigate).toHaveBeenCalledWith({ position: { pageIndex: first.pageIndex, rects: first.rects, nextPageRects: [[5, 6, 7, 8]] } });
+  expect(viewer.currentScale).toBe(1.75); expect(viewer.currentScaleValue).toBe(1.75);
 });
