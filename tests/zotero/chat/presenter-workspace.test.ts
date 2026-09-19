@@ -360,6 +360,19 @@ it('routes a direct Chinese highlight request in Agent mode through the built-in
   expect(t.port.approve).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
+it('freezes the observed live-host highlight wording as the built-in annotation workflow', async () => {
+  const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
+  const annotate = defaultSettings().skills.find(skill => skill.id === 'builtin-annotate')!;
+  f.workspaceSettings().skills.push(annotate);
+  await f.presenter.activate(); f.presenter.setMode('agent');
+  const question = 'Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.';
+  f.presenter.setQuestion(question); await f.presenter.send();
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]).toMatchObject({ mode: 'agent', question, workflow: { skill: { id: 'builtin-annotate', workflow: 'annotate' } } });
+  expect(f.sent[0]?.document?.revision).toEqual(documentA.revision);
+  expect(t.port.planAnnotations).not.toHaveBeenCalled(); f.presenter.dispose();
+});
+
 it('reports invalid annotation candidate output and creates no review task', async () => {
   const f = fixture({ document: true }); const t = taskPort(f.conversation().id); f.services.agent = agentPort({ tasks: () => Promise.resolve(t.port) });
   const annotate = defaultSettings().skills.find(skill => skill.id === 'builtin-annotate')!;

@@ -32,6 +32,7 @@ describe('Agent execution path', () => {
       '高亮当前论文最重要的 5 处内容，并简要说明原因。',
       '请帮我标注这篇文章的核心假设。',
       'Highlight the five most important claims in this paper.',
+      'Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.',
       'Underline the key claims in the current PDF.',
     ]) expect(requestsCurrentPaperAnnotations(question), question).toBe(true);
     for (const question of [
