@@ -341,16 +341,33 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
         const ready = await until(() => { const view = reader._internalReader?._primaryView ?? reader._internalReader?._lastView; const application = view?._iframeWindow?.PDFViewerApplication; return application?.pdfDocument && application.pdfViewer ? application : undefined; }, `${label}-pdf-ready`, 60000);
         const viewer = ready.pdfViewer as unknown as CitationViewer;
         requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
-        let zoomExercised = false; try { viewer.currentScaleValue = 'page-width'; zoomExercised = viewer.currentScaleValue === 'page-width'; } catch { /* Host does not expose a writable zoom value. */ }
-        let rotationExercised = false; if (typeof viewer.pagesRotation === 'number') { try { const next = (viewer.pagesRotation + 90) % 360; viewer.pagesRotation = next; rotationExercised = viewer.pagesRotation === next; } catch { /* Rotation is optional host evidence. */ } }
-        const scaleBefore = viewer.currentScaleValue; const rotationBefore = viewer.pagesRotation;
+        let zoomExercised = false; try { viewer.currentScaleValue = 'page-width'; zoomExercised = viewer.currentScaleValue === 'page-width'; } catch { /* Diagnosed below as an unavailable setup. */ }
+        const requestedRotation = typeof viewer.pagesRotation === 'number' ? (viewer.pagesRotation + 90) % 360 : undefined;
+        let rotationExercised = false; if (requestedRotation !== undefined) { try { viewer.pagesRotation = requestedRotation; rotationExercised = viewer.pagesRotation === requestedRotation; } catch { /* Diagnosed below as an unavailable setup. */ } }
+        type ViewState = { scale: string | number | undefined; rotation: number | undefined; page: number | undefined };
+        const viewState = (): ViewState => ({ scale: viewer.currentScaleValue, rotation: viewer.pagesRotation, page: viewer.currentPageNumber });
+        const immediatelyAfterSet = viewState();
+        requireCheck(zoomExercised && rotationExercised, 'CITATION_VIEW_STATE_SETUP_UNAVAILABLE');
+        const waitForStableRequestedView = async (code: string): Promise<ViewState> => {
+          let stableSamples = 0;
+          return until(() => {
+            const current = viewState(); const matches = current.scale === 'page-width' && current.rotation === requestedRotation;
+            stableSamples = matches ? stableSamples + 1 : 0; return stableSamples >= 2 ? current : undefined;
+          }, code, 5000);
+        };
+        const settledAfterSet = await waitForStableRequestedView(`${label}-view-state-after-set`);
         await reader.navigate({ pageIndex: 1 }); await until(() => viewer.currentPageNumber === 2, `${label}-move-to-second-page`);
+        const afterInitialNavigate = viewState();
+        const beforeOpenSourcePage = await waitForStableRequestedView(`${label}-view-state-before-source-open`);
         const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => reader, paper);
         const outcome = await openSourcePage(navigator, { paper, revision: document.revision }, 0, quote);
         await until(() => viewer.currentPageNumber === 1, `${label}-navigate-to-citation-page`);
-        requireCheck(outcome === 'highlighted' && viewer.currentScaleValue === scaleBefore && viewer.pagesRotation === rotationBefore, 'CITATION_NAVIGATION_CHANGED_VIEW_STATE');
+        const afterOpenSourcePage = viewState();
+        const observed = { label, outcome, zoomExercised, rotationExercised, requestedScale: 'page-width', requestedRotation, immediatelyAfterSet, settledAfterSet, afterInitialNavigate, beforeOpenSourcePage, afterOpenSourcePage };
+        const currentDetails = report.checks.at(-1)!.details ?? {}; report.checks.at(-1)!.details = { ...currentDetails, [label]: observed };
+        requireCheck(outcome === 'highlighted' && afterOpenSourcePage.scale === beforeOpenSourcePage.scale && afterOpenSourcePage.rotation === beforeOpenSourcePage.rotation, 'CITATION_NAVIGATION_CHANGED_VIEW_STATE');
         reader.close(); await until(() => !Zotero.Reader._readers.includes(reader), `${label}-reader-close`); window!.Zotero_Tabs.select(opened.tabID);
-        return { outcome, zoomExercised, rotationExercised, scalePreserved: true, rotationPreserved: true };
+        return { ...observed, scalePreserved: true, rotationPreserved: true };
       };
       const first = await exercise('citation-first-open'); const reopened = await exercise('citation-reopen');
       const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => opened, paper); const missQuote = 'SYNTHETIC ABSENT QUOTE 9F3K'; const miss = await openSourcePage(navigator, { paper, revision: document.revision }, 0, missQuote);
