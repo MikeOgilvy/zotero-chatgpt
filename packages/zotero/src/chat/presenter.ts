@@ -246,6 +246,8 @@ export class ConversationPresenter {
    * them: mode is a property of the chat, not of the composer widget.
    */
   private modes = new Map<string, RequestMode>();
+  /** Monotonic owner intent; async navigation may transfer only a mode chosen after it began. */
+  private modeIntentRevision = 0;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(context: ReaderContext, private services: PresenterServices) {
     this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, mode: 'chat', chatUnavailable: null, focusToken: 0,
@@ -309,6 +311,7 @@ export class ConversationPresenter {
     }
     traceMode(`[mode] selected ${mode} for ${this.draftKey()}`);
     this.modes.set(this.draftKey(), mode);
+    this.modeIntentRevision++;
     this.update({});
     // Agent state is hydrated on demand: Chat never touches the Agent runtime or the task/reading
     // infrastructure, so switching to Agent is what licenses the first Codex startup and refresh.
@@ -952,7 +955,13 @@ export class ConversationPresenter {
     if (this.selectionCleared) return null;
     const conversation = await client.peekCurrent(this.paper);
     if (!conversation || this.state.conversation || this.selectionCleared) return this.state.conversation;
-    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
+    const message = await this.isolationNote(client, conversation);
+    if (this.state.conversation || this.selectionCleared) return this.state.conversation;
+    // A click made while the unbound pane was loading belongs to the pane the owner can see when the
+    // load settles. Absence still means the product default Chat mode.
+    const unboundMode = this.modes.get('unbound');
+    if (unboundMode) { this.modes.delete('unbound'); this.modes.set(conversation.id, unboundMode); }
+    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message });
     return conversation;
   }
   /** The chat a request goes to: the one on screen, else the stored current one, else a new record. */
@@ -1574,17 +1583,18 @@ export class ConversationPresenter {
   }
   async openConversation(id: string): Promise<void> {
     if (this.state.conversation?.id === id) return;
+    const modeIntentRevision = this.modeIntentRevision;
     try {
       await this.loadLocal(); const navigation = ++this.navigation; this.stageDraft();
       const client = this.client;
       const conversation = client && this.state.connection === 'ready' ? await client.select(this.paper, id) : this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(id) : await (await this.connect()).select(this.paper, id);
       if (navigation !== this.navigation) return;
       if (paperId(conversation.paper) !== paperId(this.paper)) { await this.openHistoryEntry(id); return; }
-      await this.restoreConversation(conversation); if (this.state.connection === 'ready') await this.sync();
+      await this.restoreConversation(conversation, true, undefined, modeIntentRevision); if (this.state.connection === 'ready') await this.sync();
       await this.refreshList(); await this.refreshTaskState();
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
-  private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft): Promise<void> {
+  private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft, modeIntentRevision?: number): Promise<void> {
     // A chat is active again, so a previous Close no longer governs adoption.
     this.selectionCleared = false;
     let draft = override ?? this.drafts.get(conversation.id); let position = this.positions.get(conversation.id);
@@ -1593,6 +1603,7 @@ export class ConversationPresenter {
       if (saved) { draft = saved.draft; position = { scrollTop: saved.scrollTop, range: null }; }
     }
     if (stash) this.stageDraft(); this.draftVersion++;
+    if (modeIntentRevision !== undefined && this.modeIntentRevision !== modeIntentRevision) this.modes.set(conversation.id, this.state.mode);
     this.update(this.panePatch(conversation, draft ?? null, position));
     if (this.client) this.update({ message: await this.isolationNote(this.client, conversation) });
     this.stageDraft();

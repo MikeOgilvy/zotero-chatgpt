@@ -122,6 +122,28 @@ async function startChat(f: ReturnType<typeof fixture>, question: string): Promi
   return f.last().conversation!.id;
 }
 describe('conversation presenter', () => {
+  it('keeps an explicit Agent click made while the stored current chat is still loading', async () => {
+    const f = fixture(); let resolve!: (conversation: Conversation) => void;
+    const delayed = new Promise<Conversation>(done => { resolve = done; });
+    vi.mocked(f.client.peekCurrent).mockImplementation(() => delayed);
+    const activating = f.presenter.activate(); await vi.waitFor(() => expect(f.client.peekCurrent).toHaveBeenCalled());
+    expect(f.presenter.snapshot().conversation).toBeNull(); expect(f.presenter.snapshot().mode).toBe('chat');
+    f.presenter.setMode('agent'); resolve(structuredClone(f.conversation())); await activating;
+    expect(f.presenter.snapshot().conversation?.id).toBe(f.conversation().id);
+    expect(f.presenter.snapshot().mode).toBe('agent');
+  });
+
+  it('keeps the last mode click made while another saved conversation is being selected', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const second = { ...f.conversation(), id: 'bbbbbbbb-0000-4000-8000-000000000099', title: 'Second saved chat' };
+    f.setConversation(second); let resolve!: (conversation: Conversation) => void;
+    const delayed = new Promise<Conversation>(done => { resolve = done; });
+    vi.mocked(f.client.select).mockReturnValueOnce(delayed);
+    const opening = f.presenter.openConversation(second.id); await vi.waitFor(() => expect(f.client.select).toHaveBeenCalledWith(paperA, second.id));
+    f.presenter.setMode('agent'); resolve(structuredClone(second)); await opening;
+    expect(f.presenter.snapshot().conversation?.id).toBe(second.id); expect(f.presenter.snapshot().mode).toBe('agent');
+  });
+
   it('keeps two views of the same attachment consistent when either view closes', async () => {
     const f = fixture(); await f.presenter.activate();
     let first = ''; let second = '';
