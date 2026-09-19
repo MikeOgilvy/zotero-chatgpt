@@ -84,7 +84,30 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();
   });
   it('refuses to prepare a profile without an explicit stage', async () => {
-    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
+    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
+  });
+
+  it('registers the embedded ChatGPT probe on its own isolated tree', async () => {
+    await expect(select(['--embed'])).resolves.toMatchObject({ stage: 'embed', driver: 'tests/host/embed-driver.js', installDriver: true });
+    const { stdout } = await execFileAsync(process.execPath, [
+      '--input-type=module',
+      '-e',
+      `import { selectHostTree } from ${JSON.stringify(stageModule)};
+       console.log(JSON.stringify(selectHostTree(['--embed'], ${JSON.stringify(repositoryRoot)})));`,
+    ], { cwd: repositoryRoot });
+    const tree = JSON.parse(stdout) as { stage: string; profile: string; dataDir: string; reportPath: string };
+    expect(tree.stage).toBe('embed');
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/embed/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/embed/data'));
+    expect(tree.reportPath).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/embed/host-report.json'));
+    expect(tree.profile).not.toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/profile'));
+  });
+
+  it('refuses to auto-run the embedded ChatGPT probe as acceptance, native action or live verification', async () => {
+    await expect(select(['--embed', '--acceptance'])).rejects.toThrow();
+    await expect(select(['--embed', '--native'])).rejects.toThrow();
+    await expect(select(['--embed', '--live'])).rejects.toThrow();
+    await expect(select(['--context', '--embed'])).rejects.toThrow();
   });
 
   it('selects the S5 restart driver', async () => {
@@ -151,7 +174,7 @@ describe('dedicated host-test stage selection', () => {
   });
 
   it('rejects combining exclusive stage flags', async () => {
-    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-model, --s5, --s6/.test(failureMessage(error)));
-    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
   });
 });

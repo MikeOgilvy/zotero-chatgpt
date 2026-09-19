@@ -27,7 +27,7 @@ function readRawOption(name) {
 }
 
 function positionalXpi() {
-  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi']);
+  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms']);
   const skip = new Set();
   const found = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -112,7 +112,7 @@ const prefs = {
   'extensions.startupScanScopes': 1,
   'extensions.update.enabled': false,
   'extensions.zotero.httpServer.enabled': false,
-  'extensions.zotero.integration.port': tree.stage === 'context' ? 50014 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
+  'extensions.zotero.integration.port': tree.stage === 'context' ? 50014 : tree.stage === 'embed' ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
   'extensions.zoteroMacWordIntegration.skipInstallation': true,
   'extensions.zoteroOpenOfficeIntegration.skipInstallation': true,
   'app.update.enabled': false,
@@ -146,6 +146,15 @@ const config = {
   installedXpi: join(profile, 'extensions', `${subjectID}.xpi`),
   reportPath,
   pdfPath,
+  // The embed probe defaults to the real chatgpt.com; `--url` exists so the same probe can be pointed
+  // at a local fixture to separate "our surface is broken" from "the remote site refused us".
+  ...(tree.stage === 'embed' ? {
+    url: readRawOption('--url'),
+    ...(readRawOption('--probe-timeout-ms') ? { probeTimeoutMs: Number(readRawOption('--probe-timeout-ms')) } : {}),
+    // Off by default: the comparison probes read remote documents from privileged code and one of
+    // them ends this host build's process, so the product evidence is what a default run measures.
+    surfaceProbes: argumentsList.includes('--surface-probes'),
+  } : {}),
   ...(supplementPdfPath ? { supplementPdfPath } : {}),
   ...(twoVersion ? {
     upgradeXpi: upgradeInProfile,
