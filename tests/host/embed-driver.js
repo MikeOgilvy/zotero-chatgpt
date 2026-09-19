@@ -664,7 +664,16 @@ async function runHostSmoke(config) {
     const product = { notRun: ['interactive-login', 'conversation-send', 'streaming-render', 'model-selection', 'file-upload'] };
     report.product = product;
     productNetwork = startNetworkWatch();
-    const embedBrowser = () => win.document.querySelector('[data-zchatgpt-embed-browser]');
+    const embedBrowser = () => {
+      const surfaces = [...win.document.querySelectorAll('[data-zchatgpt-embed-browser]')];
+      const itemID = reader()?.itemID;
+      const bound = itemID === undefined ? [] : surfaces.filter(node => String(node.getAttribute('data-zchatgpt-context-binding') || '').endsWith(`:${itemID}`));
+      const paintedBound = bound.filter(node => Boolean(node.getAttribute('data-zchatgpt-embed-painted')));
+      if (paintedBound.length === 1) return paintedBound[0];
+      if (bound.length === 1) return bound[0];
+      const paintedSurface = surfaces.filter(node => Boolean(node.getAttribute('data-zchatgpt-embed-painted')));
+      return paintedSurface.length === 1 ? paintedSurface[0] : null;
+    };
     const painted = () => { const node = embedBrowser(); return node ? String(node.getAttribute('data-zchatgpt-embed-painted') || '') : null; };
 
     const toggle = await until(() => doc.querySelector('[data-zchatgpt-toggle]'), 'product-toolbar-button');
