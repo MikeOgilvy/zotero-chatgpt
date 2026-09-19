@@ -113,13 +113,13 @@ a33 比 a32 增加了将 Chat 重新加载按钮从时钟图标改为 reload 图
 | 优先级 / ID | 来源 | 需要完成的结果 | 本轮实现/验收 |
 | --- | --- | --- | --- |
 | P0 / ROUTING | 用户再次确认＋既有产品要求 | Chat 全路径不调用 Codex；Agent 才走 Codex；不回到“只读 Codex Chat”方案 | NOT RUN |
-| P0 / UI-01 | 截图中 Chat/Agent 开关位置不同 | 共同顶部外壳、固定位置、无第二套开关 | NOT RUN |
-| P0 / UI-02 | 截图顶部操作与多条反馈常驻 | 正常态紧凑；次要操作折叠；失败可处理 | NOT RUN |
-| P0 / UI-03 | 截图“本地 24 页”和“3/24 已缩短”未清晰分层 | 提取、待发送、已接受、回答分开表达 | NOT RUN |
-| P1 / UI-04 | 截图 Attach 操作实际提示剪贴板粘贴 | 文件准备不冒充上传；附件和文本覆盖各自明确 | NOT RUN |
-| P1 / UI-05 | 截图 Agent 的 New chat、Model 和不明圆点；输入细节待验 | 模式身份、禁用原因、独立草稿、IME、焦点和在途状态一致 | NOT RUN |
-| P1 / UI-06 | 截图“适用于所有 chat”的模型/instructions | Agent 设置独立标注；不承诺控制官网；字号范围准确 | NOT RUN |
-| P1 / UI-07 | 主界面历史入口与设置里的完整聊天列表并存 | 导航和数据管理分工；搜索/删除范围准确 | NOT RUN |
+| P0 / UI-01 | 截图中 Chat/Agent 开关位置不同 | 共同顶部外壳、固定位置、无第二套开关 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
+| P0 / UI-02 | 截图顶部操作与多条反馈常驻 | 正常态紧凑；次要操作折叠；失败可处理 | 已实现；预览几何 PASS；真实宿主 NOT RUN，见 §9 |
+| P0 / UI-03 | 截图“本地 24 页”和“3/24 已缩短”未清晰分层 | 提取、待发送、已接受、回答分开表达 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
+| P1 / UI-04 | 截图 Attach 操作实际提示剪贴板粘贴 | 文件准备不冒充上传；附件和文本覆盖各自明确 | 已实现（`Copy PDF file…`）；真实页面附件流程 NOT RUN，见 §9 |
+| P1 / UI-05 | 截图 Agent 的 New chat、Model 和不明圆点；输入细节待验 | 模式身份、禁用原因、独立草稿、IME、焦点和在途状态一致 | 已实现；离线回归 PASS；真实模型 NOT RUN，见 §9 |
+| P1 / UI-06 | 截图“适用于所有 chat”的模型/instructions | Agent 设置独立标注；不承诺控制官网；字号范围准确 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
+| P1 / UI-07 | 主界面历史入口与设置里的完整聊天列表并存 | 导航和数据管理分工；搜索/删除范围准确 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
 | P1 / ACQUIRE | 用户再次强调下文章 | DOI/URL 到条目及合法 PDF 附件的真实链路独立验收 | NOT RUN |
 | P1 / LEGACY | 旧计划中的 Chat 曾使用 Codex | 旧 mode 与服务来源不混淆；hash、任务和来源兼容 | 待核查，NOT RUN |
 | P1 / STORE | 旧计划记录 conversation 双写者 | 核查当前所有者；有问题才收敛，不机械新增存储层 | 待核查，NOT RUN |
@@ -139,3 +139,63 @@ a33 比 a32 增加了将 Chat 重新加载按钮从时钟图标改为 reload 图
 原记录未覆盖：签名、公开发布、更新频道、其它 CPU/系统、Gatekeeper 下载来源、升级/回退和公开安装验证。Apple passkey 仍是该基线的 BLOCKED 记录，不推定之后的宿主版本仍有同一结果。
 
 原文档称既有测试仅使用专用 profile/data 与合成资料，没有读取认证、操作日常文献库、push 或公开发布。本轮只处理用户提供的文档副本，同样没有执行这些仓库、宿主或账户操作。
+
+## 9. 2026-09-19 UI / UX 改造轮次记录
+
+本轮按 [zotero-chatgpt-ui-redesign-instruction.md](zotero-chatgpt-ui-redesign-instruction.md) 完成 UI-01 至 UI-07 的源码改造、离线回归、浏览器渲染复查与开发 XPI 打包。真实 Agent 功能验收按用户要求整轮排除。
+
+### 9.1 可见变化与主要修改
+
+| 目标 | 实现 |
+| --- | --- |
+| UI-01 | 新增共同外壳 `.zchatgpt-shell`：模式开关只创建一次并固定在 `.zchatgpt-chrome`（`data-zchatgpt-shell-bar`）最左侧；Chat 与 Agent 切换不再移动、也不再出现第二套开关。Agent composer 只保留附件 `+`。 |
+| UI-02 | 顶部正常态固定为一行 44 px 工具栏 + 一行 30 px 上下文摘要（实测外壳总高 75 px）。新建/历史留在右侧；`Copy paper context`、`Copy PDF file…`、`Copy selection`、`Reload` 在 Chat 面保留为次要操作。 |
+| UI-03 | 摘要行改为回答“下一次发送什么”：选区、自动 PDF 关闭、准备中、本地读取页数、文本不可用、无 PDF。点击摘要打开锚定详情面板（来源全名、下次发送、本地读取、自动 PDF 状态、复制/重新读取、上次覆盖报告）。 |
+| UI-04 | `Attach current PDF` 改名为 `Copy PDF file…`，状态文案明确“已复制到剪贴板，需粘贴”；复制成功不表示附件已上传。 |
+| UI-05 | Agent 新增紧凑空状态（标题 + 一句用途 + 高亮/获取文章/整理选中条目三个入口，仅准备草稿，不发送不连接）；空会话改称 `New agent`；发送与模型设置禁用时给出原因；输入框说明 Enter / Shift+Enter。 |
+| UI-06 | Preferences 重组为 General / Chat / Agent 四组加历史的数据管理组；`Chat text scale` 改名 `Agent text size`；`Codex instructions` 改名 `Agent instructions` 并注明“仅用于 Agent 请求”；模型与 skill 的原始 id/版本收进 `Details`；instructions 增加未保存指示。 |
+| UI-07 | 侧栏历史行改为标题 + 文献/最近活动/可证明来源的第二行；Preferences 的 `Chat history` 改名 `Local data` 并说明删除范围。 |
+
+主要文件：`packages/zotero/src/chat/view.ts`、`packages/zotero/src/chat/ui-locale.ts`、`packages/zotero/assets/sidebar.css`、`packages/zotero/src/preferences/pane.ts`、`packages/zotero/src/preferences/history-section.ts`、`packages/zotero/src/preferences/registration.ts`（Preferences 面板加载插件样式表）、`tests/host/context-driver.js`、`tests/host/embed-driver.js`，以及对应离线测试。
+
+### 9.2 本机执行的门禁（2026-09-19）
+
+| 检查 | 结果 |
+| --- | --- |
+| `npx tsc --noEmit` | PASS |
+| `npm run lint` | PASS |
+| `npm run test:unit` | PASS，100 files / 1344 tests / 0 skipped（新增 8 条 UI/设置回归） |
+| `npm run package:dev` | PASS，构建 `dist/zotero-chatgpt-0.4.0a34-dev.xpi`（92,732,302 bytes） |
+| `npm run verify:artifacts` | PASS，87 个文件；SHA-256 `c56659757bf21a9949ffa93e5a037be053ceb58f7960a05d7370edd955c5c2ef` |
+
+产品 Codex 模型请求：本轮未运行任何会连接产品 Agent 的入口（未执行 `--live*`、`--native`、`--embed --web-live`、`--context` 等宿主阶段），因此可证明范围是“未发起”，不是“已实测为零”。
+
+### 9.3 渲染复查（浏览器预览，非 Zotero/Gecko 宿主）
+
+用真实 `view.ts` / `pane.ts` 与随包 `sidebar.css`，配合合成状态在浏览器中渲染窄/常规宽度与深浅主题：
+`.zotero-chatgpt-dev/ui-preview/`，截图 `.zotero-chatgpt-dev/ui-preview/screenshots/ui-preview-{context,history}.png`（各 1248 × 1462，工具视口上限所限，只覆盖页面顶部若干卡片；其余卡片以 DOM 几何与可访问性树核对）。
+
+实测要点：
+
+| 项目 | 观测 |
+| --- | --- |
+| 模式开关 | 每张卡片仅 1 个；始终位于 `[data-zchatgpt-shell-bar]` 内、左偏移 9 px；Chat 与 Agent 一致 |
+| 顶部高度 | 工具栏 44 px；摘要行 30 px；外壳总高 75 px（≤80） |
+| 模式命中区 | 每个选项 47 × 26 px |
+| 摘要对比度 | 浅色 5.98:1、深色 9.11:1（≥4.5:1） |
+| 详情面板 | 360 px 侧栏下宽 344 px、左右各留 9 px、无横纵溢出 |
+| Agent 空状态 | 无 h1/h2；三个入口只写入草稿 |
+| Chat 宿主面 | 原生 Chat 隐藏，composer 宽高为 0（不可达）；新建/历史隐藏 |
+| 历史行 | 工作区路径渲染标题 + `文献 · 日期`，列表无溢出 |
+
+该复查是浏览器渲染，不是 Zotero/Gecko 宿主证据；真实宿主中的 dock 尺寸、IME、焦点环与 `--material-*` 主题变量仍需宿主复验。
+
+### 9.4 明确 NOT RUN
+
+```text
+UI-01 至 UI-07 真实宿主（Zotero 9.0.6 + 0.4.0a34）：NOT RUN
+原因：用户本轮明确要求不运行产品 Agent 功能验收（Codex weekly limit 已用尽），且不运行会连接产品 Agent 的宿主阶段。
+边界：离线回归与浏览器渲染证据不等于真实 Gecko 宿主、真实模型、高亮、整理或下载链路通过。
+```
+
+后续待办：在额度可用时于专用 `.zotero-chatgpt-dev/` profile 用 0.4.0a34 复验 UI-01 至 UI-07 的真实宿主布局、IME、焦点返回与多窗口；历史来源标记目前只在记录能证明 message mode 时显示，工作区列表条目未暴露来源字段，不猜测填充。
