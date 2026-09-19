@@ -1,6 +1,6 @@
 # 架构与契约
 
-本文描述 **0.4.0a16 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a17 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
@@ -55,7 +55,7 @@ send()/enqueue() → ReaderService.dispatch(run)
 - 临时诊断：`ReaderOptions.trace` 注入 sink 后，每条线都从真实对象取值（冻结 mode、被选中的 executor、`run.turnId !== null`），例如 `[conversation] mode=chat`、`[execution-router] executor=chat`、`[chat] request_started request=…`、`[agent] runtime_started=false`。默认关闭。
 - 验收测试 `tests/core/execution-boundary.test.ts` 在进程边界上把 `thread/start`、`thread/resume`、`turn/start`、`turn/interrupt` 当作 Codex Agent 运行时的入口断点：chat 请求（含带 PDF、超长提示、动作指令）从不命中，agent 请求必然命中。
 
-### 惰性 Codex 启动与运行时分界（0.4.0a16）
+### 惰性 Codex 启动与运行时分界（0.4.0a16/a17）
 
 打开侧栏、列会话、在 Chat 档发送都**不启动、不连接、不握手**随包 Codex：组合根只用本地 `StoragePort` 构造唯一的共享 `ReaderClient`，构造本身不发任何 RPC。`createReaderClient` 因此不再是「构造即握手」，它接受两种 `ManagedProcess | ConnectCodex`：测试注入已生成进程，生产注入惰性连接器。
 
