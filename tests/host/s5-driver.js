@@ -59,7 +59,13 @@ async function runHostSmoke(config) {
     };
     win.ZoteroContextPane.collapsed = true; click(toggle());
     await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'native runtime initialization', 90000);
-    await check('native-runtime-handshake-ready', panel()?.dataset.zchatgptRuntime === 'ready', { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
+    // Codex is no longer started by opening the dock: the shared client is usable without it, so the
+    // process this stage owns is created by an explicit Agent action. Selecting Agent mode is that
+    // action; without this click the profile owns no Codex process at all and every count below is 0.
+    await until(() => panel()?.querySelector('[data-zchatgpt-action="mode-agent"]'), 'mode switch');
+    click(panel().querySelector('[data-zchatgpt-action="mode-agent"]'));
+    await until(async () => (await ownProcesses()).length === 1, 'lazy codex start', 90000);
+    await check('native-runtime-handshake-ready', panel()?.dataset.zchatgptRuntime === 'ready' && (await ownProcesses()).length === 1, { visibleError: panel()?.querySelector('[role="alert"]')?.textContent || '' });
     const pidsBefore = await ownProcesses();
     await check('one-owned-codex-process', pidsBefore.length === 1, { count: pidsBefore.length });
     const signedIn = panel()?.dataset.zchatgptAuth === 'signedIn';

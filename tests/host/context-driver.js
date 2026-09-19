@@ -2,7 +2,7 @@
 // Current-PDF local preparation, citation source, consent, refusal, attachment identity and UI
 // performance on a real host. Only --live sends bounded synthetic requests.
 async function runHostSmoke(config) {
-  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash } };
+  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash } };
   const delay = ms => Zotero.Promise.delay(ms);
   const save = () => Zotero.File.putContentsAsync(config.reportPath, JSON.stringify(report, null, 2));
   let step = 'startup';
@@ -291,12 +291,93 @@ async function runHostSmoke(config) {
       modeShape.role === 'group' && Boolean(modeShape.groupLabel) && modeShape.mode === 'chat' && modeShape.chatPressed && !modeShape.agentPressed
         && modeShape.chatSegmented && !modeShape.genericButtonSkin,
       modeShape);
+    // --- Chat is not an Agent path, observed on the real dock ---
+    // There is no supported Chat transport in this build, so Chat mode must state that itself rather
+    // than borrow the Agent sign-in line, and it must not render Agent-only chrome (sign-in, retry).
+    // `aria-hidden`/`hidden` reading is why this belongs to the real dock: the presenter state can be
+    // right while the painted chrome is not.
+    const statusLine = () => panel()?.querySelector('p.zchatgpt-status-line');
+    const authButton = action => panel()?.querySelector(`[data-zchatgpt-action="${action}"]`);
+    const timingRow = () => panel()?.querySelector('[data-zchatgpt-request-timing]');
+    const timingText = () => timingRow()?.querySelector('[data-zchatgpt-request-timing-text]')?.textContent ?? '';
+    const CHAT_UNAVAILABLE_COPY = ['Chat is unavailable in this build. Use Agent mode.', '此版本未集成 Chat 通道，请使用 Agent 模式。'];
+    // The shared client resolves asynchronously, so Chat's own status is observed after the panel has
+    // settled on its runtime, not at the instant the input appears. The observed state and the panel's
+    // own alert are recorded either way: a failure here must name what the dock actually showed.
+    const settled = await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime ?? ''), 'chat-runtime-settled', 30000).catch(() => null);
+    const settledState = {
+      runtime: panel()?.dataset.zchatgptRuntime ?? null,
+      auth: panel()?.dataset.zchatgptAuth ?? null,
+      status: statusLine()?.textContent ?? null,
+      alert: panel()?.querySelector('p.zchatgpt-error:not([data-zchatgpt-view-error])')?.textContent ?? null,
+    };
+    await check('chat-runtime-settles-without-codex', settled !== null && settledState.runtime === 'ready', settledState);
+    await until(() => CHAT_UNAVAILABLE_COPY.includes(statusLine()?.textContent ?? ''), 'chat-mode-status', 30000).catch(() => undefined);
+    const chatModeUi = {
+      mode: modeSwitch().dataset.zchatgptMode,
+      status: statusLine()?.textContent ?? null,
+      loginHidden: authButton('login')?.hidden ?? null,
+      retryHidden: authButton('retry')?.hidden ?? null,
+      sendDisabled: authButton('send')?.disabled ?? null,
+      timingHidden: timingRow()?.hidden ?? null,
+      timingText: timingText(),
+    };
+    await check('chat-mode-states-its-own-unavailable-transport',
+      chatModeUi.mode === 'chat' && CHAT_UNAVAILABLE_COPY.includes(chatModeUi.status)
+        && chatModeUi.loginHidden === true && chatModeUi.retryHidden === true && chatModeUi.sendDisabled === true,
+      chatModeUi);
+    // Nothing was sent, so the shared timing row must stay hidden instead of inventing an elapsed
+    // value. The row is rendered from `conversation.requestTiming` alone, for both modes.
+    await check('chat-mode-shows-no-invented-request-timing', chatModeUi.timingHidden === true && chatModeUi.timingText === '', chatModeUi);
+    // --- Lazy Codex, observed on the real filesystem and in the real process list ---
+    // `prepareRuntime` is the only writer of these private directories and the only caller of the
+    // bundled executable, and it runs only when an Agent action asks for the Codex channel.
+    // `records/` is created by local chat storage and is deliberately not probed; nothing here reads
+    // account/ contents, only whether the directory exists. The process probe matches a Codex command
+    // line by this profile's own runtime path, so the owner's normal Zotero session (a different
+    // profile) can never be mistaken for it. The settle delay is part of the check: the eager start
+    // this refactor removed was asynchronous, so a probe taken the instant the panel appears could
+    // miss it and report a lazy start that had not happened yet.
+    const runtimeRoot = PathUtils.join(PathUtils.join(config.profile, 'zotero-chatgpt'), 'v1');
+    const runtimeDir = name => IOUtils.exists(PathUtils.join(runtimeRoot, name));
+    const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
+    const codexProcesses = async () => {
+      const child = await Subprocess.call({ command: '/bin/ps', arguments: ['-axo', 'pid=,args='], stderr: 'pipe' });
+      const decoder = new TextDecoder(); let text = '';
+      for (let bytes = await child.stdout.read(); bytes.byteLength !== 0; bytes = await child.stdout.read()) text += decoder.decode(bytes, { stream: true });
+      text += decoder.decode(); await child.wait();
+      return text.split('\n').filter(line => line.includes(`${runtimeRoot}/runtime/`) && line.includes('app-server')).map(line => line.trim().slice(0, 220));
+    };
+    await delay(5000);
+    let codexBefore = null;
+    try { codexBefore = await codexProcesses(); }
+    catch (error) { await skip('chat-only-sidebar-use-starts-no-codex-process', `The process probe itself failed: ${String((error && error.message) || error)}`); }
+    if (codexBefore !== null) {
+      await check('chat-only-sidebar-use-starts-no-codex-process', codexBefore.length === 0, { matches: codexBefore, runtimeRoot });
+      const chatOnlyDirs = { home: await runtimeDir('home'), scratch: await runtimeDir('scratch'), account: await runtimeDir('account'), tmp: await runtimeDir('tmp') };
+      await check('chat-only-sidebar-use-does-not-prepare-codex', Object.values(chatOnlyDirs).every(exists => exists === false), { runtimeRoot, ...chatOnlyDirs });
+    }
     click(modeButton('agent'));
     await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'mode-agent-selected');
     await check('mode-selector-click-selects-agent', pressed('agent') && !pressed('chat'), { mode: modeSwitch().dataset.zchatgptMode, agentPressed: pressed('agent') });
+    // Selecting Agent is the first Agent action, and it is what lazily prepares the Codex runtime.
+    const agentPrepared = await until(async () => {
+      const dirs = { home: await runtimeDir('home'), scratch: await runtimeDir('scratch'), account: await runtimeDir('account') };
+      return Object.values(dirs).every(Boolean) ? dirs : null;
+    }, 'agent-mode-prepares-codex-lazily', 120000).catch(() => null);
+    await check('agent-mode-prepares-codex-lazily', agentPrepared !== null,
+      { prepared: agentPrepared, runtime: panel()?.dataset.zchatgptRuntime ?? null, alert: panel()?.querySelector('p.zchatgpt-error:not([data-zchatgpt-view-error])')?.textContent ?? null });
+    if (codexBefore !== null) {
+      const codexAfter = await until(async () => { const matches = await codexProcesses(); return matches.length ? matches : null; }, 'agent-mode-starts-codex-lazily', 60000).catch(() => null);
+      await check('agent-mode-starts-codex-lazily', codexAfter !== null, { matches: codexAfter, runtimeRoot });
+    }
     click(modeButton('chat'));
     await until(() => pressed('chat') && modeSwitch().dataset.zchatgptMode === 'chat', 'mode-chat-restored');
     await check('mode-selector-click-returns-to-chat', pressed('chat') && !pressed('agent'), { mode: modeSwitch().dataset.zchatgptMode, chatPressed: pressed('chat') });
+    // Chat keeps its own status after Agent has started: the switch is not sticky in either direction.
+    await check('chat-mode-keeps-its-own-status-after-agent',
+      CHAT_UNAVAILABLE_COPY.includes(statusLine()?.textContent ?? '') && authButton('login')?.hidden === true,
+      { status: statusLine()?.textContent ?? null, loginHidden: authButton('login')?.hidden ?? null });
     // The unsent tab is the New chat copy in either interface language. It must not be named after
     // the paper: paper identity is carried by the attachment/context system, not by a tab label.
     const unsentTab = () => panel()?.querySelector('[data-zchatgpt-current-title]');
@@ -392,8 +473,11 @@ async function runHostSmoke(config) {
     await check('context-ring-reports-honest-unknown-state',
       contextRing().className === 'zchatgpt-context-ring' && contextRing().dataset.zchatgptContextState === 'unknown' && contextRing().querySelector('.zchatgpt-context-ring-fill')?.getAttribute('stroke-dasharray') === 'none' && /unknown/i.test(ringLabel) && !ringLabel.includes('%'),
       { state: contextRing().dataset.zchatgptContextState, strokeDasharray: contextRing().querySelector('.zchatgpt-context-ring-fill')?.getAttribute('stroke-dasharray'), label: ringLabel });
+    // The panel's runtime state is the shared client's, and the shared client is usable without Codex.
+    // The Agent channel itself is asserted above by the lazy filesystem/process checks; this is the
+    // guard that the dock settled on a usable runtime instead of failing to connect.
     await until(() => ['ready', 'error'].includes(panel()?.dataset.zchatgptRuntime), 'native-runtime-initialization', 90000);
-    await check('native-runtime-handshake-ready', panel()?.dataset.zchatgptRuntime === 'ready', { visibleStatus: panel()?.querySelector('[role="status"]')?.textContent, visibleError: refusalAlert()?.textContent });
+    await check('sidebar-runtime-ready-after-the-explicit-agent-action', panel()?.dataset.zchatgptRuntime === 'ready', { visibleStatus: panel()?.querySelector('[role="status"]')?.textContent, visibleError: refusalAlert()?.textContent });
     // Opening the dock is a local tab, not a stored chat: first-open has no conversation id until
     // the first send. signedOut still disables the picker; signedIn with an unbound composer is the
     // same login-independent local surface the next check records.
@@ -535,8 +619,11 @@ async function runHostSmoke(config) {
     await check('single-dock-and-toggle-after-cycles', rdoc().querySelectorAll('[data-zchatgpt-dock]').length === 1 && rdoc().querySelectorAll('[data-zchatgpt-toggle]').length === 1);
     step = 'inspect-request-records';
     const records = PathUtils.join(config.profile, 'zotero-chatgpt', 'v1', 'records', 'conversations');
+    // A profile that ran no conversation yet owns no records directory at all; the product lists a
+    // missing directory as empty, and this probe must read the same way.
+    const recordFiles = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : [];
     let requests = 0;
-    for (const file of await IOUtils.getChildren(records)) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
+    for (const file of recordFiles) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
     report.recordedRequests = requests;
     if (!config.live) {
       const currentRequests = conversationA
@@ -583,7 +670,7 @@ async function runHostSmoke(config) {
     tabId = opened.tabID; win.Zotero_Tabs.select(tabId);
     await until(() => shell()?.dataset.attachmentKey === a.key, 'restore-main-attachment', 60000);
     if (config.live) {
-      report.notRun = report.notRun.filter(name => !['real-model-answer', 'in-flight-model-stop'].includes(name));
+      report.notRun = report.notRun.filter(name => !['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'in-flight-model-stop'].includes(name));
       await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
       const picker = panel().querySelector('[data-zchatgpt-picker]'); picker.click();
       const spark = [...panel().querySelectorAll('[data-zchatgpt-setting="model"]')].find(node => /spark/i.test(node.textContent));
@@ -594,6 +681,12 @@ async function runHostSmoke(config) {
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
       const started = win.performance.now(); panel().querySelector('[data-zchatgpt-action="send"]').click();
       await until(() => panel()?.dataset.zchatgptGenerating === 'true', 'live-request-accepted');
+      // The same status text and timing row serve both execution modes. During a live Agent turn they
+      // must describe the request instead of staying idle: this is the real-dock half of the
+      // shared-request-state claim that the unit suite asserts only on the state shape.
+      const inFlight = await until(() => /^Waiting \d+s$/u.test(timingText()) && /Responding/u.test(statusLine()?.textContent ?? ''), 'live-status-timing', 30000).catch(() => null);
+      report.liveStatus = { status: statusLine()?.textContent ?? null, timing: timingText() };
+      await check('live-status-shows-responding-and-waiting-seconds', inFlight !== null, report.liveStatus);
       await until(() => panel()?.dataset.zchatgptGenerating === 'false', 'live-answer-terminal', 120000);
       const record = JSON.parse(await IOUtils.readUTF8(PathUtils.join(records, `${conversationA}.json`)));
       const last = record.requests.at(-1);
