@@ -24,7 +24,7 @@ function fixture(pages = ['Alpha beta']) {
   } };
   class Item implements NativeHostItem {
     id = ++nextID; key = ''; libraryID = paperA.libraryId; parentID: number | null = null; deleted = false;
-    dateModified = '2026-09-12 01:00:00'; itemType: string; data: Record<string, unknown> = {}; collections: number[] = []; attachments: number[] = []; editable = true; primaryLoaded = false;
+    dateModified = '2026-09-12 01:00:00'; itemType: string; data: Record<string, unknown> = {}; tags: string[] = []; collections: number[] = []; attachments: number[] = []; editable = true; primaryLoaded = false;
     annotationType = ''; annotationText = ''; annotationComment = ''; annotationColor = ''; annotationPageLabel = ''; annotationSortIndex = ''; annotationPosition = ''; annotationAuthorName = ''; annotationIsExternal = false; attachmentContentType = '';
     constructor(type: string) { this.itemType = type; }
     isAnnotation() { return this.itemType === 'annotation'; }
@@ -34,17 +34,19 @@ function fixture(pages = ['Alpha beta']) {
     getField(field: string) { return typeof this.data[field] === 'string' ? this.data[field] : ''; }
     getCreators() { return (this.data.creators ?? []) as NativeMetadata['creators']; }
     getCreatorsJSON() { return this.getCreators(); }
-    getTags() { return []; }
+    getTags() { return this.tags.map(tag => ({ tag })); }
     getCollections() { return [...this.collections]; }
     getAttachments() { return this.attachments.filter(id => !byID(id)?.deleted); }
     getNotes() { return []; }
     getAnnotations() { return [...items.values()].filter(item => item.parentID === this.id && item.isAnnotation()); }
-    toJSON() { return { itemType: this.itemType, ...this.data, collections: this.collections, dateModified: this.dateModified }; }
+    toJSON() { return { itemType: this.itemType, ...this.data, tags: this.tags.map(tag => ({ tag, type: 0 })), collections: this.collections, dateModified: this.dateModified }; }
     getFilePathAsync() { return Promise.resolve('/fixture/paper.pdf'); }
     loadPrimaryData() { this.primaryLoaded = true; return Promise.resolve(); }
     fromJSON(json: object) { if (this.key && !this.primaryLoaded) throw new Error('Reserved-key item primary data must be loaded'); this.data = structuredClone(json) as Record<string, unknown>; }
     addToCollection(key: string) { if (key !== 'COLLECT1') throw new Error('Wrong collection'); this.collections.push(1); }
     removeFromCollection(key: string) { if (key !== 'COLLECT1') throw new Error('Wrong collection'); this.collections = this.collections.filter(id => id !== 1); }
+    addTag(tag: string) { if (this.tags.includes(tag)) return false; this.tags.push(tag); return true; }
+    removeTag(tag: string) { const had = this.tags.includes(tag); this.tags = this.tags.filter(value => value !== tag); return had; }
     save() { if (!transaction) throw new Error('Expected caller transaction'); items.set(this.key, this); return Promise.resolve(this.id); }
     erase() { if (!transaction) throw new Error('Expected caller transaction'); items.delete(this.key); return Promise.resolve(); }
   }
@@ -166,6 +168,7 @@ it('metadata preview returns unsaved allowlisted fields and strips imported chil
 it('creates only approved metadata in the frozen collection and rejects unapproved fields', async () => {
   const f = fixture(); const saved = await createPaper(f);
   expect(saved).toMatchObject({ key: 'NEWITEM1', metadata, collectionKeys: ['COLLECT1'], attachmentKeys: [] });
+  expect(saved).not.toHaveProperty('tags'); expect(saved).not.toHaveProperty('organizationSignature');
   expect(f.items.get('NEWITEM1')!.data).not.toHaveProperty('notes');
   await expect(f.port.createItem({ target, key: 'NEWITEM2', metadata: { ...metadata, notes: [{ note: 'unapproved' }] } as NativeMetadata })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   expect(f.items.has('NEWITEM2')).toBe(false);
@@ -236,6 +239,37 @@ it('collection undo preserves a later human metadata edit', async () => {
   f.items.get(item.key)!.data.extra = 'Human note';
   expect(await f.port.undoCollectionAddition({ expected: addition })).toEqual({ status: 'conflict' });
   expect(f.items.get(item.key)!.getCollections()).toEqual([1]);
+});
+it('adds only approved tags and collection memberships and returns the native readback delta', async () => {
+  const f = fixture(); const created = await createPaper(f); const native = f.items.get(created.key)!;
+  native.collections = []; native.tags = ['existing']; const expected = (await f.port.inspectOrganizationItem(created))!;
+  const change = await f.port.organizeItem({ expected, tags: ['existing', 'topic-a'], collections: [target] });
+  expect(change).toMatchObject({ before: { tags: ['existing'], collectionKeys: [] }, after: { tags: ['existing', 'topic-a'], collectionKeys: ['COLLECT1'] }, addedTags: ['topic-a'], addedCollectionKeys: ['COLLECT1'] });
+  expect(change.after.organizationSignature).toBe(change.before.organizationSignature);
+  expect(await f.port.undoOrganization({ expected: change })).toMatchObject({ status: 'removed', after: { tags: ['existing'], collectionKeys: [] } });
+});
+it('organization undo preserves a later human edit instead of removing approved additions', async () => {
+  const f = fixture(); const created = await createPaper(f); const native = f.items.get(created.key)!;
+  native.collections = []; const expected = (await f.port.inspectOrganizationItem(created))!;
+  const change = await f.port.organizeItem({ expected, tags: ['topic-a'], collections: [target] });
+  native.data.extra = 'Later human note';
+  expect(await f.port.undoOrganization({ expected: change })).toEqual({ status: 'conflict' });
+  expect(native.tags).toEqual(['topic-a']); expect(native.collections).toEqual([1]);
+});
+it('treats a partially removed organization delta as conflict rather than falsely fully undone', async () => {
+  const f = fixture(); const created = await createPaper(f); const native = f.items.get(created.key)!;
+  native.collections = []; const expected = (await f.port.inspectOrganizationItem(created))!;
+  const change = await f.port.organizeItem({ expected, tags: ['topic-a', 'topic-b'], collections: [target] });
+  native.removeTag('topic-a');
+  expect(await f.port.undoOrganization({ expected: change })).toEqual({ status: 'conflict' });
+  expect(native.tags).toEqual(['topic-b']); expect(native.collections).toEqual([1]);
+});
+it('rejects a corrupt organization ledger before it can remove a pre-existing user tag', async () => {
+  const f = fixture(); const created = await createPaper(f); const native = f.items.get(created.key)!;
+  native.tags = ['human']; const before = (await f.port.inspectOrganizationItem(created))!;
+  const corrupt = { before, after: structuredClone(before), addedTags: ['human'], addedCollectionKeys: [] };
+  await expect(f.port.undoOrganization({ expected: corrupt })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  expect(native.tags).toEqual(['human']); expect(native.collections).toEqual([1]);
 });
 it('undoing an untouched created item moves it to trash instead of deleting files', async () => {
   const f = fixture(); const item = await createPaper(f);

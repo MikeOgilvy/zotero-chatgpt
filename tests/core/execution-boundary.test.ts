@@ -66,6 +66,26 @@ describe('Chat never enters the Codex Agent runtime', () => {
     expect(methods(p)).not.toContain('thread/read');
   });
 
+  it('J: warm Codex does not recover stored Agent work while Chat only browses local history', async () => {
+    const storage = new MemoryStorage();
+    const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
+    const created = await store.create(paperA, 'Synthetic Paper A', settings);
+    created.messages.push({ id: 'm-agent-user', requestId: requestId(10), role: 'user', phase: null, mode: 'agent', settings, text: 'old agent work', citations: [], status: 'completed' });
+    created.requests.push({ requestId: requestId(10), hash: 'unused', hashVersion: 3, state: 'running', turnId: 'old-turn', createdAt: 'now', updatedAt: 'now', action: 'ask' });
+    created.activeRequestId = requestId(10); created.upstream.threadId = 'old-agent-thread';
+    await store.save(created);
+
+    const { c, p } = await setup([], storage);
+    await c.peekCurrent(paperA); await c.get(created.id); await c.select(paperA, created.id); await flush();
+    expect(methods(p)).not.toContain('thread/resume');
+    expect(methods(p)).not.toContain('thread/read');
+    expect(methods(p)).not.toContain('turn/start');
+
+    await c.ensureAgentReady!(); await flush();
+    expect(methods(p)).toContain('thread/resume');
+    expect(methods(p)).toContain('thread/read');
+  });
+
   it('A: a plain chat message never touches the Codex runtime and fails honestly', async () => {
     const lines: string[] = [];
     const { c, p, request, conversation } = await setup(lines);

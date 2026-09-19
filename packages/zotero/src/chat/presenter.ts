@@ -1,8 +1,8 @@
 import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runtime.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
+import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type OrganizationContext, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
 import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
-import { citationFromAnnotation, parseAnnotationCandidates, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
+import { citationFromAnnotation, parseAnnotationCandidates, parseOrganizationProposals, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { LIMITS, validateImageAttachment, validateOutputImage } from '../../../contracts/src/validation.ts';
@@ -16,7 +16,7 @@ import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
 import type { DocumentServices, ReaderContext } from '../reader/context.ts';
 import type { PresenterAgent, PresenterReading } from './capability.ts';
-import { executeAgentSend, type AgentSendContext } from './agent-execution.ts';
+import { executeAgentSend, requestsCurrentPaperAnnotations, requestsSelectionOrganization, type AgentSendContext } from './agent-execution.ts';
 import { executeChatSend, refuseChatAction, refuseChatWorkflow } from './chat-execution.ts';
 import { traceMode } from './mode-trace.ts';
 /** Shown when a legacy per-chat research profile no longer resolves; global preferences take over. */
@@ -70,6 +70,7 @@ export interface PresenterServices {
 }
 export type PresenterSkillEdit = Pick<ReaderSkill, 'name' | 'description' | 'version' | 'workflow' | 'markdown' | 'enabled'> & { id: string | null; revision?: string };
 type RequestContext = { enabled: boolean; range: [number, number] | null; acquisitionTarget?: NativeCollectionTarget | null };
+type FrozenOrganizationResult = { ok: true; value: OrganizationContext } | { ok: false; error: unknown };
 export interface PresenterState {
   connection: 'idle' | 'starting' | 'ready' | 'error';
   runtime: RuntimeSnapshot | null;
@@ -198,6 +199,8 @@ export class ConversationPresenter {
   private get submitting(): boolean { return this.submissions.size > 0; }
   private explainFlights = new Map<string, Promise<void>>();
   private continuing = false;
+  /** Mode that authorized the pre-submit More-details intent waiting on disclosure/login. */
+  private pendingExplainMode: RequestMode | null = null;
   private drafts = new Map<string, WorkspaceDraft>();
   /**
    * The draft each conversation's request was built from, so Stop can hand the question, citations
@@ -224,7 +227,7 @@ export class ConversationPresenter {
   private readingClient: ReaderClient | null = null;
   private unreading: (() => void) | null = null;
   private readingDescriptions = new Map<string, { question: string; scopeLabel: string }>();
-  private planningAnnotations = new Set<string>();
+  private planningActions = new Set<string>();
   private disposed = false;
   /**
    * Set by an explicit close or by `New chat`. The persisted paper index still points at the last
@@ -243,6 +246,8 @@ export class ConversationPresenter {
    * them: mode is a property of the chat, not of the composer widget.
    */
   private modes = new Map<string, RequestMode>();
+  /** Monotonic owner intent; async navigation may transfer only a mode chosen after it began. */
+  private modeIntentRevision = 0;
   private documentJob: { controller: AbortController; range: string; promise: Promise<DocumentContext>; consumers: number } | null = null;
   constructor(context: ReaderContext, private services: PresenterServices) {
     this.state = { connection: 'idle', runtime: null, conversation: null, openConversations: [], newChatOpen: false, conversations: [], draft: workspaceDraft({ settings: null, paper: context.paper, question: '', citations: [], images: [] }), pendingExplain: null, message: null, generating: false, mode: 'chat', chatUnavailable: null, focusToken: 0,
@@ -296,8 +301,17 @@ export class ConversationPresenter {
    */
   setMode(mode: RequestMode): void {
     if (this.modes.get(this.draftKey()) === mode) return;
+    const pending = this.state.pendingExplain;
+    if (pending && this.pendingExplainMode && this.pendingExplainMode !== mode) {
+      // This intent was never accepted by a service. Preserve its frozen selection as a draft
+      // citation, but revoke auto-resume so a later shared-runtime login cannot submit behind Chat.
+      this.pendingExplainMode = null;
+      this.changeDraft(addCitation(this.state.draft, pending));
+      this.update({ pendingExplain: null, message: 'The pending Agent explanation was not sent after switching modes. The selection remains in the draft.' });
+    }
     traceMode(`[mode] selected ${mode} for ${this.draftKey()}`);
     this.modes.set(this.draftKey(), mode);
+    this.modeIntentRevision++;
     this.update({});
     // Agent state is hydrated on demand: Chat never touches the Agent runtime or the task/reading
     // infrastructure, so switching to Agent is what licenses the first Codex startup and refresh.
@@ -307,7 +321,7 @@ export class ConversationPresenter {
       // so selecting Agent is what starts the local read; the send path would otherwise do it and
       // make the first Agent request wait for a whole PDF.
       if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
-      void this.services.ensureAgent().then(() => this.refreshTaskState()).catch(error => {
+      void this.hydrateAgentState().catch(error => {
         if (this.state.mode === 'agent') this.reportError(this.errorText(error));
       });
     }
@@ -323,16 +337,17 @@ export class ConversationPresenter {
    *
    * Returns false when the caller must stop: the reason is already on screen (or login is pending).
    */
-  private async prepareMode(mode: RequestMode, options: { pendingExplain?: Citation } = {}): Promise<boolean> {
+  private async prepareMode(mode: RequestMode, options: { pendingExplain?: Citation; pendingMode?: RequestMode } = {}): Promise<boolean> {
     if (mode === 'chat') {
       const reason = this.services.chatUnavailableReason();
       if (!reason) return true;
-      this.update({ message: reason, ...(options.pendingExplain ? { pendingExplain: clone(options.pendingExplain) } : {}) });
+      this.update({ message: reason });
       return false;
     }
     try { await this.services.ensureAgent(); }
     catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); throw error; }
     if (this.signedIn()) return true;
+    if (options.pendingExplain) this.pendingExplainMode = options.pendingMode ?? mode;
     this.update({ message: options.pendingExplain ? null : 'Sign in with ChatGPT first.', ...(options.pendingExplain ? { pendingExplain: clone(options.pendingExplain) } : {}) });
     await this.login();
     return false;
@@ -344,6 +359,11 @@ export class ConversationPresenter {
     return models.length ? alignSettings(models, current) : current;
   }
   private draftKey(): string { return this.state.conversation?.id ?? 'unbound'; }
+  private transferUnboundMode(conversationId: string): void {
+    const mode = this.modes.get('unbound');
+    if (!mode) return;
+    this.modes.delete('unbound'); this.modes.set(conversationId, mode);
+  }
   private emptyDraft(settings: GenerationSettings | null = this.currentSettings()): WorkspaceDraft {
     return workspaceDraft({ settings, paper: this.paper, question: '', citations: [], images: [] });
   }
@@ -370,7 +390,10 @@ export class ConversationPresenter {
       this.update({ workspace: settings });
       // A cleared selection is new-chat state: the persisted pointer to the just-closed chat must
       // not silently restore it while the reader is composing the next question.
-      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) this.update({ conversation: current, openConversations: this.withOpen(current), conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
+      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) {
+        this.transferUnboundMode(current.id);
+        this.update({ conversation: current, openConversations: this.withOpen(current), conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
+      }
       const id = this.state.conversation?.id ?? null;
       const saved = await workspace.readDraft(this.paper, id) ?? (id ? await workspace.readDraft(this.paper, null) : null);
       if (this.disposed) return;
@@ -590,7 +613,13 @@ export class ConversationPresenter {
   }
   async collections(): Promise<Array<NativeCollectionTarget & { name: string }>> {
     if (!this.services.library?.collections) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native collection selection is unavailable.');
-    const options = await this.services.library.collections(); this.update({ collectionOptions: options }); return clone(options);
+    const options = await this.services.library.collections(); this.rememberCollectionOptions(options); return clone(options);
+  }
+  private rememberCollectionOptions(options: Array<NativeCollectionTarget & { name: string }>): void {
+    const identity = (target: NativeCollectionTarget) => `${target.clientId}:${target.libraryId}:${target.collectionKey}`;
+    const merged = new Map(this.state.collectionOptions.map(option => [identity(option), clone(option)]));
+    for (const option of options) merged.set(identity(option), clone(option));
+    this.update({ collectionOptions: [...merged.values()] });
   }
   setAcquisitionTarget(target: NativeCollectionTarget | null): void {
     if (target && !this.state.collectionOptions.some(option => option.clientId === target.clientId && option.libraryId === target.libraryId && option.collectionKey === target.collectionKey)) throw new ReaderError('INVALID_REQUEST', 'Choose an editable collection from this Zotero profile.');
@@ -628,39 +657,60 @@ export class ConversationPresenter {
     const tasks = await (await this.getTasks()).list(id); if (this.state.conversation?.id === id) this.update({ tasks });
     const jobs = await (await this.getReading(this.client ?? undefined)).list(id); if (this.state.conversation?.id === id) this.update({ readingJobs: jobs });
   }
+  private async hydrateAgentState(): Promise<void> {
+    if (this.state.mode !== 'agent') return;
+    await this.services.ensureAgent();
+    const conversation = this.state.conversation;
+    if (conversation) await this.recoverActionPlans(conversation);
+    await this.refreshTaskState();
+  }
   async approveTask(id: string, selected: string[], choices: ActionTaskChoices = {}): Promise<void> { this.acceptTask(await (await this.getTasks()).approve(id, [...selected], clone(choices))); }
   async cancelTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).cancel(id)); }
   async reconcileTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).reconcile(id)); }
   async undoTask(id: string): Promise<void> { this.acceptTask(await (await this.getTasks()).undo(id)); }
-  private async planReturnedAnnotations(requestId: string, conversation = this.state.conversation): Promise<void> {
+  private async planReturnedActions(requestId: string, conversation = this.state.conversation): Promise<void> {
     if (!conversation || paperId(conversation.paper) !== paperId(this.paper)) return;
     const key = `${conversation.id}:${requestId}`;
-    if (!this.services.agent || this.planningAnnotations.has(key)) return;
+    if (!this.services.agent || this.planningActions.has(key)) return;
     const user = conversation.messages.find(message => message.requestId === requestId && message.role === 'user');
+    if (!user) return;
     // Chat mode never reaches Agent infrastructure. A request recorded before the mode field existed
     // has no mode; its non-read workflow is still the only signal, so the legacy read is kept rather
     // than retroactively reclassifying stored Agent work as chat.
-    if (user?.mode === 'chat' || user?.workflow?.skill?.workflow !== 'annotate' || user.batch?.phase === 'map') return;
+    const workflow = user.workflow?.skill?.workflow;
+    if (user.mode === 'chat' || (workflow !== 'annotate' && workflow !== 'organize') || user.batch?.phase === 'map') return;
+    if (workflow === 'organize' && user.organization) this.rememberCollectionOptions(user.organization.collections);
     const answer = conversation.messages.filter(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed' && message.phase !== 'commentary').at(-1);
     if (!answer?.text.trim()) return;
-    const origin = user.document ?? (user.batch ? conversation.messages.find(message => message.role === 'user' && message.batch?.id === user.batch?.id && message.document)?.document : undefined);
-    if (!origin) throw new ReaderError('INVALID_REQUEST', 'Annotation proposals have no frozen PDF version. Prepare the PDF and try again.');
-    this.planningAnnotations.add(key);
+    this.planningActions.add(key);
     try {
       const tasks = await this.getTasks();
-      if ((await tasks.list(conversation.id)).some(task => task.kind === 'annotations' && task.modelRequestId === requestId)) return;
-      const candidates = parseAnnotationCandidates(answer.text);
-      const task = await tasks.planAnnotations({ conversationId: conversation.id, paper: clone(conversation.paper), revision: clone(origin.revision), question: user.batch?.question ?? user.text, candidates, modelRequestId: requestId }); this.acceptTask(task);
-    } finally { this.planningAnnotations.delete(key); }
+      const kind = workflow === 'annotate' ? 'annotations' : 'organization';
+      if ((await tasks.list(conversation.id)).some(task => task.kind === kind && task.modelRequestId === requestId)) return;
+      if (workflow === 'annotate') {
+        const origin = user.document ?? (user.batch ? conversation.messages.find(message => message.role === 'user' && message.batch?.id === user.batch?.id && message.document)?.document : undefined);
+        if (!origin) throw new ReaderError('INVALID_REQUEST', 'Annotation proposals have no frozen PDF version. Prepare the PDF and try again.');
+        const candidates = parseAnnotationCandidates(answer.text);
+        this.acceptTask(await tasks.planAnnotations({ conversationId: conversation.id, paper: clone(conversation.paper), revision: clone(origin.revision), question: user.batch?.question ?? user.text, candidates, modelRequestId: requestId }));
+      } else {
+        if (!user.organization) throw new ReaderError('INVALID_REQUEST', 'Organization proposals have no frozen Zotero selection. Select the items and try again.');
+        const proposals = parseOrganizationProposals(answer.text);
+        // Collection names are model-facing labels in the frozen request. The task controller accepts
+        // only native identity fields, so project at this trust boundary instead of weakening its
+        // strict record validator to admit display metadata.
+        const collections = user.organization.collections.map(({ clientId, libraryId, collectionKey }) => ({ clientId, libraryId, collectionKey }));
+        this.acceptTask(await tasks.planOrganization({ conversationId: conversation.id, question: user.text, modelRequestId: requestId, selection: clone(user.organization.selection), collections, proposals }));
+      }
+    } finally { this.planningActions.delete(key); }
   }
-  private async recoverAnnotationPlans(conversation: Conversation): Promise<void> {
+  private async recoverActionPlans(conversation: Conversation): Promise<void> {
     if (!this.services.agent || !this.client || this.disposed) return;
-    const requests = new Set(conversation.messages.filter(message => message.role === 'user' && message.mode !== 'chat' && message.workflow?.skill?.workflow === 'annotate' && message.batch?.phase !== 'map').map(message => message.requestId));
+    const requests = new Set(conversation.messages.filter(message => message.role === 'user' && message.mode !== 'chat' && ['annotate', 'organize'].includes(message.workflow?.skill?.workflow ?? '') && message.batch?.phase !== 'map').map(message => message.requestId));
     for (const requestId of requests) {
       if (conversation.activeRequestId === requestId || !conversation.messages.some(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed')) continue;
       try {
         if ((await this.client.request(conversation.id, requestId)).state !== 'completed') continue;
-        await this.planReturnedAnnotations(requestId, conversation);
+        await this.planReturnedActions(requestId, conversation);
       } catch (error) {
         if (error instanceof ReaderError && error.code === 'NOT_FOUND') continue;
         if (this.state.conversation?.id === conversation.id) this.reportError(this.errorText(error));
@@ -715,6 +765,30 @@ export class ConversationPresenter {
     if (enabled !== this.state.document.enabled) this.update({ document: { ...this.state.document, enabled } });
     return { enabled, range: clone(this.state.document.range), acquisitionTarget: this.state.acquisitionTarget ? clone(this.state.acquisitionTarget) : null };
   }
+  private organizationRequested(draft: WorkspaceDraft, mode: RequestMode): boolean {
+    if (mode !== 'agent') return false;
+    if (!draft.skillId) return requestsSelectionOrganization(draft.question);
+    return this.state.workspace?.skills.find(skill => skill.id === draft.skillId && skill.enabled)?.workflow === 'organize';
+  }
+  private async freezeOrganizationContext(): Promise<OrganizationContext> {
+    const library = this.services.library;
+    if (!library?.selectedItems || !library.collections) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native Zotero selection organization is unavailable.');
+    // Both host reads start together. selectedItems copies every native identity before its first
+    // await, so a later focus or selection change cannot retarget this request.
+    const [selection, available] = await Promise.all([library.selectedItems(), library.collections()]);
+    if (!selection.length) throw new ReaderError('INVALID_REQUEST', 'Select one or more Zotero items before organizing them.');
+    const first = selection[0]!;
+    const collections = available.filter(collection => collection.clientId === first.clientId && collection.libraryId === first.libraryId);
+    this.rememberCollectionOptions(collections);
+    return { selection: clone(selection), collections: clone(collections) };
+  }
+  private prepareOrganizationContext(draft: WorkspaceDraft, mode: RequestMode): Promise<FrozenOrganizationResult> | null {
+    if (!this.organizationRequested(draft, mode)) return null;
+    return this.freezeOrganizationContext().then(
+      value => ({ ok: true as const, value }),
+      (error: unknown) => { this.reportError(this.errorText(error)); return { ok: false as const, error }; },
+    );
+  }
   /** Draft only: never edits an in-flight or already-submitted message snapshot. */
   setSettings(settings: GenerationSettings): void {
     const models = this.state.runtime?.models ?? [];
@@ -737,8 +811,7 @@ export class ConversationPresenter {
     } catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); }
     // Agent mode is the one composer state that needs Codex (for the model picker). Activating into
     // Chat never reaches this, so a reader who never leaves Chat starts no Agent runtime.
-    if (this.state.mode === 'agent') await this.services.ensureAgent().catch(error => this.reportError(this.errorText(error)));
-    await this.refreshTaskState().catch(error => this.reportError(this.errorText(error)));
+    if (this.state.mode === 'agent') await this.hydrateAgentState().catch(error => this.reportError(this.errorText(error)));
     // Adopting the saved chat clears `message`. If local preparation already failed, that would erase
     // the only signal the owner has — the panel that used to render preparation state is gone — so a
     // failure that landed before the restore is re-announced here. A later failure sets it itself.
@@ -768,7 +841,7 @@ export class ConversationPresenter {
     this.services.document?.acknowledge?.();
     this.update({ document: { ...this.state.document, disclosure: false } });
     const pending = this.state.pendingExplain;
-    if (pending) { this.update({ pendingExplain: null }); void this.explain(pending); }
+    if (pending) { const mode = this.pendingExplainMode; this.pendingExplainMode = null; this.update({ pendingExplain: null }); if (mode === this.state.mode) void this.explain(pending); else this.changeDraft(addCitation(this.state.draft, pending)); }
   }
   prepareContext(): Promise<DocumentContext> { return this.prepareDocument(this.state.document.range); }
   /**
@@ -871,10 +944,10 @@ export class ConversationPresenter {
     try {
       await this.adoptCurrent();
       const pending = this.state.pendingExplain;
-      if (pending && !this.state.document.disclosure) {
+      if (pending && this.pendingExplainMode === 'agent' && this.state.mode === 'agent' && !this.state.document.disclosure) {
         // Only a resumed explain needs a chat; a plain login opens no chat of its own.
         const conversation = await this.ensureConversation();
-        this.update({ pendingExplain: null });
+        this.pendingExplainMode = null; this.update({ pendingExplain: null });
         // A pending More details is always the Agent explain that queued it, so it resumes as Agent.
         await this.submit(conversation, makeExplain(pending, conversation.id, this.services.uuid(), this.currentSettings() ?? conversation.settings, this.paperIdentity()), this.contextOptions(), { ...clone(this.state.draft), skillId: null, references: [] }, await this.captureWorkspace(), false, 'agent');
       }
@@ -890,7 +963,12 @@ export class ConversationPresenter {
     if (this.selectionCleared) return null;
     const conversation = await client.peekCurrent(this.paper);
     if (!conversation || this.state.conversation || this.selectionCleared) return this.state.conversation;
-    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message: await this.isolationNote(client, conversation) });
+    const message = await this.isolationNote(client, conversation);
+    if (this.state.conversation || this.selectionCleared) return this.state.conversation;
+    // A click made while the unbound pane was loading belongs to the pane the owner can see when the
+    // load settles. Absence still means the product default Chat mode.
+    this.transferUnboundMode(conversation.id);
+    this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message });
     return conversation;
   }
   /** The chat a request goes to: the one on screen, else the stored current one, else a new record. */
@@ -1019,7 +1097,7 @@ export class ConversationPresenter {
       const buffered = this.buffered; this.buffered = []; this.syncing = false;
       this.update({ conversation });
       for (const event of buffered) if (event.seq > conversation.lastSeq) this.apply(event);
-      await this.recoverAnnotationPlans(conversation);
+      if (this.state.mode === 'agent') await this.recoverActionPlans(conversation);
     } catch (error) { if (generation !== this.syncGeneration) return; this.syncing = false; this.buffered = []; this.update({ message: this.errorText(error) }); }
   }
   /**
@@ -1035,7 +1113,7 @@ export class ConversationPresenter {
       const { conversation, message } = this.advance(active, event);
       // An alert raised by an event only reaches the panel when the chat it belongs to is on screen.
       this.update(message === undefined ? { conversation } : { conversation, message });
-      if (event.type === 'completed') void this.planReturnedAnnotations(event.requestId).catch(error => this.reportError(this.errorText(error)));
+      if (event.type === 'completed') void this.planReturnedActions(event.requestId).catch(error => this.reportError(this.errorText(error)));
       return;
     }
     const open = this.state.openConversations.find(entry => entry.id === event.conversationId);
@@ -1051,7 +1129,7 @@ export class ConversationPresenter {
     if (!known) return;
     void this.client?.get(event.conversationId).then(conversation => {
       if (this.disposed || conversation.id !== event.conversationId || paperId(conversation.paper) !== paperId(this.paper)) return;
-      return this.planReturnedAnnotations(event.requestId, conversation);
+      return this.planReturnedActions(event.requestId, conversation);
     }).catch(error => { if (this.state.conversation?.id === event.conversationId) this.reportError(this.errorText(error)); });
   }
   /**
@@ -1062,7 +1140,7 @@ export class ConversationPresenter {
    */
   private async planStoredCompletion(requestId: string, conversation: Conversation): Promise<void> {
     const stored = this.client ? await this.client.get(conversation.id).catch(() => null) : null;
-    await this.planReturnedAnnotations(requestId, stored ?? conversation);
+    await this.planReturnedActions(requestId, stored ?? conversation);
   }
   /**
    * Fold one event into a copy of `conversation`. Spread alone keeps the stale timing, which would
@@ -1116,22 +1194,23 @@ export class ConversationPresenter {
   explain(citation: Citation): Promise<void> {
     const key = `${this.draftKey()}:${citation.id}`;
     const existing = this.explainFlights.get(key); if (existing) return existing;
+    const mode = this.state.mode;
     const context = this.contextOptions(); const frozenSettings = this.currentSettings();
     const draft = { ...clone(this.state.draft), skillId: null, references: [] }; const workspace = this.captureWorkspace(); const target = this.state.conversation;
-    if (context.enabled && this.state.document.disclosure) { this.update({ pendingExplain: clone(citation) }); return Promise.resolve(); }
+    if (mode === 'agent' && context.enabled && this.state.document.disclosure) { this.pendingExplainMode = mode; this.update({ pendingExplain: clone(citation) }); return Promise.resolve(); }
     const flight = (async () => {
       const kept = clone(citation);
       try {
         await this.loadLocal();
         const configuration = await workspace; if (this.disposed) return;
         await this.connect();
-        // More details is an Agent request in this build: it needs the PDF context pipeline and the
-        // reading coordinator, and Chat has no transport yet. Routing it to Chat would break a
-        // working feature, so it is frozen as Agent. Once a Chat transport lands, More details can
-        // follow the composer mode like any other request without changing the router.
-        if (!await this.prepareMode('agent', { pendingExplain: kept })) return;
+        // The host routes the real hosted-Chat selection actions directly to the official page.
+        // This method remains the native conversation entry point, so it freezes the mode shown at
+        // the click and must never turn a Chat action into a Codex Agent request behind the owner's
+        // back. A host without a native Chat transport refuses through prepareMode before sending.
+        if (!await this.prepareMode(mode, { pendingExplain: kept, pendingMode: mode })) return;
         const conversation = target ?? await this.ensureConversation();
-        await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration, false, 'agent');
+        await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration, false, mode);
       } catch (error) { this.update({ message: this.errorText(error) }); }
     })().finally(() => { this.explainFlights.delete(key); });
     this.explainFlights.set(key, flight);
@@ -1143,8 +1222,9 @@ export class ConversationPresenter {
     const draft = clone(this.state.draft); const version = this.draftVersion;
     const settings = this.currentSettings(); const document = this.contextOptions();
     const workspace = this.captureWorkspace(); const target = this.state.conversation;
+    const mode = this.state.mode; const organization = this.prepareOrganizationContext(draft, mode);
     if (document.enabled) { this.services.document?.acknowledge?.(); this.update({ document: { ...this.state.document, disclosure: false } }); }
-    const flight = this.sendDraft(draft, version, settings, document, workspace, target).finally(() => { this.sendFlights.delete(key); }); this.sendFlights.set(key, flight);
+    const flight = this.sendDraft(draft, version, settings, document, workspace, target, false, mode, organization).finally(() => { this.sendFlights.delete(key); }); this.sendFlights.set(key, flight);
     return flight;
   }
   queueDraft(): Promise<void> {
@@ -1152,15 +1232,18 @@ export class ConversationPresenter {
     if (!this.state.draft.question.trim()) { this.reportError('Enter a question first.'); return Promise.resolve(); }
     const draft = clone(this.state.draft); const version = this.draftVersion; const settings = this.currentSettings(); const document = this.contextOptions();
     const workspace = this.captureWorkspace(); const target = this.state.conversation; const sending = this.sendFlights.get(this.draftKey());
+    const mode = this.state.mode; const organization = this.prepareOrganizationContext(draft, mode);
     this.update({ queueing: true });
-    this.queueFlight = (async () => { await sending; await this.sendDraft(draft, version, settings, document, workspace, target, true); })().finally(() => { this.queueFlight = null; this.update({ queueing: false }); });
+    this.queueFlight = (async () => { await sending; await this.sendDraft(draft, version, settings, document, workspace, target, true, mode, organization); })().finally(() => { this.queueFlight = null; this.update({ queueing: false }); });
     return this.queueFlight;
   }
-  private async sendDraft(draft: WorkspaceDraft, version: number, settings: GenerationSettings | null, document: RequestContext, workspace: Promise<WorkspaceSettings | null>, target: Conversation | null, queued = false): Promise<void> {
-    // Freeze the mode the composer is showing when this send starts, before any await, so a switch
-    // during preparation cannot retrofit a different mode onto this one request.
-    const mode = this.state.mode;
+  private async sendDraft(draft: WorkspaceDraft, version: number, settings: GenerationSettings | null, document: RequestContext, workspace: Promise<WorkspaceSettings | null>, target: Conversation | null, queued: boolean, mode: RequestMode, organizationFlight: Promise<FrozenOrganizationResult> | null): Promise<void> {
     try {
+      // Scope failures win over login/runtime preparation: selection was frozen at the owner's click,
+      // and a failed freeze must never start Codex, disappear behind a login message, or retarget a
+      // later selection. The settled union also makes an early rejection safe while Queue is waiting.
+      let organization: OrganizationContext | undefined;
+      if (organizationFlight) { const frozen = await organizationFlight; if (!frozen.ok) throw frozen.error; organization = frozen.value; }
       await this.loadLocal();
       const configuration = await workspace; if (this.disposed) return;
       await this.connect();
@@ -1168,6 +1251,7 @@ export class ConversationPresenter {
       const conversation = target ?? await this.ensureConversation();
       const resolved = ConversationPresenter.withoutStaleProfile(draft, configuration);
       const input = makeAsk(resolved.draft, conversation.id, this.services.uuid(), settings ?? conversation.settings, this.paperIdentity());
+      if (organization) input.organization = organization;
       await this.submit(conversation, input, document, resolved.draft, configuration, queued, mode);
       // Remember what was sent so Stop can return it to the composer.
       this.submitted.set(conversation.id, clone(resolved.draft));
@@ -1191,15 +1275,25 @@ export class ConversationPresenter {
       if (resolved.stale) this.update({ message: STALE_PROFILE_MESSAGE });
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
-  private frozenWorkflow(draft: WorkspaceDraft, settings: WorkspaceSettings | null): WorkflowSnapshot | undefined {
+  private frozenWorkflow(draft: WorkspaceDraft, settings: WorkspaceSettings | null, mode: RequestMode, question: string): WorkflowSnapshot | undefined {
     if (!settings) return undefined;
     // Global preferences are authoritative. A legacy persisted per-chat profile that no longer
     // resolves must not abort the send — the per-chat profile control is gone, so there would be no
     // way out — and it must not override the global preferences either. Treat it as "no profile";
     // the send path reports the degradation out loud.
     const profile = draft.profileId ? settings.profiles.find(profile => profile.id === draft.profileId) : undefined;
-    const skill = draft.skillId ? settings.skills.find(skill => skill.id === draft.skillId) : null;
+    const inferredAnnotation = !draft.skillId && mode === 'agent' && requestsCurrentPaperAnnotations(question);
+    const inferredOrganization = !draft.skillId && mode === 'agent' && !inferredAnnotation && requestsSelectionOrganization(question);
+    const skill = draft.skillId
+      ? settings.skills.find(skill => skill.id === draft.skillId)
+      : inferredAnnotation
+        ? settings.skills.find(skill => skill.id === 'builtin-annotate' && skill.enabled)
+        : inferredOrganization
+          ? settings.skills.find(skill => skill.id === 'builtin-organize' && skill.enabled)
+        : null;
     if (draft.skillId && (!skill || !skill.enabled)) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The selected skill is unavailable or disabled.');
+    if (inferredAnnotation && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in annotation workflow is unavailable or disabled. Enable it before asking Agent to highlight the current paper.');
+    if (inferredOrganization && !skill) throw new ReaderError('UNSUPPORTED_INTERACTION', 'The built-in organization workflow is unavailable or disabled. Enable it before asking Agent to organize the selected items.');
     return validateWorkflow({ skill: skill ?? null, profileId: profile ? draft.profileId : null, preferences: { ...settings.preferences, ...profile?.preferences, ...draft.overrides } });
   }
   /**
@@ -1271,7 +1365,7 @@ export class ConversationPresenter {
       // Last line of defence: no Chat request may reach the shared service without a Chat transport,
       // so Chat can never be routed to Codex by a path that forgot to check.
       if (mode === 'chat') { const reason = this.services.chatUnavailableReason(); if (reason) throw new ReaderError('UNSUPPORTED_INTERACTION', reason); }
-      const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace);
+      const workflow = this.frozenWorkflow(draft, configuration ?? this.state.workspace, mode, input.question);
       if (workflow) input.workflow = workflow;
       const skillWorkflow = workflow?.skill?.workflow ?? null;
       // Stage 6/8: the composer's mode control is the single authority for `mode`; `workflow` never
@@ -1287,6 +1381,7 @@ export class ConversationPresenter {
         await executeAgentSend(this.agentSendContext(client, conversation, input, null, queued, { target: clone(context.acquisitionTarget), identifiers }));
         return;
       }
+      if (skillWorkflow === 'organize' && !input.organization) throw new ReaderError('INVALID_REQUEST', 'The selected Zotero items were not frozen for this request. Select them again and retry.');
       if (skillWorkflow === 'diagram' && this.state.runtime?.capabilities?.imageGeneration !== true) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Image generation is unavailable in this runtime.');
       if (mode === 'chat') {
         // Chat is read context + reason + answer: an Agent-only skill or a plainly imperative
@@ -1294,7 +1389,7 @@ export class ConversationPresenter {
         refuseChatWorkflow(skillWorkflow);
         refuseChatAction(input.question);
       }
-      if (context.enabled) input.document = await this.requestDocument(context.range, controller.signal);
+      if (context.enabled && skillWorkflow !== 'organize') input.document = await this.requestDocument(context.range, controller.signal);
       const references: ReferenceInput[] = [];
       for (const reference of draft.references) {
         aborted(controller.signal);
@@ -1495,17 +1590,18 @@ export class ConversationPresenter {
   }
   async openConversation(id: string): Promise<void> {
     if (this.state.conversation?.id === id) return;
+    const modeIntentRevision = this.modeIntentRevision;
     try {
       await this.loadLocal(); const navigation = ++this.navigation; this.stageDraft();
       const client = this.client;
       const conversation = client && this.state.connection === 'ready' ? await client.select(this.paper, id) : this.services.getWorkspace ? await (await this.getWorkspace()).readConversation(id) : await (await this.connect()).select(this.paper, id);
       if (navigation !== this.navigation) return;
       if (paperId(conversation.paper) !== paperId(this.paper)) { await this.openHistoryEntry(id); return; }
-      await this.restoreConversation(conversation); if (this.state.connection === 'ready') await this.sync();
+      await this.restoreConversation(conversation, true, undefined, modeIntentRevision); if (this.state.connection === 'ready') await this.sync();
       await this.refreshList(); await this.refreshTaskState();
     } catch (error) { this.update({ message: this.errorText(error) }); }
   }
-  private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft): Promise<void> {
+  private async restoreConversation(conversation: Conversation, stash = true, override?: WorkspaceDraft, modeIntentRevision?: number): Promise<void> {
     // A chat is active again, so a previous Close no longer governs adoption.
     this.selectionCleared = false;
     let draft = override ?? this.drafts.get(conversation.id); let position = this.positions.get(conversation.id);
@@ -1514,6 +1610,7 @@ export class ConversationPresenter {
       if (saved) { draft = saved.draft; position = { scrollTop: saved.scrollTop, range: null }; }
     }
     if (stash) this.stageDraft(); this.draftVersion++;
+    if (modeIntentRevision !== undefined && this.modeIntentRevision !== modeIntentRevision) this.modes.set(conversation.id, this.state.mode);
     this.update(this.panePatch(conversation, draft ?? null, position));
     if (this.client) this.update({ message: await this.isolationNote(this.client, conversation) });
     this.stageDraft();

@@ -1,4 +1,4 @@
-import { NativeOperationError, type NativeActionPort, type NativeMetadata } from '../../packages/contracts/src/native.ts';
+import { NativeOperationError, type NativeActionPort, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
 import { ReaderError, type DocumentContext, type PaperScope } from '../../packages/contracts/src/index.ts';
 import type { LibraryReferencePort } from '../../packages/contracts/src/workspace.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
@@ -20,6 +20,8 @@ export interface NativeSmokeConfig {
   subjectID: string;
   subjectVersion: string;
   artifactHash: string;
+  verificationToken?: string;
+  driverSourceHash?: string;
 }
 interface SmokeItem extends NativeHostItem {
   setField(name: string, value: string): void;
@@ -29,7 +31,7 @@ interface SmokeItem extends NativeHostItem {
 }
 interface SmokeCollection extends NativeHostCollection { name: string; saveTx(): Promise<number | boolean> }
 interface SmokeWindow extends ZoteroWindow {
-  ZoteroPane?: { loaded?: boolean; itemsView?: unknown };
+  ZoteroPane?: { loaded?: boolean; itemsView?: { getSelectedItems(asIDs?: false): SmokeItem[] } };
   Zotero_Tabs: { selectedID: string; getTabInfo(id: string): { id?: string; data?: { itemID?: number } }; select(id: string): void };
 }
 interface SmokeReader extends HostReader { tabID: string; _window: SmokeWindow; _initPromise?: Promise<void>; close(): void }
@@ -70,13 +72,14 @@ export interface NativeSmokeReport {
   startedAt: string;
   completedAt?: string;
   status: 'running' | 'passed' | 'partial' | 'failed';
-  build: { expectedVersion: string; expectedArtifactHash: string; artifactHashSource: 'prepare-script'; adapterSource: 'working-tree-production-modules-in-test-driver'; subjectScope: 'installed-addon-identity-only'; actualVersion?: string };
+  build: { expectedVersion: string; expectedArtifactHash: string; artifactHashSource: 'prepare-script'; adapterSource: 'working-tree-production-modules-in-test-driver'; subjectScope: 'installed-addon-identity-only'; driverSourceHash: string | null; actualVersion?: string };
   environment?: { zotero: string; os: string; abi: string; width: number; height: number; dpr: number };
   driverIssuedModelRequests: 0;
   modelProposalSource: 'deterministic-synthetic-fixture';
+  verificationToken: string;
   checks: SmokeCheck[];
   notRun: Array<{ name: string; reason: string }>;
-  retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string };
+  retained?: { parentKey: string; attachmentKeys: string[]; collectionKey: string; taskIds: string[]; ledger: string; manuallyEditedAnnotationKey?: string; organizationItemKeys?: string[]; organizationCollectionKey?: string };
 }
 class SmokeFailure extends Error { constructor(readonly code: string) { super(code); this.name = 'NativeSmokeFailure'; } }
 function requireCheck(ok: unknown, code: string): asserts ok { if (!ok) throw new SmokeFailure(code); }
@@ -102,8 +105,10 @@ function tabInfo(window: SmokeWindow, id: string) { try { return window.Zotero_T
 /** Test-only entrypoint. Importing this file never runs it or opens a reader. */
 export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmokeReport> {
   await Zotero.initializationPromise;
+  const verificationToken = typeof config.verificationToken === 'string' && /^RUN-[a-f0-9]{24}$/u.test(config.verificationToken) ? config.verificationToken : 'ORCHID-72';
   const profile = safePath(config.profile); const dataDir = safePath(config.dataDir);
-  requireCheck(profile.endsWith('/.zotero-chatgpt-dev/context/profile') && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
+  const contextProfile = profile.match(/^(.*\/\.zotero-chatgpt-dev\/(?:context|context-runs\/[a-z0-9][a-z0-9-]{0,63}))\/profile$/u);
+  requireCheck(Boolean(contextProfile) && dataDir === `${contextProfile?.[1]}/data` && PathUtils.profileDir === profile, 'PROFILE_GUARD_REJECTED');
   const contextRoot = profile.slice(0, -'/profile'.length);
   requireCheck(dataDir === PathUtils.join(contextRoot, 'data') && Zotero.DataDirectory.dir === dataDir, 'DATA_GUARD_REJECTED');
   const reportPath = safePath(config.reportPath); const pdfPath = safePath(config.pdfPath); const supplementPath = safePath(config.supplementPdfPath);
@@ -122,8 +127,8 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
   requireCheck(!host.isSymlink(reportPath), 'REPORT_SYMLINK_REJECTED');
   const report: NativeSmokeReport = {
     schemaVersion: 1, stage: 'native-agent', runId: host.uuid(), startedAt: new Date().toISOString(), status: 'running',
-    build: { expectedVersion: config.subjectVersion, expectedArtifactHash: config.artifactHash, artifactHashSource: 'prepare-script', adapterSource: 'working-tree-production-modules-in-test-driver', subjectScope: 'installed-addon-identity-only' },
-    driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', checks: [],
+    build: { expectedVersion: config.subjectVersion, expectedArtifactHash: config.artifactHash, artifactHashSource: 'prepare-script', adapterSource: 'working-tree-production-modules-in-test-driver', subjectScope: 'installed-addon-identity-only', driverSourceHash: config.driverSourceHash ?? null },
+    driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', verificationToken, checks: [],
     notRun: [
       { name: 'real-model-proposal', reason: 'The driver supplies explicit synthetic annotation proposals. They are not model output.' },
       { name: 'oa-pdf-acquisition-and-correspondence', reason: 'This bounded smoke does not download external PDFs. Real network evidence is limited to unsaved DOI metadata translation.' },
@@ -167,18 +172,19 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       return { value: true, details: { profileMatched: true, dataDirectoryMatched: true, addonActive: true, productionModulesBundledInTestDriver: true } };
     });
     const fixture = await step('create-isolated-synthetic-fixtures', 'real-host-api', async () => {
-      for (const [path, token] of [[pdfPath, 'ORCHID-72'], [supplementPath, 'BAMBOO-19']] as const) {
+      for (const [path, token] of [[pdfPath, verificationToken], [supplementPath, 'BAMBOO-19']] as const) {
         const stat = await host.io.stat(path); requireCheck(stat.size > 0 && stat.size < 256 * 1024, 'SYNTHETIC_FIXTURE_SIZE_INVALID');
         const contents = new TextDecoder().decode(await host.io.read(path));
         requireCheck(contents.startsWith('%PDF-') && contents.includes('Synthetic page 1 - development testing only') && contents.includes(token), 'SYNTHETIC_FIXTURE_MARKERS_MISSING');
       }
       guard(); const collection = new Zotero.Collection(); collection.libraryID = libraryID; collection.name = `[Synthetic native smoke] ${report.runId}`; await collection.saveTx();
-      guard(); const parent = new Zotero.Item('journalArticle'); parent.libraryID = libraryID; parent.setField('title', `[Synthetic native smoke] ${report.runId}`); parent.setField('abstractNote', 'Local synthetic fixture. No model or network metadata provenance.'); parent.addToCollection(collection.key); await parent.saveTx({ skipSelect: true });
+      guard(); const parent = new Zotero.Item('journalArticle'); parent.libraryID = libraryID; parent.setField('title', `[Synthetic native smoke] ${report.runId}`); parent.setField('abstractNote', 'Local synthetic fixture. No model or network metadata provenance.'); parent.addTag('preserve-existing-parent'); parent.addToCollection(collection.key); await parent.saveTx({ skipSelect: true });
+      guard(); const peer = new Zotero.Item('journalArticle'); peer.libraryID = libraryID; peer.setField('title', `[Synthetic organization peer] ${report.runId}`); peer.setField('abstractNote', 'Second local synthetic item for a bounded organization batch.'); peer.addTag('preserve-existing-peer'); peer.addToCollection(collection.key); await peer.saveTx({ skipSelect: true });
       guard(); const main = await Zotero.Attachments.importFromFile({ file: pdfPath, parentItemID: parent.id, title: 'Synthetic main PDF', saveOptions: { skipSelect: true } });
       guard(); const supplement = await Zotero.Attachments.importFromFile({ file: supplementPath, parentItemID: parent.id, title: 'Synthetic supplement PDF', saveOptions: { skipSelect: true } });
-      await Promise.all([parent.loadAllData(), main.loadAllData(), supplement.loadAllData()]);
+      await Promise.all([parent.loadAllData(), peer.loadAllData(), main.loadAllData(), supplement.loadAllData()]);
       requireCheck(main.key !== supplement.key && main.parentID === parent.id && supplement.parentID === parent.id && main.getAnnotations().length === 0 && supplement.getAnnotations().length === 0, 'SYNTHETIC_ATTACHMENT_IDENTITY_FAILED');
-      return { value: { collection, parent, main, supplement }, details: { parentKey: parent.key, collectionKey: collection.key, attachmentKeys: [main.key, supplement.key], modelGenerated: false, networkImported: false } };
+      return { value: { collection, parent, peer, main, supplement }, details: { parentKey: parent.key, peerKey: peer.key, collectionKey: collection.key, attachmentKeys: [main.key, supplement.key], modelGenerated: false, networkImported: false } };
     });
     requireCheck(fixture, 'FIXTURES_NOT_CREATED');
     currentStage = 'open-synthetic-main-reader';
@@ -205,7 +211,44 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     currentStage = 'construct-task-controller';
     const storage = new GeckoStorage(host, ledger);
     tasks = new ActionTaskController(storage, native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
-    report.retained = { parentKey: fixture.parent.key, attachmentKeys: [fixture.main.key, fixture.supplement.key], collectionKey: fixture.collection.key, taskIds: [], ledger: ledgerName };
+    const taskController = tasks;
+    unsubscribe = taskController.subscribe(record => {
+      if (report.retained && !report.retained.taskIds.includes(record.id)) report.retained.taskIds.push(record.id);
+      reportTail = reportTail.then(save).catch(() => { /* The next awaited report save exposes failures. */ });
+    });
+    report.retained = { parentKey: fixture.parent.key, attachmentKeys: [fixture.main.key, fixture.supplement.key], collectionKey: fixture.collection.key, taskIds: [], ledger: ledgerName, organizationItemKeys: [fixture.parent.key, fixture.peer.key] };
+    const organizationReview = await step('organization-review-freezes-two-selected-items-without-writing', 'synthetic-proposal-real-host-write', async () => {
+      guard(); const targetCollection = new Zotero.Collection(); targetCollection.libraryID = libraryID; targetCollection.name = `[Synthetic organization target] ${report.runId}`; await targetCollection.saveTx();
+      const refs = [fixture.parent, fixture.peer].map(item => ({ clientId, libraryId: libraryID, key: item.key }));
+      const selection: NativeOrganizationItemSnapshot[] = []; for (const ref of refs) { const snapshot = await native.inspectOrganizationItem(ref); requireCheck(snapshot, 'ORGANIZATION_SELECTION_SNAPSHOT_MISSING'); selection.push(snapshot); }
+      const target = { clientId, libraryId: libraryID, collectionKey: targetCollection.key };
+      const tag = `synthetic-organization-${report.runId}`;
+      const task = await taskController.planOrganization({ conversationId: host.uuid(), question: 'Synthetic smoke: add one tag and one collection to both frozen selected items.', modelRequestId: host.uuid(), selection, collections: [target], proposals: selection.map((_item, itemIndex) => ({ itemIndex, tags: [tag], collectionIndexes: [0] })) });
+      requireCheck(task.kind === 'organization' && task.state === 'review' && task.items.length === 2 && task.items.every((item, index) => item.sourceIndex === index && item.status === 'candidate' && item.before.key === selection[index]?.key), 'ORGANIZATION_REVIEW_NOT_FROZEN');
+      const unchanged = await Promise.all(refs.map(ref => native.inspectOrganizationItem(ref)));
+      requireCheck(unchanged.every((item, index) => item && !item.tags.includes(tag) && !item.collectionKeys.includes(target.collectionKey) && item.contentSignature === selection[index]?.contentSignature), 'ORGANIZATION_PREAPPROVAL_WRITE_DETECTED');
+      if (report.retained) report.retained.organizationCollectionKey = target.collectionKey;
+      return { value: { task, selection, target, tag }, details: { selectedItems: selection.length, frozenSourceIndexes: task.items.map(item => item.sourceIndex), proposedTagsPerItem: 1, proposedCollectionsPerItem: 1, nativeWritesBeforeApproval: 0 } };
+    });
+    requireCheck(organizationReview, 'ORGANIZATION_REVIEW_UNAVAILABLE');
+    const organizationApplied = await step('organization-approval-adds-and-reads-back-without-replacing-existing-values', 'synthetic-proposal-real-host-write', async () => {
+      const approved = await taskController.approve(organizationReview.task.id, organizationReview.task.items.map(item => item.id));
+      requireCheck(approved.kind === 'organization' && approved.state === 'completed' && approved.items.every(item => item.status === 'applied' && item.change), 'ORGANIZATION_APPROVAL_FAILED');
+      const readback = await Promise.all(organizationReview.selection.map(item => native.inspectOrganizationItem(item)));
+      requireCheck(readback.every((item, index) => item && item.tags.includes(organizationReview.tag) && item.tags.includes(organizationReview.selection[index]!.tags[0]!) && item.collectionKeys.includes(organizationReview.target.collectionKey) && item.collectionKeys.includes(fixture.collection.key)), 'ORGANIZATION_ADDITIVE_READBACK_FAILED');
+      requireCheck(approved.items.every((item, index) => item.kind === 'organization' && item.change && item.change.addedTags.length === 1 && item.change.addedCollectionKeys.length === 1 && item.change.after.contentSignature === readback[index]?.contentSignature), 'ORGANIZATION_LEDGER_READBACK_MISMATCH');
+      return { value: approved, details: { taskId: approved.id, selectedItems: approved.items.length, verifiedReadbacks: readback.length, existingTagsPreserved: true, existingCollectionsPreserved: true, additiveOnly: true } };
+    });
+    requireCheck(organizationApplied, 'ORGANIZATION_APPLY_UNAVAILABLE');
+    await step('organization-undo-removes-unchanged-additions-and-preserves-a-later-edit', 'synthetic-user-edit-real-host-api', async () => {
+      const laterTag = `synthetic-later-edit-${report.runId}`; guard(); const peer = Zotero.Items.getByLibraryAndKey(libraryID, fixture.peer.key); requireCheck(peer, 'ORGANIZATION_EDIT_TARGET_MISSING'); peer.addTag(laterTag); await peer.saveTx({ skipSelect: true });
+      const result = await taskController.undo(organizationApplied.id); requireCheck(result.kind === 'organization' && result.state === 'conflict', 'ORGANIZATION_UNDO_CONFLICT_NOT_REPORTED');
+      const parentResult = result.items.find(item => item.before.key === fixture.parent.key); const peerResult = result.items.find(item => item.before.key === fixture.peer.key);
+      const parentAfter = await native.inspectOrganizationItem({ clientId, libraryId: libraryID, key: fixture.parent.key }); const peerAfter = await native.inspectOrganizationItem({ clientId, libraryId: libraryID, key: fixture.peer.key });
+      requireCheck(parentResult?.status === 'undone' && parentAfter && parentAfter.tags.includes('preserve-existing-parent') && !parentAfter.tags.includes(organizationReview.tag) && parentAfter.collectionKeys.includes(fixture.collection.key) && !parentAfter.collectionKeys.includes(organizationReview.target.collectionKey), 'ORGANIZATION_SAFE_UNDO_FAILED');
+      requireCheck(peerResult?.status === 'conflict' && peerResult.errorCode === 'OUTPUT_CHANGED' && peerAfter && peerAfter.tags.includes('preserve-existing-peer') && peerAfter.tags.includes(organizationReview.tag) && peerAfter.tags.includes(laterTag) && peerAfter.collectionKeys.includes(fixture.collection.key) && peerAfter.collectionKeys.includes(organizationReview.target.collectionKey), 'ORGANIZATION_UNDO_OVERWROTE_LATER_EDIT');
+      return { value: true, details: { unchangedItemUndoVerified: true, laterNativeEditPreserved: true, conflictingItemKey: fixture.peer.key, conflictCode: peerResult.errorCode, existingTagsPreserved: true, existingCollectionsPreserved: true } };
+    });
     const document = await step('native-whole-pdf-text-and-loaded-file-sha256', 'real-host-api', async () => {
       const pdf = (opened._internalReader?._primaryView ?? opened._internalReader?._lastView)?._iframeWindow?.PDFViewerApplication?.pdfDocument;
       const globals = globalThis as unknown as { IOUtils?: { stat?: unknown }; Cu?: { cloneInto?: unknown }; crypto?: { subtle?: { digest?: unknown } } };
@@ -227,25 +270,28 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       diagnostic.coverage = document.pages.map(page => ({ pageIndex: page.pageIndex, status: page.status, partial: page.partial === true, characters: page.text.length })); await save();
       const body = document.pages.map(page => page.text).join('\n');
       requireCheck(document.totalPages === 2 && document.pages.length === 2 && document.pages.every(page => page.status === 'text' && !page.partial), 'FULL_PDF_TEXT_COVERAGE_FAILED');
-      requireCheck(document.pages[0]?.pageLabel === 'i' && document.pages[1]?.pageLabel === '1' && body.includes('ORCHID-72') && !body.includes('BAMBOO-19'), 'SYNTHETIC_MAIN_TEXT_IDENTITY_FAILED');
+      requireCheck(document.pages[0]?.pageLabel === 'i' && document.pages[1]?.pageLabel === '1' && body.includes(verificationToken) && !body.includes('BAMBOO-19'), 'SYNTHETIC_MAIN_TEXT_IDENTITY_FAILED');
       requireCheck(loadedHash === fileHash && document.revision.sha256 === fileHash, 'LOADED_AND_DISK_HASH_MISMATCH');
       return { value: document, details: { pages: document.totalPages, pageLabels: document.pages.map(page => page.pageLabel), textCharacters: body.length, loadedBytes: loadedBytes.length, sha256: fileHash, loadedBytesMatchFile: true } };
     });
     requireCheck(document, 'DOCUMENT_NOT_PREPARED');
     await step('native-quote-coordinate-resolution', 'real-host-api', async () => {
-      const resolution = await native.resolveQuote({ paper, revision: document.revision, quote: 'A prior describes beliefs before a measurement is observed.', pageIndexes: [0] });
+      const quote = 'Calibration constant for this synthetic example: 37. A prior describes beliefs before a measurement is observed.';
+      const resolution = await native.resolveQuote({ paper, revision: document.revision, quote });
       requireCheck(resolution.status === 'resolved', 'QUOTE_DID_NOT_RESOLVE');
-      requireCheck(resolution.candidate.position.pageIndex === 0 && resolution.candidate.position.rects.length > 0 && resolution.candidate.pageLabel === 'i', 'QUOTE_COORDINATES_UNAVAILABLE');
-      return { value: resolution.candidate, details: { pageLabel: resolution.candidate.pageLabel, pageIndex: 0, rectangles: resolution.candidate.position.rects.length, sortIndex: resolution.candidate.sortIndex } };
+      requireCheck(resolution.candidate.position.pageIndex === 0 && resolution.candidate.position.rects.length >= 2 && resolution.candidate.pageLabel === 'i', 'QUOTE_COORDINATES_UNAVAILABLE');
+      return { value: resolution.candidate, details: { pageLabel: resolution.candidate.pageLabel, pageIndex: 0, rectangles: resolution.candidate.position.rects.length, multiLineQuote: true, sortIndex: resolution.candidate.sortIndex } };
     });
-    const taskController = tasks;
-    unsubscribe = taskController.subscribe(record => {
-      if (report.retained && !report.retained.taskIds.includes(record.id)) report.retained.taskIds.push(record.id);
-      reportTail = reportTail.then(save).catch(() => { /* The next awaited report save exposes failures. */ });
+    await step('globally-ambiguous-quote-stays-unresolved-and-unwritten', 'synthetic-proposal-real-host-write', async () => {
+      const repeated = 'A prior describes beliefs before a measurement is observed.';
+      const task = await taskController.planAnnotations({ conversationId: host.uuid(), paper, revision: document.revision, question: 'Synthetic ambiguity control: do not write a quote that occurs on both pages.', modelRequestId: host.uuid(), candidates: [{ quote: repeated, pageIndex: 0, reason: 'The model page is only a hint and cannot hide the second occurrence.' }] });
+      const item = task.kind === 'annotations' ? task.items[0] : undefined; await fixture.main.loadAllData();
+      requireCheck(task.state === 'review' && item?.status === 'unresolved' && item.resolution?.status === 'ambiguous' && item.resolution.matches === 2 && fixture.main.getAnnotations().length === 0, 'AMBIGUOUS_QUOTE_WAS_NOT_SKIPPED');
+      return { value: true, details: { modelProposedPage: 0, nativeOutcome: item.resolution.status, nativeMatches: item.resolution.matches, nativeWrites: 0, approveEligible: false } };
     });
     const proposals = [
-      { quote: 'A prior describes beliefs before a measurement is observed.', pageIndex: 0, reason: 'Synthetic candidate: definition of prior.' },
-      { quote: 'A likelihood describes the measurement under each candidate state.', pageIndex: 0, reason: 'Synthetic candidate: definition of likelihood.' },
+      { quote: 'Calibration constant for this synthetic example: 37. A prior describes beliefs before a measurement is observed.', pageIndex: 0, reason: 'Synthetic unique multi-line candidate on the first physical page.' },
+      { quote: `Hidden verification token on this page: ${verificationToken}. A prior describes beliefs before a measurement is observed.`, pageIndex: 1, reason: 'Synthetic unique multi-line candidate on the second physical page.' },
     ];
     const conversationId = host.uuid();
     const plan = async () => taskController.planAnnotations({ conversationId, paper, revision: document.revision, question: 'Synthetic smoke: annotate the two supplied definitions.', modelRequestId: host.uuid(), candidates: proposals });
@@ -286,26 +332,53 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     // Bounded real-host check of the citation path: production locate + native navigate on the
     // frozen revision, with an explicit synthetic fixture quote. No library write and no model output.
     await step('citation-quote-navigation-on-frozen-revision', 'real-host-api', async () => {
-      const view = opened._internalReader?._primaryView ?? opened._internalReader?._lastView;
-      const viewer = view?._iframeWindow?.PDFViewerApplication?.pdfViewer as unknown as { currentPageNumber?: number } | undefined;
-      requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
       const annotationsBefore = fixture.main.getAnnotations().length;
-      guard(); await opened.navigate({ pageIndex: 1 });
-      await until(() => viewer?.currentPageNumber === 2, 'READER_DID_NOT_MOVE_TO_SECOND_PAGE');
-      const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => opened, paper);
       const quote = 'A prior describes beliefs before a measurement is observed.';
-      const outcome = await openSourcePage(navigator, { paper, revision: document.revision }, 0, quote);
-      await until(() => viewer?.currentPageNumber === 1, 'READER_DID_NOT_NAVIGATE_TO_CITATION_PAGE');
-      const missQuote = 'SYNTHETIC ABSENT QUOTE 9F3K';
-      const miss = await openSourcePage(navigator, { paper, revision: document.revision }, 0, missQuote);
+      type CitationViewer = { currentPageNumber?: number; currentScaleValue?: string | number; pagesRotation?: number };
+      const exercise = async (label: string) => {
+        guard(); const before = new Set(Zotero.Reader._readers); const reader = await Zotero.Reader.open(fixture.main.id, undefined, { allowDuplicate: true, openInBackground: false });
+        requireCheck(!before.has(reader) && reader.itemID === fixture.main.id, 'CITATION_READER_OWNERSHIP_MISMATCH'); ownedReaders.push(reader); if (reader._initPromise) await reader._initPromise;
+        const ready = await until(() => { const view = reader._internalReader?._primaryView ?? reader._internalReader?._lastView; const application = view?._iframeWindow?.PDFViewerApplication; return application?.pdfDocument && application.pdfViewer ? application : undefined; }, `${label}-pdf-ready`, 60000);
+        const viewer = ready.pdfViewer as unknown as CitationViewer;
+        requireCheck(viewer && typeof viewer.currentPageNumber === 'number', 'READER_VIEWER_PAGE_NUMBER_UNAVAILABLE');
+        let zoomExercised = false; try { viewer.currentScaleValue = 'page-width'; zoomExercised = viewer.currentScaleValue === 'page-width'; } catch { /* Diagnosed below as an unavailable setup. */ }
+        const requestedRotation = typeof viewer.pagesRotation === 'number' ? (viewer.pagesRotation + 90) % 360 : undefined;
+        let rotationExercised = false; if (requestedRotation !== undefined) { try { viewer.pagesRotation = requestedRotation; rotationExercised = viewer.pagesRotation === requestedRotation; } catch { /* Diagnosed below as an unavailable setup. */ } }
+        type ViewState = { scale: string | number | undefined; rotation: number | undefined; page: number | undefined };
+        const viewState = (): ViewState => ({ scale: viewer.currentScaleValue, rotation: viewer.pagesRotation, page: viewer.currentPageNumber });
+        const immediatelyAfterSet = viewState();
+        requireCheck(zoomExercised && rotationExercised, 'CITATION_VIEW_STATE_SETUP_UNAVAILABLE');
+        const waitForStableRequestedView = async (code: string): Promise<ViewState> => {
+          let stableSamples = 0;
+          return until(() => {
+            const current = viewState(); const matches = current.scale === 'page-width' && current.rotation === requestedRotation;
+            stableSamples = matches ? stableSamples + 1 : 0; return stableSamples >= 2 ? current : undefined;
+          }, code, 5000);
+        };
+        const settledAfterSet = await waitForStableRequestedView(`${label}-view-state-after-set`);
+        await reader.navigate({ pageIndex: 1 }); await until(() => viewer.currentPageNumber === 2, `${label}-move-to-second-page`);
+        const afterInitialNavigate = viewState();
+        const beforeOpenSourcePage = await waitForStableRequestedView(`${label}-view-state-before-source-open`);
+        const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => reader, paper);
+        const outcome = await openSourcePage(navigator, { paper, revision: document.revision }, 0, quote);
+        await until(() => viewer.currentPageNumber === 1, `${label}-navigate-to-citation-page`);
+        const afterOpenSourcePage = viewState();
+        const observed = { label, outcome, zoomExercised, rotationExercised, requestedScale: 'page-width', requestedRotation, immediatelyAfterSet, settledAfterSet, afterInitialNavigate, beforeOpenSourcePage, afterOpenSourcePage };
+        const currentDetails = report.checks.at(-1)!.details ?? {}; report.checks.at(-1)!.details = { ...currentDetails, [label]: observed };
+        requireCheck(outcome === 'highlighted' && afterOpenSourcePage.scale === beforeOpenSourcePage.scale && afterOpenSourcePage.rotation === beforeOpenSourcePage.rotation, 'CITATION_NAVIGATION_CHANGED_VIEW_STATE');
+        reader.close(); await until(() => !Zotero.Reader._readers.includes(reader), `${label}-reader-close`); window!.Zotero_Tabs.select(opened.tabID);
+        return { ...observed, scalePreserved: true, rotationPreserved: true };
+      };
+      const first = await exercise('citation-first-open'); const reopened = await exercise('citation-reopen');
+      const navigator = nativeSourceNavigator(Zotero as unknown as ZoteroHost, () => opened, paper); const missQuote = 'SYNTHETIC ABSENT QUOTE 9F3K'; const miss = await openSourcePage(navigator, { paper, revision: document.revision }, 0, missQuote);
       guard(); await fixture.main.loadAllData();
-      requireCheck(outcome === 'highlighted' && miss === 'unlocated', 'CITATION_PATH_OUTCOME_UNEXPECTED');
+      requireCheck(first.outcome === 'highlighted' && reopened.outcome === 'highlighted' && miss === 'unlocated', 'CITATION_PATH_OUTCOME_UNEXPECTED');
       requireCheck(fixture.main.getAnnotations().length === annotationsBefore, 'CITATION_PATH_WROTE_TO_LIBRARY');
-      return { value: true, details: { outcome, missOutcome: miss, currentPageNumber: viewer?.currentPageNumber, navigationPageIndex: 0, quoteIsSyntheticFixture: true, modelProducedQuote: false, libraryWrite: false, annotationsBefore, annotationsAfter: fixture.main.getAnnotations().length } };
+      return { value: true, details: { firstOpen: first, reopened, missOutcome: miss, navigationPageIndex: 0, quoteIsSyntheticFixture: true, modelProducedQuote: false, libraryWrite: false, annotationsBefore, annotationsAfter: fixture.main.getAnnotations().length } };
     });
     const references = createLibraryReferencePort(Zotero, { clientId, documentCache: cache, uuid: () => host.uuid(), getWindow: () => window });
     const referencePort: LibraryReferencePort = references;
-    await verifyReferenceImagesAndReaders({ report, step, host, contextRoot, window, opened, paper, supplementPaper, document, fixture, references, referencePort, until });
+    await verifyReferenceImagesAndReaders({ report, step, host, contextRoot, window, opened, paper, supplementPaper, document, fixture, references, referencePort, verificationToken, until });
     await step('native-metadata-create-and-undo-use-synthetic-data', 'real-host-api', async () => {
       const reservedKey = Zotero.Utilities.generateObjectKey(); const metadata: NativeMetadata = { itemType: 'journalArticle', title: `[SYNTHETIC METADATA FIXTURE] ${report.runId}`, creators: [], abstractNote: 'Local deterministic mock metadata, not obtained from a model or network. Tests only native item/collection writes.' };
       guard(); const created = await native.createItem({ target: { clientId, libraryId: libraryID, collectionKey: fixture.collection.key }, key: reservedKey, metadata });
@@ -347,6 +420,7 @@ type Step = <T>(name: string, evidence: Evidence, work: () => Promise<{ value: T
 async function verifyReferenceImagesAndReaders(options: {
   report: NativeSmokeReport; step: Step; host: FileHost; contextRoot: string; window: SmokeWindow; opened: SmokeReader; paper: PaperScope; supplementPaper: PaperScope; document: DocumentContext;
   fixture: { parent: SmokeItem; main: SmokeItem; supplement: SmokeItem }; references: ReturnType<typeof createLibraryReferencePort>; referencePort: LibraryReferencePort;
+  verificationToken: string;
   until<T>(this: void, read: () => T | false | undefined, code: string, timeout?: number): Promise<T>;
 }): Promise<void> {
   const { step, host, window, opened, paper, supplementPaper, fixture, references, referencePort, until } = options;
@@ -384,7 +458,7 @@ async function verifyReferenceImagesAndReaders(options: {
     } }, ['tab'], `zchatgpt-native-smoke-${options.report.runId}`);
     try {
       const value = await referencePort.read(supplement, new AbortController().signal);
-      requireCheck(value.document?.paper.attachmentKey === fixture.supplement.key && value.document.pages.some(page => page.text.includes('BAMBOO-19')) && value.document.pages.every(page => !page.text.includes('ORCHID-72')), 'ARTICLE_REFERENCE_READ_WRONG_PDF');
+      requireCheck(value.document?.paper.attachmentKey === fixture.supplement.key && value.document.pages.some(page => page.text.includes('BAMBOO-19')) && value.document.pages.every(page => !page.text.includes(options.verificationToken)), 'ARTICLE_REFERENCE_READ_WRONG_PDF');
       await until(() => !Zotero.Reader._readers.some(reader => reader.itemID === fixture.supplement.id), 'BACKGROUND_READER_NOT_RELEASED');
       await until(() => added.size > 0 && [...added].every(id => closed.has(id)), 'BACKGROUND_TAB_LIFECYCLE_NOT_OBSERVED');
       requireCheck(window.Zotero_Tabs.selectedID === selected && selectedBackground.size === 0 && Zotero.Reader._readers.every(reader => beforeReaders.has(reader)), 'BACKGROUND_REFERENCE_CHANGED_USER_TABS');

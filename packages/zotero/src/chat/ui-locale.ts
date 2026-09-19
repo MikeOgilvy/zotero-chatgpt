@@ -27,6 +27,21 @@ const COPY: Readonly<Record<string, string>> = {
   'No text was read from this PDF, so there is nothing to copy.': '未能从该 PDF 读取到文本，没有可复制的内容。',
   'The paper context could not be prepared.': '无法准备论文上下文。',
   'Select text in the PDF first, then copy it here.': '请先在 PDF 中选中文本，再复制。',
+  'When you send in official ChatGPT, locally extracted text from the current PDF and the current Zotero selection are added to that message. Nothing is sent when you open the sidebar. You can turn this off in Zotero Preferences.': '在官方 ChatGPT 中发送时，插件会把当前 PDF 在本地提取的文本和当前 Zotero 选区加入这条消息。打开侧栏不会发送任何内容。你可以在 Zotero 偏好设置中关闭此功能。',
+  'Current PDF context will be added when you send in ChatGPT.': '在 ChatGPT 中发送时，将自动加入当前 PDF 上下文。',
+  'Automatic PDF context is off. You can turn it on in Zotero Preferences.': '自动 PDF 上下文已关闭。你可以在 Zotero 偏好设置中开启。',
+  'Preparing frozen current PDF context. Nothing has been sent yet.': '正在冻结当前 PDF 上下文，尚未发送任何内容。',
+  'ChatGPT accepted this message with the frozen current PDF context.': 'ChatGPT 已接收这条消息及冻结的当前 PDF 上下文。',
+  'ChatGPT did not confirm that this message was accepted. It was not sent again.': 'ChatGPT 未确认已接收这条消息，插件没有再次发送。',
+  'ChatGPT accepted this message without PDF context because automatic PDF context is off.': '自动 PDF 上下文已关闭；ChatGPT 已接收这条不含 PDF 上下文的消息。',
+  'The PDF context could not be frozen. Your ChatGPT draft was kept and was not sent.': '无法冻结 PDF 上下文。ChatGPT 草稿已保留，未发送。',
+  'The official ChatGPT composer is unavailable. Your draft was kept and was not sent.': '官方 ChatGPT 输入框不可用。草稿已保留，未发送。',
+  'The selection was inserted in the ChatGPT draft. It has not been sent.': '选中内容已插入 ChatGPT 草稿，尚未发送。',
+  'Sign in to official ChatGPT. Automatic PDF context will start only after its supported composer is available.': '请登录官方 ChatGPT。只有检测到受支持的输入框后，自动 PDF 上下文才会启用。',
+  'Automatic PDF context is blocked because this ChatGPT page does not expose the supported composer. No question can be sent from this surface.': '此 ChatGPT 页面未提供受支持的输入框，自动 PDF 上下文已阻止发送；此界面不会发送任何问题。',
+  'Automatic PDF context is blocked because the official ChatGPT send control is unsupported. Your draft was kept and was not sent.': '官方 ChatGPT 发送控件不受支持，自动 PDF 上下文已阻止发送。草稿已保留，未发送。',
+  'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.': '已有四个论文 ChatGPT 会话包含草稿或进行中的工作。请先完成或清空其中一个，再打开新会话。',
+  'Complete sign-in on the official account page. PDF context is disabled until ChatGPT returns.': '请在官方账户页面完成登录。返回 ChatGPT 前，PDF 上下文功能保持关闭。',
   Recorded: '已记录', Stopped: '已停止', Failed: '失败', Queued: '已排队', 'Cancelled before sending': '发送前已取消',
   'Unconfirmed: the connection was interrupted. The request was not sent again.': '状态未确认：连接已中断，未重新发送此请求。',
   'No saved chats match this search.': '没有匹配的已保存对话。',
@@ -162,7 +177,7 @@ const TEXT = [
   // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
   '.zchatgpt-document-status',
   // The hosted-application bar's answer line: page counts and labels are re-emitted verbatim.
-  '.zchatgpt-embed-status',
+  '.zchatgpt-embed-status', '.zchatgpt-embed-bridge-status', '.zchatgpt-embed-context-notice',
   // The unbound New chat tab is copy, unlike named chat titles.
   '.zchatgpt-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.

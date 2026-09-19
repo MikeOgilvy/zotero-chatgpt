@@ -62,7 +62,7 @@ const ANSWER_LIMIT = 1024 * 1024;
 /** At most one liveness `progress` event per run per second; reasoning deltas arrive far faster. */
 const PROGRESS_INTERVAL_MS = 1000;
 async function hashInput(input: SendInput, version: 1 | 2 | 3 = 3): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version >= 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version >= 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(version === 3 && input.organization ? { organization: input.organization } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -160,7 +160,6 @@ export class ReaderService {
     const existing = await this.store.current(scope);
     if (existing) {
       await this.load(existing.id, existing);
-      await this.ensureRecovered(existing.id);
       return toPublic(await this.load(existing.id));
     }
     return this.create(scope, title, settings);
@@ -171,7 +170,6 @@ export class ReaderService {
     const existing = await this.store.current(scope);
     if (!existing) return null;
     await this.load(existing.id, existing);
-    await this.ensureRecovered(existing.id);
     return toPublic(await this.load(existing.id));
   }
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
@@ -195,13 +193,11 @@ export class ReaderService {
     return result;
   }
   async get(conversationId: string): Promise<Conversation> {
-    await this.ensureRecovered(conversationId);
     return toPublic(await this.load(conversationId));
   }
   async select(paper: PaperScope, conversationId: string): Promise<Conversation> {
     const selected = await this.store.select(validatePaperScope(paper), conversationId);
     await this.load(selected.id, selected);
-    await this.ensureRecovered(selected.id);
     return toPublic(await this.load(selected.id));
   }
   async deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation | null> {
@@ -275,6 +271,10 @@ export class ReaderService {
   private ensureRecovered(conversationId: UUID): Promise<void> {
     if (this.recovered.has(conversationId) && !this.recovering.has(conversationId)) return Promise.resolve();
     return this.serial(conversationId, () => this.recoverOnce(conversationId)).then(run => { if (run) return this.dispatch(run); });
+  }
+  /** Explicit Agent activation: local Chat/history browsing never calls this recovery edge. */
+  async activateAgent(): Promise<void> {
+    for (const conversationId of [...this.loaded.keys()]) await this.ensureRecovered(conversationId);
   }
   /** Accepted leftover is dispatched once. Uncertain leftover: resume the thread, then match `thread/read` history. */
   private async recover(conversationId: UUID): Promise<Run | null> {
@@ -367,10 +367,10 @@ export class ReaderService {
     if (user.referenceDocuments?.some(source => !conversation.documents?.[source.document.id])) return null;
     // A record written before the field existed has no `mode`; `hashInput` hashes `'chat'` for v3 (D3),
     // so an absent mode reconstructs consistently instead of making the request `uncertain`.
-    const restoredFields = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}), ...(user.mode ? { mode: user.mode } : {}) };
+    const restoredFields = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}), ...(user.organization ? { organization: user.organization } : {}), ...(user.mode ? { mode: user.mode } : {}) };
     if (request.action) {
       const restored = { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...restoredFields };
-      if ((version >= 2 || user.workflow || user.references || user.batch || user.contextReport) && await hashInput(restored, version) !== request.hash) return null;
+      if ((version >= 2 || user.workflow || user.references || user.batch || user.contextReport || user.organization) && await hashInput(restored, version) !== request.hash) return null;
       return restored;
     }
     for (const action of ['explain', 'ask'] as const) {
@@ -538,7 +538,7 @@ export class ReaderService {
     const chat = (input.mode ?? 'chat') === 'chat';
     if (chat && !this.options.chatAvailable) throw new ReaderError('UNSUPPORTED_INTERACTION', this.options.chatUnavailable ?? 'Chat is unavailable in this build.');
     const hash = await hashInput(input);
-    await this.ensureRecovered(input.conversationId);
+    if (!chat) await this.ensureRecovered(input.conversationId);
     const outcome = await this.serial(input.conversationId, async (): Promise<{ receipt: SendReceipt; run: Run | null }> => {
       const live = await this.load(input.conversationId);
       const existing = live.requests.find(r => r.requestId === input.requestId);
@@ -596,7 +596,7 @@ export class ReaderService {
         c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action,
           ...(input.mode ? { mode: input.mode } : {}),
           ...(input.images?.length ? { images: input.images } : {}), ...(input.paper ? { paper: input.paper } : {}), ...(input.document ? { document: documentSummary(input.document) } : {}),
-          ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}),
+          ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(input.organization ? { organization: input.organization } : {}),
           ...(references ? { references, referenceDocuments: input.references!.flatMap(ref => ref.document ? [{ referenceId: ref.id, document: documentSummary(ref.document) }] : []) } : {}),
         });
         if (!waiting) { c.activeRequestId = input.requestId; if (input.batch) c.activeBatchId = input.batch.id; }
@@ -778,7 +778,6 @@ export class ReaderService {
     });
   }
   async request(conversationId: string, requestId: string): Promise<SendReceipt> {
-    await this.ensureRecovered(conversationId);
     const live = await this.load(conversationId);
     const request = live.requests.find(r => r.requestId === requestId);
     if (!request) throw new ReaderError('NOT_FOUND', 'Unknown request');

@@ -1,6 +1,7 @@
 import { Window as HappyWindow } from 'happy-dom';
 import { afterEach, expect, it, vi } from 'vitest';
-import { CHAT_APP_URL, CHAT_EMBED_ATTR, CHAT_EMBED_CONTAINER_ATTR, createChatEmbedSurface } from '../../../packages/zotero/src/chat/embed.ts';
+import { acquireChatSurface, CHAT_APP_URL, CHAT_EMBED_ATTR, CHAT_EMBED_CONTAINER_ATTR, createChatEmbedSurface, type ChatEmbedSurface } from '../../../packages/zotero/src/chat/embed.ts';
+import { OFFICIAL_CHAT_BRIDGE_EVENT } from '../../../packages/zotero/src/chat/official-chat-actor.ts';
 
 const XUL = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
 const reload = vi.fn();
@@ -55,6 +56,21 @@ function sidebar(doc: Document): { slot: Element; frame: Element } {
 }
 
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); });
+
+it('caps retained paper surfaces and evicts only the oldest actor-proven idle one', () => {
+  const pool = new Map<string, ChatEmbedSurface>();
+  const stub = (idle: boolean) => ({ evictable: () => idle, destroy: vi.fn() }) as unknown as ChatEmbedSurface;
+  const firstDestroy = vi.fn(); const first = { evictable: () => true, destroy: firstDestroy } as unknown as ChatEmbedSurface;
+  pool.set('a', first); pool.set('b', stub(false)); pool.set('c', stub(false)); pool.set('d', stub(false));
+  const fifth = stub(false);
+  expect(acquireChatSurface(pool, 'e', () => fifth)).toBe(fifth);
+  expect(pool.has('a')).toBe(false); expect(firstDestroy).toHaveBeenCalledTimes(1); expect(pool.size).toBe(4);
+
+  const protectedPool = new Map<string, ChatEmbedSurface>([['a', stub(false)], ['b', stub(false)], ['c', stub(false)], ['d', stub(false)]]);
+  const create = vi.fn(() => stub(false));
+  expect(acquireChatSurface(protectedPool, 'e', create)).toBeNull();
+  expect(create).not.toHaveBeenCalled(); expect(protectedPool.size).toBe(4);
+});
 
 it('creates a parked browser with the attribute set Zotero\'s own remote surfaces use, and names the application in src', () => {
   const { win, doc } = chromeWindow();
@@ -143,5 +159,304 @@ it('reloads the application through the browser\'s own navigation without discar
   expect(browser.getAttribute('data-zchatgpt-embed-state')).toBe('loading');
   expect(surface.snapshot().loaded).toBe(false);
   expect(browser.isConnected).toBe(true);
+  surface.destroy();
+});
+
+it('prepares one frozen context only for the bound official-page submission', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  surface.bindContext('paper-a:revision-1', question => Promise.resolve({
+    status: 'ready', document: 'Paper: A\n\n[page 1]\nfrozen body', selection: 'frozen selection',
+    coverage: { pages: 1, totalPages: 3, truncated: false }, question,
+  }));
+  let response: unknown;
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'prepare', binding: browser.getAttribute('data-zchatgpt-embed-binding'), transaction: 'transaction-a', question: 'Why?', respond: (value: unknown) => { response = value; } },
+  }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(response).toMatchObject({ status: 'prepared' });
+  expect((response as { text: string }).text).toContain('frozen body');
+  expect((response as { text: string }).text).toContain('frozen selection');
+  expect((response as { text: string }).text).toContain('Why?');
+  surface.destroy();
+});
+
+it('invalidates an awaited PDF snapshot when the bound reader changes', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  let finish!: (value: { status: 'ready'; document: string; selection: null; coverage: { pages: number; totalPages: number; truncated: false } }) => void;
+  surface.bindContext('paper-a:revision-1', () => new Promise(resolve => { finish = resolve; }));
+  let response: unknown;
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'prepare', binding: browser.getAttribute('data-zchatgpt-embed-binding'), transaction: 'transaction-b', question: 'Question A', respond: (value: unknown) => { response = value; } },
+  }));
+  surface.bindContext('paper-b:revision-1', () => Promise.resolve({ status: 'ready', document: 'Paper B', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } }));
+  finish({ status: 'ready', document: 'Paper A', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(response).toMatchObject({ status: 'blocked', reason: 'context-changed' });
+  surface.destroy();
+});
+
+it('sends only bounded stage and submit commands to the actor of the official document', async () => {
+  const { win, doc } = chromeWindow();
+  const sendQuery = vi.fn((name: string) => Promise.resolve({ status: name === 'probe' ? 'ready' : 'staged' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: { getActor(name: string): { sendQuery(name: string, data: unknown): Promise<unknown> } } };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  await surface.stage('Selection text');
+  await surface.submitQuestion('Explain this selection.');
+  expect(sendQuery).toHaveBeenNthCalledWith(1, 'stage', { text: 'Selection text' });
+  expect(sendQuery).toHaveBeenNthCalledWith(2, 'submitQuestion', { question: 'Explain this selection.' });
+  browser.currentURI = { spec: 'https://example.invalid/' };
+  await expect(surface.stage('must not cross origin')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  expect(sendQuery).toHaveBeenCalledTimes(2);
+  surface.destroy();
+});
+
+it('allows ChatGPT same-document conversation routing but rejects a replacement WindowGlobal', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const globalA = { getActor: () => ({ sendQuery: () => Promise.resolve({ status: 'accepted' }) }) };
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: globalA };
+  const accepted = surface.submitQuestion('question');
+  browser.currentURI = { spec: 'https://chatgpt.com/c/new-conversation' };
+  await expect(accepted).resolves.toEqual({ status: 'accepted' });
+  const pending = surface.submitQuestion('next');
+  browser.browsingContext.currentWindowGlobal = { getActor: globalA.getActor };
+  await expect(pending).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  surface.destroy();
+});
+
+it('ignores a late accepted marker after the reader binding changes', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  surface.bindContext('paper-a', () => Promise.resolve({ status: 'ready', document: 'A', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } }));
+  let prepared: { marker: string } | null = null;
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'prepare', binding: browser.getAttribute('data-zchatgpt-embed-binding'), transaction: 'transaction-c', question: 'A?', respond: (value: unknown) => { prepared = value as { marker: string }; } },
+  }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const marker = prepared!.marker;
+  surface.bindContext('paper-b', () => Promise.resolve({ status: 'ready', document: 'B', selection: null, coverage: { pages: 1, totalPages: 1, truncated: false } }));
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'status', binding: browser.getAttribute('data-zchatgpt-embed-binding'), status: 'accepted', marker },
+  }));
+  expect(browser.getAttribute('data-zchatgpt-bridge-status')).toBe('idle');
+  surface.destroy();
+});
+
+it('records a canonical official conversation URL for the bound paper without query data', () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
+  const remembered = vi.fn();
+  surface.bindConversation('paper-a', null, remembered);
+  browser.currentURI = { spec: 'https://chatgpt.com/c/12345678-abcd?temporary=value#fragment' };
+  surface.sync();
+  expect(remembered).toHaveBeenCalledWith('https://chatgpt.com/c/12345678-abcd');
+  surface.destroy();
+});
+
+it('restores a saved web conversation only when the same WindowGlobal is idle', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const probe = vi.fn(() => Promise.resolve({ status: 'ready' }));
+  const global = { getActor: () => ({ sendQuery: probe }) };
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: global };
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.getAttribute('src')).toBe('https://chatgpt.com/c/12345678-abcd');
+
+  browser.setAttribute('src', CHAT_APP_URL);
+  probe.mockResolvedValueOnce({ status: 'generating' });
+  surface.bindConversation('paper-b', 'https://chatgpt.com/c/87654321-dcba', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.getAttribute('src')).toBe(CHAT_APP_URL);
+  surface.destroy();
+});
+
+it('restores a saved web conversation from an empty supported composer before its send button exists', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const probe = vi.fn(() => Promise.resolve({ status: 'composer-ready' }));
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery: probe }) } };
+
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect(probe).toHaveBeenCalledWith('probe');
+  expect(browser.getAttribute('src')).toBe('https://chatgpt.com/c/12345678-abcd');
+  surface.destroy();
+});
+
+it('blocks composer preparation and parent submission while a saved conversation restore is pending', async () => {
+  const { win, doc } = chromeWindow();
+  const provider = vi.fn(() => Promise.resolve({
+    status: 'ready' as const,
+    document: 'must not be frozen on the old page',
+    selection: null,
+    coverage: { pages: 1, totalPages: 1, truncated: false },
+  }));
+  const sendQuery = vi.fn((name: string) => Promise.resolve(name === 'probe' ? { status: 'draft' } : { status: 'accepted' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  surface.bindContext('paper-a', provider);
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  await expect(surface.submitQuestion('must not reach the old page')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  let response: unknown = null;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: {
+      kind: 'prepare',
+      binding: browser.getAttribute('data-zchatgpt-embed-binding'),
+      transaction: 'restore-pending',
+      question: 'keyboard submit on old page',
+      respond: (value: unknown) => { response = value; },
+    },
+  }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect(response).toEqual({ status: 'blocked', reason: 'context-changed', marker: 'restore-pending' });
+  expect(provider).not.toHaveBeenCalled();
+  expect(sendQuery.mock.calls.filter(([name]) => name !== 'probe')).toEqual([]);
+  expect(browser.getAttribute('src')).toBe(CHAT_APP_URL);
+  surface.destroy();
+});
+
+it('keeps a login-only official page interactive while saved conversation restore remains pending', async () => {
+  const { win, doc } = chromeWindow();
+  const sendQuery = vi.fn((name: string) => Promise.resolve({ status: name === 'probe' ? 'composer-missing' : 'unexpected-command' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  const { slot, frame } = sidebar(doc); surface.show(slot, frame);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('composer-missing');
+  expect(browser.getAttribute('src')).toBe(CHAT_APP_URL);
+  await expect(surface.submitQuestion('must remain unavailable')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  expect(sendQuery.mock.calls.filter(([name]) => name !== 'probe')).toEqual([]);
+  surface.hide(); expect(surface.evictable()).toBe(false);
+  surface.destroy();
+});
+
+it('fails closed when the official page has an unknown editor and opens only recognized or login-only pages', async () => {
+  const { win, doc } = chromeWindow();
+  let status = 'unsupported-composer';
+  const browserActor = { sendQuery: () => Promise.resolve({ status }) };
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => browserActor } };
+  const { slot, frame } = sidebar(doc);
+  surface.show(slot, frame);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.style.pointerEvents).toBe('none');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('unsupported-composer');
+
+  status = 'ready';
+  browser.browsingContext.currentWindowGlobal = { getActor: () => browserActor };
+  surface.show(slot, frame);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('ready');
+  surface.destroy();
+});
+
+it('keeps actor readiness messages separate from clipboard-action results', () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  const host = doc.createElement('section'); host.dataset.zchatgptEmbed = '';
+  const bridge = doc.createElement('span'); bridge.dataset.zchatgptBridgeStatusLine = ''; bridge.hidden = true;
+  const clipboard = doc.createElement('span'); clipboard.dataset.zchatgptEmbedStatus = ''; clipboard.textContent = 'Copied 2 of 2 pages — paste into ChatGPT.';
+  const slot = place(doc.createElement('div'), { left: 10, top: 20, width: 300, height: 500 });
+  host.append(bridge, clipboard, slot); doc.documentElement.append(host);
+  surface.show(slot, null);
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'readiness', binding: browser.getAttribute('data-zchatgpt-embed-binding'), status: 'unsupported-send' },
+  }));
+  expect(bridge.hidden).toBe(false);
+  expect(bridge.textContent).toContain('send control is unsupported');
+  expect(clipboard.textContent).toBe('Copied 2 of 2 pages — paste into ChatGPT.');
+  surface.destroy();
+});
+
+it('keeps an official Apple authorization navigation interactive without exposing the PDF bridge', async () => {
+  const { win, doc } = chromeWindow();
+  const sendQuery = vi.fn(() => Promise.resolve({ status: 'ready' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  const { slot, frame } = sidebar(doc); surface.show(slot, frame);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.style.pointerEvents).toBe('auto');
+
+  const srcBeforeAuth = browser.getAttribute('src');
+  browser.currentURI = { spec: 'https://appleid.apple.com/auth/authorize?private=not-recorded' };
+  browser.browsingContext.currentWindowGlobal = { auth: true };
+  await new Promise(resolve => setTimeout(resolve, 550));
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('auth-navigation');
+  await expect(surface.submitQuestion('must stay disabled during auth')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(browser.getAttribute('src')).toBe(srcBeforeAuth);
+
+  browser.currentURI = { spec: 'https://chatgpt.com/c/12345678-abcd' };
+  browser.browsingContext.currentWindowGlobal = { getActor: () => ({ sendQuery }) };
+  await new Promise(resolve => setTimeout(resolve, 550));
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('ready');
   surface.destroy();
 });

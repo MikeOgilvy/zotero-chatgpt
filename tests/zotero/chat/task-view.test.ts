@@ -1,7 +1,7 @@
 import { Window as HappyWindow } from 'happy-dom';
 import { expect, it, vi } from 'vitest';
-import type { ActionTaskRecord, AnnotationTaskItem } from '../../../packages/contracts/src/tasks.ts';
-import type { NativeItemSnapshot } from '../../../packages/contracts/src/native.ts';
+import type { ActionTaskRecord, AnnotationTaskItem, OrganizationTaskItem } from '../../../packages/contracts/src/tasks.ts';
+import type { NativeItemSnapshot, NativeOrganizationItemSnapshot } from '../../../packages/contracts/src/native.ts';
 import type { ReadingJob } from '../../../packages/core/src/context/coordinator.ts';
 import { mountTaskView, type TaskViewActions } from '../../../packages/zotero/src/chat/task-view.ts';
 import { paperA } from '../../contracts/factories.ts';
@@ -17,6 +17,14 @@ const duplicate = (key: string): NativeItemSnapshot => ({ clientId: paperA.clien
 function acquisition(): ActionTaskRecord {
   return { ...base, kind: 'acquisition', target: { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1' }, question: 'Acquire these papers', items: [{ id: 'paper-one', kind: 'acquisition', reservedKey: 'OUTPUT01', status: 'candidate', identifier: '10.1/b', preview: { identifier: '10.1/b', source: 'identifier', candidates: [{ itemType: 'journalArticle', title: 'Candidate A', DOI: '10.1/a', creators: [] }, { itemType: 'journalArticle', title: 'Candidate B', DOI: '10.1/b', creators: [] }] }, duplicates: [duplicate('EXIST001'), duplicate('EXIST002')] }] };
 }
+function organizationItem(id: string, sourceIndex: number): OrganizationTaskItem {
+  const baseItem = duplicate(id.toUpperCase());
+  const before: NativeOrganizationItemSnapshot = { ...baseItem, metadata: { ...baseItem.metadata, title: `Selected paper ${sourceIndex + 1}` }, tags: ['existing-tag'], collectionKeys: ['KEEP0001'], organizationSignature: `organization-${id}` };
+  return { id, kind: 'organization', reservedKey: 'OUTPUT01', status: 'candidate', sourceIndex, before, proposal: { tags: [`topic-${sourceIndex + 1}`], collections: [{ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: `ADD0000${sourceIndex + 1}` }] } };
+}
+function organization(): Extract<ActionTaskRecord, { kind: 'organization' }> {
+  return { ...base, kind: 'organization', question: 'Organize the selected papers', items: [organizationItem('organize-one', 1), organizationItem('organize-two', 3)] };
+}
 function setup(overrides: Partial<TaskViewActions> = {}) {
   const document = new HappyWindow().document as unknown as Document;
   const container = document.createElement('div'); document.body.append(container);
@@ -30,6 +38,7 @@ function setup(overrides: Partial<TaskViewActions> = {}) {
 it('shows source-resolved annotation review and preserves checkbox state and focus across updates', async () => {
   const { container, view, actions, change, action, document } = setup(); const original = task(); view.update({ tasks: [original] });
   expect(container.textContent).toContain(original.question); expect(container.textContent).toContain('iv'); expect(container.textContent).toContain('Defines the central variable');
+  expect(container.querySelector('[data-zchatgpt-task-item-id="three"]')?.textContent).toContain('Proposed model page 1 · Exact quote not found');
   const second = container.querySelector<HTMLInputElement>('[data-zchatgpt-task-select="two"]')!;
   second.checked = false; change(second); second.focus();
   view.update({ tasks: [{ ...original, revision: 2, updatedAt: 'later' }] });
@@ -51,6 +60,60 @@ it('requires explicit metadata and duplicate choices and sends the selected PDF 
   const pdf = container.querySelector<HTMLInputElement>('[data-zchatgpt-download-pdf]')!; pdf.checked = false; change(pdf);
   action('approve').click();
   await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['paper-one'], { 'paper-one': { metadataIndex: 1, duplicateKey: 'EXIST002', downloadPDF: false } }));
+});
+
+it('shows an additive organization preview for each frozen selected item and approves only checked items', async () => {
+  const { container, view, actions, change, action } = setup(); const original = organization(); view.update({ tasks: [original] });
+  expect(container.querySelector('summary')!.textContent).toMatch(/Organize library.*2\/2 selected items/iu);
+  expect(container.textContent).toContain('Selection positions 2–4 · 2 proposed items');
+  expect(container.textContent).toContain('Selected paper 2');
+  expect(container.textContent).toContain('Add tags: topic-2');
+  expect(container.textContent).toContain('Add to collections: Research / Methods');
+  expect(container.textContent).toContain('Existing 1 tag and 1 collection stay unchanged');
+  expect(container.querySelector('[data-zchatgpt-metadata-choice]')?.parentElement?.parentElement?.hidden).toBe(true);
+
+  const second = container.querySelector<HTMLInputElement>('[data-zchatgpt-task-select="organize-two"]')!;
+  second.checked = false; change(second);
+  expect(container.querySelector('summary')!.textContent).toMatch(/1\/2 selected items/iu);
+  action('approve').click();
+  await vi.waitFor(() => expect(actions.approveSelected).toHaveBeenCalledWith('task-one', ['organize-one'], {}));
+});
+
+it('reports only verified organization readback as saved and exposes exact undo outcomes', async () => {
+  const { container, view, actions, action } = setup(); const original = organization(); const item = original.items[0]!;
+  item.selected = true; item.status = 'applied'; item.change = {
+    before: item.before,
+    after: { ...item.before, tags: [...item.before.tags, 'topic-1'], collectionKeys: [...item.before.collectionKeys, 'ADD00001'] },
+    addedTags: ['topic-1'],
+    addedCollectionKeys: ['ADD00001'],
+  };
+  original.items[1]!.selected = false; original.items[1]!.status = 'skipped'; original.approvedAt = 'approved'; original.state = 'completed';
+  view.update({ tasks: [original] });
+  expect(container.querySelector('summary')!.textContent).toMatch(/1\/2 items organized/iu);
+  expect(container.textContent).toContain('Verified saved: 1 tag and 1 collection added');
+  expect(action('undo').hidden).toBe(false);
+  action('undo').click(); await vi.waitFor(() => expect(actions.undo).toHaveBeenCalledWith('task-one'));
+
+  const undone = { ...original, revision: 2, state: 'undone' as const, items: original.items.map(entry => entry.id === item.id ? { ...entry, status: 'undone' as const } : entry) };
+  view.update({ tasks: [undone] });
+  expect(container.textContent).toContain('Undo verified: approved additions removed');
+  expect(container.textContent).not.toContain('Verified saved:');
+  expect(action('undo').hidden).toBe(true);
+});
+
+it('does not claim an organization save or undo succeeded when readback is missing or conflicts', () => {
+  const { container, view, action } = setup(); const original = organization(); const first = original.items[0]!;
+  first.selected = true; first.status = 'applied'; original.items[1]!.selected = false; original.items[1]!.status = 'skipped'; original.approvedAt = 'approved'; original.state = 'partial';
+  view.update({ tasks: [original] });
+  expect(container.textContent).toContain('Saved output not verified');
+  expect(container.textContent).not.toContain('Verified saved:');
+  expect(action('undo').hidden).toBe(true);
+
+  first.status = 'conflict'; first.errorCode = 'OUTPUT_CHANGED'; first.change = { before: first.before, after: { ...first.before, tags: [...first.before.tags, 'topic-1'] }, addedTags: ['topic-1'], addedCollectionKeys: [] };
+  view.update({ tasks: [{ ...original, revision: 2, state: 'conflict', items: [...original.items] }] });
+  expect(container.textContent).toContain('Changed output preserved');
+  expect(container.textContent).toContain('Later changes were preserved; undo was not reported as successful');
+  expect(container.textContent).not.toContain('Undo verified:');
 });
 
 it('keeps unconfirmed writes inspectable and requires reconciliation before safe undo', async () => {

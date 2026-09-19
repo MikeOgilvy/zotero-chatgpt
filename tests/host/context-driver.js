@@ -2,7 +2,8 @@
 // Current-PDF local preparation, citation source, consent, refusal, attachment identity and UI
 // performance on a real host. Only --live sends bounded synthetic requests.
 async function runHostSmoke(config) {
-  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash } };
+  const verificationToken = typeof config.verificationToken === 'string' && /^RUN-[a-f0-9]{24}$/u.test(config.verificationToken) ? config.verificationToken : 'ORCHID-72';
+  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash, driverSourceHash: config.driverSourceHash ?? null }, fixture: { verificationToken } };
   const delay = ms => Zotero.Promise.delay(ms);
   const save = () => Zotero.File.putContentsAsync(config.reportPath, JSON.stringify(report, null, 2));
   let step = 'startup';
@@ -30,7 +31,8 @@ async function runHostSmoke(config) {
   const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
   try {
     await Zotero.initializationPromise;
-    await check('isolated-context-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/context/profile') && Zotero.DataDirectory.dir === config.dataDir);
+    const contextProfile = String(config.profile).match(/^(.*\/\.zotero-chatgpt-dev\/(?:context|context-runs\/[a-z0-9][a-z0-9-]{0,63}))\/profile$/u);
+    await check('isolated-context-profile', PathUtils.profileDir === config.profile && Boolean(contextProfile) && config.dataDir === `${contextProfile?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
     const win = await until(() => Zotero.getMainWindow(), 'main-window');
     report.environment = { zotero: Zotero.version, width: win.innerWidth, height: win.innerHeight, devicePixelRatio: win.devicePixelRatio };
     await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library-ready');
@@ -39,10 +41,21 @@ async function runHostSmoke(config) {
     await check('full-xpi-active', addon?.isActive && addon.version === config.subjectVersion);
     const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
+    let organizationFixture = null;
+    if (config.liveCoreFlows) {
+      const libraryID = Zotero.Libraries.userLibraryID;
+      const controlCollection = new Zotero.Collection(); controlCollection.libraryID = libraryID; controlCollection.name = `Synthetic preserved collection ${verificationToken}`; await controlCollection.saveTx();
+      const targetCollection = new Zotero.Collection(); targetCollection.libraryID = libraryID; targetCollection.name = `Synthetic target collection ${verificationToken}`; await targetCollection.saveTx();
+      parent.addTag(`preserve-parent-${verificationToken}`); parent.addToCollection(controlCollection.key);
+      organizationFixture = { controlCollection, targetCollection, peer: null };
+    }
     const queue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue: queue });
+    if (organizationFixture) {
+      const peer = new Zotero.Item('journalArticle'); peer.libraryID = Zotero.Libraries.userLibraryID; peer.setField('title', `Synthetic selected peer ${verificationToken}`); peer.addTag(`preserve-peer-${verificationToken}`); peer.addToCollection(organizationFixture.controlCollection.key); await peer.saveTx({ notifierQueue: queue }); organizationFixture.peer = peer;
+    }
     const a = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Main synthetic PDF', saveOptions: { notifierQueue: queue } });
     const b = await Zotero.Attachments.importFromFile({ file: config.supplementPdfPath ?? config.pdfPath, parentItemID: parent.id, title: 'Supplement synthetic PDF', saveOptions: { notifierQueue: queue } });
-    await Promise.all([parent.loadAllData(), a.loadAllData(), b.loadAllData()]); await Zotero.Notifier.commit(queue);
+    await Promise.all([parent.loadAllData(), a.loadAllData(), b.loadAllData(), ...(organizationFixture?.peer ? [organizationFixture.peer.loadAllData()] : [])]); await Zotero.Notifier.commit(queue);
     win.Zotero_Tabs.closeAll(); await until(() => Zotero.Reader._readers.length === 0, 'close-only-this-profile-tabs');
     Zotero.Prefs.set('extensions.zchatgpt.automaticPdfText', true, true);
     Zotero.Prefs.set('extensions.zchatgpt.pdfTextDisclosureSeen', false, true);
@@ -268,14 +281,27 @@ async function runHostSmoke(config) {
     const coldStart = win.performance.now(); toggle().click();
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
+    // KaTeX must load through the add-on's narrow resource mapping inside the real reader document.
+    // `link.sheet` and readable rules are host evidence; a source-string href alone cannot prove CSS
+    // or fonts survived Gecko's security boundary.
+    const katexLink = await until(() => rdoc()?.querySelector('link[data-zchatgpt-katex-css]'), 'katex-stylesheet-link', 30000);
+    await until(() => katexLink.sheet, 'katex-stylesheet-loaded', 30000);
+    const katexStyle = { href: katexLink.getAttribute('href'), sheet: Boolean(katexLink.sheet), rulesAccessible: false, ruleCount: 0, hasKatexRule: false, accessError: null };
+    try {
+      const rules = [...katexLink.sheet.cssRules]; katexStyle.rulesAccessible = true; katexStyle.ruleCount = rules.length;
+      katexStyle.hasKatexRule = rules.some(rule => rule.type === 5 || /@font-face|\.katex\b/u.test(String(rule.cssText ?? '')));
+    } catch (error) { katexStyle.accessError = String(error?.name ?? 'UnknownError').slice(0, 80); }
+    await check('katex-stylesheet-loads-through-scoped-resource',
+      katexStyle.href === 'resource://zotero-chatgpt-katex/katex.min.css' && katexStyle.sheet && katexStyle.rulesAccessible && katexStyle.ruleCount > 0 && katexStyle.hasKatexRule,
+      katexStyle);
     // --- The composer's Chat / Agent routing control, in the real dock ---
     // The unit DOM cannot reproduce this: the option's pressed fill and pill geometry are
     // `.zchatgpt-mode-option[...]`, so rendering the options with the generic `.zchatgpt-button`
     // skin (the regression this observes) leaves the selected mode invisible and the control
     // looking like two plain buttons. `aria-pressed` is painted from presenter state, so a real
     // click that does not move it means the switch is not wired. Nothing here sends a request.
-    const modeSwitch = () => panel()?.querySelector('[data-zchatgpt-mode-switch]');
-    const modeButton = mode => panel()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
+    const modeSwitch = () => shell()?.querySelector('[data-zchatgpt-mode-switch]');
+    const modeButton = mode => modeSwitch()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
     const pressed = mode => modeButton(mode)?.getAttribute('aria-pressed') === 'true';
     await until(() => modeSwitch() && modeButton('chat') && modeButton('agent'), 'mode-switch-rendered');
     const modeShape = {
@@ -286,10 +312,12 @@ async function runHostSmoke(config) {
       chatPressed: pressed('chat'), agentPressed: pressed('agent'),
       chatSegmented: modeButton('chat').classList.contains('zchatgpt-mode-option') && modeButton('agent').classList.contains('zchatgpt-mode-option'),
       genericButtonSkin: modeButton('chat').classList.contains('zchatgpt-button') || modeButton('agent').classList.contains('zchatgpt-button'),
+      visible: !modeSwitch().closest('[hidden]'),
+      inHostedChatBar: Boolean(modeSwitch().parentElement?.hasAttribute('data-zchatgpt-embed-bar')),
     };
     await check('mode-selector-defaults-to-chat-with-segmented-options',
       modeShape.role === 'group' && Boolean(modeShape.groupLabel) && modeShape.mode === 'chat' && modeShape.chatPressed && !modeShape.agentPressed
-        && modeShape.chatSegmented && !modeShape.genericButtonSkin,
+        && modeShape.chatSegmented && !modeShape.genericButtonSkin && modeShape.visible && modeShape.inHostedChatBar,
       modeShape);
     // --- Chat is not an Agent path, observed on the real dock ---
     // There is no supported Chat transport in this build, so Chat mode must state that itself rather
@@ -460,8 +488,8 @@ async function runHostSmoke(config) {
     const labels = await pdf().pdfDocument.getPageLabels2();
     const pageOne = await extractPage(0); const pageTwo = await extractPage(1);
     await check('two-pages-extracted', pdf().pdfDocument.numPages === 2 && labels?.length === 2, { numPages: pdf().pdfDocument.numPages, labels });
-    report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes('ORCHID-72') };
-    await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
+    report.nativeExtraction = { labels, pageOneCharacters: pageOne.length, pageTwoCharacters: pageTwo.length, pageTwoHasToken: pageTwo.includes(verificationToken) };
+    await check('text-from-both-pages-and-page-labels', pageOne.includes('Synthetic page 1') && pageTwo.includes('Synthetic page 2') && pageTwo.includes(verificationToken) && labels[0] === 'i' && labels[1] === '1', report.nativeExtraction);
     // The assertion rests only on what the product itself did: its revision gate for this file and the
     // per-page text it measured. `counts.*Expected` counts only after the driver's own disk probe, and
     // the driver has not read any of this document with the wrapper off.
@@ -572,6 +600,15 @@ async function runHostSmoke(config) {
       await skip('consent-path-reachable-without-the-removed-panel', 'No synthetic text selection could be simulated in the real reader view.');
       await skip('acknowledge-context-resumes-the-pending-explain', 'No synthetic text selection could be simulated in the real reader view.');
     }
+    // The consent probe above intentionally created a pending Agent Explain owned by this driver.
+    // Revoke it through the visible mode control before any login wait: switching to Chat preserves
+    // the frozen selection in the draft and clears auto-resume, then returning to Agent restores the
+    // mode needed by later request-boundary checks without sending anything.
+    if (explainSelected) {
+      click(modeButton('chat')); await until(() => pressed('chat') && modeSwitch().dataset.zchatgptMode === 'chat' && disclosure()?.hidden === true, 'pending-explain-revoked-in-chat', 30000);
+      await check('pending-explain-revoked-without-request', disclosure()?.hidden === true && pressed('chat'), { mode: modeSwitch().dataset.zchatgptMode, disclosureHidden: disclosure()?.hidden ?? null });
+      click(modeButton('agent')); await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'agent-restored-after-pending-explain-revocation', 30000);
+    }
     toggle().click(); await until(() => !panel(), 'close-sidebar');
     await check('close-preserves-current-page', pdfViewer().currentPageNumber === 2, {
       page: pdfViewer().currentPageNumber,
@@ -632,9 +669,12 @@ async function runHostSmoke(config) {
     const records = PathUtils.join(config.profile, 'zotero-chatgpt', 'v1', 'records', 'conversations');
     // A profile that ran no conversation yet owns no records directory at all; the product lists a
     // missing directory as empty, and this probe must read the same way.
-    const recordFiles = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : [];
-    let requests = 0;
-    for (const file of recordFiles) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
+    const countStoredRequests = async () => {
+      const files = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : []; let total = 0;
+      for (const file of files) if (file.endsWith('.json') && !file.endsWith('.source.json')) total += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
+      return total;
+    };
+    const requests = await countStoredRequests();
     report.recordedRequests = requests;
     if (!config.live) {
       const currentRequests = conversationA
@@ -682,12 +722,75 @@ async function runHostSmoke(config) {
     await until(() => shell()?.dataset.attachmentKey === a.key, 'restore-main-attachment', 60000);
     if (config.live) {
       report.notRun = report.notRun.filter(name => !['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'in-flight-model-stop'].includes(name));
+      if (config.liveCoreFlows) {
+        const requestsBeforeLogin = await countStoredRequests();
+        report.liveCoreFlows = { status: 'waiting-for-official-login', loginWaitSeconds: config.loginWaitSeconds ?? 0, driverClickedLogin: false, driverReadAuthFiles: false, modelTurns: 0, requestsBeforeLogin };
+        await save();
+        const waitStarted = Date.now();
+        while (panel().dataset.zchatgptAuth !== 'signedIn' && Date.now() - waitStarted < (config.loginWaitSeconds ?? 0) * 1000) { await delay(500); }
+        if (panel().dataset.zchatgptAuth !== 'signedIn') {
+          report.liveCoreFlows.status = 'blocked'; report.liveCoreFlows.reason = 'official-login-required'; report.status = 'blocked'; report.finishedAt = new Date().toISOString();
+          await skip('live-core-annotation-flow', 'BLOCKED: complete the official login manually in this dedicated profile; the driver does not click login or inspect authentication files.');
+          await skip('live-core-organization-flow', 'BLOCKED: complete the official login manually in this dedicated profile; the driver does not click login or inspect authentication files.');
+          await save(); return;
+        }
+        await delay(2500);
+        const requestsAfterLogin = await countStoredRequests();
+        await check('live-core-login-starts-no-incidental-request', requestsAfterLogin === requestsBeforeLogin, { requestsBeforeLogin, requestsAfterLogin });
+        report.liveCoreFlows.status = 'running'; report.liveCoreFlows.loginObserved = 'signedIn'; report.liveCoreFlows.requestsAfterLogin = requestsAfterLogin; await save();
+      }
       await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
-      const picker = panel().querySelector('[data-zchatgpt-picker]'); picker.click();
-      const spark = [...panel().querySelectorAll('[data-zchatgpt-setting="model"]')].find(node => /spark/i.test(node.textContent));
-      if (spark) spark.click();
-      if (picker.getAttribute('aria-expanded') === 'true') picker.click();
+      const picker = panel().querySelector('[data-zchatgpt-picker]');
       report.liveModel = picker.textContent;
+      if (config.liveCoreFlows) {
+        const tagNames = item => item.getTags().map(entry => entry.tag).sort();
+        const collectionKeys = item => item.getCollections().map(id => Zotero.Collections.get(id)).filter(Boolean).map(collection => collection.key).sort();
+        const taskCard = label => [...panel().querySelectorAll('[data-zchatgpt-task-id]')].find(card => String(card.querySelector('summary')?.textContent ?? '').includes(label));
+        const sendAgent = async (question, label, afterClick) => {
+          if (modeSwitch().dataset.zchatgptMode !== 'agent') { click(modeButton('agent')); await until(() => modeSwitch().dataset.zchatgptMode === 'agent', `${label}-agent-mode`); }
+          input().value = question; input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
+          const send = panel().querySelector('[data-zchatgpt-action="send"]'); await until(() => !send.disabled, `${label}-send-enabled`, 30000);
+          await check(`${label}-visible-reader-send`, win.Zotero_Tabs.selectedID === tabId && send.isConnected && !send.hidden && Boolean(panel()), { selectedTab: win.Zotero_Tabs.selectedID, readerTab: tabId, sendHidden: send.hidden });
+          click(send); if (afterClick) await afterClick();
+          await until(() => panel()?.dataset.zchatgptGenerating === 'true', `${label}-request-accepted`, 30000);
+          await until(() => panel()?.dataset.zchatgptGenerating === 'false', `${label}-request-terminal`, 180000);
+          report.liveCoreFlows.modelTurns += 1; await save();
+        };
+        const annotationsBefore = a.getAnnotations().length;
+        await sendAgent('Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.', 'live-annotation');
+        const annotationCard = await until(() => taskCard('Annotations'), 'live-annotation-review', 60000);
+        await check('live-core-annotation-review-before-write', annotationCard.dataset.state === 'review' && annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 5 && a.getAnnotations().length === annotationsBefore, { candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, nativeAnnotationsBefore: annotationsBefore });
+        click(annotationCard.querySelector('[data-zchatgpt-task-action="approve"]'));
+        await until(() => annotationCard.dataset.state === 'completed', 'live-annotation-applied', 60000); await a.loadAllData();
+        const createdAnnotations = a.getAnnotations().length - annotationsBefore;
+        await check('live-core-annotation-native-readback', createdAnnotations === 5, { createdAnnotations, attachmentKey: a.key });
+        toggle().click(); await until(() => !panel(), 'live-annotation-sidebar-closed'); toggle().click(); await until(() => taskCard('Annotations')?.dataset.state === 'completed', 'live-annotation-sidebar-reopened', 60000);
+        const reopenedAnnotationCard = taskCard('Annotations'); const viewer = pdfViewer(); viewer.currentScaleValue = 'page-width'; const scaleBeforeOutput = viewer.currentScaleValue;
+        let rotationBeforeOutput = viewer.pagesRotation; if (typeof rotationBeforeOutput === 'number') { viewer.pagesRotation = (rotationBeforeOutput + 90) % 360; rotationBeforeOutput = viewer.pagesRotation; }
+        click(reopenedAnnotationCard.querySelector('[data-zchatgpt-task-action="output"]')); await delay(500);
+        await check('live-core-annotation-output-reopens-with-view-state', viewer.currentScaleValue === scaleBeforeOutput && viewer.pagesRotation === rotationBeforeOutput, { zoom: viewer.currentScaleValue, rotation: viewer.pagesRotation ?? null });
+        click(reopenedAnnotationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => reopenedAnnotationCard.dataset.state === 'undone', 'live-annotation-undone', 60000); await a.loadAllData();
+        await check('live-core-annotation-undo-readback', a.getAnnotations().length === annotationsBefore, { nativeAnnotationsAfterUndo: a.getAnnotations().length, baseline: annotationsBefore });
+
+        if (!organizationFixture?.peer) throw new Error('Live organization fixtures were not prepared.');
+        const peer = organizationFixture.peer; const proposedTag = `live-organized-${verificationToken}`; const laterTag = `later-user-edit-${verificationToken}`;
+        const parentExistingTag = `preserve-parent-${verificationToken}`; const peerExistingTag = `preserve-peer-${verificationToken}`;
+        const selectedIDs = [parent.id, peer.id]; await win.ZoteroPane.selectItems(selectedIDs, { inLibraryRoot: true });
+        await until(() => win.ZoteroPane.itemsView.getSelectedItems(true).length === 2, 'live-organization-native-selection'); win.Zotero_Tabs.select(tabId);
+        await until(() => shell()?.dataset.attachmentKey === a.key && input(), 'live-organization-reader-restored');
+        await sendAgent(`Organize the selected Zotero items by adding the tag ${proposedTag} and placing both items in the collection named "${organizationFixture.targetCollection.name}". Preserve every existing tag and collection.`, 'live-organization', async () => {
+          await win.ZoteroPane.selectItems([parent.id], { inLibraryRoot: true, noTabSwitch: true });
+        });
+        const organizationCard = await until(() => taskCard('Organize library'), 'live-organization-review', 60000);
+        await parent.loadAllData(); await peer.loadAllData();
+        await check('live-core-organization-frozen-review-before-write', organizationCard.dataset.state === 'review' && organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 2 && !tagNames(parent).includes(proposedTag) && !tagNames(peer).includes(proposedTag), { candidates: organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, selectedTitles: [parent.getField('title'), peer.getField('title')], selectionChangedAfterSend: true, visibleReaderSend: true });
+        click(organizationCard.querySelector('[data-zchatgpt-task-action="approve"]')); await until(() => organizationCard.dataset.state === 'completed', 'live-organization-applied', 60000); await parent.loadAllData(); await peer.loadAllData();
+        const targetKey = organizationFixture.targetCollection.key; const controlKey = organizationFixture.controlCollection.key;
+        await check('live-core-organization-additive-native-readback', [parent, peer].every(item => tagNames(item).includes(proposedTag) && collectionKeys(item).includes(targetKey) && collectionKeys(item).includes(controlKey)) && tagNames(parent).includes(parentExistingTag) && tagNames(peer).includes(peerExistingTag), { parentTags: tagNames(parent), peerTags: tagNames(peer), parentCollections: collectionKeys(parent), peerCollections: collectionKeys(peer) });
+        peer.addTag(laterTag); await peer.saveTx({ skipSelect: true }); click(organizationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => organizationCard.dataset.state === 'conflict', 'live-organization-undo-conflict', 60000); await parent.loadAllData(); await peer.loadAllData();
+        await check('live-core-organization-undo-preserves-later-edit', !tagNames(parent).includes(proposedTag) && !collectionKeys(parent).includes(targetKey) && tagNames(parent).includes(parentExistingTag) && tagNames(peer).includes(proposedTag) && tagNames(peer).includes(laterTag) && tagNames(peer).includes(peerExistingTag) && collectionKeys(peer).includes(targetKey) && collectionKeys(peer).includes(controlKey), { parentTags: tagNames(parent), peerTags: tagNames(peer), parentCollections: collectionKeys(parent), peerCollections: collectionKeys(peer), taskState: organizationCard.dataset.state });
+        report.liveCoreFlows.status = 'passed'; report.liveCoreFlows.annotationCandidates = createdAnnotations; report.liveCoreFlows.organizationItems = 2; await save();
+      } else {
       input().value = 'What is the hidden verification token on the second physical page of this synthetic PDF, and what combines prior beliefs and likelihood? Cite the page label. Answer briefly.';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
       const started = win.performance.now(); panel().querySelector('[data-zchatgpt-action="send"]').click();
@@ -704,7 +807,7 @@ async function runHostSmoke(config) {
       const answer = record.messages.filter(m => m.role === 'assistant' && m.requestId === last?.requestId).map(m => m.text).join('\n');
       report.live = { state: last?.state, latencyMs: win.performance.now() - started, answer: answer.slice(0, 1600), inputDocumentId: record.messages.find(m => m.requestId === last?.requestId && m.role === 'user')?.document?.id };
       await check('real-model-answer', last?.state === 'completed' && answer.trim().length > 0, { state: last?.state, characters: answer.length });
-      await check('model-used-second-page-source', answer.includes('ORCHID-72') && !answer.includes('BAMBOO-19'));
+      await check('model-used-second-page-source', answer.includes(verificationToken) && !answer.includes('BAMBOO-19'));
       await check('full-document-in-live-request', Boolean(report.live.inputDocumentId));
       input().value = 'Explain this synthetic example in depth with ten worked examples and detailed reasoning for a beginner.';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
@@ -718,6 +821,7 @@ async function runHostSmoke(config) {
       report.live.stopState = terminal;
       await check('live-stop-confirmed-or-completion-race', terminal === 'cancelled' || terminal === 'completed', { state: terminal });
       if (terminal === 'completed') report.notRun.push('stop-during-stream-completed-too-fast');
+      }
     }
     try {
       const doc = pdf().pdfDocument;

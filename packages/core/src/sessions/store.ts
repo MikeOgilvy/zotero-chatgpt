@@ -1,6 +1,6 @@
 import { ReaderError, type Conversation, type DocumentContext, type DocumentSummary, type GenerationSettings, type PaperScope, type RequestState, type UUID } from '../../../contracts/src/index.ts';
 import { clone } from '../../../contracts/src/clone.ts';
-import { validatePaperScope, validateSettings, validateCitation, validateImageAttachment, validateOutputImage, validatePaperIdentity } from '../../../contracts/src/validation.ts';
+import { validatePaperScope, validateSettings, validateCitation, validateImageAttachment, validateOutputImage, validatePaperIdentity, validateOrganizationContext } from '../../../contracts/src/validation.ts';
 import { validateBatch, validateContextReport, validateReference, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
 import { parseThreadUsage } from '../codex/model-capabilities.ts';
 import { DOCUMENT_BYTES, documentSummary, validateDocument, validateRevision } from '../../../contracts/src/document.ts';
@@ -93,6 +93,7 @@ function parseConversation(value: unknown, metadataOnly = false): StoredConversa
       if (m.workflow !== undefined) message.workflow = validateWorkflow(m.workflow);
       if (m.batch !== undefined) message.batch = validateBatch(m.batch);
       if (m.contextReport !== undefined) message.contextReport = validateContextReport(m.contextReport);
+      if (m.organization !== undefined) message.organization = validateOrganizationContext(m.organization);
       if (m.references !== undefined) { if (!Array.isArray(m.references)) unavailable(); message.references = m.references.map(validateReference); }
       if (m.generatedImages !== undefined) { if (!Array.isArray(m.generatedImages)) unavailable(); message.generatedImages = m.generatedImages.map(validateOutputImage); }
     } catch { unavailable(); }

@@ -1,5 +1,5 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { type NativeAnnotationPosition, type NativeAnnotationSnapshot, type NativeItemRef, type NativeItemSnapshot, type NativeMetadata, type NativeOperationErrorCode, NativeOperationError, type NativeCreator } from '../../../contracts/src/native.ts';
+import { type NativeAnnotationPosition, type NativeAnnotationSnapshot, type NativeItemRef, type NativeItemSnapshot, type NativeMetadata, type NativeOperationErrorCode, NativeOperationError, type NativeOrganizationItemSnapshot, type NativeCreator } from '../../../contracts/src/native.ts';
 import type { DocumentRevision, PaperScope, Rect } from '../../../contracts/src/index.ts';
 import { nativeDocumentSource, type DocumentSource } from '../reader/document.ts';
 import type { ZoteroHost } from '../reader/host-types.ts';
@@ -101,6 +101,7 @@ export interface NativeSupport {
   cleanDOI(value: string): string;
   readMetadata(value: unknown, strict: boolean): NativeMetadata;
   itemSnapshot(item: NativeHostItem): NativeItemSnapshot;
+  organizationItemSnapshot(item: NativeHostItem): NativeOrganizationItemSnapshot;
   getItem(ref: NativeItemRef): NativeHostItem | null;
   contentSignature(item: NativeHostItem): string;
   annotationSnapshot(paper: PaperScope, item: NativeHostItem): NativeAnnotationSnapshot | null;
@@ -171,6 +172,11 @@ export function createNativeSupport(options: NativeSupportOptions): NativeSuppor
   };
   // Canonical full native item JSON: only used to detect later edits, never sent to the model.
   const contentSignature = (item: NativeHostItem): string => canonical(item.toJSON());
+  const organizationSignature = (item: NativeHostItem): string => {
+    const raw = clone(item.toJSON()) as Record<string, unknown>;
+    for (const field of ['tags', 'collections', 'dateAdded', 'dateModified', 'version']) delete raw[field];
+    return canonical(raw);
+  };
   const itemSnapshot = (item: NativeHostItem): NativeItemSnapshot => {
     const raw: Record<string, unknown> = { itemType: item.itemType, title: item.getField('title'), creators: item.getCreatorsJSON() };
     for (const field of NATIVE_METADATA_FIELDS) { const value = item.getField(field); if (value) raw[field] = value; }
@@ -178,11 +184,16 @@ export function createNativeSupport(options: NativeSupportOptions): NativeSuppor
       collectionKeys: item.getCollections().map(id => z.Collections.get(id)).filter(c => !!c).map(c => c.key).sort(),
       attachmentKeys: item.getAttachments().map(id => z.Items.get(id)).filter(i => !!i).map(i => i.key).sort(), dateModified: item.dateModified, contentSignature: contentSignature(item) };
   };
+  const organizationItemSnapshot = (item: NativeHostItem): NativeOrganizationItemSnapshot => ({
+    ...itemSnapshot(item),
+    tags: item.getTags().map(entry => entry.tag.trim().normalize('NFC')).filter(Boolean).sort(),
+    organizationSignature: organizationSignature(item),
+  });
   const getItem = (ref: NativeItemRef): NativeHostItem | null => { scope(ref); key(ref.key); const item = z.Items.getByLibraryAndKey(ref.libraryId, ref.key); return item && !item.deleted && item.isRegularItem() ? item : null; };
   const annotationSnapshot = (p: PaperScope, item: NativeHostItem): NativeAnnotationSnapshot | null => {
     const parent = paper(p);
     if (item.deleted || !item.isAnnotation() || item.parentID !== parent.id || !['highlight', 'underline'].includes(item.annotationType)) return null;
     return { paper: clone(p), key: item.key, type: item.annotationType as 'highlight' | 'underline', text: item.annotationText ?? '', comment: item.annotationComment ?? '', color: item.annotationColor ?? '', pageLabel: item.annotationPageLabel ?? '', sortIndex: item.annotationSortIndex ?? '', position: position(JSON.parse(item.annotationPosition ?? '{}')), authorName: item.annotationAuthorName ?? '', isExternal: item.annotationIsExternal, tags: item.getTags().map(t => t.tag).sort(), dateModified: item.dateModified };
   };
-  return { clientId: options.clientId, z, environment, readURL, scope, paper, capture, cleanDOI, readMetadata, itemSnapshot, getItem, contentSignature, annotationSnapshot };
+  return { clientId: options.clientId, z, environment, readURL, scope, paper, capture, cleanDOI, readMetadata, itemSnapshot, organizationItemSnapshot, getItem, contentSignature, annotationSnapshot };
 }

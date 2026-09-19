@@ -98,11 +98,15 @@ class RuntimeSession implements ReaderClient {
    * the Chat path never does, which is what keeps Chat independent of the Agent runtime.
    */
   ensureAgentReady(): Promise<void> {
-    if (this.agentReady) return this.agentReady;
-    const flight = this.ensureConnection().then(() => this.refreshAccount());
-    this.agentReady = flight;
-    void flight.catch(() => { if (this.agentReady === flight) this.agentReady = null; }).catch(() => undefined);
-    return flight;
+    if (!this.agentReady) {
+      const flight = this.ensureConnection().then(() => this.refreshAccount());
+      this.agentReady = flight;
+      void flight.catch(() => { if (this.agentReady === flight) this.agentReady = null; }).catch(() => undefined);
+    }
+    // Runtime readiness is cached; recovery is not. A conversation can be loaded locally in Chat
+    // after the runtime was warmed by another Agent session, and must wait for a new explicit Agent
+    // activation before any thread/resume or queued turn occurs.
+    return this.agentReady.then(() => this.service.activateAgent());
   }
   /** Null when a supported Chat transport is integrated; otherwise the honest reason Chat cannot run. */
   chatUnavailableReason(): string | null { return this.chat.available ? null : CHAT_TRANSPORT_UNAVAILABLE_MESSAGE; }
@@ -118,6 +122,7 @@ class RuntimeSession implements ReaderClient {
     this.state.runtime = 'ready'; this.state.error = null; this.state.account = { state: 'signedOut' }; this.state.login = null; this.state.models = [];
     this.invalidateAccountExtras(); this.emit();
     await this.refreshAccount();
+    await this.service.activateAgent();
   }
   private acceptNotice(message: Record<string, unknown>): void {
     if (this.closing || this.failureStarted) return;

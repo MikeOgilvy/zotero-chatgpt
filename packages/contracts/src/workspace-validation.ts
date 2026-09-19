@@ -74,7 +74,7 @@ export function validateWorkflow(value: unknown): WorkflowSnapshot {
   let skill: ReaderSkill | null = null;
   if (source.skill !== null) {
     const s = object(source.skill, ['id', 'name', 'description', 'version', 'revision', 'markdown', 'origin', 'enabled', 'workflow', 'permissions', 'unsupportedDependencies']);
-    if (s.enabled !== true || !['builtin', 'user', 'imported'].includes(String(s.origin)) || !['read', 'annotate', 'acquire', 'diagram'].includes(String(s.workflow))) fail();
+    if (s.enabled !== true || !['builtin', 'user', 'imported'].includes(String(s.origin)) || !['read', 'annotate', 'acquire', 'organize', 'diagram'].includes(String(s.workflow))) fail();
     const unsupported = array(s.unsupportedDependencies, 64).map(x => text(x, 256)); if (unsupported.length) throw new ReaderError('UNSUPPORTED_INTERACTION', 'This workflow has unsupported dependencies; they were not executed.');
     skill = { id: text(s.id, 128, 1), name: text(s.name, 128, 1), description: text(s.description, 2048), version: text(s.version, 64, 1), revision: text(s.revision, 128, 1), markdown: text(s.markdown, 64 * 1024, 1), origin: s.origin as ReaderSkill['origin'], enabled: true, workflow: s.workflow as ReaderSkill['workflow'], permissions: array(s.permissions, 64).map(x => text(x, 256)), unsupportedDependencies: [] };
   }

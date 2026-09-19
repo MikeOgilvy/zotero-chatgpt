@@ -160,7 +160,7 @@ function uniqueClock() {
 it('persists preferences, profiles and builtin availability across store instances', async () => {
   const storage = new MemoryStorage(); const store = new WorkspaceStore(storage, clock);
   const value = await store.settings();
-  expect(value.skills.map(skill => skill.name)).toEqual(expect.arrayContaining(['read', 'derive', 'compare', 'annotate', 'acquire', 'diagram']));
+  expect(value.skills.map(skill => skill.name)).toEqual(expect.arrayContaining(['read', 'derive', 'compare', 'annotate', 'acquire', 'organize', 'diagram']));
   for (const skill of value.skills) {
     expect(skill.markdown).toMatch(/Input/); expect(skill.markdown).toMatch(/Steps/); expect(skill.markdown).toMatch(/Output/); expect(skill.markdown).toMatch(/Permission/);
   }

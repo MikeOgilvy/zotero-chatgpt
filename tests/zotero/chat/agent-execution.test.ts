@@ -6,7 +6,7 @@ import type { ActionTasks } from '../../../packages/contracts/src/tasks.ts';
 import type { ContextPlan } from '../../../packages/core/src/context/planner.ts';
 import type { ReadingJob } from '../../../packages/core/src/context/coordinator.ts';
 import type { PresenterReading } from '../../../packages/zotero/src/chat/capability.ts';
-import { executeAgentSend, type AgentSendContext } from '../../../packages/zotero/src/chat/agent-execution.ts';
+import { executeAgentSend, requestsCurrentPaperAnnotations, requestsSelectionOrganization, type AgentSendContext } from '../../../packages/zotero/src/chat/agent-execution.ts';
 
 const request: SendInput = { question: 'Summarize all pages', requestId: 'r1' } as SendInput;
 const plan = { mode: 'multi-pass' } as unknown as ContextPlan;
@@ -27,6 +27,40 @@ function context(overrides: Partial<AgentSendContext> = {}) {
 }
 
 describe('Agent execution path', () => {
+  it('recognizes direct current-paper annotation actions without treating questions as actions', () => {
+    for (const question of [
+      '高亮当前论文最重要的 5 处内容，并简要说明原因。',
+      '请帮我标注这篇文章的核心假设。',
+      'Highlight the five most important claims in this paper.',
+      'Highlight the five most important scientifically meaningful sentences in the current PDF. Use native Zotero highlights and propose only exact quotations that appear verbatim in this PDF.',
+      'Underline the key claims in the current PDF.',
+    ]) expect(requestsCurrentPaperAnnotations(question), question).toBe(true);
+    for (const question of [
+      '如何高亮当前论文？',
+      '解释这篇论文里高亮的段落。',
+      'Explain how highlighting works in PDFs.',
+      'Highlight this button.',
+      '总结当前论文最重要的 5 处内容。',
+    ]) expect(requestsCurrentPaperAnnotations(question), question).toBe(false);
+  });
+
+  it('recognizes additive selection organization requests without treating organization questions as actions', () => {
+    for (const question of [
+      '按主题打标签，并归入合适的集合。',
+      '请给选中的文献添加主题标签。',
+      'Tag these papers by topic.',
+      'Organize the selected items into appropriate collections.',
+      'Add topic tags to the selected papers.',
+    ]) expect(requestsSelectionOrganization(question), question).toBe(true);
+    for (const question of [
+      '如何给文献打标签？',
+      '什么是 Zotero 集合？',
+      'Explain how to organize a collection.',
+      'Create a collection for later.',
+      'Summarize the selected papers.',
+    ]) expect(requestsSelectionOrganization(question), question).toBe(false);
+  });
+
   it('turns a multi-pass plan into a reading job through the injected capability', async () => {
     const f = context({ plan });
     await executeAgentSend(f.value);

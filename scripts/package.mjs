@@ -3,13 +3,19 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { builtinModules } from "node:module";
 
 import yazl from "yazl";
 import { PINNED_RUNTIME, validatePackagedRuntime } from "./runtime-assets.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const defaultSourceDirectory = path.join(repositoryRoot, "build/dev");
-const requiredFiles = ["bootstrap.js", "content/zchatgpt.js", "manifest.json", "LICENSE"];
+const requiredActors = [
+  "content/actors/OfficialChatParent.mjs",
+  "content/actors/OfficialChatChild.mjs",
+  "content/actors/chatgpt-dom.mjs",
+];
+const requiredFiles = ["bootstrap.js", "content/zchatgpt.js", "manifest.json", "LICENSE", ...requiredActors];
 const requiredManifestFields = [
   ["name"],
   ["version"],
@@ -19,6 +25,9 @@ const requiredManifestFields = [
   ["applications", "zotero", "update_url"],
 ];
 const fixedLocalTimestamp = new Date(1980, 0, 1, 0, 0, 0, 0);
+const forbiddenProductNames = new Set(["auth.json", "auth.json.enc", "credentials.json", "token.json", "cookies.sqlite", "logins.json", "key4.db", ".env", "prefs.js"]);
+const nodeBuiltins = new Set(builtinModules.map(name => name.replace(/^node:/u, "").split("/")[0]));
+const moduleSpecifier = /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["']([^"']+)["']/gu;
 
 function requireNode24() {
   if (process.versions.node.split(".")[0] !== "24") {
@@ -64,6 +73,32 @@ function isRuntimeFile(filePath, runtimeManifest) {
     filePath.startsWith("content/") ||
     filePath.startsWith("locale/")
   );
+}
+
+function validateProductFiles(files) {
+  for (const file of files) {
+    const base = file.split("/").pop() ?? file;
+    if (file.startsWith("content/actors/") && !requiredActors.includes(file)) {
+      throw new Error(`Unexpected actor asset in product package: ${file}`);
+    }
+    if (/^(?:driver|.+-driver)\.(?:js|mjs)$/u.test(base) || file.includes("web-acceptance") || file.includes("acceptance-actor")) {
+      throw new Error(`Test-only asset cannot enter the product package: ${file}`);
+    }
+    if (forbiddenProductNames.has(base) || file.includes(".zotero-chatgpt-dev") || file.includes("/records/") || file.includes("/account/")) {
+      throw new Error(`Private runtime data cannot enter the product package: ${file}`);
+    }
+  }
+}
+
+async function validateExecutableFiles(sourceDirectory, files) {
+  for (const file of files.filter(name => name.endsWith(".js") || name.endsWith(".mjs"))) {
+    const text = await readFile(path.join(sourceDirectory, file), "utf8");
+    for (const match of text.matchAll(moduleSpecifier)) {
+      const specifier = match[1].replace(/^node:/u, "").split("/")[0];
+      if (nodeBuiltins.has(specifier)) throw new Error(`Production executable ${file} imports Node builtin ${match[1]}`);
+    }
+    if (/\/Users\/|\/home\/|[A-Za-z]:\\Users\\/u.test(text)) throw new Error(`Production executable ${file} contains an absolute user path`);
+  }
 }
 
 async function validateRequiredFiles(sourceDirectory) {
@@ -145,7 +180,10 @@ export async function packageExtension(sourceDirectory = defaultSourceDirectory,
   const runtimeManifest = options.runtimeManifest ?? PINNED_RUNTIME;
   await validatePackagedRuntime(sourceDirectory, runtimeManifest);
   const archivePath = requestedArchivePath ?? path.join(options.repositoryRoot ?? repositoryRoot, `dist/zotero-chatgpt-${manifest.version}-dev.xpi`);
-  const files = (await listFiles(sourceDirectory)).filter(file => isRuntimeFile(file, runtimeManifest)).sort();
+  const sourceFiles = await listFiles(sourceDirectory);
+  validateProductFiles(sourceFiles);
+  const files = sourceFiles.filter(file => isRuntimeFile(file, runtimeManifest)).sort();
+  await validateExecutableFiles(sourceDirectory, files);
   await writeArchive(sourceDirectory, archivePath, files);
   const digest = createHash("sha256").update(await readFile(archivePath)).digest("hex");
   await writeFile(path.join(path.dirname(archivePath), "SHA256SUMS"), `${digest}  ${path.basename(archivePath)}\n`);

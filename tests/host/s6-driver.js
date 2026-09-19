@@ -107,7 +107,7 @@ async function runHostSmoke(config) {
     await check('virgin-profile-signed-out', auth === 'signedOut', { auth });
     await check('login-control-visible', !!panel()?.querySelector('[data-zchatgpt-action="login"]'));
     await check('not-generating', panel()?.dataset.zchatgptGenerating !== 'true' && !panel()?.dataset.zchatgptActiveRequest);
-    await skip('live-model-send', 'quota blocks live Codex until 2026-09-15; this driver does not send');
+    await skip('live-model-send', 'This installation driver does not issue model requests.');
     const conversationId = '11111111-0000-4000-8000-000000000006';
     const recordsDir = PathUtils.join(PathUtils.profileDir, 'zotero-chatgpt', 'v1', 'records', 'conversations');
     const recordPath = PathUtils.join(recordsDir, `${conversationId}.json`);

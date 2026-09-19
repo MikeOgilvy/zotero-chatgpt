@@ -78,7 +78,7 @@ function fixture(options: { signedIn?: boolean; clipboard?: () => Promise<Clipbo
     reconnect: vi.fn(() => Promise.resolve()),
   };
   const states: PresenterState[] = [];
-  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
+  const services = { client: vi.fn(() => Promise.resolve(client)), ensureAgent: vi.fn(() => Promise.resolve()), chatUnavailableReason: vi.fn<() => string | null>(() => null), openAuthorization: vi.fn(), uuid: (() => { let n = 0; return () => `9a1c3e5f-7b2d-4c6e-8f0a-${String(++n).padStart(12, '0')}`; })(), now: () => '2026-09-09T08:00:00.000Z', ...(options.clipboard ? { readClipboardImage: options.clipboard } : {}) };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), services);
   const unbind = presenter.bind(state => states.push(state));
   type Pending = ReaderEvent extends infer E ? E extends ReaderEvent ? Omit<E, 'seq' | 'conversationId' | 'at'> : never : never;
@@ -122,6 +122,28 @@ async function startChat(f: ReturnType<typeof fixture>, question: string): Promi
   return f.last().conversation!.id;
 }
 describe('conversation presenter', () => {
+  it('keeps an explicit Agent click made while the stored current chat is still loading', async () => {
+    const f = fixture(); let resolve!: (conversation: Conversation) => void;
+    const delayed = new Promise<Conversation>(done => { resolve = done; });
+    vi.mocked(f.client.peekCurrent).mockImplementation(() => delayed);
+    const activating = f.presenter.activate(); await vi.waitFor(() => expect(f.client.peekCurrent).toHaveBeenCalled());
+    expect(f.presenter.snapshot().conversation).toBeNull(); expect(f.presenter.snapshot().mode).toBe('chat');
+    f.presenter.setMode('agent'); resolve(structuredClone(f.conversation())); await activating;
+    expect(f.presenter.snapshot().conversation?.id).toBe(f.conversation().id);
+    expect(f.presenter.snapshot().mode).toBe('agent');
+  });
+
+  it('keeps the last mode click made while another saved conversation is being selected', async () => {
+    const f = fixture(); await f.presenter.activate();
+    const second = { ...f.conversation(), id: 'bbbbbbbb-0000-4000-8000-000000000099', title: 'Second saved chat' };
+    f.setConversation(second); let resolve!: (conversation: Conversation) => void;
+    const delayed = new Promise<Conversation>(done => { resolve = done; });
+    vi.mocked(f.client.select).mockReturnValueOnce(delayed);
+    const opening = f.presenter.openConversation(second.id); await vi.waitFor(() => expect(f.client.select).toHaveBeenCalledWith(paperA, second.id));
+    f.presenter.setMode('agent'); resolve(structuredClone(second)); await opening;
+    expect(f.presenter.snapshot().conversation?.id).toBe(second.id); expect(f.presenter.snapshot().mode).toBe('agent');
+  });
+
   it('keeps two views of the same attachment consistent when either view closes', async () => {
     const f = fixture(); await f.presenter.activate();
     let first = ''; let second = '';
@@ -376,6 +398,15 @@ describe('conversation presenter', () => {
     expect(f.sent[0]!.question).not.toMatch(/请用中文解释/u);
     expect(f.last().draft.question).toBe('草稿中的问题'); expect(f.last().draft.citations).toEqual([citationB]);
   });
+  it('a direct More details call in Chat mode never starts or borrows the Agent runtime', async () => {
+    const f = fixture(); f.services.chatUnavailableReason.mockReturnValue('Hosted Chat owns this action.');
+    await f.presenter.activate();
+    await f.presenter.explain(citationA);
+    expect(f.presenter.snapshot().mode).toBe('chat');
+    expect(f.sent).toHaveLength(0);
+    expect(f.services.ensureAgent).not.toHaveBeenCalled();
+    expect(f.last().message).toBe('Hosted Chat owns this action.');
+  });
   it('attaches bibliographic paper identity on ask even without a citation', async () => {
     const f = fixture(); await f.presenter.activate();
     f.presenter.setQuestion('这篇在讲什么方向？');
@@ -462,11 +493,22 @@ describe('conversation presenter', () => {
     const f = fixture({ signedIn: false }); await f.presenter.activate();
     // Local restore is Codex-independent: the stored chat is shown before any sign-in.
     expect(f.last().conversation).not.toBeNull(); expect(f.client.current).not.toHaveBeenCalled();
+    f.presenter.setMode('agent');
     await f.presenter.explain(citationA);
     expect(f.sent).toHaveLength(0); expect(f.services.openAuthorization).toHaveBeenCalledWith('https://auth.openai.com/authorize?x=1'); expect(f.last().pendingExplain?.id).toBe(citationA.id);
     f.setRuntime({ account: { state: 'signedIn', displayLabel: 'ChatGPT' }, models: [model] }); await settle();
     f.setRuntime({ revision: 99 }); await settle();
     expect(f.sent).toHaveLength(1); expect(f.sent[0]).toMatchObject({ action: 'explain', citations: [citationA] }); expect(f.last().pendingExplain).toBeNull();
+  });
+  it('does not resume a pending Agent explanation after that presenter switches to Chat', async () => {
+    const f = fixture({ signedIn: false }); await f.presenter.activate(); f.presenter.setMode('agent');
+    await f.presenter.explain(citationA); expect(f.last().pendingExplain?.id).toBe(citationA.id);
+    f.presenter.setMode('chat');
+    expect(f.last().pendingExplain).toBeNull(); expect(f.last().draft.citations).toEqual([citationA]);
+    const second = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), f.services); await second.activate(); second.setMode('agent');
+    f.setRuntime({ account: { state: 'signedIn', displayLabel: 'ChatGPT' }, models: [model] }); await settle();
+    expect(f.sent).toHaveLength(0); expect(f.presenter.snapshot().mode).toBe('chat'); expect(f.presenter.snapshot().draft.citations).toEqual([citationA]);
+    second.dispose();
   });
   it('Ask while signed out stores the citation and waits for the user even after login', async () => {
     const f = fixture({ signedIn: false }); await f.presenter.activate(); f.presenter.addCitation(citationA);

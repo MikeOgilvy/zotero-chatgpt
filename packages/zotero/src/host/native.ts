@@ -30,7 +30,7 @@ export interface NativeHostItem {
   getCreators(): Array<{ firstName?: string; lastName?: string; name?: string; creatorType?: string; fieldMode?: number }>;
   getCreatorsJSON(): Array<{ firstName?: string; lastName?: string; name?: string; creatorType?: string }>;
   getExtraField?(field: string): string | false;
-  getTags(): Array<{ tag: string }>;
+  getTags(): Array<{ tag: string; type?: number }>;
   getCollections(includeTrashed?: boolean): number[];
   getAttachments(includeTrashed?: boolean): number[];
   getNotes(includeTrashed?: boolean): number[];
@@ -41,6 +41,8 @@ export interface NativeHostItem {
   loadPrimaryData(): Promise<void>;
   addToCollection(key: string): void;
   removeFromCollection(key: string): void;
+  addTag(tag: string, type?: number): boolean;
+  removeTag(tag: string): boolean;
   loadAllData?(): Promise<void>;
   save(options?: { skipSelect?: boolean }): Promise<number | boolean>;
   erase(): Promise<void>;

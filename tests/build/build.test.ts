@@ -36,10 +36,13 @@ describe("development build", () => {
     );
 
     expect(await readFile(path.join(outputDirectory, "content/runtime/codex-aarch64-apple-darwin"), "utf8")).toBe("abc");
-    const [bundle, manifest, bootstrap] = await Promise.all([
+    const [bundle, manifest, bootstrap, chatParentActor, chatChildActor, chatDom] = await Promise.all([
       readFile(path.join(outputDirectory, "content/zchatgpt.js"), "utf8"),
       readFile(path.join(outputDirectory, "manifest.json"), "utf8"),
       readFile(path.join(outputDirectory, "bootstrap.js"), "utf8"),
+      readFile(path.join(outputDirectory, "content/actors/OfficialChatParent.mjs"), "utf8"),
+      readFile(path.join(outputDirectory, "content/actors/OfficialChatChild.mjs"), "utf8"),
+      readFile(path.join(outputDirectory, "content/actors/chatgpt-dom.mjs"), "utf8"),
     ]);
     const moduleScope: Record<string, unknown> = {};
     vm.createContext(moduleScope);
@@ -75,6 +78,14 @@ describe("development build", () => {
     });
     expect(parsedManifest.version).toBe(sourceManifest.version);
     expect(bootstrap.length).toBeGreaterThan(0);
+    expect(chatParentActor.length).toBeGreaterThan(0);
+    expect(chatChildActor.length).toBeGreaterThan(0);
+    expect(chatDom.length).toBeGreaterThan(0);
+    expect((await readdir(path.join(outputDirectory, "content/actors"))).sort()).toEqual([
+      "OfficialChatChild.mjs",
+      "OfficialChatParent.mjs",
+      "chatgpt-dom.mjs",
+    ]);
     const katexCss = await readFile(path.join(outputDirectory, "content/assets/katex/katex.min.css"), "utf8");
     expect(katexCss).toContain("@font-face");
     expect(katexCss).not.toMatch(/https?:\/\//u);

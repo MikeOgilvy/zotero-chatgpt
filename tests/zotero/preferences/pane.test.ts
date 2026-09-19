@@ -150,18 +150,18 @@ it('renders only the annotate builtin while the other definitions stay installed
   const rendered = [...find('[data-zchatgpt-pref="skills"]').querySelectorAll<HTMLElement>('.zchatgpt-preferences-skill')].map(row => row.dataset.zchatgptSkill);
   // The owner's own workflows still list; only the builtin set is withdrawn to annotate.
   expect(rendered).toEqual(['builtin-annotate', 'user-study', 'imported-blocked']);
-  for (const withdrawn of ['read', 'derive', 'compare', 'acquire', 'diagram']) {
+  for (const withdrawn of ['read', 'derive', 'compare', 'acquire', 'organize', 'diagram']) {
     expect(root.querySelector(`[data-zchatgpt-skill="builtin-${withdrawn}"]`), withdrawn).toBeNull();
   }
 
-  // The definition is withdrawn from the list, not from the record: a pane save keeps all six
+  // The definition is withdrawn from the list, not from the record: a pane save keeps all seven
   // builtins, so the default path and every persisted `read` selection keep resolving.
   find<HTMLTextAreaElement>('[data-zchatgpt-pref="preference-background"]').value = 'Keep read installed';
   find<HTMLButtonElement>('[data-zchatgpt-pref="save-preferences"]').click();
   await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
   await vi.waitFor(() => expect(current().preferences.background).toBe('Keep read installed'));
   expect(current().skills.filter(skill => skill.origin === 'builtin').map(skill => skill.id))
-    .toEqual(['builtin-read', 'builtin-derive', 'builtin-compare', 'builtin-annotate', 'builtin-acquire', 'builtin-diagram']);
+    .toEqual(['builtin-read', 'builtin-derive', 'builtin-compare', 'builtin-annotate', 'builtin-acquire', 'builtin-organize', 'builtin-diagram']);
   // Withdrawing a row never disables the definition behind it.
   expect(current().skills.filter(skill => skill.origin === 'builtin').every(skill => skill.enabled)).toBe(true);
 });

@@ -1,6 +1,6 @@
 import type { DocumentContext, Draft, ImageAttachment, PaperIdentity, PaperScope } from './index.ts';
 
-export type WorkflowKind = 'read' | 'annotate' | 'acquire' | 'diagram';
+export type WorkflowKind = 'read' | 'annotate' | 'acquire' | 'organize' | 'diagram';
 export interface Personalization {
   language: string;
   detail: 'brief' | 'standard' | 'detailed';
@@ -153,6 +153,8 @@ export interface ReaderWorkspace {
 }
 export interface LibraryReferencePort {
   collections?(): Promise<Array<import('./native.ts').NativeCollectionTarget & { name: string }>>;
+  /** Frozen from the active Zotero library pane at the moment the user starts an organization task. */
+  selectedItems?(): Promise<import('./native.ts').NativeOrganizationItemSnapshot[]>;
   search(query: string): Promise<ReaderReference[]>;
   read(reference: ReaderReference, signal: AbortSignal): Promise<ReferenceInput>;
   open(paper: PaperScope): Promise<void>;

@@ -17,7 +17,7 @@ const requestId = (n: number) => `11111111-0000-4000-8000-${String(n).padStart(1
 // Citations are normalized exactly as `validateCitation` does it on the way in, because the hash is
 // taken over the validated input and is order-sensitive.
 async function hashInput(input: SendInput, version: 1 | 2 | 3 = 1): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations.map(validateCitation), settings: input.settings, images: input.images ?? [], ...(version >= 2 && input.paper ? { paper: input.paper } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations.map(validateCitation), settings: input.settings, images: input.images ?? [], ...(version >= 2 && input.paper ? { paper: input.paper } : {}), ...(version === 3 && input.organization ? { organization: input.organization } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -30,6 +30,7 @@ async function setup(configure?: (s: ReturnType<typeof server>) => void, storage
 async function signedIn(configure?: (s: ReturnType<typeof server>) => void, storage?: MemoryStorage) {
   const rig = await setup(configure, storage); await rig.c.refreshAccount();
   const conversation = await rig.c.current(paperA, 'Synthetic Paper A');
+  await rig.c.ensureAgentReady!();
   // Recovery is Agent-only: only a Codex request can be interrupted with native work to reconcile, so
   // these helpers declare `mode: 'agent'` explicitly. `absent` is the Chat request (D3) variant.
   const absent = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, ...overrides });
@@ -71,6 +72,25 @@ describe('process restart and uncertain reconciliation', () => {
     // The frozen mode participates in the v3 hash, so a mismatch would leave the request uncertain.
     expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
     expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
+  });
+  it('reconstructs the exact frozen organization scope instead of reading the current selection', async () => {
+    const storage = new MemoryStorage();
+    const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
+    const created = await store.create(paperA, 'Synthetic Paper A', settings);
+    const organization = {
+      selection: [{ clientId: paperA.clientId, libraryId: 1, key: 'ITEMONE1', metadata: { itemType: 'journalArticle' as const, title: 'Frozen selection', creators: [] }, tags: ['existing'], collectionKeys: [], attachmentKeys: [], dateModified: 'then', contentSignature: 'full', organizationSignature: 'non-organization' }],
+      collections: [{ clientId: paperA.clientId, libraryId: 1, collectionKey: 'COLLECT1', name: 'Topic A' }],
+    };
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'ask', question: 'Organize these.', citations: [], settings, mode: 'agent', organization };
+    const hash = await hashInput(input, 3);
+    created.requests.push({ requestId: input.requestId, hash, hashVersion: 3, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'ask' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: input.question, citations: [], status: 'completed', mode: 'agent', organization });
+    created.activeRequestId = input.requestId; await store.save(created);
+    const { c, p } = await signedIn(undefined, storage); await flush(); await tick(20);
+    expect(methods(p).filter(method => method === 'turn/start')).toHaveLength(1);
+    expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
+    const reloaded = await new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' }).get(created.id);
+    expect(reloaded.messages.find(message => message.requestId === input.requestId && message.role === 'user')?.organization).toEqual(organization);
   });
   it('redelivers a hashVersion 3 request with no mode as chat and never enters the Codex runtime (D3)', async () => {
     const storage = new MemoryStorage();
@@ -123,6 +143,7 @@ describe('process restart and uncertain reconciliation', () => {
     unsigned.handlers.set('account/read', () => ({ account: { type: 'chatgpt', email: 'private@example.test', planType: 'plus' }, requiresOpenaiAuth: true }));
     await unsigned.c.refreshAccount();
     await unsigned.c.get(created.id);
+    await unsigned.c.ensureAgentReady!();
     await flush(); await tick(20);
     expect(methods(unsigned.p).filter(m => m === 'turn/start')).toHaveLength(1);
     expect(await unsigned.c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });

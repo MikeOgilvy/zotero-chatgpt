@@ -16,6 +16,13 @@ export interface NativeCollectionTarget { clientId: string; libraryId: number; c
 /** Persisted into real Zotero annotations; the historical product name stays literal. */
 export const NATIVE_ANNOTATION_PROVENANCE = '[AI · Zotero ChatGPT]';
 export interface NativeCollectionAddition { before: NativeItemSnapshot; after: NativeItemSnapshot; collectionKey: string; added: boolean }
+/** Exact additive organization delta recorded after native readback. */
+export interface NativeOrganizationChange {
+  before: NativeOrganizationItemSnapshot;
+  after: NativeOrganizationItemSnapshot;
+  addedTags: string[];
+  addedCollectionKeys: string[];
+}
 export interface NativeQuoteInput {
   paper: PaperScope;
   revision: DocumentRevision;
@@ -97,6 +104,12 @@ export interface NativeItemSnapshot extends NativeItemRef {
   /** Canonical full native item JSON, used only to detect subsequent edits; never a model input. */
   contentSignature: string;
 }
+/** Rich item state used only for additive organization and its exact readback/undo. */
+export interface NativeOrganizationItemSnapshot extends NativeItemSnapshot {
+  tags: string[];
+  /** Full native JSON with tags, collections and host-maintained timestamps removed. */
+  organizationSignature: string;
+}
 export interface NativeAttachmentSnapshot extends NativeItemRef {
   parentKey: string;
   url: string;
@@ -118,6 +131,7 @@ export interface NativeReaderPort {
   previewMetadata(input: { identifier: string }, signal?: AbortSignal): Promise<NativeMetadataPreview>;
   findDuplicateDOI(input: { clientId: string; libraryId: number; doi: string }, signal?: AbortSignal): Promise<NativeItemSnapshot[]>;
   inspectItem(input: NativeItemRef, signal?: AbortSignal): Promise<NativeItemSnapshot | null>;
+  inspectOrganizationItem(input: NativeItemRef, signal?: AbortSignal): Promise<NativeOrganizationItemSnapshot | null>;
   inspectAttachment(input: NativeItemRef, signal?: AbortSignal): Promise<NativeAttachmentSnapshot | null>;
 }
 
@@ -132,6 +146,8 @@ export interface NativeActionPort extends NativeReaderPort {
   createItem(input: { target: NativeCollectionTarget; key: string; metadata: NativeMetadata }, signal?: AbortSignal): Promise<NativeItemSnapshot>;
   addItemToCollection(input: { expected: NativeItemSnapshot; target: NativeCollectionTarget }, signal?: AbortSignal): Promise<NativeCollectionAddition>;
   undoCollectionAddition(input: { expected: NativeCollectionAddition }, signal?: AbortSignal): Promise<{ status: 'removed' | 'absent' | 'conflict' }>;
+  organizeItem(input: { expected: NativeOrganizationItemSnapshot; tags: string[]; collections: NativeCollectionTarget[] }, signal?: AbortSignal): Promise<NativeOrganizationChange>;
+  undoOrganization(input: { expected: NativeOrganizationChange }, signal?: AbortSignal): Promise<{ status: 'removed' | 'absent' | 'conflict'; after?: NativeOrganizationItemSnapshot }>;
   undoCreatedItem(input: { expected: NativeItemSnapshot; attachments: NativeAttachmentSnapshot[] }, signal?: AbortSignal): Promise<{ status: 'trashed' | 'absent' | 'conflict' }>;
   undoAttachment(input: { expected: NativeAttachmentSnapshot }, signal?: AbortSignal): Promise<{ status: 'trashed' | 'absent' | 'conflict' }>;
   acquireOpenAccessPDF(input: { item: NativeItemSnapshot }, signal?: AbortSignal): Promise<NativeAcquisitionResult>;

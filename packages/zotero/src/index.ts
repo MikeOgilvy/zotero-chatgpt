@@ -1,6 +1,9 @@
 import { mountChatView, renderReaderShell } from './chat/view.ts';
 import { ConversationPresenter, type PresenterAgent } from './chat/presenter.ts';
-import { createChatEmbedSurface, type ChatEmbedSurface } from './chat/embed.ts';
+import { acquireChatSurface, createChatEmbedSurface, type ChatEmbedSurface } from './chat/embed.ts';
+import { dispatchSelectionAction, prepareOfficialChatContext } from './chat/official-chat.ts';
+import { installOfficialChatResource, OFFICIAL_CHAT_RESOURCE_ROOT, registerOfficialChatActor, removeOfficialChatResource, unregisterOfficialChatActor } from './chat/official-chat-actor.ts';
+import { parseOfficialConversationStore, rememberOfficialConversation } from './chat/official-chat-history.ts';
 import { createAgentRuntime, type AgentRuntime } from './runtime/agent-runtime.ts';
 import { createLocalServices, openLocalStorage } from './runtime/local-services.ts';
 import { runtimePaths } from './runtime/prepare.ts';
@@ -21,15 +24,17 @@ import { attachmentIdentity, nativeDocumentServices, paperScope, readerContextFo
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
+import { installKatexResource, KATEX_STYLESHEET, removeKatexResource } from './reader/katex-resource.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { createPreferencesService } from './preferences/service.ts';
 import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './preferences/registration.ts';
 import { createFileActions, type LibraryFileActions } from './actions/files.ts';
+import { createLibraryReferencePort, type LibraryWindow } from './library/reference.ts';
 import { ReaderError, paperId, type Citation, type PaperScope } from '../../contracts/src/index.ts';
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
 export interface PluginContext { rootURI: string; pluginID: string; version?: string }
-interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string; latestCitation?: Citation }
+interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string; latestCitation?: Citation; stagedOfficialSelection?: string }
 const CLIENT_ID_PREF = 'extensions.zchatgpt.clientId';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 let context: PluginContext | undefined;
@@ -53,19 +58,25 @@ let client: ReaderClient | null = null;
  */
 const CHAT_TRANSPORT: ChatTransport | undefined = undefined;
 /**
- * Chat mode's hosted surfaces, one per main window. They are created lazily on the first Chat dock
- * and then kept for the window's life: the ChatGPT session, its cookies and the open conversation
- * belong to that document, so `Agent -> Chat`, a reader switch or a sidebar close must not reload it.
+ * One hosted surface per paper per main window. Each paper owns its ChatGPT draft, streaming turn and
+ * official `/c/…` history independently; inactive surfaces park without unloading.
  */
-const chatSurfaces = new Map<ZoteroWindow, ChatEmbedSurface>();
-function chatSurface(win: ZoteroWindow): ChatEmbedSurface {
-  let surface = chatSurfaces.get(win);
-  if (!surface) { surface = createChatEmbedSurface(win); chatSurfaces.set(win, surface); }
-  return surface;
+const chatSurfaces = new Map<ZoteroWindow, Map<string, ChatEmbedSurface>>();
+function chatSurface(win: ZoteroWindow, binding: string): ChatEmbedSurface | null {
+  let surfaces = chatSurfaces.get(win);
+  if (!surfaces) { surfaces = new Map(); chatSurfaces.set(win, surfaces); }
+  return acquireChatSurface(surfaces, binding, () => createChatEmbedSurface(win));
+}
+function showChatSurface(win: ZoteroWindow, binding: string, surface: ChatEmbedSurface, anchor: Element, frame: Element | null): void {
+  for (const [key, other] of chatSurfaces.get(win) ?? []) if (key !== binding) other.hide();
+  surface.show(anchor, frame);
 }
 let documentCache: ReaderDocumentCache | undefined;
 let localServices: ReturnType<typeof createLocalServices> | undefined;
 let preferencePanes: PreferencePaneRegistrar | undefined;
+let officialChatActorRegistered = false;
+let officialChatResourceInstalled = false;
+let katexResourceInstalled = false;
 /** Small, JSON-only surface the Preferences window script may call; see preferences/entry.ts. */
 interface PreferencesBridgeHost {
   ZoteroChatGPTPreferencesHost?: unknown;
@@ -74,11 +85,22 @@ interface PreferencesBridgeHost {
 function preferencesBridge(): PreferencesBridgeHost { return Zotero as ZoteroHost & PreferencesBridgeHost; }
 const AUTO_PDF_PREF = 'extensions.zchatgpt.automaticPdfText';
 const PDF_DISCLOSURE_PREF = 'extensions.zchatgpt.pdfTextDisclosureSeen';
+const OFFICIAL_CHAT_URLS_PREF = 'extensions.zchatgpt.officialChatConversationURLs';
 const readers = new Map<HostReader, ReaderEntry>();
 const windows = new Map<ZoteroWindow, () => void>();
 /** Presenters outlive views: drafts and conversation copies stay while a sidebar is closed. */
 const presenters = new Map<string, ConversationPresenter>();
 const citationVersions = new WeakMap<Citation, Promise<Citation>>();
+
+function officialConversationURL(binding: string): string | null {
+  const stored = parseOfficialConversationStore(Zotero.Prefs.get(OFFICIAL_CHAT_URLS_PREF, true));
+  return stored[binding]?.url ?? null;
+}
+function rememberOfficialConversationURL(binding: string, url: string): void {
+  const stored = parseOfficialConversationStore(Zotero.Prefs.get(OFFICIAL_CHAT_URLS_PREF, true));
+  const next = rememberOfficialConversation(stored, binding, url, new Date().toISOString());
+  Zotero.Prefs.set(OFFICIAL_CHAT_URLS_PREF, JSON.stringify(next), true);
+}
 
 /** Persistent random namespace of this Zotero profile; it never changes across restarts or upgrades. */
 function clientId(): string {
@@ -100,9 +122,21 @@ function assembleAgent(services: ReturnType<typeof createLocalServices>): Presen
  * search/read/open/capture and `actions/files.ts` owns the file picker and export. Both are
  * stateless, so assembling this per call is just object spread.
  */
-function libraryPort(): ReturnType<typeof createLocalServices>['library'] & LibraryFileActions {
+function libraryPort(reader?: HostReader): ReturnType<typeof createLocalServices>['library'] & LibraryFileActions {
   if (!localServices) throw new Error('The local Zotero library is unavailable.');
-  return { ...localServices.library, ...createFileActions(Zotero, { clientId: clientId(), uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() }) };
+  const id = clientId();
+  const base = { ...localServices.library, ...createFileActions(Zotero, { clientId: id, uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() }) };
+  // Library selection belongs to the Zotero window that owns this reader. Capture it synchronously
+  // there; a later foreground-window lookup could silently organize a different user's selection.
+  if (!reader?._window || !documentCache) return base;
+  const bound = createLibraryReferencePort(Zotero, {
+    clientId: id,
+    documentCache,
+    uuid: () => crypto.randomUUID(),
+    now: () => new Date().toISOString(),
+    getWindow: () => reader._window as unknown as Window & LibraryWindow,
+  });
+  return { ...base, ...(bound.selectedItems ? { selectedItems: () => bound.selectedItems!() } : {}) };
 }
 /**
  * Build the shared reader client over local records. This creates directories, not Codex: the
@@ -173,7 +207,7 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
         // The Agent capability is assembled here, once, from the local services; a host without it
         // leaves the chat path unable to reach approvals, the ledger or undo (Stage 4).
         agent: assembleAgent(local),
-        library: libraryPort(),
+        library: libraryPort(reader),
         openCitation: citation => openCitation(Zotero, citation, clientId()),
         openItem: async (reference: import('../../contracts/src/native.ts').NativeItemRef) => {
           if (reference.clientId !== clientId()) throw new ReaderError('NOT_FOUND', 'The output belongs to another profile.');
@@ -224,7 +258,7 @@ function readerAssets(): { stylesheet?: string; katex?: string } {
   if (!context) return {};
   return {
     stylesheet: `${context.rootURI}content/assets/sidebar.css`,
-    katex: `${context.rootURI}content/assets/katex/katex.min.css`,
+    katex: KATEX_STYLESHEET,
   };
 }
 function zoomDocuments(reader: HostReader, root: HTMLElement): Array<Document | HTMLElement> {
@@ -239,6 +273,23 @@ function entry(reader: HostReader): ReaderEntry {
     const pane = new NativeReaderPane(Zotero, reader, paneID, buttons, (body, identity, close, opened) => {
       const root = renderReaderShell(body, identity);
       const presenter = presenterFor(identity, reader);
+      const hostedBinding = `${paperId(presenter.snapshot().document.paper)}:${reader.itemID}`;
+      const prepareHostedContext = () => {
+        const snapshot = presenter.snapshot();
+        // First-use disclosure must be acknowledged before a document leaves Zotero. A deliberate
+        // opt-out allows the owner's question through without document context.
+        const selected = readers.get(reader)?.stagedOfficialSelection ?? null;
+        return prepareOfficialChatContext({
+          disclosure: snapshot.document.disclosure,
+          enabled: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
+          document: () => presenter.exportDocumentBrief(),
+          selection: selected,
+          consumeSelection: () => {
+            const source = readers.get(reader);
+            if (source?.stagedOfficialSelection === selected) delete source.stagedOfficialSelection;
+          },
+        });
+      };
       const unmount = mountChatView(root, presenter, {
         ...hooks,
         openDocumentPage: (document, pageIndex, quote) =>
@@ -252,9 +303,19 @@ function entry(reader: HostReader): ReaderEntry {
         // dock and kept for the window, so no mode switch, reader switch or sidebar close unloads
         // the session; the reader's own browser is the frame whose rect the surface is measured in.
         chatEmbed: {
-          show: anchor => chatSurface(reader._window).show(anchor, reader._iframe ?? null),
-          hide: () => chatSurfaces.get(reader._window)?.hide(),
-          reload: () => chatSurfaces.get(reader._window)?.reload(),
+          show: anchor => {
+            const surface = chatSurface(reader._window, hostedBinding);
+            if (!surface) {
+              const status = anchor.closest('[data-zchatgpt-embed]')?.querySelector<HTMLElement>('[data-zchatgpt-bridge-status-line]');
+              if (status) { status.textContent = 'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.'; status.hidden = false; }
+              return;
+            }
+            surface.bindContext(hostedBinding, prepareHostedContext);
+            surface.bindConversation(hostedBinding, officialConversationURL(hostedBinding), url => rememberOfficialConversationURL(hostedBinding, url));
+            showChatSurface(reader._window, hostedBinding, surface, anchor, reader._iframe ?? null);
+          },
+          hide: () => chatSurfaces.get(reader._window)?.get(hostedBinding)?.hide(),
+          reload: () => chatSurfaces.get(reader._window)?.get(hostedBinding)?.reload(),
           // The application owns its own conversation and this host has no supported way to put
           // context into it, so both controls prepare text and say plainly that it is on the
           // clipboard. Neither one sends anything, and neither starts Codex.
@@ -296,15 +357,47 @@ function entry(reader: HostReader): ReaderEntry {
       return unmount;
     }, readerAssets());
     // Both selection actions only show the sidebar; the citation copy was taken before the click.
-    const act = async (citation: Citation, run: (presenter: ConversationPresenter, frozen: Citation) => void) => {
+    const act = async (citation: Citation, mode: 'chat' | 'agent', run: (presenter: ConversationPresenter, frozen: Citation, mode: 'chat' | 'agent') => void | Promise<void>) => {
       const identity = attachmentIdentity(Zotero, reader); if (!identity || !active) return;
       const frozen = await (citationVersions.get(citation) ?? freezeCitationVersion(Zotero, reader, citation));
       await pane.controller.open();
-      const presenter = presenterFor(identity, reader); await presenter.activate(); run(presenter, frozen);
+      const presenter = presenterFor(identity, reader); await presenter.activate(); current!.latestCitation = frozen; await run(presenter, frozen, mode);
+    };
+    const modeAtClick = (): 'chat' | 'agent' => {
+      const identity = attachmentIdentity(Zotero, reader);
+      return identity ? presenterFor(identity, reader).snapshot().mode : 'chat';
+    };
+    const officialResult = async (work: Promise<{ status: string; reason?: string }>): Promise<void> => {
+      const result = await work;
+      if (!['staged', 'accepted', 'submitted'].includes(result.status)) throw new Error(`ChatGPT did not accept this selection (${result.reason ?? result.status}).`);
+    };
+    const hostedSurface = (presenter: ConversationPresenter): ChatEmbedSurface => {
+      const binding = `${paperId(presenter.snapshot().document.paper)}:${reader.itemID}`;
+      const surface = chatSurface(reader._window, binding);
+      if (!surface) throw new ReaderError('BUSY', 'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.');
+      return surface;
     };
     const bar = new SelectionActionBar({
-      explain: citation => { void act(citation, (presenter, frozen) => { void presenter.explain(frozen); }).catch(error => Zotero.logError(error)); },
-      ask: citation => { void act(citation, (presenter, frozen) => { presenter.addCitation(frozen); presenter.focusInput(); }).catch(error => Zotero.logError(error)); },
+      explain: citation => { const mode = modeAtClick(); void act(citation, mode, async (presenter, frozen, frozenMode) => dispatchSelectionAction(
+        frozenMode,
+        'explain',
+        selectionBrief(frozen),
+        {
+          stage: text => officialResult(hostedSurface(presenter).stage(text)),
+          submitQuestion: question => officialResult(hostedSurface(presenter).submitQuestion(question)),
+        },
+        { explain: () => presenter.explain(frozen), stage: () => { presenter.addCitation(frozen); presenter.focusInput(); } },
+      )).catch(error => Zotero.logError(error)); },
+      ask: citation => { const mode = modeAtClick(); void act(citation, mode, async (presenter, frozen, frozenMode) => dispatchSelectionAction(
+        frozenMode,
+        'ask',
+        selectionBrief(frozen),
+        {
+          stage: async text => { await officialResult(hostedSurface(presenter).stage(text)); current!.stagedOfficialSelection = text; },
+          submitQuestion: question => officialResult(hostedSurface(presenter).submitQuestion(question)),
+        },
+        { explain: () => presenter.explain(frozen), stage: () => { presenter.addCitation(frozen); presenter.focusInput(); } },
+      )).catch(error => Zotero.logError(error)); },
     });
     current = { buttons, pane, bar };
     readers.set(reader, current);
@@ -356,7 +449,7 @@ function reconcile(): void {
   }
   // A tab change moves the reader browser that the Chat surface is pinned to, and the tab notifier
   // is the only signal that arrives before the frame is re-laid-out.
-  for (const surface of chatSurfaces.values()) surface.sync();
+  for (const surfaces of chatSurfaces.values()) for (const surface of surfaces.values()) surface.sync();
 }
 export function startup(options: PluginContext): void {
   if (active) return;
@@ -389,7 +482,12 @@ export function startup(options: PluginContext): void {
     workspace,
     // One pref, one owner: the native pane and the reader opt-out read the same value.
     readAutomaticPdfText: () => Zotero.Prefs.get(AUTO_PDF_PREF, true) !== false,
-    writeAutomaticPdfText: value => { Zotero.Prefs.set(AUTO_PDF_PREF, value, true); },
+    writeAutomaticPdfText: value => {
+      Zotero.Prefs.set(AUTO_PDF_PREF, value, true);
+      // Keep every open Chat strip honest and abort unused local extraction when the owner opts out
+      // from another window's Preferences pane.
+      for (const presenter of presenters.values()) presenter.setDocumentEnabled(value);
+    },
     // The runtime's last live `model/list` ids, or null when Agent has never loaded them. Read-only:
     // opening the Preferences window never starts Codex, and an offerable id it reports (a GPT-5.3
     // Spark model) becomes selectable in the pane. Excluded families are filtered in core, not here.
@@ -405,6 +503,29 @@ export function startup(options: PluginContext): void {
   Zotero.Reader.registerEventListener('renderToolbar', attach, options.pluginID);
   Zotero.Reader.registerEventListener('renderTextSelectionPopup', onSelectionPopup, options.pluginID);
   notifierID = Zotero.Notifier.registerObserver({ notify: reconcile }, ['tab'], options.pluginID);
+  try {
+    installKatexResource(options.rootURI); katexResourceInstalled = true;
+    installOfficialChatResource(options.rootURI); officialChatResourceInstalled = true;
+    registerOfficialChatActor(OFFICIAL_CHAT_RESOURCE_ROOT); officialChatActorRegistered = true;
+  } catch (error) {
+    if (officialChatActorRegistered) {
+      try { unregisterOfficialChatActor(); officialChatActorRegistered = false; } catch { /* keep its resource mapping below */ }
+    }
+    if (!officialChatActorRegistered && officialChatResourceInstalled) {
+      try { removeOfficialChatResource(); officialChatResourceInstalled = false; } catch { /* retained for a shutdown retry */ }
+    }
+    if (katexResourceInstalled) {
+      try { removeKatexResource(); katexResourceInstalled = false; } catch { /* retained for a shutdown retry */ }
+    }
+    active = false;
+    if (notifierID) Zotero.Notifier.unregisterObserver(notifierID); notifierID = undefined;
+    preferencePanes?.remove(); preferencePanes = undefined;
+    if (paneID) Zotero.ItemPaneManager.unregisterSection(paneID); paneID = '';
+    const bridge = preferencesBridge();
+    try { delete bridge.ZoteroChatGPTPreferencesHost; delete bridge.ZoteroChatGPTPreferencesPane; } catch { /* startup is already failing */ }
+    documentCache?.clear(); documentCache = undefined; localServices = undefined; agent = undefined; context = undefined;
+    throw error;
+  }
 }
 export function onMainWindowLoad(window: Window): void {
   const win = window as ZoteroWindow;
@@ -413,7 +534,7 @@ export function onMainWindowLoad(window: Window): void {
   const css = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
   css.setAttribute('rel', 'stylesheet'); css.setAttribute('href', `${context.rootURI}content/assets/sidebar.css`);
   const katex = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
-  katex.setAttribute('rel', 'stylesheet'); katex.setAttribute('href', `${context.rootURI}content/assets/katex/katex.min.css`);
+  katex.setAttribute('rel', 'stylesheet'); katex.setAttribute('href', KATEX_STYLESHEET);
   const locale = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
   // Zotero registers plugin locale files by resource basename, not absolute URI.
   locale.setAttribute('rel', 'localization'); locale.setAttribute('href', 'zchatgpt.ftl');
@@ -446,7 +567,7 @@ export function onMainWindowUnload(window: Window): void {
   const win = window as ZoteroWindow;
   // The window is going away, so its Chat surface goes with it: the document cannot outlive the
   // window it was created in.
-  chatSurfaces.get(win)?.destroy(); chatSurfaces.delete(win);
+  for (const surface of chatSurfaces.get(win)?.values() ?? []) surface.destroy(); chatSurfaces.delete(win);
   for (const [reader, current] of readers) {
     if (reader._window !== win) continue;
     for (const button of current.buttons) button.remove();
@@ -457,8 +578,21 @@ export function onMainWindowUnload(window: Window): void {
 export async function shutdown(): Promise<void> {
   active = false;
   for (const win of windows.keys()) onMainWindowUnload(win);
-  for (const surface of chatSurfaces.values()) surface.destroy();
+  for (const surfaces of chatSurfaces.values()) for (const surface of surfaces.values()) surface.destroy();
   chatSurfaces.clear();
+  if (officialChatActorRegistered) {
+    try { unregisterOfficialChatActor(); officialChatActorRegistered = false; } catch (error) { Zotero.logError(error); }
+    // A live actor must never point at a removed substitution. If unregister failed, retain both so a
+    // deliberate shutdown retry can finish the pair safely.
+  }
+  if (!officialChatActorRegistered && officialChatResourceInstalled) {
+    try { removeOfficialChatResource(); officialChatResourceInstalled = false; }
+    catch (error) { Zotero.logError(error); }
+  }
+  if (katexResourceInstalled) {
+    try { removeKatexResource(); katexResourceInstalled = false; }
+    catch (error) { Zotero.logError(error); }
+  }
   for (const current of readers.values()) { for (const button of current.buttons) button.remove(); current.pane.dispose(); current.bar.dispose(); }
   readers.clear();
   preferencePanes?.remove(); preferencePanes = undefined;

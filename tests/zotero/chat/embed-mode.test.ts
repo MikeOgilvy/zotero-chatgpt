@@ -133,6 +133,35 @@ it('offers both context copy controls and says the text is on the clipboard, not
   expect(statusOf(root).textContent).toBe('Copied the selection from page i — paste into ChatGPT.');
 });
 
+it('discloses automatic current-PDF context before the first official-page submission', () => {
+  const { root, presenter } = mount('chat');
+  presenter.snapshot().document.disclosure = true;
+  presenter.snapshot().document.enabled = true;
+  const acknowledge = vi.spyOn(presenter, 'acknowledgeContext');
+  presenter.setMode('chat');
+  const notice = root.querySelector<HTMLElement>('[data-zchatgpt-embed-context-notice]')!;
+  const consent = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="continue-with-pdf"]')!;
+  expect(notice.textContent).toContain('official ChatGPT');
+  expect(notice.textContent).toContain('current PDF');
+  expect(notice.textContent).toContain('Preferences');
+  expect(consent.hidden).toBe(false);
+  consent.click();
+  expect(acknowledge).toHaveBeenCalledTimes(1);
+});
+
+it('states whether automatic PDF context is on without claiming a message was accepted', () => {
+  const { root, presenter } = mount('chat');
+  const notice = root.querySelector<HTMLElement>('[data-zchatgpt-embed-context-notice]')!;
+  presenter.snapshot().document.disclosure = false;
+  presenter.snapshot().document.enabled = true;
+  presenter.setMode('chat');
+  expect(notice.textContent).toBe('Current PDF context will be added when you send in ChatGPT.');
+  expect(notice.textContent).not.toMatch(/sent|attached/u);
+  presenter.snapshot().document.enabled = false;
+  presenter.setMode('chat');
+  expect(notice.textContent).toBe('Automatic PDF context is off. You can turn it on in Zotero Preferences.');
+});
+
 it('hands the real PDF file to the clipboard for the application\'s own paste-to-attach path', async () => {
   const { root, embed } = mount('chat');
   root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!.click();

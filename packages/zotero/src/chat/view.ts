@@ -173,6 +173,9 @@ const COPY = {
   embedContextEmpty: 'No text was read from this PDF, so there is nothing to copy.',
   embedContextFailed: 'The paper context could not be prepared.',
   embedSelectionMissing: 'Select text in the PDF first, then copy it here.',
+  embedAutomaticDisclosure: 'When you send in official ChatGPT, locally extracted text from the current PDF and the current Zotero selection are added to that message. Nothing is sent when you open the sidebar. You can turn this off in Zotero Preferences.',
+  embedAutomaticOn: 'Current PDF context will be added when you send in ChatGPT.',
+  embedAutomaticOff: 'Automatic PDF context is off. You can turn it on in Zotero Preferences.',
   /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
   sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
   continueWithPdf: 'Continue with current PDF',
@@ -687,11 +690,20 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const embedSlot = embedSection ? el('div', 'zchatgpt-embed-slot') : null;
   /** The bar's own one-line answer to the last action; it replaces the previous answer each time. */
   const embedStatus = embedSection ? el('span', 'zchatgpt-embed-status') : null;
-  if (embedSection && embedBar && embedSlot && embedStatus) {
+  /** Actor/readiness/submission lifecycle; clipboard controls use `embedStatus` independently. */
+  const embedBridgeStatus = embedSection ? el('span', 'zchatgpt-embed-status zchatgpt-embed-bridge-status') : null;
+  const embedContextNotice = embedSection ? el('p', 'zchatgpt-embed-context-notice') : null;
+  const embedConsent = embedSection ? button(COPY.continueWithPdf, 'continue-with-pdf', () => presenter.acknowledgeContext()) : null;
+  if (embedSection && embedBar && embedSlot && embedStatus && embedBridgeStatus && embedContextNotice && embedConsent) {
     embedSection.dataset.zchatgptEmbed = '';
     embedBar.dataset.zchatgptEmbedBar = '';
     embedSlot.dataset.zchatgptEmbedSlot = '';
     embedStatus.dataset.zchatgptEmbedStatus = '';
+    embedBridgeStatus.dataset.zchatgptBridgeStatusLine = '';
+    embedBridgeStatus.hidden = true;
+    embedContextNotice.dataset.zchatgptEmbedContextNotice = '';
+    embedContextNotice.setAttribute('data-zchatgpt-ui', 'true');
+    embedConsent.dataset.zchatgptAction = 'continue-with-pdf';
     embedStatus.hidden = true;
     /**
      * The one thing this host knows that the web application does not is which PDF the reader has
@@ -732,9 +744,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       // as a file and the owner pastes it into ChatGPT's own composer, whose own upload path runs.
       action(COPY.embedAttachPdf, 'copy-pdf-file', () => hooks.chatEmbed?.copyPdfFile?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
       action(COPY.embedCopySelection, 'copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
-      button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'clock'),
+      button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'reload'),
     );
-    embedBar.append(embedActions, embedStatus);
+    embedBar.append(embedActions, embedContextNotice, embedConsent, embedBridgeStatus, embedStatus);
     embedSection.append(embedBar, embedSlot);
     root.append(embedSection);
   }
@@ -1614,6 +1626,12 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       chat.hidden = embedActive;
       if (embedActive) {
         if (modeSwitch.parentElement !== embedBar) embedBar.append(modeSwitch);
+        if (embedContextNotice && embedConsent) {
+          const disclosure = state.document.enabled && state.document.disclosure;
+          embedContextNotice.textContent = disclosure ? COPY.embedAutomaticDisclosure
+            : state.document.enabled ? COPY.embedAutomaticOn : COPY.embedAutomaticOff;
+          embedConsent.hidden = !disclosure;
+        }
         hooks.chatEmbed.show(embedSlot);
       } else {
         if (modeSwitch.parentElement !== leading) leading.append(modeSwitch);

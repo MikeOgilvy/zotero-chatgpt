@@ -21,13 +21,22 @@ async function runHostSmoke(config) {
     return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}zchatgpt_run=${nonce}`;
   })();
   const expectedTitle = `ZCHATGPT-RUN-${nonce}`;
+  const safeWebURL = value => {
+    try {
+      const parsed = new URL(String(value || ''));
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return `${parsed.origin}${parsed.pathname}`.slice(0, 320);
+      if (parsed.protocol === 'about:' && parsed.pathname === 'blank') return 'about:blank';
+      return `scheme:${parsed.protocol.replace(/:$/u, '').slice(0, 24) || 'unknown'}`;
+    } catch { return null; }
+  };
+  const safeReportedText = value => String(value || '').replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/giu, candidate => safeWebURL(candidate) ?? '[url-omitted]');
   const probeTimeoutMs = config.probeTimeoutMs || 25000;
   const targetHost = (() => { try { return new URL(url).hostname; } catch { return 'chatgpt.com'; } })();
   const report = {
     startedAt: new Date().toISOString(),
     stage: 'embed',
     status: 'running',
-    target: url,
+    target: safeWebURL(url),
     probeTimeoutMs,
     experiments: [],
     checks: [],
@@ -39,12 +48,12 @@ async function runHostSmoke(config) {
       'file-upload',
       'restart-persistence',
     ],
-    build: { version: config.subjectVersion, sha256: config.artifactHash },
+    build: { version: config.subjectVersion, sha256: config.artifactHash, driverSourceHash: config.driverSourceHash ?? null },
     note: 'Surface probe. Login, sending, upload and model selection need a human and are recorded as not-run, never as a pass.',
   };
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const save = () => Zotero.File.putContentsAsync(config.reportPath, JSON.stringify(report, null, 2));
-  const message = error => String((error && error.message) || error);
+  const message = error => safeReportedText((error && error.message) || error);
   const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
   const systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
   let step = 'startup';
@@ -55,12 +64,36 @@ async function runHostSmoke(config) {
   };
   const check = async (name, ok, details = {}) => { step = name; report.checks.push({ name, ok: Boolean(ok), details }); await save(); if (!ok) throw new Error(`Check failed: ${name}`); };
 
-  // Every console message while the probe runs, unfiltered and capped. This is how a refused frame
-  // load, a CSP violation, a security-manager refusal or a Cloudflare challenge becomes evidence
-  // rather than a guess.
+  // Remote console prose may contain page or account data. Keep only allowlisted error classes and
+  // HTTP(S) origin/path with query and fragment discarded; never retain arbitrary message text.
   const consoleMessages = [];
+  /**
+   * A second, never-drained copy for the opt-in diagnostic window. It is what lets a human
+   * reproduction — a sign-in attempt, for instance — leave evidence behind: the page's own errors and
+   * warnings, in order, with the watchdog terminations counted separately because those are the
+   * difference between a page that is slow and a page whose script Gecko has already destroyed.
+   */
+  const diagnosticConsole = [];
   let consoleListener = null;
+  let productNetwork = null;
   const consoleZero = Date.now();
+  const consoleClass = text => {
+    if (/Script terminated by timeout|Script unresponsive|ScopeDisposedError|has been disposed/iu.test(text)) return 'script-timeout';
+    if (/cloudflare|challenge|turnstile|captcha|verify you are human|just a moment/iu.test(text)) return 'challenge';
+    if (/Content-Security-Policy|\bCSP\b|blocked.*(?:script|frame|resource)/iu.test(text)) return 'csp';
+    if (/security manager|permission denied|denied to access|unsafe|principal/iu.test(text)) return 'security';
+    if (/module|import|resource:\/\/|trusted scheme/iu.test(text)) return 'module-load';
+    if (/failed to load|network|NS_ERROR|connection|request/iu.test(text)) return 'network-load';
+    if (/Feature Policy: Skipping unsupported feature name|Missing resource in locale|InstallTrigger is deprecated|Layout was forced before the page was fully loaded/iu.test(text)) return 'noise';
+    return 'other';
+  };
+  const consoleSource = value => {
+    try {
+      const url = new URL(String(value || ''));
+      if (!['http:', 'https:'].includes(url.protocol)) return { scheme: url.protocol.slice(0, 24), origin: null, path: null };
+      return { scheme: url.protocol, origin: url.origin.slice(0, 160), path: url.pathname.slice(0, 160) };
+    } catch { return { scheme: null, origin: null, path: null }; }
+  };
   const startConsole = () => {
     try {
       consoleListener = {
@@ -69,14 +102,81 @@ async function runHostSmoke(config) {
             if (consoleMessages.length >= 500) return;
             const text = String((entry && (entry.message || entry.errorMessage)) || '');
             const source = String((entry && entry.sourceName) || '');
-            consoleMessages.push({ ms: Date.now() - consoleZero, source: source.slice(0, 200), text: text.slice(0, 400) });
+            const recordEntry = { ms: Date.now() - consoleZero, class: consoleClass(text), ...consoleSource(source) };
+            consoleMessages.push(recordEntry);
+            if (diagnosticConsole.length < 600) diagnosticConsole.push(recordEntry);
           } catch { /* console observers must never throw */ }
         },
       };
       Services.console.registerListener(consoleListener);
-    } catch (error) { report.consoleCaptureError = message(error); }
+    } catch (error) { report.consoleCaptureError = consoleClass(message(error)); }
   };
   const takeConsole = () => consoleMessages.splice(0, consoleMessages.length);
+  /**
+   * The same console with the two floods removed — Gecko's own Feature Policy notes from a challenge
+   * iframe and its locale warnings arrive in the hundreds and bury the handful of lines that are the
+   * page's own voice. This is the list to read when the question is "what did the application say".
+   */
+  const diagnosticNotable = () => diagnosticConsole.filter(entry => !['noise', 'other'].includes(entry.class)).slice(-120);
+  const safeConsole = entries => entries.map(entry => ({ ms: entry.ms, class: entry.class, scheme: entry.scheme, origin: entry.origin, path: entry.path }));
+  const consoleClassCounts = () => diagnosticConsole.reduce((counts, entry) => ({ ...counts, [entry.class]: (counts[entry.class] ?? 0) + 1 }), {});
+  /** Hostnames whose traffic explains a sign-in round trip; everything else is counted, not listed. */
+  const WATCHED_HOSTS = /(^|\.)(chatgpt\.com|openai\.com|oaistatic\.com|oaiusercontent\.com|apple\.com|icloud\.com|cloudflare\.com|google\.com|gstatic\.com)$/i;
+
+  /**
+   * Network activity of the hosted surface, observed from chrome. Only the shape of each exchange is
+   * recorded — host, a truncated path, the response status and whether the request was cancelled —
+   * never a header, query string, body or cookie, so a password typed into the page cannot end up in
+   * this report.
+   */
+  const startNetworkWatch = () => {
+    const state = { responses: [], stops: [], hosts: {}, otherHosts: 0 };
+    const note = (channel, kind) => {
+      try {
+        const uri = channel.URI;
+        const host = String(uri.host || '');
+        if (!WATCHED_HOSTS.test(host)) { state.otherHosts += 1; return; }
+        state.hosts[host] = (state.hosts[host] || 0) + 1;
+        const recordEntry = {
+          ms: Date.now() - consoleZero,
+          kind,
+          host,
+          path: String(uri.pathQueryRef || '').split('?')[0].slice(0, 120),
+          status: (() => { try { return channel.responseStatus; } catch { return null; } })(),
+          statusText: (() => { try { return String(channel.responseStatusText || '').slice(0, 40); } catch { return null; } })(),
+          canceled: (() => { try { return Boolean(channel.isCanceled); } catch { return null; } })(),
+          errorCode: (() => { try { const status = channel.status; return status === 0 || status === undefined ? null : `0x${(status >>> 0).toString(16)}`; } catch { return null; } })(),
+          contentLength: (() => { try { return channel.contentLength; } catch { return null; } })(),
+          fromCache: kind === 'cached',
+        };
+        const bucket = kind === 'stop' ? state.stops : state.responses;
+        if (bucket.length < 400) bucket.push(recordEntry);
+      } catch { /* observation must never disturb the request it observes */ }
+    };
+    const observer = {
+      observe(subject, topic) {
+        try {
+          if (topic === 'http-on-stop-request') return note(subject.QueryInterface(Ci.nsIHttpChannel), 'stop');
+          return note(subject.QueryInterface(Ci.nsIHttpChannel), topic === 'http-on-examine-response' ? 'response' : 'cached');
+        } catch { /* a channel that is not an HTTP channel is not ours */ }
+      },
+    };
+    try {
+      for (const topic of ['http-on-examine-response', 'http-on-examine-cached-response', 'http-on-examine-merged-response', 'http-on-stop-request']) Services.obs.addObserver(observer, topic);
+    } catch (error) { state.registerError = message(error); }
+    return {
+      state,
+      stop() { try { for (const topic of ['http-on-examine-response', 'http-on-examine-cached-response', 'http-on-examine-merged-response', 'http-on-stop-request']) Services.obs.removeObserver(observer, topic); } catch { /* already gone */ } },
+    };
+  };
+  /** The preferences that decide whether Gecko kills a long page script or lets a popup through. */
+  const relevantPrefs = () => {
+    const names = ['dom.max_script_run_time', 'dom.max_child_script_run_time', 'dom.max_chrome_script_run_time', 'dom.disable_open_during_load', 'privacy.cookieBehavior', 'network.cookie.cookieBehavior', 'dom.timeout.enable_budget_timer_throttling', 'dom.min_background_timeout_value'];
+    const out = {};
+    for (const name of names) { try { out[name] = Services.prefs.getPrefType(name) === 0 ? null : Services.prefs.getIntPref(name); } catch { out[name] = null; } }
+    return out;
+  };
+  const scriptTerminations = () => diagnosticConsole.filter(entry => entry.class === 'script-timeout').length;
 
   const cookieCount = (host) => {
     try { return Services.cookies.countCookiesFromHost(host); } catch (error) { return `error:${message(error)}`; }
@@ -101,13 +201,13 @@ async function runHostSmoke(config) {
     if (!doc) {
       // A cross-origin iframe hides its document; a content browser created by chrome code does not.
       // Recording which one happened is the point of the comparison.
-      try { out.contentWindowLocation = String(element.contentWindow && element.contentWindow.location.href); }
+      try { out.contentWindowLocation = safeWebURL(element.contentWindow && element.contentWindow.location.href); }
       catch (error) { out.contentWindowError = message(error); }
       return out;
     }
     try { out.readyState = String(doc.readyState || ''); } catch (error) { out.readyStateError = message(error); }
     try { out.title = String(doc.title || '').slice(0, 120); } catch (error) { out.titleError = message(error); }
-    try { out.location = String((doc.location && doc.location.href) || '').slice(0, 200); } catch (error) { out.locationError = message(error); }
+    try { out.location = safeWebURL((doc.location && doc.location.href) || ''); } catch (error) { out.locationError = message(error); }
     try { out.documentElementTag = String((doc.documentElement && doc.documentElement.tagName) || ''); } catch { /* best effort */ }
     try { out.elementCount = doc.getElementsByTagName('*').length; } catch { /* best effort */ }
     try { out.htmlLength = String((doc.documentElement && doc.documentElement.innerHTML) || '').length; } catch { /* best effort */ }
@@ -157,7 +257,7 @@ async function runHostSmoke(config) {
     out.element.hasLoadURI = typeof element.loadURI;
     out.element.hasWebProgress = typeof element.webProgress;
     if (kind.startsWith('xul')) {
-      try { out.currentURI = element.currentURI ? String(element.currentURI.spec).slice(0, 200) : null; } catch (error) { out.currentURIError = message(error); }
+      try { out.currentURI = element.currentURI ? safeWebURL(element.currentURI.spec) : null; } catch (error) { out.currentURIError = message(error); }
       try { out.contentTitle = element.contentTitle ? String(element.contentTitle).slice(0, 120) : null; } catch (error) { out.contentTitleError = message(error); }
       try { out.isLoadingDocument = element.webProgress ? Boolean(element.webProgress.isLoadingDocument) : null; } catch { /* best effort */ }
       // An inactive docshell never starts a queued navigation, so this is the difference between a
@@ -170,9 +270,9 @@ async function runHostSmoke(config) {
       try {
         const context = element.browsingContext;
         out.browsingContext = context ? {
-          currentURI: context.currentURI ? String(context.currentURI.spec).slice(0, 200) : null,
+          currentURI: context.currentURI ? safeWebURL(context.currentURI.spec) : null,
           osPid: context.currentWindowGlobal ? context.currentWindowGlobal.osPid : null,
-          documentURI: context.currentWindowGlobal && context.currentWindowGlobal.documentURI ? String(context.currentWindowGlobal.documentURI.spec).slice(0, 200) : null,
+          documentURI: context.currentWindowGlobal && context.currentWindowGlobal.documentURI ? safeWebURL(context.currentWindowGlobal.documentURI.spec) : null,
           isContent: Boolean(context.isContent),
         } : null;
       } catch (error) { out.browsingContextError = message(error); }
@@ -185,7 +285,7 @@ async function runHostSmoke(config) {
   // an HTML document; anything created in the main window is inside a XUL document.
   const describeDocument = (doc) => {
     const out = {};
-    try { out.location = String((doc.location && doc.location.href) || '').slice(0, 200); } catch (error) { out.locationError = message(error); }
+    try { out.location = safeWebURL((doc.location && doc.location.href) || ''); } catch (error) { out.locationError = message(error); }
     try { out.contentType = String(doc.contentType || ''); } catch { /* best effort */ }
     try { out.createXULElement = typeof doc.createXULElement; } catch { out.createXULElement = 'error'; }
     try { out.existingIframes = Array.from(doc.querySelectorAll('iframe')).map(frame => ({ src: String(frame.getAttribute('src') || '').slice(0, 120), inDocument: frame.isConnected })); } catch { /* best effort */ }
@@ -230,9 +330,7 @@ async function runHostSmoke(config) {
     if (fallbackUsed) entry.fallbackUsed = fallbackUsed;
     entry.console = takeConsole();
     entry.cookiesAfter = { [targetHost]: cookieCount(targetHost) };
-    entry.challengeMarkers = entry.console
-      .filter(({ text }) => /cloudflare|challenge|turnstile|just a moment|captcha|verify you are human/i.test(text))
-      .slice(0, 10);
+    entry.challengeMarkers = entry.console.filter(item => item.class === 'challenge').slice(0, 10);
     entry.fixtureCookieFromThisRun = fixtureCookieMatches();
     entry.scriptRanThisLoad = titleProvesScript(entry);
     entry.verdict = (() => {
@@ -254,7 +352,7 @@ async function runHostSmoke(config) {
     // Written before the probe runs, so a host that loses the process mid-probe still leaves the name
     // of the step it died in rather than a report that simply stops.
     report.step = step; await save();
-    const entry = { id, kind, host, url: probeUrl, note, startedAt: new Date().toISOString(), document: describeDocument(doc) };
+    const entry = { id, kind, host, url: safeWebURL(probeUrl), note, startedAt: new Date().toISOString(), document: describeDocument(doc) };
     if (probeUrl === url || /^https?:/u.test(probeUrl)) entry.cookiesBefore = { [targetHost]: cookieCount(targetHost) };
     let element = null;
     let container = null;
@@ -336,7 +434,7 @@ async function runHostSmoke(config) {
         entry.loadURIUsed = true;
         try { navigate(); } catch (error) { entry.loadURIError = message(error); }
         await delay(3000);
-        entry.beforeAdoptionURI = String(element.currentURI?.spec || '');
+        entry.beforeAdoptionURI = safeWebURL(element.currentURI?.spec || '');
         entry.beforeAdoptionTitle = String(element.contentTitle || '');
         try {
           adopter: {
@@ -346,7 +444,7 @@ async function runHostSmoke(config) {
             entry.adoptedInto = 'reader #split-view';
           }
         } catch (error) { entry.adoptionError = message(error); }
-        entry.afterAdoptionURI = String(element.currentURI?.spec || '');
+        entry.afterAdoptionURI = safeWebURL(element.currentURI?.spec || '');
       }
     } catch (error) {
       entry.creationError = message(error);
@@ -373,13 +471,79 @@ async function runHostSmoke(config) {
     return finished;
   };
 
+  /**
+   * What a page inside our surface can actually do, and whether hiding the surface changes it.
+   *
+   * The product loads the application while its box is parked off-screen so the session survives a
+   * mode switch. Whether Gecko treats that box as a hidden document — frames stopped, timers cut to
+   * one second — decides whether the application can finish starting at all, which is the difference
+   * between "the page is slow" and "the page is standing still". The same page is therefore loaded
+   * twice, once parked and once painted, and then the parked one is shown to see whether it recovers.
+   */
+  const runCapabilityProbe = async (probeUrl, win) => {
+    const placements = ['parked', 'painted'];
+    const results = [];
+    for (const placement of placements) {
+      const born = Date.now();
+      const entry = { placement, url: safeWebURL(probeUrl), samples: [], errors: [] };
+      let container = null;
+      let browser = null;
+      try {
+        browser = win.document.createXULElement('browser');
+        for (const [name, value] of [
+          ['type', 'content'], ['remote', 'false'], ['disableglobalhistory', 'true'],
+          ['maychangeremoteness', 'true'], ['messagemanagergroup', 'zchatgpt'], ['class', 'zchatgpt-embed-probe-browser'],
+        ]) browser.setAttribute(name, value);
+        browser.setAttribute('data-zchatgpt-embed-probe', `caps-${placement}`);
+        browser.style.cssText = 'display:block;width:100%;height:100%;border:0;';
+        container = win.document.createElement('div');
+        container.setAttribute('data-zchatgpt-embed-probe', `caps-${placement}`);
+        container.style.cssText = placement === 'parked'
+          ? 'position:fixed;left:-20000px;top:0px;width:480px;height:720px;overflow:hidden;border:0;margin:0;padding:0;background:#fff;'
+          : 'position:fixed;left:40px;top:80px;width:480px;height:720px;overflow:hidden;border:0;margin:0;padding:0;z-index:2147483000;background:#fff;';
+        browser.setAttribute('src', probeUrl);
+        container.appendChild(browser);
+        (win.document.body || win.document.documentElement).appendChild(container);
+
+        const readTitle = () => { try { return String(browser.contentTitle || ''); } catch (error) { entry.errors.push(message(error)); return ''; } };
+        const decode = value => value.replace(/^ZCAPS\s*/u, '');
+        let last = null;
+        const deadline = Date.now() + 12000;
+        while (Date.now() < deadline) {
+          await delay(500);
+          const title = decode(readTitle());
+          if (title && title !== last) { last = title; entry.samples.push({ ms: Date.now() - born, report: title.slice(0, 500) }); }
+          if (/slowImage/u.test(title)) break;
+        }
+        if (placement === 'parked') {
+          // Showing the parked box is the whole question: does the page notice, resume frames and
+          // finish the work it could not do while it was out of the viewport?
+          container.style.left = '40px';
+          container.style.top = '80px';
+          container.style.zIndex = '2147483000';
+          const shownAt = Date.now();
+          await delay(3000);
+          entry.afterShowing = { waitedMs: Date.now() - shownAt, report: decode(readTitle()).slice(0, 500) };
+        }
+        entry.final = decode(readTitle()).slice(0, 500);
+      } catch (error) {
+        entry.errors.push(message(error));
+      } finally {
+        try { container?.remove(); } catch { /* already gone */ }
+      }
+      results.push(entry);
+      await save();
+    }
+    return results;
+  };
+
   // Zotero's own supported remote-page surface: a XUL window whose <browser> loads any URI, used by
   // OAuth sign-in and by BrowserRequest challenges. Measured here as the baseline the sidebar would
   // have to match.
   const runViewerProbe = async (probeUrl) => {
     step = 'probe-viewer-window';
     report.step = step; await save();
-    const entry = { id: `viewer-window`, kind: 'zotero-openInViewer', host: 'zotero-viewer', url: probeUrl, note: 'Zotero.openInViewer()', startedAt: new Date().toISOString() };
+    const entry = { id: `viewer-window`, kind: 'zotero-openInViewer', host: 'zotero-viewer', url: safeWebURL(probeUrl), note: 'Zotero.openInViewer()', startedAt: new Date().toISOString() };
     const born = Date.now();
     let viewer = null;
     try {
@@ -418,8 +582,7 @@ async function runHostSmoke(config) {
 
   try {
     await Zotero.initializationPromise;
-    startConsole();
-    await check('isolated-embed-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/embed/profile') && Zotero.DataDirectory.dir === config.dataDir, { profile: PathUtils.profileDir });
+    startConsole();    await check('isolated-embed-profile', PathUtils.profileDir === config.profile && String(config.profile).endsWith('/.zotero-chatgpt-dev/embed/profile') && Zotero.DataDirectory.dir === config.dataDir, { profile: PathUtils.profileDir });
     // Cookies already on disk when this process starts prove the jar survives a Zotero restart; that
     // is the same mechanism an authenticated ChatGPT session would depend on. Counts only.
     report.persistence = { cookiesAtStartup: { [targetHost]: cookieCount(targetHost) } };
@@ -458,7 +621,7 @@ async function runHostSmoke(config) {
     const readerDoc = () => reader()?._iframeWindow?.document;
     const doc = await until(() => readerDoc(), 'reader-document');
     report.reader = {
-      documentURL: String((doc.location && doc.location.href) || '').slice(0, 200),
+      documentURL: safeWebURL((doc.location && doc.location.href) || ''),
       hasSplitView: Boolean(doc.getElementById('split-view')),
       document: describeDocument(doc),
       readerBrowser: (() => {
@@ -471,6 +634,16 @@ async function runHostSmoke(config) {
       })(),
     };
     await check('reader-document-is-the-sidebar-host', Boolean(doc.getElementById('split-view')), report.reader);
+
+    // Before anything else in this run touches the window: what a page inside the product's exact
+    // surface shape can do, parked versus painted. This is the run's cheapest and most load-bearing
+    // measurement, so it happens first and is saved as soon as it finishes.
+    if (config.capabilityProbe) {
+      step = 'capability-probe';
+      report.step = step; await save();
+      report.capability = await runCapabilityProbe(config.url, win);
+      await save();
+    }
 
     // The launched window can report a size while nothing under its tab bar has been laid out yet —
     // the whole chain from `#browser` down measures zero, including the reader pane the sidebar lives
@@ -499,7 +672,17 @@ async function runHostSmoke(config) {
     // shows is the real application, in a chrome browser, kept across mode switches.
     const product = { notRun: ['interactive-login', 'conversation-send', 'streaming-render', 'model-selection', 'file-upload'] };
     report.product = product;
-    const embedBrowser = () => win.document.querySelector('[data-zchatgpt-embed-browser]');
+    productNetwork = startNetworkWatch();
+    const embedBrowser = () => {
+      const surfaces = [...win.document.querySelectorAll('[data-zchatgpt-embed-browser]')];
+      const itemID = reader()?.itemID;
+      const bound = itemID === undefined ? [] : surfaces.filter(node => String(node.getAttribute('data-zchatgpt-context-binding') || '').endsWith(`:${itemID}`));
+      const paintedBound = bound.filter(node => Boolean(node.getAttribute('data-zchatgpt-embed-painted')));
+      if (paintedBound.length === 1) return paintedBound[0];
+      if (bound.length === 1) return bound[0];
+      const paintedSurface = surfaces.filter(node => Boolean(node.getAttribute('data-zchatgpt-embed-painted')));
+      return paintedSurface.length === 1 ? paintedSurface[0] : null;
+    };
     const painted = () => { const node = embedBrowser(); return node ? String(node.getAttribute('data-zchatgpt-embed-painted') || '') : null; };
 
     const toggle = await until(() => doc.querySelector('[data-zchatgpt-toggle]'), 'product-toolbar-button');
@@ -561,6 +744,23 @@ async function runHostSmoke(config) {
     await save();
 
     const surfaceBrowser = await until(() => embedBrowser(), 'product-embed-browser', 30000);
+    // A new-window request from the hosted page is how an OAuth sign-in usually leaves the document.
+    // Whether a browsing context came with it is the difference between a visible sign-in page and a
+    // request that goes nowhere the owner can see, so both are recorded.
+    const popupAttempts = [];
+    try {
+      surfaceBrowser.addEventListener('DOMWindowOpen', event => {
+        try {
+          const detail = event.detail || {};
+          popupAttempts.push({
+            ms: Date.now() - consoleZero,
+            url: safeWebURL(detail.url || ''),
+            hasBrowsingContext: Boolean(detail.browsingContext),
+            hasWindow: Boolean(event.target && event.target !== surfaceBrowser),
+          });
+        } catch { /* observation only */ }
+      });
+    } catch (error) { product.popupListenerError = message(error); }
     // A silent surface has several possible causes — no layout yet, a hidden dock, an inactive
     // docshell, a refused navigation — and they are told apart by what changes over time, so the
     // samples are recorded rather than reduced to one final reading.
@@ -568,15 +768,19 @@ async function runHostSmoke(config) {
       const browser = embedBrowser();
       if (!browser) return { missing: true, surfaces: win.document.querySelectorAll('[data-zchatgpt-embed-browser]').length };
       const probe = value => { try { return typeof value === 'function' ? value() : value; } catch (error) { return message(error); } };
+      const pointer = value => ['', 'auto', 'none'].includes(String(value ?? '')) ? String(value ?? '') : 'other';
+      const centerHitOwnedBrowser = probe(() => { const rect = browser.getBoundingClientRect(); if (rect.width < 1 || rect.height < 1) return false; const hit = win.document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2); return hit === browser || browser.contains?.(hit) === true; });
       return {
         state: String(browser.getAttribute('data-zchatgpt-embed-state') || ''),
         painted: painted(),
-        currentURI: probe(() => String(browser.currentURI?.spec || '').slice(0, 200)),
+        currentURI: probe(() => safeWebURL(browser.currentURI?.spec || '')),
         isLoadingDocument: probe(() => Boolean(browser.webProgress?.isLoadingDocument)),
         docShellIsActive: probe(() => (browser.docShell ? Boolean(browser.docShell.isActive) : null)),
         contentPid: probe(() => browser.browsingContext?.currentWindowGlobal?.osPid ?? null),
         title: probe(() => String(browser.contentTitle ?? '').slice(0, 80)),
         parent: String(browser.parentElement?.localName || ''),
+        pointerEvents: { inline: pointer(browser.style.pointerEvents), computed: pointer(win.getComputedStyle(browser).pointerEvents) },
+        centerHitOwnedBrowser,
         rect: rectOfNode(browser),
         containerStyle: String(browser.parentElement?.getAttribute('style') || '').slice(0, 200),
         slotRect: rectOfNode(slot),
@@ -625,7 +829,183 @@ async function runHostSmoke(config) {
     // The product always loads the application this plugin hosts; `--url` only redirects the
     // experiments above, so this check names the application origin rather than the probe URL.
     await check('product-chat-browser-loads-the-application', String(surfaceURI).startsWith('https://chatgpt.com/'),
-      { currentURI: String(surfaceURI || '').slice(0, 200), expected: 'https://chatgpt.com/', paintWait: product.paintWait });
+      { currentURI: safeWebURL(surfaceURI), expected: 'https://chatgpt.com/', paintWait: product.paintWait });
+    // Product actor proof: ask the actor bound to this exact WindowGlobal whether it can see the one
+    // named official composer. The reply is an enum only — no document text, form value, account data
+    // or credential crosses into this report — and the query never clicks or sends a model request.
+    report.step = 'product-official-chat-actor-probe';
+    await save();
+    product.actorProbe = await (async () => {
+      const out = {
+        actor: 'ZoteroChatGPTOfficialChat',
+        currentURI: safeWebURL(surfaceBrowser.currentURI?.spec || ''),
+        contentPid: surfaceBrowser.browsingContext?.currentWindowGlobal?.osPid ?? null,
+        status: null,
+        elapsedMs: null,
+        error: null,
+        timeline: [],
+      };
+      product.actorProbe = out;
+      const started = Date.now();
+      const deadline = started + 30000;
+      while (Date.now() < deadline) {
+        try {
+          const browser = embedBrowser();
+          const global = browser?.browsingContext?.currentWindowGlobal;
+          if (!global) throw new Error('The hosted page has no current WindowGlobal.');
+          let timer = null;
+          const result = await Promise.race([
+            global.getActor('ZoteroChatGPTOfficialChat').sendQuery('probe'),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Official Chat actor probe query timed out.')), 5000); }),
+          ]).finally(() => { if (timer !== null) clearTimeout(timer); });
+          const status = result && typeof result.status === 'string' ? result.status : 'invalid-response';
+          out.status = status; out.error = null;
+          out.currentURI = safeWebURL(browser.currentURI?.spec || '');
+          out.contentPid = global.osPid ?? null;
+          out.timeline.push({ ms: Date.now() - started, status, currentURI: out.currentURI, contentPid: out.contentPid });
+          if (status === 'ready' || status === 'composer-ready' || status === 'draft') break;
+        } catch (error) {
+          out.error = message(error);
+          out.timeline.push({ ms: Date.now() - started, status: 'error', error: out.error });
+        }
+        out.timeline = out.timeline.slice(-60); await save();
+        await delay(500);
+      }
+      out.timeline = out.timeline.slice(-60);
+      out.elapsedMs = Date.now() - started;
+      return out;
+    })();
+    const productActorReady = ['ready', 'composer-ready', 'draft'].includes(product.actorProbe.status) && product.actorProbe.error === null;
+    const manualWatch = Number(config.watchSeconds || 0) > 0;
+    if (config.webLive) { product.actorProbe.webLiveReadinessGate = productActorReady; await save(); }
+    else if (manualWatch) { product.actorProbe.manualLoginReadiness = productActorReady ? 'available' : 'unavailable'; await save(); }
+    else await check('product-official-chat-actor-reaches-the-composer', productActorReady, product.actorProbe);
+    if (config.webLive) {
+      report.step = 'product-official-chat-web-live';
+      product.webLive = { status: 'checking-readiness', maxModelTurns: 1, modelTurnsStarted: 0, transcriptReturned: false, authDataRead: false, cookieDataRead: false, timeline: [] };
+      const boundedQuery = async (actorName, name, data, timeout = 5000) => {
+        const browser = embedBrowser(); const global = browser?.browsingContext?.currentWindowGlobal;
+        if (!global) throw new Error('The hosted page has no current WindowGlobal.');
+        let timer = null;
+        try {
+          const value = await Promise.race([
+            global.getActor(actorName).sendQuery(name, data),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${actorName} ${name} timed out.`)), timeout); }),
+          ]);
+          return { value, global, browser };
+        } finally { if (timer !== null) clearTimeout(timer); }
+      };
+      const ownCodexProcesses = async () => {
+        const { Subprocess } = ChromeUtils.importESModule('resource://gre/modules/Subprocess.sys.mjs');
+        const child = await Subprocess.call({ command: '/bin/ps', arguments: ['-axo', 'pid=,args='], stderr: 'pipe' });
+        const decoder = new TextDecoder(); let output = '';
+        for (let bytes = await child.stdout.read(); bytes.byteLength !== 0; bytes = await child.stdout.read()) output += decoder.decode(bytes, { stream: true });
+        output += decoder.decode(); await child.wait();
+        return output.split('\n').filter(line => line.includes(`${config.profile}/zotero-chatgpt/`) && line.includes(' app-server')).map(line => line.trim().slice(0, 220));
+      };
+      let before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+      let baseline = before.value;
+      product.webLive.baseline = baseline;
+      let effectiveProductStatus = product.actorProbe.status;
+      if (effectiveProductStatus === 'draft' && baseline?.draftMatchesKnownSyntheticHarness === true) {
+        const cleared = await boundedQuery('ZoteroChatGPTWebAcceptance', 'clearKnownHarnessDraft', {}, 10000);
+        product.webLive.discardedKnownSyntheticDraft = cleared.value?.status === 'cleared' && cleared.value?.discardedKnownSyntheticDraft === true && cleared.value?.empty === true;
+        if (product.webLive.discardedKnownSyntheticDraft) {
+          before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken }); baseline = before.value; product.webLive.baselineAfterDiscard = baseline;
+          const productAfterDiscard = await boundedQuery('ZoteroChatGPTOfficialChat', 'probe', {}, 10000); effectiveProductStatus = productAfterDiscard.value?.status ?? 'invalid-response';
+          product.webLive.productAfterDiscard = { status: effectiveProductStatus };
+        }
+      } else product.webLive.discardedKnownSyntheticDraft = false;
+      const draftSafe = effectiveProductStatus !== 'draft' || baseline?.draftMatchesExactTestQuestion === true;
+      const contextReady = ['ready', 'composer-ready', 'draft'].includes(effectiveProductStatus) && draftSafe && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true;
+      if (!contextReady) {
+        product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (!draftSafe ? 'unrelated-existing-draft' : (baseline?.reason ?? 'official-input-unavailable')) : (product.actorProbe.status ?? 'product-actor-unavailable');
+        product.notRun.push('conversation-send', 'streaming-render'); await save();
+      } else {
+        // A brand-new conversation can expose its composer before the page has finished hydrating, so
+        // require the same ready observation twice before submitting. This is harness timing only:
+        // the product still has to make the send work, and the number of clicks it needed is recorded
+        // as `attempts` in productSubmit below.
+        let stableSamples = 0;
+        await until(async () => {
+          try {
+            const observed = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+            const state = { status: observed?.status ?? null, inputReady: observed?.inputReady === true, canonicalURL: observed?.canonicalURL ?? null, documentReadyState: observed?.documentReadyState ?? null };
+            stableSamples = state.status === 'ok' && state.inputReady ? stableSamples + 1 : 0;
+            product.webLive.preSubmitReadiness = { ...state, stableSamples };
+            return stableSamples >= 2 ? state : null;
+          } catch (error) {
+            const text = message(error);
+            if (/WindowGlobal unavailable|timed out|NS_ERROR_NOT_INITIALIZED|dead object|actor/iu.test(text)) { stableSamples = 0; return null; }
+            throw error;
+          }
+        }, 'stable-official-composer-before-web-live-submit', 30000).catch(() => null);
+        const consent = doc.querySelector('[data-zchatgpt-action="continue-with-pdf"]');
+        if (consent && !consent.hidden) { consent.click(); await until(() => consent.hidden, 'web-live-pdf-disclosure-acknowledged', 30000); product.webLive.pdfDisclosureAcknowledged = true; }
+        else product.webLive.pdfDisclosureAcknowledged = false;
+        const question = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
+        let postStage = baseline;
+        if (!postStage.sendReady) {
+          if (product.actorProbe.status !== 'draft') {
+            product.webLive.status = 'staging-question'; await save();
+            const staged = await boundedQuery('ZoteroChatGPTOfficialChat', 'stage', { text: question }, 10000);
+            product.webLive.productStage = staged.value && typeof staged.value === 'object' ? { status: staged.value.status ?? 'invalid-response', reason: staged.value.reason ?? null } : { status: 'invalid-response', reason: null };
+          } else product.webLive.productStage = { status: 'existing-exact-harness-draft', reason: null };
+          const stageStarted = Date.now();
+          while (Date.now() - stageStarted < 10000) {
+            const observed = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken }); postStage = observed.value;
+            product.webLive.postStage = postStage; await save(); if (postStage?.status === 'ok' && postStage.sendReady === true && postStage.draftMatchesExactTestQuestion === true) break; await delay(250);
+          }
+        }
+        if (postStage?.status !== 'ok' || postStage.sendReady !== true) {
+          product.webLive.status = 'blocked'; product.webLive.blockedStage = 'official-send-readiness-after-stage'; product.webLive.reason = product.webLive.productStage?.reason ?? product.webLive.productStage?.status ?? 'send-unavailable'; await save();
+        } else {
+        const codexBefore = await ownCodexProcesses();
+        const globalBeforeSubmit = before.global;
+        product.webLive.status = 'submitting'; product.webLive.submissionAttempts = 1; product.webLive.confirmedServiceReply = false; await save();
+        const submitted = await boundedQuery('ZoteroChatGPTOfficialChat', 'submitQuestion', { question }, 90000);
+        product.webLive.productSubmit = submitted.value && typeof submitted.value === 'object'
+          ? { status: submitted.value.status ?? 'invalid-response', reason: submitted.value.reason ?? null, attempts: Number.isInteger(submitted.value.attempts) ? submitted.value.attempts : null }
+          : { status: 'invalid-response', reason: null };
+        product.webLive.sameWindowGlobalAtSubmit = submitted.global === globalBeforeSubmit;
+        product.webLive.status = 'observing-submit-outcome'; await save();
+        const started = Date.now(); const deadline = started + 180000; let latest = baseline; let streamingObserved = false;
+        while (Date.now() < deadline) {
+          try {
+            const sample = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+            latest = sample.value;
+            if (latest?.streaming === true) streamingObserved = true;
+            product.webLive.timeline.push({
+              ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true, currentCanonicalURL: latest?.canonicalURL ?? null,
+              inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true,
+              streaming: latest?.streaming === true, userMarkerMessages: Number(latest?.userMarkerMessages ?? 0), assistantMessages: Number(latest?.assistantMessages ?? 0),
+              latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, roleStructure: latest?.roleStructure ?? null,
+            });
+            if (latest?.status === 'ok' && latest.officialURL === true && latest.userMarkerMessages > baseline.userMarkerMessages && latest.assistantMessages > baseline.assistantMessages && latest.latestAssistantContainsToken === true && latest.streaming === false) break;
+          } catch (error) { product.webLive.timeline.push({ ms: Date.now() - started, status: 'query-error', error: message(error).slice(0, 200) }); }
+          product.webLive.timeline = product.webLive.timeline.slice(-120); await save(); await delay(500);
+        }
+        const codexAfter = await ownCodexProcesses(); product.webLive.timeline = product.webLive.timeline.slice(-120);
+        const userMarkerDelta = Number(latest?.userMarkerMessages ?? 0) - Number(baseline.userMarkerMessages ?? 0); const assistantDelta = Number(latest?.assistantMessages ?? 0) - Number(baseline.assistantMessages ?? 0);
+        const confirmedServiceReply = assistantDelta >= 1 && latest?.latestAssistantContainsToken === true && latest?.streaming === false;
+        const confirmedFailure = !confirmedServiceReply && userMarkerDelta === 0 && latest?.draftHasZoteroRequestMarker === true && latest?.streaming === false;
+        if (streamingObserved || assistantDelta >= 1) product.webLive.modelTurnsStarted = 1;
+        if (userMarkerDelta === 1) product.notRun = product.notRun.filter(name => name !== 'conversation-send');
+        if (streamingObserved) product.notRun = product.notRun.filter(name => name !== 'streaming-render');
+        product.webLive.confirmedServiceReply = confirmedServiceReply;
+        product.webLive.result = {
+          officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null, currentCanonicalURL: latest?.canonicalURL ?? null,
+          userMarkerDelta, assistantDelta, latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
+          draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true, roleStructure: latest?.roleStructure ?? null, streamingObserved,
+          codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
+        };
+        const passed = confirmedServiceReply && userMarkerDelta === 1 && product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com' && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0;
+        product.webLive.status = passed ? 'passed' : confirmedFailure ? 'confirmed-failure' : 'unknown';
+        report.checks.push({ name: 'product-web-live-official-answer-uses-random-pdf-token', ok: passed, details: { ...product.webLive.result, productSubmitStatus: product.webLive.productSubmit.status, outcome: product.webLive.status } });
+        await save();
+        }
+      }
+    }
     // Recorded, not asserted: hit testing a chrome document over an out-of-process frame is not a
     // stable contract, so the composited result is what the human step looks at.
     try {
@@ -644,9 +1024,14 @@ async function runHostSmoke(config) {
     click('[data-zchatgpt-action="mode-chat"]');
     await until(() => painted(), 'product-chat-repainted');
     const back = embedBrowser();
+    // The invariant is "the same element, the same document", not "the same URL": the application is
+    // free to navigate itself (a challenge interstitial becoming the app, a sign-in redirect), and
+    // that is not a reload of our surface. So the element identity, the tag written into it, and the
+    // application origin are asserted, and any same-origin navigation is reported rather than failed.
+    const backURI = String(back.currentURI?.spec || '');
     await check('product-mode-switch-keeps-the-application-document',
-      back === surfaceBrowser && back.getAttribute('data-zchatgpt-product-tag') === nonce && String(back.currentURI?.spec || '') === surfaceURI,
-      { sameElement: back === surfaceBrowser, currentURI: String(back.currentURI?.spec || '').slice(0, 200) });
+      back === surfaceBrowser && back.getAttribute('data-zchatgpt-product-tag') === nonce && backURI.startsWith('https://chatgpt.com/'),
+      { sameElement: back === surfaceBrowser, currentURI: safeWebURL(backURI), uriWhenTagged: safeWebURL(surfaceURI), navigatedItself: backURI !== surfaceURI });
     product.cookiesAfterChatSurface = { [targetHost]: cookieCount(targetHost) };
     await save();
 
@@ -812,7 +1197,99 @@ async function runHostSmoke(config) {
         : applicationTitle ? 'unknown' : 'no-title',
       note: 'Browser-element properties only; the remote document is not walked.',
     };
+    product.initialNetwork = {
+      responses: productNetwork.state.responses.slice(-120), stops: productNetwork.state.stops.slice(-60),
+      hosts: productNetwork.state.hosts, otherHostCount: productNetwork.state.otherHosts,
+    };
+    productNetwork.stop(); productNetwork = null;
     await save();
+
+    // ---- the human reproduction window (opt-in) ----------------------------------------------------
+    // Everything above is measured without a person. This section exists for the one thing a driver
+    // cannot do: use the hosted application as a signed-in human would. When `--watch-seconds` is
+    // passed, the run stays alive for that long with the network and console watchers attached, and
+    // the report then holds what the page itself did — which requests were answered, which were
+    // cancelled, whether a new window was requested and where it went, and how often Gecko terminated
+    // the page's script. Nothing is typed or clicked by this driver.
+    product.popupAttempts = popupAttempts;
+    const watchSeconds = Number(config.watchSeconds || 0);
+    if (watchSeconds > 0) {
+      const hiddenChildBrowsers = () => {
+        const origin = embedBrowser()?.browsingContext ?? null; if (!origin) return [];
+        return [...win.document.querySelectorAll('browser')].flatMap(browser => {
+          const context = browser.browsingContext ?? null; if (!context || context.opener !== origin) return [];
+          const safe = safeWebURL(browser.currentURI?.spec || context.currentURI?.spec || ''); let host = null; let path = null;
+          try { const parsed = safe?.startsWith('http') ? new URL(safe) : null; host = parsed?.host ?? null; path = parsed?.pathname ?? null; } catch { /* already classified */ }
+          const rect = rectOfNode(browser); let display = null; try { display = win.getComputedStyle(browser).display; } catch { /* observation only */ }
+          return [{ hidden: Boolean(browser.hidden || display === 'none' || !rect), hasOpener: true, contextId: String(context.id ?? '').slice(0, 80) || null, host, path }];
+        }).slice(0, 12);
+      };
+      step = 'ready-for-manual-login-watch';
+      report.step = step; await save();
+      const network = startNetworkWatch();
+      product.diagnose = {
+        startedAt: new Date().toISOString(),
+        watchSeconds,
+        phase: 'ready-for-manual-login-watch',
+        actorReadiness: product.actorProbe.manualLoginReadiness ?? (productActorReady ? 'available' : 'unavailable'),
+        prefs: relevantPrefs(),
+        instruction: 'Use the hosted application in this window; the driver only observes.',
+        hiddenChildBrowsers: hiddenChildBrowsers(),
+      };
+      await save();
+      const deadlineMs = Date.now() + watchSeconds * 1000;
+      let lastSave = 0;
+      // One sample per cycle of what the application document is doing. A page that stays on the same
+      // URI and title for minutes while the owner waits on it is the shape of a stalled request, and
+      // the transition into or out of an interstitial is what separates "slow" from "never".
+      const surfaceTimeline = [];
+      while (Date.now() < deadlineMs) {
+        await delay(1000);
+        const sample = describeSurface();
+        const previous = surfaceTimeline[surfaceTimeline.length - 1];
+        if (!previous || previous.title !== sample.title || previous.currentURI !== sample.currentURI || previous.isLoadingDocument !== sample.isLoadingDocument) {
+          surfaceTimeline.push({ t: Math.round((Date.now() - consoleZero) / 1000), uri: sample.currentURI, title: sample.title, loading: sample.isLoadingDocument });
+        }
+        if (Date.now() - lastSave < 5000) continue;
+        lastSave = Date.now();
+        product.diagnose = {
+          ...product.diagnose,
+          secondsLeft: Math.max(0, Math.round((deadlineMs - Date.now()) / 1000)),
+          scriptTerminations: scriptTerminations(),
+          consoleClassCounts: consoleClassCounts(),
+          notableConsole: safeConsole(diagnosticNotable()),
+          consoleTail: safeConsole(diagnosticConsole.slice(-40)),
+          surfaceTimeline: surfaceTimeline.slice(-40),
+          requests: network.state.responses.slice(-80),
+          stopped: network.state.stops.slice(-40),
+          hosts: network.state.hosts,
+          otherHostCount: network.state.otherHosts,
+          popups: popupAttempts.slice(-10),
+          hiddenChildBrowsers: hiddenChildBrowsers(),
+          surface: sample,
+        };
+        await save();
+      }
+      network.stop();
+      product.diagnose = {
+        ...product.diagnose,
+        secondsLeft: 0,
+        endedAt: new Date().toISOString(),
+        scriptTerminations: scriptTerminations(),
+        consoleClassCounts: consoleClassCounts(),
+        notableConsole: safeConsole(diagnosticNotable()),
+        consoleTail: safeConsole(diagnosticConsole.slice(-120)),
+        surfaceTimeline: surfaceTimeline.slice(-60),
+        requests: network.state.responses.slice(-120),
+        stopped: network.state.stops.slice(-60),
+        hosts: network.state.hosts,
+        otherHostCount: network.state.otherHosts,
+        popups: popupAttempts,
+        hiddenChildBrowsers: hiddenChildBrowsers(),
+        surface: describeSurface(),
+      };
+      await save();
+    }
 
     // ---- what the host can do beyond the product path ---------------------------------------------
     // Run after the product so the destructive experiments cannot disturb what the shipped surface
@@ -838,12 +1315,25 @@ async function runHostSmoke(config) {
       await save();
     }
 
-    report.status = 'completed';
+    const webStatus = report.product?.webLive?.status;
+    report.status = webStatus === 'blocked' ? 'blocked' : webStatus === 'confirmed-failure' ? 'failed' : webStatus === 'unknown' ? 'uncertain' : 'completed';
     report.finishedAt = new Date().toISOString();
     await save();
   } catch (error) {
+    if (productNetwork) {
+      productNetwork.stop();
+      report.productNetworkAtFailure = {
+        responses: productNetwork.state.responses.slice(-120), stops: productNetwork.state.stops.slice(-60),
+        hosts: productNetwork.state.hosts, otherHostCount: productNetwork.state.otherHosts,
+      };
+      productNetwork = null;
+    }
     report.status = 'failed';
-    report.failure = { step, message: message(error), stack: String((error && error.stack) || '').split('\n').slice(0, 6).map(line => line.trim()) };
+    report.failure = {
+      step, class: consoleClass(message(error)), consoleClassCounts: consoleClassCounts(),
+      notableConsole: safeConsole(diagnosticNotable()),
+      consoleTail: safeConsole(diagnosticConsole.slice(-80)),
+    };
     report.finishedAt = new Date().toISOString();
     try { await save(); } catch { /* nothing left to report */ }
   } finally {

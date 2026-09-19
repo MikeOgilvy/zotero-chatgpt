@@ -56,6 +56,37 @@ describe('shareable artifact verification', () => {
     await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /node:/i.test(failureMessage(error)));
   });
 
+  it('requires exactly the three production actor modules', async () => {
+    const missing = path.join(await makeTemporaryDirectory(), 'missing');
+    await cp(builtExtension, missing, { recursive: true });
+    await rm(path.join(missing, 'content/actors/OfficialChatParent.mjs'));
+    await expect(verify(missing)).rejects.toSatisfy((error: unknown) => /OfficialChatParent\.mjs/u.test(failureMessage(error)));
+
+    const extra = path.join(await makeTemporaryDirectory(), 'extra');
+    await cp(builtExtension, extra, { recursive: true });
+    await writeFile(path.join(extra, 'content/actors/UnexpectedActor.mjs'), 'export {};\n');
+    await expect(verify(extra)).rejects.toSatisfy((error: unknown) => /UnexpectedActor\.mjs/u.test(failureMessage(error)));
+  });
+
+  it('rejects host drivers and acceptance actors from a product artifact', async () => {
+    const copy = path.join(await makeTemporaryDirectory(), 'pkg');
+    await cp(builtExtension, copy, { recursive: true });
+    await writeFile(path.join(copy, 'driver.js'), '// host test driver\n');
+    await mkdir(path.join(copy, 'content/web-acceptance'), { recursive: true });
+    await writeFile(path.join(copy, 'content/web-acceptance/web-acceptance-actor.mjs'), 'export {};\n');
+    await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /driver\.js|web-acceptance/u.test(failureMessage(error)));
+  });
+
+  it('scans shipped actor modules for Node imports and absolute user paths', async () => {
+    for (const injected of ['\nimport "node:fs";\n', '\nimport "fs";\n', '\nconst leaked = "/Users/private/Library";\n']) {
+      const copy = path.join(await makeTemporaryDirectory(), injected.includes('node:') ? 'node' : 'path');
+      await cp(builtExtension, copy, { recursive: true });
+      const actor = path.join(copy, 'content/actors/OfficialChatChild.mjs');
+      await writeFile(actor, `${await readFile(actor, 'utf8')}${injected}`);
+      await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /node:|Node builtin fs|absolute user path/u.test(failureMessage(error)));
+    }
+  });
+
   it('rejects packaged auth files, development profiles and username paths', async () => {
     const copy = path.join(await makeTemporaryDirectory(), 'pkg');
     await cp(builtExtension, copy, { recursive: true });
@@ -66,7 +97,7 @@ describe('shareable artifact verification', () => {
     await rm(path.join(copy, 'content/account/auth.json'));
     const bundle = path.join(copy, 'content/zchatgpt.js');
     await writeFile(bundle, `${await readFile(bundle, 'utf8')}\nconst home = "/Users/secret-user/Library";\n`);
-    await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /\/Users\//.test(failureMessage(error)));
+    await expect(verify(copy)).rejects.toSatisfy((error: unknown) => /absolute user path/u.test(failureMessage(error)));
   });
 
   it('rejects a package missing the native preferences pane fragment or its script', async () => {

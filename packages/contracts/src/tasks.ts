@@ -1,6 +1,6 @@
 import { ReaderError, type Citation, type DocumentRevision, type PaperScope } from './index.ts';
 import { validateCitation } from './validation.ts';
-import type { NativeAcquisitionResult, NativeAnnotationCandidate, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeQuoteResolution } from './native.ts';
+import type { NativeAcquisitionResult, NativeAnnotationCandidate, NativeAnnotationSnapshot, NativeCollectionAddition, NativeCollectionTarget, NativeItemSnapshot, NativeMetadataPreview, NativeOrganizationChange, NativeOrganizationItemSnapshot, NativeQuoteResolution } from './native.ts';
 
 export interface AnnotationProposal { quote: string; pageIndex: number; reason: string }
 /**
@@ -26,6 +26,35 @@ export function parseAnnotationCandidates(value: string): AnnotationProposal[] {
   const result = record(parsed, ['candidates']); if (!Array.isArray(result.candidates) || result.candidates.length > 50) invalid();
   return result.candidates.map(validateAnnotationProposal);
 }
+export interface OrganizationProposal { itemIndex: number; tags: string[]; collectionIndexes: number[] }
+function itemIndex(value: unknown): number { if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) >= 50) invalid(); return value as number; }
+function collectionIndex(value: unknown): number { if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) >= 1000) invalid(); return value as number; }
+function uniqueIndexes(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length > 24) invalid();
+  const result = value.map(collectionIndex); if (new Set(result).size !== result.length) invalid(); return result;
+}
+function tags(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 24) invalid();
+  const result = value.map(tag => text(tag, 128, 1).trim().normalize('NFC'));
+  if (result.some(tag => !tag || /[\u0000-\u001f]/u.test(tag)) || new Set(result).size !== result.length) invalid();
+  return result;
+}
+/** Model JSON addresses only indexes in host-frozen arrays; native item and collection keys are rejected. */
+export function validateOrganizationProposal(value: unknown): OrganizationProposal {
+  const proposal = record(value, ['itemIndex', 'tags', 'collectionIndexes']);
+  const result = { itemIndex: itemIndex(proposal.itemIndex), tags: tags(proposal.tags), collectionIndexes: uniqueIndexes(proposal.collectionIndexes) };
+  if (!result.tags.length && !result.collectionIndexes.length) invalid();
+  return result;
+}
+export function parseOrganizationProposals(value: string): OrganizationProposal[] {
+  text(value, 1024 * 1024, 2);
+  let parsed: unknown; try { parsed = JSON.parse(value) as unknown; } catch { invalid(); }
+  const result = record(parsed, ['candidates']);
+  if (!Array.isArray(result.candidates) || !result.candidates.length || result.candidates.length > 50) invalid();
+  const proposals = result.candidates.map(validateOrganizationProposal);
+  if (new Set(proposals.map(proposal => proposal.itemIndex)).size !== proposals.length) invalid();
+  return proposals;
+}
 /**
  * The one domain constructor for a Citation built from a task-resolved annotation candidate. The
  * task controller resolved and froze the quote against a PDF version; a view must not re-derive the
@@ -46,7 +75,10 @@ export function citationFromAnnotation(input: {
     authors: [],
     text: input.candidate.text,
     pageLabel: input.candidate.pageLabel,
-    positions: [{ pageIndex: input.candidate.position.pageIndex, rects: input.candidate.position.rects }],
+    positions: [
+      { pageIndex: input.candidate.position.pageIndex, rects: input.candidate.position.rects },
+      ...(input.candidate.position.nextPageRects?.length ? [{ pageIndex: input.candidate.position.pageIndex + 1, rects: input.candidate.position.nextPageRects }] : []),
+    ],
     capturedAt: input.clock.now(),
     contextScope: 'selection',
     documentRevision: input.documentRevision,
@@ -59,7 +91,7 @@ export function citationFromAnnotation(input: {
  */
 export type ActionTaskState = 'preparing' | 'review' | 'running' | 'completed' | 'partial' | 'cancelled' | 'uncertain' | 'undone' | 'conflict' | 'failed';
 export type ActionTaskItemStatus = 'candidate' | 'unresolved' | 'skipped' | 'writing' | 'applied' | 'metadata-only' | 'failed' | 'uncertain' | 'undoing' | 'undone' | 'conflict';
-export type ActionTaskOperation = 'annotation-create' | 'metadata-create' | 'collection-add' | 'pdf-acquire' | 'annotation-delete' | 'collection-remove' | 'item-trash' | 'attachment-trash';
+export type ActionTaskOperation = 'annotation-create' | 'metadata-create' | 'collection-add' | 'pdf-acquire' | 'annotation-delete' | 'collection-remove' | 'item-trash' | 'attachment-trash' | 'organization-add' | 'organization-remove';
 interface TaskItemBase {
   id: string;
   reservedKey: string;
@@ -86,6 +118,13 @@ export interface AcquisitionTaskItem extends TaskItemBase {
   acquisition?: NativeAcquisitionResult;
   attachmentUndone?: true;
 }
+export interface OrganizationTaskItem extends TaskItemBase {
+  kind: 'organization';
+  sourceIndex: number;
+  before: NativeOrganizationItemSnapshot;
+  proposal: { tags: string[]; collections: NativeCollectionTarget[] };
+  change?: NativeOrganizationChange;
+}
 export interface AcquisitionChoice { metadataIndex?: number; duplicateKey?: string; downloadPDF?: boolean }
 export type ActionTaskChoices = Record<string, AcquisitionChoice>;
 interface ActionTaskBase {
@@ -102,9 +141,11 @@ interface ActionTaskBase {
 }
 export type ActionTaskRecord =
   | (ActionTaskBase & { kind: 'annotations'; paper: PaperScope; documentRevision: DocumentRevision; modelRequestId?: string; items: AnnotationTaskItem[] })
-  | (ActionTaskBase & { kind: 'acquisition'; target: NativeCollectionTarget; items: AcquisitionTaskItem[] });
+  | (ActionTaskBase & { kind: 'acquisition'; target: NativeCollectionTarget; items: AcquisitionTaskItem[] })
+  | (ActionTaskBase & { kind: 'organization'; modelRequestId?: string; items: OrganizationTaskItem[] });
 export interface AnnotationTaskPlan { conversationId: string; paper: PaperScope; revision: DocumentRevision; question: string; modelRequestId?: string; candidates: AnnotationProposal[] }
 export interface AcquisitionTaskPlan { conversationId: string; target: NativeCollectionTarget; question: string; identifiers: string[] }
+export interface OrganizationTaskPlan { conversationId: string; question: string; modelRequestId?: string; selection: NativeOrganizationItemSnapshot[]; collections: NativeCollectionTarget[]; proposals: OrganizationProposal[] }
 /** Durable action-task ledger surfaced to the UI; the implementation is `core/tasks`. */
 export interface ActionTasks {
   list(conversationId?: string): Promise<ActionTaskRecord[]>;
@@ -112,6 +153,7 @@ export interface ActionTasks {
   subscribe(listener: (record: ActionTaskRecord) => void): () => void;
   planAnnotations(input: AnnotationTaskPlan): Promise<ActionTaskRecord>;
   planAcquisition(input: AcquisitionTaskPlan): Promise<ActionTaskRecord>;
+  planOrganization(input: OrganizationTaskPlan): Promise<ActionTaskRecord>;
   approve(id: string, selectedItemIds: string[], choices?: ActionTaskChoices): Promise<ActionTaskRecord>;
   cancel(id: string): Promise<ActionTaskRecord>;
   reconcile(id: string): Promise<ActionTaskRecord>;

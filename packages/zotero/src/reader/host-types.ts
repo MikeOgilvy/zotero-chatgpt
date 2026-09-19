@@ -25,7 +25,7 @@ export interface PdfView {
   _iframe?: HTMLIFrameElement;
   initializedPromise?: Promise<void>;
 }
-export interface ReaderLocation { position?: { pageIndex: number; rects: number[][] }; pageIndex?: number; dest?: [number, { name: string }, number, number, number | null] }
+export interface ReaderLocation { position?: { pageIndex: number; rects: number[][]; nextPageRects?: number[][] }; pageIndex?: number; dest?: [number, { name: string }, number, number, number | null] }
 export interface HostReader {
   itemID: number;
   tabID?: string;

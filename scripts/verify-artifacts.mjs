@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { builtinModules } from 'node:module';
 import yauzl from 'yauzl';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
@@ -20,9 +21,12 @@ const requiredLicenses = [
   'content/assets/licenses/entities.LICENSE',
 ];
 const requiredPanes = ['content/preferences/preferences.xhtml', 'content/preferences/pane.js'];
-const requiredFiles = ['bootstrap.js', 'content/zchatgpt.js', 'manifest.json', 'LICENSE', ...requiredLicenses, ...requiredPanes];
-const forbiddenNames = ['auth.json', 'auth.json.enc', 'credentials.json', '.zotero-chatgpt-dev'];
-const textSuffixes = ['.js', '.json', '.css', '.html', '.ftl', '.md', '.txt', '.toml'];
+const requiredActors = ['content/actors/OfficialChatParent.mjs', 'content/actors/OfficialChatChild.mjs', 'content/actors/chatgpt-dom.mjs'];
+const requiredFiles = ['bootstrap.js', 'content/zchatgpt.js', 'manifest.json', 'LICENSE', ...requiredLicenses, ...requiredPanes, ...requiredActors];
+const forbiddenNames = ['auth.json', 'auth.json.enc', 'credentials.json', 'token.json', 'cookies.sqlite', 'logins.json', 'key4.db', '.env', 'prefs.js', '.zotero-chatgpt-dev'];
+const textSuffixes = ['.js', '.mjs', '.json', '.css', '.html', '.ftl', '.md', '.txt', '.toml'];
+const nodeBuiltins = new Set(builtinModules.map(name => name.replace(/^node:/u, '').split('/')[0]));
+const moduleSpecifier = /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)['"]([^'"]+)['"]/gu;
 
 function requireNode24() {
   if (process.versions.node.split('.')[0] !== '24') {
@@ -60,8 +64,14 @@ function assertCleanNames(files) {
     if (forbiddenNames.includes(base) || forbiddenNames.some(name => file.includes(`/${name}/`) || file.includes(`${name}/`))) {
       throw new Error(`Packaged artifact contains a forbidden file: ${file}`);
     }
-    if (file.includes('.zotero-chatgpt-dev') || file.endsWith('.jsonl') || file.includes('/records/')) {
+    if (file.includes('.zotero-chatgpt-dev') || file.endsWith('.jsonl') || file.includes('/records/') || file.includes('/account/')) {
       throw new Error(`Packaged artifact contains a forbidden file: ${file}`);
+    }
+    if (file.startsWith('content/actors/') && !requiredActors.includes(file)) {
+      throw new Error(`Packaged artifact contains an unexpected actor asset: ${file}`);
+    }
+    if (/^(?:driver|.+-driver)\.(?:js|mjs)$/u.test(base) || file.includes('web-acceptance') || file.includes('acceptance-actor')) {
+      throw new Error(`Packaged artifact contains a test-only file: ${file}`);
     }
   }
 }
@@ -73,9 +83,12 @@ function assertRequired(files) {
 }
 
 function assertBundleText(relativePath, text) {
-  if (relativePath !== 'content/zchatgpt.js' && relativePath !== 'bootstrap.js') return;
-  if (/['"]node:/.test(text)) throw new Error(`Production bundle ${relativePath} imports a node: builtin`);
-  if (/\/Users\//.test(text)) throw new Error(`Production bundle ${relativePath} contains a /Users/ path`);
+  if (!relativePath.endsWith('.js') && !relativePath.endsWith('.mjs')) return;
+  for (const match of text.matchAll(moduleSpecifier)) {
+    const specifier = match[1].replace(/^node:/u, '').split('/')[0];
+    if (nodeBuiltins.has(specifier)) throw new Error(`Production executable ${relativePath} imports Node builtin ${match[1]}`);
+  }
+  if (/\/Users\/|\/home\/|[A-Za-z]:\\Users\\/u.test(text)) throw new Error(`Production executable ${relativePath} contains an absolute user path`);
 }
 
 export async function verifyExtensionDirectory(sourceDirectory) {
