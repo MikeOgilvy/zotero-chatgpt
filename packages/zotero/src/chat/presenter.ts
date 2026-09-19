@@ -199,6 +199,8 @@ export class ConversationPresenter {
   private get submitting(): boolean { return this.submissions.size > 0; }
   private explainFlights = new Map<string, Promise<void>>();
   private continuing = false;
+  /** Mode that authorized the pre-submit More-details intent waiting on disclosure/login. */
+  private pendingExplainMode: RequestMode | null = null;
   private drafts = new Map<string, WorkspaceDraft>();
   /**
    * The draft each conversation's request was built from, so Stop can hand the question, citations
@@ -297,6 +299,14 @@ export class ConversationPresenter {
    */
   setMode(mode: RequestMode): void {
     if (this.modes.get(this.draftKey()) === mode) return;
+    const pending = this.state.pendingExplain;
+    if (pending && this.pendingExplainMode && this.pendingExplainMode !== mode) {
+      // This intent was never accepted by a service. Preserve its frozen selection as a draft
+      // citation, but revoke auto-resume so a later shared-runtime login cannot submit behind Chat.
+      this.pendingExplainMode = null;
+      this.changeDraft(addCitation(this.state.draft, pending));
+      this.update({ pendingExplain: null, message: 'The pending Agent explanation was not sent after switching modes. The selection remains in the draft.' });
+    }
     traceMode(`[mode] selected ${mode} for ${this.draftKey()}`);
     this.modes.set(this.draftKey(), mode);
     this.update({});
@@ -324,16 +334,17 @@ export class ConversationPresenter {
    *
    * Returns false when the caller must stop: the reason is already on screen (or login is pending).
    */
-  private async prepareMode(mode: RequestMode, options: { pendingExplain?: Citation } = {}): Promise<boolean> {
+  private async prepareMode(mode: RequestMode, options: { pendingExplain?: Citation; pendingMode?: RequestMode } = {}): Promise<boolean> {
     if (mode === 'chat') {
       const reason = this.services.chatUnavailableReason();
       if (!reason) return true;
-      this.update({ message: reason, ...(options.pendingExplain ? { pendingExplain: clone(options.pendingExplain) } : {}) });
+      this.update({ message: reason });
       return false;
     }
     try { await this.services.ensureAgent(); }
     catch (error) { this.update({ connection: 'error', message: this.errorText(error) }); throw error; }
     if (this.signedIn()) return true;
+    if (options.pendingExplain) this.pendingExplainMode = options.pendingMode ?? mode;
     this.update({ message: options.pendingExplain ? null : 'Sign in with ChatGPT first.', ...(options.pendingExplain ? { pendingExplain: clone(options.pendingExplain) } : {}) });
     await this.login();
     return false;
@@ -807,7 +818,7 @@ export class ConversationPresenter {
     this.services.document?.acknowledge?.();
     this.update({ document: { ...this.state.document, disclosure: false } });
     const pending = this.state.pendingExplain;
-    if (pending) { this.update({ pendingExplain: null }); void this.explain(pending); }
+    if (pending) { const mode = this.pendingExplainMode; this.pendingExplainMode = null; this.update({ pendingExplain: null }); if (mode === this.state.mode) void this.explain(pending); else this.changeDraft(addCitation(this.state.draft, pending)); }
   }
   prepareContext(): Promise<DocumentContext> { return this.prepareDocument(this.state.document.range); }
   /**
@@ -910,10 +921,10 @@ export class ConversationPresenter {
     try {
       await this.adoptCurrent();
       const pending = this.state.pendingExplain;
-      if (pending && !this.state.document.disclosure) {
+      if (pending && this.pendingExplainMode === 'agent' && this.state.mode === 'agent' && !this.state.document.disclosure) {
         // Only a resumed explain needs a chat; a plain login opens no chat of its own.
         const conversation = await this.ensureConversation();
-        this.update({ pendingExplain: null });
+        this.pendingExplainMode = null; this.update({ pendingExplain: null });
         // A pending More details is always the Agent explain that queued it, so it resumes as Agent.
         await this.submit(conversation, makeExplain(pending, conversation.id, this.services.uuid(), this.currentSettings() ?? conversation.settings, this.paperIdentity()), this.contextOptions(), { ...clone(this.state.draft), skillId: null, references: [] }, await this.captureWorkspace(), false, 'agent');
       }
@@ -1158,7 +1169,7 @@ export class ConversationPresenter {
     const mode = this.state.mode;
     const context = this.contextOptions(); const frozenSettings = this.currentSettings();
     const draft = { ...clone(this.state.draft), skillId: null, references: [] }; const workspace = this.captureWorkspace(); const target = this.state.conversation;
-    if (context.enabled && this.state.document.disclosure) { this.update({ pendingExplain: clone(citation) }); return Promise.resolve(); }
+    if (mode === 'agent' && context.enabled && this.state.document.disclosure) { this.pendingExplainMode = mode; this.update({ pendingExplain: clone(citation) }); return Promise.resolve(); }
     const flight = (async () => {
       const kept = clone(citation);
       try {
@@ -1169,7 +1180,7 @@ export class ConversationPresenter {
         // This method remains the native conversation entry point, so it freezes the mode shown at
         // the click and must never turn a Chat action into a Codex Agent request behind the owner's
         // back. A host without a native Chat transport refuses through prepareMode before sending.
-        if (!await this.prepareMode(mode, { pendingExplain: kept })) return;
+        if (!await this.prepareMode(mode, { pendingExplain: kept, pendingMode: mode })) return;
         const conversation = target ?? await this.ensureConversation();
         await this.submit(conversation, makeExplain(kept, conversation.id, this.services.uuid(), frozenSettings ?? conversation.settings, this.paperIdentity()), context, draft, configuration, false, mode);
       } catch (error) { this.update({ message: this.errorText(error) }); }

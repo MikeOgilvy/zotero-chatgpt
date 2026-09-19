@@ -478,6 +478,16 @@ describe('conversation presenter', () => {
     f.setRuntime({ revision: 99 }); await settle();
     expect(f.sent).toHaveLength(1); expect(f.sent[0]).toMatchObject({ action: 'explain', citations: [citationA] }); expect(f.last().pendingExplain).toBeNull();
   });
+  it('does not resume a pending Agent explanation after that presenter switches to Chat', async () => {
+    const f = fixture({ signedIn: false }); await f.presenter.activate(); f.presenter.setMode('agent');
+    await f.presenter.explain(citationA); expect(f.last().pendingExplain?.id).toBe(citationA.id);
+    f.presenter.setMode('chat');
+    expect(f.last().pendingExplain).toBeNull(); expect(f.last().draft.citations).toEqual([citationA]);
+    const second = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), f.services); await second.activate(); second.setMode('agent');
+    f.setRuntime({ account: { state: 'signedIn', displayLabel: 'ChatGPT' }, models: [model] }); await settle();
+    expect(f.sent).toHaveLength(0); expect(f.presenter.snapshot().mode).toBe('chat'); expect(f.presenter.snapshot().draft.citations).toEqual([citationA]);
+    second.dispose();
+  });
   it('Ask while signed out stores the citation and waits for the user even after login', async () => {
     const f = fixture({ signedIn: false }); await f.presenter.activate(); f.presenter.addCitation(citationA);
     f.setRuntime({ account: { state: 'signedIn', displayLabel: 'ChatGPT' }, models: [model] }); await settle();
