@@ -859,7 +859,7 @@ async function runHostSmoke(config) {
           out.currentURI = safeWebURL(browser.currentURI?.spec || '');
           out.contentPid = global.osPid ?? null;
           out.timeline.push({ ms: Date.now() - started, status, currentURI: out.currentURI, contentPid: out.contentPid });
-          if (status === 'ready') break;
+          if (status === 'ready' || status === 'composer-ready') break;
         } catch (error) {
           out.error = message(error);
           out.timeline.push({ ms: Date.now() - started, status: 'error', error: out.error });
@@ -872,7 +872,9 @@ async function runHostSmoke(config) {
       return out;
     })();
     const productActorReady = ['ready', 'composer-ready'].includes(product.actorProbe.status) && product.actorProbe.error === null;
+    const manualWatch = Number(config.watchSeconds || 0) > 0;
     if (config.webLive) { product.actorProbe.webLiveReadinessGate = productActorReady; await save(); }
+    else if (manualWatch) { product.actorProbe.manualLoginReadiness = productActorReady ? 'available' : 'unavailable'; await save(); }
     else await check('product-official-chat-actor-reaches-the-composer', productActorReady, product.actorProbe);
     if (config.webLive) {
       report.step = 'product-official-chat-web-live';
@@ -1182,14 +1184,27 @@ async function runHostSmoke(config) {
     product.popupAttempts = popupAttempts;
     const watchSeconds = Number(config.watchSeconds || 0);
     if (watchSeconds > 0) {
-      step = 'diagnose-watch';
+      const hiddenChildBrowsers = () => {
+        const origin = embedBrowser()?.browsingContext ?? null; if (!origin) return [];
+        return [...win.document.querySelectorAll('browser')].flatMap(browser => {
+          const context = browser.browsingContext ?? null; if (!context || context.opener !== origin) return [];
+          const safe = safeWebURL(browser.currentURI?.spec || context.currentURI?.spec || ''); let host = null; let path = null;
+          try { const parsed = safe?.startsWith('http') ? new URL(safe) : null; host = parsed?.host ?? null; path = parsed?.pathname ?? null; } catch { /* already classified */ }
+          const rect = rectOfNode(browser); let display = null; try { display = win.getComputedStyle(browser).display; } catch { /* observation only */ }
+          return [{ hidden: Boolean(browser.hidden || display === 'none' || !rect), hasOpener: true, contextId: String(context.id ?? '').slice(0, 80) || null, host, path }];
+        }).slice(0, 12);
+      };
+      step = 'ready-for-manual-login-watch';
       report.step = step; await save();
       const network = startNetworkWatch();
       product.diagnose = {
         startedAt: new Date().toISOString(),
         watchSeconds,
+        phase: 'ready-for-manual-login-watch',
+        actorReadiness: product.actorProbe.manualLoginReadiness ?? (productActorReady ? 'available' : 'unavailable'),
         prefs: relevantPrefs(),
         instruction: 'Use the hosted application in this window; the driver only observes.',
+        hiddenChildBrowsers: hiddenChildBrowsers(),
       };
       await save();
       const deadlineMs = Date.now() + watchSeconds * 1000;
@@ -1220,6 +1235,7 @@ async function runHostSmoke(config) {
           hosts: network.state.hosts,
           otherHostCount: network.state.otherHosts,
           popups: popupAttempts.slice(-10),
+          hiddenChildBrowsers: hiddenChildBrowsers(),
           surface: sample,
         };
         await save();
@@ -1239,6 +1255,7 @@ async function runHostSmoke(config) {
         hosts: network.state.hosts,
         otherHostCount: network.state.otherHosts,
         popups: popupAttempts,
+        hiddenChildBrowsers: hiddenChildBrowsers(),
         surface: describeSurface(),
       };
       await save();
