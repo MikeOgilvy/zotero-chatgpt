@@ -744,7 +744,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       // as a file and the owner pastes it into ChatGPT's own composer, whose own upload path runs.
       action(COPY.embedAttachPdf, 'copy-pdf-file', () => hooks.chatEmbed?.copyPdfFile?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
       action(COPY.embedCopySelection, 'copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
-      button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'clock'),
+      button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'reload'),
     );
     embedBar.append(embedActions, embedContextNotice, embedConsent, embedBridgeStatus, embedStatus);
     embedSection.append(embedBar, embedSlot);
