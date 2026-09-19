@@ -153,7 +153,7 @@ function nativeItemSnapshot(value: unknown): NativeOrganizationItemSnapshot {
   if (typeof item.key !== 'string' || !ATTACHMENT_KEY.test(item.key)) invalid('organization item key is invalid');
   return {
     clientId: uuid(item.clientId, 'organization item client'), libraryId: item.libraryId as number, key: item.key,
-    metadata: nativeMetadata(item.metadata), tags: stringList(item.tags, 'organization item tags', 256),
+    metadata: nativeMetadata(item.metadata), tags: stringList(item.tags, 'organization item tags', 1024),
     collectionKeys: stringList(item.collectionKeys, 'organization item collections', 1000).map(key => ATTACHMENT_KEY.test(key) ? key : invalid('organization collection key is invalid')),
     attachmentKeys: stringList(item.attachmentKeys, 'organization item attachments', 1000).map(key => ATTACHMENT_KEY.test(key) ? key : invalid('organization attachment key is invalid')),
     dateModified: text(item.dateModified, 'organization item modification time', 128),

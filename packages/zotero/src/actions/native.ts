@@ -136,7 +136,7 @@ export function createNativeActionPort(support: NativeSupport, reader: NativeRea
       checkSignal(signal); const expected = clone(value.expected); support.scope(expected.after);
       support.scope(expected.before);
       if (expected.before.clientId !== expected.after.clientId || expected.before.libraryId !== expected.after.libraryId || expected.before.key !== expected.after.key) fail('INVALID_INPUT', 'The recorded organization item identity is inconsistent.');
-      const beforeTags = organizationTags(expected.before.tags, 256).sort(); const afterTags = organizationTags(expected.after.tags, 256).sort();
+      const beforeTags = organizationTags(expected.before.tags, 2048).sort(); const afterTags = organizationTags(expected.after.tags, 2048).sort();
       const addedTags = organizationTags(expected.addedTags).sort();
       if (!Array.isArray(expected.addedCollectionKeys) || expected.addedCollectionKeys.length > MAX_ORGANIZATION_VALUES) fail('INVALID_INPUT', 'The recorded collection changes are invalid.');
       const beforeCollections = expected.before.collectionKeys.map(value => key(value)).sort();

@@ -45,7 +45,7 @@ function strings(value: unknown, maxItems: number, maxLength: number, keys = fal
 function itemSnapshot(value: unknown): NativeOrganizationItemSnapshot {
   const item = record(value, ['clientId', 'libraryId', 'key', 'metadata', 'tags', 'collectionKeys', 'attachmentKeys', 'dateModified', 'contentSignature', 'organizationSignature']);
   validatePaperScope({ clientId: item.clientId, libraryId: item.libraryId, attachmentKey: key(item.key) });
-  record(item.metadata); strings(item.tags, 256, 128); strings(item.collectionKeys, 1000, 8, true); strings(item.attachmentKeys, 1000, 8, true);
+  record(item.metadata); strings(item.tags, 2048, 128); strings(item.collectionKeys, 2048, 8, true); strings(item.attachmentKeys, 1000, 8, true);
   text(item.dateModified, 128); text(item.contentSignature, 1024 * 1024); text(item.organizationSignature, 1024 * 1024);
   return clone(item) as unknown as NativeOrganizationItemSnapshot;
 }
