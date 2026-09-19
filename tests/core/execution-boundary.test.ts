@@ -38,6 +38,15 @@ async function setup(lines: string[] = []) {
 }
 
 describe('Chat never enters the Codex Agent runtime', () => {
+  it('G: opening a conversation in default Chat mode starts no Codex thread or turn', async () => {
+    const { p, conversation } = await setup();
+    // The handshake and account/model catalog are the shared platform layer. What must not happen on
+    // open is Agent execution: no thread, no resume, no turn for a conversation nobody has asked about.
+    expect(methods(p)).not.toContain('thread/start');
+    expect(agentEntries(p)).toEqual([]);
+    expect(conversation.activeRequestId).toBeNull();
+  });
+
   it('A: a plain chat message never touches the Codex runtime and fails honestly', async () => {
     const lines: string[] = [];
     const { c, p, request, state } = await setup(lines);

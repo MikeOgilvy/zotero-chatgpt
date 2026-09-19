@@ -1,16 +1,17 @@
 # 架构与契约
 
-本文描述 **0.4.0a14 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a15 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
-产品默认路径是 **Chat Mode**：在当前 PDF/附件上阅读、推理与问答。`core/tasks` 里的原生任务编排（候选 → 确定性校验 → 审批 → 原生动作 → 结果账本 → 撤销）是在 Chat Mode 之上叠加的 **Agent Mode 动作能力**，只在显式工具调用与任务授权时运行；它不是对整个产品的身份定义，也不改变默认阅读路径。
+产品默认路径是 **Chat Mode**：在当前 PDF/附件上阅读、推理与问答。**Agent Mode** 是 Codex 执行：`core/tasks` 里的原生任务编排（候选 → 确定性校验 → 审批 → 原生动作 → 结果账本 → 撤销）只在显式工具调用与任务授权时运行。两种模式共用一个会话、一份文档上下文和一套模型展示，但**不共用执行生命周期**：Chat 不创建线程/轮次/任务/审批，也不消耗 Agent 执行额度。默认阅读路径不因 Agent Mode 的存在而改变。
 
 **Chat Mode / Agent Mode 共用同一个文档上下文层。** Reader 产生 Current Document Context（Zotero 书目与附件身份、PDF 文本、当前页、选区、邻近文本、标注、引用与页定位信息），两种模式都从它取数；区别只是该轮是否暴露 `core/tasks` + `zotero/actions` 的写入能力。不存在第二套 reader 管道，模式也不是两个层：
 
 ```text
-Reader → Current Document Context → Chat Mode  → LLM → 回答
-                                   → Agent Mode → 工具/动作 → 结果
+                               ┌ Chat Mode  → ChatExecutor  → ChatTransport（普通补全）
+Reader → Current Document Context → ExecutionRouter ┤
+                               └ Agent Mode → AgentExecutor → Codex 线程/轮次 → 工具/动作 → 结果
 ```
 
 上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-chatgpt-user-flow.md)。
@@ -32,6 +33,27 @@ submit()  ──mode=chat──▶ chat/chat-execution.ts   只读上下文 + �
 - 删除会话时的「未完成原生任务 / 未完成阅读作业」忙碌检查会获取任务端口与阅读端口，因此它受一个显式条件约束：`this.state.mode === 'agent'` **或** `conversationHasAgentWork(conversation)`。后者是 `core/chat/agent-work.ts` 的纯函数，只看该会话自身记录——某个 `message.mode === 'agent'`，或（旧记录）非 `read` 的 `workflow.skill.workflow`，或 `message.batch`（只由阅读协调器写入，因此也覆盖 Stage 6–7 从 Chat 轮次升级出阅读作业那段遗留数据）。文案与拒绝行为不变：仍抛 `BUSY` 且从不调用 `cancel`/`undo`。真实数据里未完成任务/阅读作业必然伴随上述某一种消息，所以纯 Chat 会话的删除不会初始化能力，而任何真实保护都不失效。
 - `chat/capability.ts` 定义唯一的 Agent 能力接口 `AgentCapability`（组合根仍以 `PresenterAgent` 名注入）。边界由 `tests/build/dependency-boundaries.test.ts` 静态强制：Chat 执行模块不得 import 协调器/任务/写入实现，且 `ChatSendContext` 不得含 `agent` 成员——加回该成员会让 `HasAgentMember` 类型断言编译失败。
 - 判定「这是不是一条动作指令」由 `core/chat/action-intent.ts` 的纯函数完成，无模型调用；规则保守，疑问句与主题介词一律判为普通问答。
+
+### Core 执行边界：一个 Router，两个平级 executor
+
+presenter 决定「这一轮是不是动作」；`core/sessions/service.ts`（共享会话控制器）决定「这一轮用哪个执行运行时」。二者之间只有一个选择点：
+
+```text
+send()/enqueue() → ReaderService.dispatch(run)
+                     └ ExecutionRouter.select(run.input.mode)
+                        ├ chat  → ChatExecutor → ChatTransport（抽象端口）
+                        └ agent → AgentExecutor → Codex App Server（线程 / 轮次 / 工具 / 任务）
+```
+
+- 契约在 `contracts/src/execution.ts`：`ExecutionMode`、`ChatRequest`、`ChatContext`、`ChatStreamEvent`（`chat.started` / `chat.delta` / `chat.completed` / `chat.failed` / `chat.cancelled`）、`ChatTransport`、`ChatExecutorPort`、`AgentExecutorPort`。两个 executor 是**平级**类型，没有继承也没有互相包装。
+- `core/conversation/execution-router.ts` 是唯一按 `mode` 选择运行时的地方；缺省或未知 mode 一律是 chat（D3）。别处再出现「按 mode 选运行时」的 `if` 就是把两条路径重新耦合。
+- Chat 路径（`core/chat/executor.ts`）只做一次会话式补全：没有线程、轮次、任务、审批、工具、配额与恢复。它不 import `core/codex`、`core/sessions`、`core/tasks`、`core/context/coordinator`，由 `tests/build/dependency-boundaries.test.ts` 静态强制。
+- **ChatTransport 是尚未落地的平台集成边界。** 本 build 只装 `core/chat/chat-transport.ts` 的诚实占位实现：`available=false`，请求以 `UNSUPPORTED_INTERACTION` 明确失败并提示切到 Agent Mode。它不会退回 Codex，也不是「无工具的 Codex 轮次」；等有受支持的 ChatGPT Chat 传输再实现同一端口，Router、共享控制器与 Agent 运行时都不需要改动。
+- **没有自动升级。** 长提示、整篇 PDF、复杂推导、`contextReport: multi-pass` 都不会把 Chat 变成 Agent。Chat 里出现动作指令时，`chat-action` 与 `assertModeBoundary` 在发送前拒绝并提示切换；模式只由用户显式切换。
+- **事件与取消也分开。** Chat 的响应生命周期走共享的 `ReaderEvent`（`accepted` / `delta` / `messageCompleted` / `completed` / `failed` / `cancelled`）与请求记录（`requestTiming` 的 accepted/firstText/settled、`lastEventAt`），因此「Responding… / Waiting Ns」读的是共享请求状态，不依赖 Agent 的 turn/task 事件；`usage`、`turn/*` 只属于 Agent。Stop 在 Chat 上 abort 本地流并调用 `ChatTransport.cancel`，绝不发 `turn/interrupt`。
+- **恢复策略不同。** 只有被中断的 Agent 请求是 `uncertain`（可能需要 `thread/read` 对账）；被中断的 Chat 请求没有副作用也没有可对账的线程，直接记为 `failed`，不阻塞会话。
+- 临时诊断：`ReaderOptions.trace` 注入 sink 后，每条线都从真实对象取值（冻结 mode、被选中的 executor、`run.turnId !== null`），例如 `[conversation] mode=chat`、`[execution-router] executor=chat`、`[chat] request_started request=…`、`[agent] runtime_started=false`。默认关闭。
+- 验收测试 `tests/core/execution-boundary.test.ts` 在进程边界上把 `thread/start`、`thread/resume`、`turn/start`、`turn/interrupt` 当作 Codex Agent 运行时的入口断点：chat 请求（含带 PDF、超长提示、动作指令）从不命中，agent 请求必然命中。
 
 
 ## 分层与依赖方向
