@@ -39,7 +39,7 @@ async function runHostSmoke(config) {
       'file-upload',
       'restart-persistence',
     ],
-    build: { version: config.subjectVersion, sha256: config.artifactHash },
+    build: { version: config.subjectVersion, sha256: config.artifactHash, driverSourceHash: config.driverSourceHash ?? null },
     note: 'Surface probe. Login, sending, upload and model selection need a human and are recorded as not-run, never as a pass.',
   };
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -67,6 +67,7 @@ async function runHostSmoke(config) {
    */
   const diagnosticConsole = [];
   let consoleListener = null;
+  let productNetwork = null;
   const consoleZero = Date.now();
   const startConsole = () => {
     try {
@@ -93,6 +94,8 @@ async function runHostSmoke(config) {
    */
   const CONSOLE_NOISE = /Feature Policy: Skipping unsupported feature name|Missing resource in locale|InstallTrigger is deprecated|Layout was forced before the page was fully loaded|JavaScript Warning: "Content-Security-Policy/;
   const diagnosticNotable = () => diagnosticConsole.filter(entry => !CONSOLE_NOISE.test(entry.text)).slice(-120);
+  const redactQuery = value => String(value || '').replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/giu, '$1?[redacted]');
+  const safeConsole = entries => entries.map(entry => ({ ms: entry.ms, source: redactQuery(entry.source).slice(0, 200), text: redactQuery(entry.text).slice(0, 400) }));
   /** Hostnames whose traffic explains a sign-in round trip; everything else is counted, not listed. */
   const WATCHED_HOSTS = /(^|\.)(chatgpt\.com|openai\.com|oaistatic\.com|oaiusercontent\.com|apple\.com|icloud\.com|cloudflare\.com|google\.com|gstatic\.com)$/i;
 
@@ -647,6 +650,7 @@ async function runHostSmoke(config) {
     // shows is the real application, in a chrome browser, kept across mode switches.
     const product = { notRun: ['interactive-login', 'conversation-send', 'streaming-render', 'model-selection', 'file-upload'] };
     report.product = product;
+    productNetwork = startNetworkWatch();
     const embedBrowser = () => win.document.querySelector('[data-zchatgpt-embed-browser]');
     const painted = () => { const node = embedBrowser(); return node ? String(node.getAttribute('data-zchatgpt-embed-painted') || '') : null; };
 
@@ -791,6 +795,54 @@ async function runHostSmoke(config) {
     // experiments above, so this check names the application origin rather than the probe URL.
     await check('product-chat-browser-loads-the-application', String(surfaceURI).startsWith('https://chatgpt.com/'),
       { currentURI: String(surfaceURI || '').slice(0, 200), expected: 'https://chatgpt.com/', paintWait: product.paintWait });
+    // Product actor proof: ask the actor bound to this exact WindowGlobal whether it can see the one
+    // named official composer. The reply is an enum only — no document text, form value, account data
+    // or credential crosses into this report — and the query never clicks or sends a model request.
+    report.step = 'product-official-chat-actor-probe';
+    await save();
+    product.actorProbe = await (async () => {
+      const out = {
+        actor: 'ZoteroChatGPTOfficialChat',
+        currentURI: String(surfaceBrowser.currentURI?.spec || '').slice(0, 200),
+        contentPid: surfaceBrowser.browsingContext?.currentWindowGlobal?.osPid ?? null,
+        status: null,
+        elapsedMs: null,
+        error: null,
+        timeline: [],
+      };
+      product.actorProbe = out;
+      const started = Date.now();
+      const deadline = started + 30000;
+      while (Date.now() < deadline) {
+        try {
+          const browser = embedBrowser();
+          const global = browser?.browsingContext?.currentWindowGlobal;
+          if (!global) throw new Error('The hosted page has no current WindowGlobal.');
+          let timer = null;
+          const result = await Promise.race([
+            global.getActor('ZoteroChatGPTOfficialChat').sendQuery('probe'),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Official Chat actor probe query timed out.')), 5000); }),
+          ]).finally(() => { if (timer !== null) clearTimeout(timer); });
+          const status = result && typeof result.status === 'string' ? result.status : 'invalid-response';
+          out.status = status; out.error = null;
+          out.currentURI = String(browser.currentURI?.spec || '').slice(0, 200);
+          out.contentPid = global.osPid ?? null;
+          out.timeline.push({ ms: Date.now() - started, status, currentURI: out.currentURI, contentPid: out.contentPid });
+          if (status === 'ready') break;
+        } catch (error) {
+          out.error = message(error);
+          out.timeline.push({ ms: Date.now() - started, status: 'error', error: out.error });
+        }
+        out.timeline = out.timeline.slice(-60); await save();
+        await delay(500);
+      }
+      out.timeline = out.timeline.slice(-60);
+      out.elapsedMs = Date.now() - started;
+      return out;
+    })();
+    await check('product-official-chat-actor-reaches-the-composer',
+      product.actorProbe.status === 'ready' && product.actorProbe.error === null,
+      product.actorProbe);
     // Recorded, not asserted: hit testing a chrome document over an out-of-process frame is not a
     // stable contract, so the composited result is what the human step looks at.
     try {
@@ -982,6 +1034,11 @@ async function runHostSmoke(config) {
         : applicationTitle ? 'unknown' : 'no-title',
       note: 'Browser-element properties only; the remote document is not walked.',
     };
+    product.initialNetwork = {
+      responses: productNetwork.state.responses.slice(-120), stops: productNetwork.state.stops.slice(-60),
+      hosts: productNetwork.state.hosts, otherHostCount: productNetwork.state.otherHosts,
+    };
+    productNetwork.stop(); productNetwork = null;
     await save();
 
     // ---- the human reproduction window (opt-in) ----------------------------------------------------
@@ -1082,8 +1139,21 @@ async function runHostSmoke(config) {
     report.finishedAt = new Date().toISOString();
     await save();
   } catch (error) {
+    if (productNetwork) {
+      productNetwork.stop();
+      report.productNetworkAtFailure = {
+        responses: productNetwork.state.responses.slice(-120), stops: productNetwork.state.stops.slice(-60),
+        hosts: productNetwork.state.hosts, otherHostCount: productNetwork.state.otherHosts,
+      };
+      productNetwork = null;
+    }
     report.status = 'failed';
-    report.failure = { step, message: message(error), stack: String((error && error.stack) || '').split('\n').slice(0, 6).map(line => line.trim()) };
+    report.failure = {
+      step, message: redactQuery(message(error)),
+      stack: String((error && error.stack) || '').split('\n').slice(0, 6).map(line => redactQuery(line.trim())),
+      notableConsole: safeConsole(diagnosticNotable()),
+      consoleTail: safeConsole(diagnosticConsole.slice(-80)),
+    };
     report.finishedAt = new Date().toISOString();
     try { await save(); } catch { /* nothing left to report */ }
   } finally {
