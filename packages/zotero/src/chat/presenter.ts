@@ -602,7 +602,13 @@ export class ConversationPresenter {
   }
   async collections(): Promise<Array<NativeCollectionTarget & { name: string }>> {
     if (!this.services.library?.collections) throw new ReaderError('UNSUPPORTED_INTERACTION', 'Native collection selection is unavailable.');
-    const options = await this.services.library.collections(); this.update({ collectionOptions: options }); return clone(options);
+    const options = await this.services.library.collections(); this.rememberCollectionOptions(options); return clone(options);
+  }
+  private rememberCollectionOptions(options: Array<NativeCollectionTarget & { name: string }>): void {
+    const identity = (target: NativeCollectionTarget) => `${target.clientId}:${target.libraryId}:${target.collectionKey}`;
+    const merged = new Map(this.state.collectionOptions.map(option => [identity(option), clone(option)]));
+    for (const option of options) merged.set(identity(option), clone(option));
+    this.update({ collectionOptions: [...merged.values()] });
   }
   setAcquisitionTarget(target: NativeCollectionTarget | null): void {
     if (target && !this.state.collectionOptions.some(option => option.clientId === target.clientId && option.libraryId === target.libraryId && option.collectionKey === target.collectionKey)) throw new ReaderError('INVALID_REQUEST', 'Choose an editable collection from this Zotero profile.');
@@ -662,6 +668,7 @@ export class ConversationPresenter {
     // than retroactively reclassifying stored Agent work as chat.
     const workflow = user.workflow?.skill?.workflow;
     if (user.mode === 'chat' || (workflow !== 'annotate' && workflow !== 'organize') || user.batch?.phase === 'map') return;
+    if (workflow === 'organize' && user.organization) this.rememberCollectionOptions(user.organization.collections);
     const answer = conversation.messages.filter(message => message.requestId === requestId && message.role === 'assistant' && message.status === 'completed' && message.phase !== 'commentary').at(-1);
     if (!answer?.text.trim()) return;
     this.planningActions.add(key);
@@ -761,6 +768,7 @@ export class ConversationPresenter {
     if (!selection.length) throw new ReaderError('INVALID_REQUEST', 'Select one or more Zotero items before organizing them.');
     const first = selection[0]!;
     const collections = available.filter(collection => collection.clientId === first.clientId && collection.libraryId === first.libraryId);
+    this.rememberCollectionOptions(collections);
     return { selection: clone(selection), collections: clone(collections) };
   }
   private prepareOrganizationContext(draft: WorkspaceDraft, mode: RequestMode): Promise<FrozenOrganizationResult> | null {

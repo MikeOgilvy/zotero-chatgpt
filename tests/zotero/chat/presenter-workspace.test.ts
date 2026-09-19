@@ -398,6 +398,7 @@ it('freezes the native selection and routes a natural organization request into 
   expect(f.library.selectedItems).toHaveBeenCalledTimes(1); expect(f.library.collections).toHaveBeenCalledTimes(1);
   expect(f.sent).toHaveLength(1);
   expect(f.sent[0]).toMatchObject({ mode: 'agent', workflow: { skill: { id: 'builtin-organize', workflow: 'organize' } }, organization: { selection: [selectedItem], collections: [{ collectionKey: 'COLLECT1', name: 'Research / Topic A' }] } });
+  expect(f.presenter.snapshot().collectionOptions).toContainEqual({ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Topic A' });
   expect(f.sent[0]).not.toHaveProperty('document');
   expect(f.presenter.snapshot().draft.skillId).toBeNull();
   const requestId = f.sent[0]!.requestId;
@@ -416,6 +417,18 @@ it('freezes Agent mode and the native organization scope when Queue is clicked',
   expect(f.queued).toHaveLength(1);
   expect(f.queued[0]).toMatchObject({ mode: 'agent', organization: { selection: [selectedItem], collections: [{ collectionKey: 'COLLECT1' }] }, workflow: { skill: { workflow: 'organize' } } });
   expect(f.library.selectedItems).toHaveBeenCalledTimes(1); f.presenter.dispose();
+});
+
+it('merges frozen organization labels without dropping labels owned by other open tasks', async () => {
+  const f = fixture(); f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
+  await f.presenter.activate(); await f.presenter.collections();
+  f.library.collections.mockResolvedValue([{ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Updated topic' }]);
+  f.presenter.setMode('agent'); f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
+  expect(f.presenter.snapshot().collectionOptions).toEqual(expect.arrayContaining([
+    { clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Updated topic' },
+    { clientId: paperA.clientId, libraryId: 99, collectionKey: 'OTHER001', name: 'Other library' },
+  ]));
+  f.presenter.dispose();
 });
 
 it('reports a failed selection freeze and keeps the organization draft', async () => {
@@ -602,12 +615,13 @@ it('recovers organization proposals from the persisted frozen selection only aft
   await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
   const requestId = f.sent[0]!.requestId; const text = JSON.stringify({ candidates: [{ itemIndex: 0, tags: ['topic-a'], collectionIndexes: [0] }] });
   f.saveConversation({ ...f.conversation(), activeRequestId: null, messages: [...f.conversation().messages, { id: 'saved-organization-answer', requestId, role: 'assistant', phase: 'final', settings, citations: [], status: 'completed', text }] });
-  f.presenter.dispose(); f.library.selectedItems.mockResolvedValue([{ ...selectedItem, key: 'ITEMTWO2' }]);
+  f.presenter.dispose(); f.library.selectedItems.mockResolvedValue([{ ...selectedItem, key: 'ITEMTWO2' }]); f.library.collections.mockResolvedValue([]);
   const restored = new ConversationPresenter(presenterContext(paperA, 'Paper A'), f.services); await restored.activate();
   expect(t.port.planOrganization).not.toHaveBeenCalled(); restored.setMode('agent');
   await vi.waitFor(() => expect(t.port.planOrganization).toHaveBeenCalledTimes(1));
   expect(t.port.planOrganization).toHaveBeenCalledWith(expect.objectContaining({ modelRequestId: requestId, selection: [selectedItem] }));
-  expect(f.library.selectedItems).toHaveBeenCalledTimes(1); restored.dispose();
+  expect(restored.snapshot().collectionOptions).toContainEqual({ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Topic A' });
+  expect(f.library.selectedItems).toHaveBeenCalledTimes(1); expect(f.library.collections).toHaveBeenCalledTimes(1); restored.dispose();
 });
 
 it('recovers the completed live-host organization JSON through the real strict task controller', async () => {
@@ -634,6 +648,7 @@ it('recovers the completed live-host organization JSON through the real strict t
   expect(task).toMatchObject({ kind: 'organization', modelRequestId: requestId, state: 'review', items: [{ proposal: { tags: ['live-organized'], collections: [{ collectionKey: 'COLLECT1' }] } }] });
   if (task.kind !== 'organization') throw new Error('Expected organization task');
   expect(Object.keys(task.items[0]!.proposal.collections[0]!).sort()).toEqual(['clientId', 'collectionKey', 'libraryId']);
+  expect(restored.snapshot().collectionOptions).toContainEqual({ clientId: paperA.clientId, libraryId: paperA.libraryId, collectionKey: 'COLLECT1', name: 'Research / Topic A' });
   expect(f.sent).toHaveLength(1); restored.dispose();
 });
 
