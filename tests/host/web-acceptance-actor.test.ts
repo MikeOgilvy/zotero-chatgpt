@@ -27,6 +27,13 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     userMarkerMessages: 1,
     latestAssistantContainsToken: true,
     streaming: true,
+    observations: {
+      editables: [{ tag: 'div', id: 'prompt-textarea', role: null, contenteditable: 'true', parent: { tag: 'body', id: null, role: null, dataTestid: null }, form: null }],
+      buttons: [
+        { tag: 'button', dataTestid: 'send-button', type: null, disabled: false },
+        { tag: 'button', dataTestid: 'stop-button', type: null, disabled: false },
+      ],
+    },
   });
   expect(Object.keys(result)).not.toEqual(expect.arrayContaining(['transcript', 'text', 'formValue', 'cookie', 'href', 'pathname', 'search']));
 });

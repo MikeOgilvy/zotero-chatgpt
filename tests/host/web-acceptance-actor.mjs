@@ -14,6 +14,34 @@ function trustedOfficialDocument(document) {
   }
 }
 
+function attribute(node, name, max = 128) {
+  const value = node?.getAttribute?.(name);
+  return typeof value === 'string' && value ? value.slice(0, max) : null;
+}
+
+function structuralNode(node) {
+  if (!node) return null;
+  return {
+    tag: String(node.localName ?? '').slice(0, 40) || null,
+    id: attribute(node, 'id'),
+    role: attribute(node, 'role'),
+    dataTestid: attribute(node, 'data-testid'),
+  };
+}
+
+function structuralObservations(document) {
+  const editables = [...document.querySelectorAll('textarea, [contenteditable]')].slice(0, 10).map(node => ({
+    tag: String(node.localName ?? '').slice(0, 40) || null,
+    id: attribute(node, 'id'), role: attribute(node, 'role'), contenteditable: attribute(node, 'contenteditable'),
+    parent: structuralNode(node.parentElement), form: structuralNode(node.closest('form')),
+  }));
+  const buttons = [...document.querySelectorAll('button[data-testid], button[type]')].slice(0, 20).map(node => ({
+    tag: String(node.localName ?? '').slice(0, 40) || null,
+    dataTestid: attribute(node, 'data-testid'), type: attribute(node, 'type'), disabled: node.disabled === true,
+  }));
+  return { editables, buttons };
+}
+
 /** Return only bounded booleans and counts; no page text, field value, path, query, cookie or identity. */
 export function summarizeOfficialPage(document, verificationToken) {
   if (!trustedOfficialDocument(document)) return { status: 'blocked', reason: 'untrusted-origin' };
@@ -34,6 +62,7 @@ export function summarizeOfficialPage(document, verificationToken) {
     userMarkerMessages: users.filter(node => REQUEST_MARKER.test(String(node.textContent ?? ''))).length,
     latestAssistantContainsToken: Boolean(latestAssistant && String(latestAssistant.textContent ?? '').includes(verificationToken)),
     streaming: Boolean(document.querySelector('button[data-testid="stop-button"]')),
+    observations: structuralObservations(document),
   };
 }
 

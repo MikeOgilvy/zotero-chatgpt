@@ -840,9 +840,9 @@ async function runHostSmoke(config) {
       out.elapsedMs = Date.now() - started;
       return out;
     })();
-    await check('product-official-chat-actor-reaches-the-composer',
-      product.actorProbe.status === 'ready' && product.actorProbe.error === null,
-      product.actorProbe);
+    const productActorReady = product.actorProbe.status === 'ready' && product.actorProbe.error === null;
+    if (config.webLive) { product.actorProbe.webLiveReadinessGate = productActorReady; await save(); }
+    else await check('product-official-chat-actor-reaches-the-composer', productActorReady, product.actorProbe);
     if (config.webLive) {
       report.step = 'product-official-chat-web-live';
       product.webLive = { status: 'checking-readiness', maxModelTurns: 1, modelTurnsStarted: 0, transcriptReturned: false, authDataRead: false, cookieDataRead: false, timeline: [] };
@@ -869,9 +869,9 @@ async function runHostSmoke(config) {
       const before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
       const baseline = before.value;
       product.webLive.baseline = baseline;
-      const ready = baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true && baseline.sendReady === true;
+      const ready = productActorReady && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true && baseline.sendReady === true;
       if (!ready) {
-        product.webLive.status = 'blocked'; product.webLive.blockedStage = 'official-input-send-readiness'; product.webLive.reason = baseline?.reason ?? 'official-input-or-send-unavailable';
+        product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-send-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (baseline?.reason ?? 'official-input-or-send-unavailable') : (product.actorProbe.status ?? 'product-actor-unavailable');
         product.notRun.push('conversation-send', 'streaming-render'); await save();
       } else {
         const consent = doc.querySelector('[data-zchatgpt-action="continue-with-pdf"]');
