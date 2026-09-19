@@ -394,7 +394,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
           || browser.browsingContext?.currentWindowGlobal !== windowGlobal || !officialDocument()) return;
       // Busy covers local PDF preparation; generating covers an accepted turn whose answer is still
       // streaming. Neither may be navigated away by a reader switch.
-      if (probe?.status !== 'ready') { restoreAfter = Date.now() + 5000; return; }
+      if (probe?.status !== 'ready' && probe?.status !== 'composer-ready') { restoreAfter = Date.now() + 5000; return; }
       restore.issued = true;
       browser.setAttribute('src', restore.target);
     } finally {
@@ -444,6 +444,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
     }
     if (detail.kind !== 'prepare' || typeof detail.question !== 'string' || typeof detail.transaction !== 'string' || typeof detail.respond !== 'function') return;
     const respond = detail.respond as (value: unknown) => void;
+    if (pendingRestore) { respond({ status: 'blocked', reason: 'context-changed' }); return; }
     const question = detail.question;
     const generation = contextGeneration;
     const binding = contextBinding;
@@ -456,7 +457,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
     announce('Preparing frozen current PDF context. Nothing has been sent yet.');
     void provider(question).then(result => {
       if (generation !== contextGeneration || binding !== contextBinding || provider !== contextProvider
-          || !officialDocument() || browser.getAttribute(CHAT_EMBED_BINDING_ATTR) !== surfaceBinding) {
+          || pendingRestore || !officialDocument() || browser.getAttribute(CHAT_EMBED_BINDING_ATTR) !== surfaceBinding) {
         respond({ status: 'blocked', reason: 'context-changed', marker }); return;
       }
       if (result.status === 'allow') { respond({ status: 'allow', marker }); return; }
@@ -470,6 +471,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
   browser.addEventListener(OFFICIAL_CHAT_BRIDGE_EVENT, onBridge);
 
   const queryActor = async (name: 'stage' | 'submitQuestion', data: Record<string, string>): Promise<OfficialChatCommandOutcome> => {
+    if (pendingRestore) return { status: 'blocked', reason: 'context-changed' };
     const target = actor();
     if (!target) return { status: 'blocked', reason: 'context-changed' };
     operations += 1; bridgeIdle = false;
@@ -480,7 +482,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
     // ChatGPT's first accepted message changes `/` to `/c/<id>` in the same document. That is an
     // expected SPA route change; a replacement WindowGlobal is the navigation boundary to reject.
     if (windowGlobal === null || browser.browsingContext?.currentWindowGlobal !== windowGlobal
-        || !officialDocument() || browser.getAttribute(CHAT_EMBED_BINDING_ATTR) !== surfaceBinding) {
+        || pendingRestore || !officialDocument() || browser.getAttribute(CHAT_EMBED_BINDING_ATTR) !== surfaceBinding) {
       return { status: 'blocked', reason: 'context-changed' };
     }
     if (!result || typeof result !== 'object' || typeof (result as Record<string, unknown>).status !== 'string') return { status: 'blocked', reason: 'context-failed' };

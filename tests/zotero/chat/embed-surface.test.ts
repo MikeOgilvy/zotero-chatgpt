@@ -298,6 +298,66 @@ it('restores a saved web conversation only when the same WindowGlobal is idle', 
   surface.destroy();
 });
 
+it('restores a saved web conversation from an empty supported composer before its send button exists', async () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const probe = vi.fn(() => Promise.resolve({ status: 'composer-ready' }));
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery: probe }) } };
+
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect(probe).toHaveBeenCalledWith('probe');
+  expect(browser.getAttribute('src')).toBe('https://chatgpt.com/c/12345678-abcd');
+  surface.destroy();
+});
+
+it('blocks composer preparation and parent submission while a saved conversation restore is pending', async () => {
+  const { win, doc } = chromeWindow();
+  const provider = vi.fn(() => Promise.resolve({
+    status: 'ready' as const,
+    document: 'must not be frozen on the old page',
+    selection: null,
+    coverage: { pages: 1, totalPages: 1, truncated: false },
+  }));
+  const sendQuery = vi.fn((name: string) => Promise.resolve(name === 'probe' ? { status: 'draft' } : { status: 'accepted' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  surface.bindContext('paper-a', provider);
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  await expect(surface.submitQuestion('must not reach the old page')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  let response: unknown = null;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: {
+      kind: 'prepare',
+      binding: browser.getAttribute('data-zchatgpt-embed-binding'),
+      transaction: 'restore-pending',
+      question: 'keyboard submit on old page',
+      respond: (value: unknown) => { response = value; },
+    },
+  }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect(response).toEqual({ status: 'blocked', reason: 'context-changed' });
+  expect(provider).not.toHaveBeenCalled();
+  expect(sendQuery.mock.calls.filter(([name]) => name !== 'probe')).toEqual([]);
+  expect(browser.getAttribute('src')).toBe(CHAT_APP_URL);
+  surface.destroy();
+});
+
 it('fails closed when the official page has an unknown editor and opens only recognized or login-only pages', async () => {
   const { win, doc } = chromeWindow();
   let status = 'unsupported-composer';
