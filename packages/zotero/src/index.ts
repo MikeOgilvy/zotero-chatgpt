@@ -24,6 +24,7 @@ import { attachmentIdentity, nativeDocumentServices, paperScope, readerContextFo
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
 import { nativeSourceNavigator, openSourcePage } from './reader/source-highlight.ts';
+import { installKatexResource, KATEX_STYLESHEET, removeKatexResource } from './reader/katex-resource.ts';
 import type { HostReader, ToolbarEvent, ZoteroHost, ZoteroWindow } from './reader/host-types.ts';
 import { createPreferencesService } from './preferences/service.ts';
 import { createPreferencePaneRegistrar, type PreferencePaneRegistrar } from './preferences/registration.ts';
@@ -75,6 +76,7 @@ let localServices: ReturnType<typeof createLocalServices> | undefined;
 let preferencePanes: PreferencePaneRegistrar | undefined;
 let officialChatActorRegistered = false;
 let officialChatResourceInstalled = false;
+let katexResourceInstalled = false;
 /** Small, JSON-only surface the Preferences window script may call; see preferences/entry.ts. */
 interface PreferencesBridgeHost {
   ZoteroChatGPTPreferencesHost?: unknown;
@@ -256,7 +258,7 @@ function readerAssets(): { stylesheet?: string; katex?: string } {
   if (!context) return {};
   return {
     stylesheet: `${context.rootURI}content/assets/sidebar.css`,
-    katex: `${context.rootURI}content/assets/katex/katex.min.css`,
+    katex: KATEX_STYLESHEET,
   };
 }
 function zoomDocuments(reader: HostReader, root: HTMLElement): Array<Document | HTMLElement> {
@@ -304,7 +306,7 @@ function entry(reader: HostReader): ReaderEntry {
           show: anchor => {
             const surface = chatSurface(reader._window, hostedBinding);
             if (!surface) {
-              const status = anchor.closest('[data-zchatgpt-embed]')?.querySelector<HTMLElement>('[data-zchatgpt-embed-status]');
+              const status = anchor.closest('[data-zchatgpt-embed]')?.querySelector<HTMLElement>('[data-zchatgpt-bridge-status-line]');
               if (status) { status.textContent = 'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.'; status.hidden = false; }
               return;
             }
@@ -502,6 +504,7 @@ export function startup(options: PluginContext): void {
   Zotero.Reader.registerEventListener('renderTextSelectionPopup', onSelectionPopup, options.pluginID);
   notifierID = Zotero.Notifier.registerObserver({ notify: reconcile }, ['tab'], options.pluginID);
   try {
+    installKatexResource(options.rootURI); katexResourceInstalled = true;
     installOfficialChatResource(options.rootURI); officialChatResourceInstalled = true;
     registerOfficialChatActor(OFFICIAL_CHAT_RESOURCE_ROOT); officialChatActorRegistered = true;
   } catch (error) {
@@ -510,6 +513,9 @@ export function startup(options: PluginContext): void {
     }
     if (!officialChatActorRegistered && officialChatResourceInstalled) {
       try { removeOfficialChatResource(); officialChatResourceInstalled = false; } catch { /* retained for a shutdown retry */ }
+    }
+    if (katexResourceInstalled) {
+      try { removeKatexResource(); katexResourceInstalled = false; } catch { /* retained for a shutdown retry */ }
     }
     active = false;
     if (notifierID) Zotero.Notifier.unregisterObserver(notifierID); notifierID = undefined;
@@ -528,7 +534,7 @@ export function onMainWindowLoad(window: Window): void {
   const css = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
   css.setAttribute('rel', 'stylesheet'); css.setAttribute('href', `${context.rootURI}content/assets/sidebar.css`);
   const katex = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
-  katex.setAttribute('rel', 'stylesheet'); katex.setAttribute('href', `${context.rootURI}content/assets/katex/katex.min.css`);
+  katex.setAttribute('rel', 'stylesheet'); katex.setAttribute('href', KATEX_STYLESHEET);
   const locale = doc.createElementNS('http://www.w3.org/1999/xhtml', 'link');
   // Zotero registers plugin locale files by resource basename, not absolute URI.
   locale.setAttribute('rel', 'localization'); locale.setAttribute('href', 'zchatgpt.ftl');
@@ -581,6 +587,10 @@ export async function shutdown(): Promise<void> {
   }
   if (!officialChatActorRegistered && officialChatResourceInstalled) {
     try { removeOfficialChatResource(); officialChatResourceInstalled = false; }
+    catch (error) { Zotero.logError(error); }
+  }
+  if (katexResourceInstalled) {
+    try { removeKatexResource(); katexResourceInstalled = false; }
     catch (error) { Zotero.logError(error); }
   }
   for (const current of readers.values()) { for (const button of current.buttons) button.remove(); current.pane.dispose(); current.bar.dispose(); }
