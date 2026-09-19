@@ -903,11 +903,21 @@ async function runHostSmoke(config) {
         output += decoder.decode(); await child.wait();
         return output.split('\n').filter(line => line.includes(`${config.profile}/zotero-chatgpt/`) && line.includes(' app-server')).map(line => line.trim().slice(0, 220));
       };
-      const before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
-      const baseline = before.value;
+      let before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+      let baseline = before.value;
       product.webLive.baseline = baseline;
-      const draftSafe = product.actorProbe.status !== 'draft' || baseline?.draftMatchesExactTestQuestion === true;
-      const contextReady = productActorReady && draftSafe && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true;
+      let effectiveProductStatus = product.actorProbe.status;
+      if (effectiveProductStatus === 'draft' && baseline?.draftMatchesKnownSyntheticHarness === true) {
+        const cleared = await boundedQuery('ZoteroChatGPTWebAcceptance', 'clearKnownHarnessDraft', {}, 10000);
+        product.webLive.discardedKnownSyntheticDraft = cleared.value?.status === 'cleared' && cleared.value?.discardedKnownSyntheticDraft === true && cleared.value?.empty === true;
+        if (product.webLive.discardedKnownSyntheticDraft) {
+          before = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken }); baseline = before.value; product.webLive.baselineAfterDiscard = baseline;
+          const productAfterDiscard = await boundedQuery('ZoteroChatGPTOfficialChat', 'probe', {}, 10000); effectiveProductStatus = productAfterDiscard.value?.status ?? 'invalid-response';
+          product.webLive.productAfterDiscard = { status: effectiveProductStatus };
+        }
+      } else product.webLive.discardedKnownSyntheticDraft = false;
+      const draftSafe = effectiveProductStatus !== 'draft' || baseline?.draftMatchesExactTestQuestion === true;
+      const contextReady = ['ready', 'composer-ready', 'draft'].includes(effectiveProductStatus) && draftSafe && baseline?.status === 'ok' && baseline.officialURL === true && baseline.canonicalOrigin === 'https://chatgpt.com' && baseline.inputReady === true;
       if (!contextReady) {
         product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (!draftSafe ? 'unrelated-existing-draft' : (baseline?.reason ?? 'official-input-unavailable')) : (product.actorProbe.status ?? 'product-actor-unavailable');
         product.notRun.push('conversation-send', 'streaming-render'); await save();

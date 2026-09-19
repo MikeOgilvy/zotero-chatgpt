@@ -1,6 +1,6 @@
 import { Window as HappyWindow } from 'happy-dom';
 import { expect, it } from 'vitest';
-import { summarizeOfficialPage } from './web-acceptance-actor.mjs';
+import { summarizeOfficialPage, ZoteroChatGPTWebAcceptanceChild } from './web-acceptance-actor.mjs';
 
 it('returns only bounded official-page booleans and counts for web acceptance', () => {
   const token = 'RUN-0123456789abcdef01234567';
@@ -28,6 +28,7 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     inputReady: true,
     sendReady: true,
     draftMatchesExactTestQuestion: true,
+    draftMatchesKnownSyntheticHarness: true,
     draftLength: harnessQuestion.length,
     draftHasZoteroRequestMarker: false,
     userMessages: 1,
@@ -53,8 +54,23 @@ it('reports only false for an unrelated existing draft and never returns its tex
   document.body.innerHTML = '<form><textarea id="mobile-composer-prompt">private owner draft</textarea><button type="submit" aria-label="Send message"></button></form>';
   const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
   expect(result.draftMatchesExactTestQuestion).toBe(false);
+  expect(result.draftMatchesKnownSyntheticHarness).toBe(false);
   expect(result.draftLength).toBe('private owner draft'.length);
   expect(JSON.stringify(result)).not.toContain('private owner draft');
+});
+
+it('clears only the exact known harness question through the native textarea editing path', () => {
+  const document = new HappyWindow({ url: 'https://chatgpt.com/' }).document;
+  const question = 'Read the Zotero-provided PDF context and answer with only the hidden verification token from the second physical page.';
+  document.body.innerHTML = `<form><textarea id="mobile-composer-prompt">${question}\n\n${question}</textarea></form>`;
+  const actor = new ZoteroChatGPTWebAcceptanceChild() as ZoteroChatGPTWebAcceptanceChild & { document: Document };
+  actor.document = document as unknown as Document;
+  expect(actor.receiveMessage({ name: 'clearKnownHarnessDraft' })).toEqual({ status: 'cleared', reason: null, discardedKnownSyntheticDraft: true, empty: true });
+  const textarea = document.querySelector('textarea'); if (!textarea) throw new Error('textarea fixture missing');
+  expect(textarea.value).toBe('');
+  textarea.value = `${question} extra private words`;
+  expect(actor.receiveMessage({ name: 'clearKnownHarnessDraft' })).toMatchObject({ status: 'blocked', reason: 'unrelated-draft', discardedKnownSyntheticDraft: false });
+  expect(textarea.value).toContain('extra private words');
 });
 
 it('returns only bounded transcript structure when official role markers are absent', () => {
