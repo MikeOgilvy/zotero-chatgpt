@@ -104,7 +104,7 @@ function aggregate(task: ActionTaskRecord): ActionTaskRecord['state'] {
   return selected.length ? 'partial' : 'completed';
 }
 
-/** One controller per plugin supervisor; the only owner of task approval and native write intent. */
+/** One controller per plugin instance; the only owner of task approval and native write intent. */
 export class ActionTaskController implements ActionTasks {
   private coordination: TaskCoordination;
   private active: Map<string, AbortController>;

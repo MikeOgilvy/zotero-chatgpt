@@ -22,7 +22,7 @@ export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => 
  * Builds the shared reader client over local records. Constructing it performs no Codex work: the
  * handshake happens only when the Agent runtime is actually asked for something (`refreshAccount`,
  * the first Agent send, or login). `processOrConnect` is either a spawned process (tests) or the lazy
- * connector the supervisor hands over (production); neither is touched here.
+ * connector the Agent runtime hands over (production); neither is touched here.
  */
 export function createReaderClient(processOrConnect: ManagedProcess | ConnectCodex, storage: StoragePort, options: ReaderOptions): Promise<ReaderClient> {
   if (options.codexVersion !== '0.154.0' || !options.cwd) return Promise.reject(new RuntimeFailure('Unsupported runtime version or directory'));

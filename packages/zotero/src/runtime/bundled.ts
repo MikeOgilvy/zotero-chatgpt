@@ -21,9 +21,9 @@ export async function ensureBundledRuntime(host: AssetHost, rootURI: string, pri
       try { await verify(target); }
       catch {
         // The immutable path must hold exactly the pinned bytes. Retain the corrupt file as
-        // evidence and extract the packaged copy again. This runs only before a spawn, after
-        // the supervisor has confirmed that no owned process is running; renaming never
-        // alters an inode another process might still be executing.
+        // evidence and extract the packaged copy again. This runs only while the Agent runtime
+        // prepares a spawn, i.e. before it owns any process that could still be executing the old
+        // inode; renaming never alters an inode another process might still be running.
         await host.io.move(target, host.join(directory, `corrupt-${token}`), { noOverwrite: true });
         cached = false;
       }

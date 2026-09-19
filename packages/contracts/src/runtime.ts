@@ -61,8 +61,9 @@ export class RuntimeFailure extends Error {
   constructor(message: string) { super(message); this.name = 'RuntimeFailure'; }
 }
 /**
- * In-process reader API used by the sidebar. Views borrow it from the plugin-wide supervisor and
+ * In-process reader API used by the sidebar. Views borrow it from the plugin-wide Agent runtime and
  * never receive pipes, file handles or credentials. Business failures are ReaderError instances.
+ * Reading, listing and renaming work without that runtime; Agent work is what starts it.
  */
 export interface ReaderClient {
   snapshot(): RuntimeSnapshot;
