@@ -600,6 +600,15 @@ async function runHostSmoke(config) {
       await skip('consent-path-reachable-without-the-removed-panel', 'No synthetic text selection could be simulated in the real reader view.');
       await skip('acknowledge-context-resumes-the-pending-explain', 'No synthetic text selection could be simulated in the real reader view.');
     }
+    // The consent probe above intentionally created a pending Agent Explain owned by this driver.
+    // Revoke it through the visible mode control before any login wait: switching to Chat preserves
+    // the frozen selection in the draft and clears auto-resume, then returning to Agent restores the
+    // mode needed by later request-boundary checks without sending anything.
+    if (explainSelected) {
+      click(modeButton('chat')); await until(() => pressed('chat') && modeSwitch().dataset.zchatgptMode === 'chat' && disclosure()?.hidden === true, 'pending-explain-revoked-in-chat', 30000);
+      await check('pending-explain-revoked-without-request', disclosure()?.hidden === true && pressed('chat'), { mode: modeSwitch().dataset.zchatgptMode, disclosureHidden: disclosure()?.hidden ?? null });
+      click(modeButton('agent')); await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'agent-restored-after-pending-explain-revocation', 30000);
+    }
     toggle().click(); await until(() => !panel(), 'close-sidebar');
     await check('close-preserves-current-page', pdfViewer().currentPageNumber === 2, {
       page: pdfViewer().currentPageNumber,
@@ -660,9 +669,12 @@ async function runHostSmoke(config) {
     const records = PathUtils.join(config.profile, 'zotero-chatgpt', 'v1', 'records', 'conversations');
     // A profile that ran no conversation yet owns no records directory at all; the product lists a
     // missing directory as empty, and this probe must read the same way.
-    const recordFiles = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : [];
-    let requests = 0;
-    for (const file of recordFiles) if (file.endsWith('.json') && !file.endsWith('.source.json')) requests += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
+    const countStoredRequests = async () => {
+      const files = await IOUtils.exists(records) ? await IOUtils.getChildren(records) : []; let total = 0;
+      for (const file of files) if (file.endsWith('.json') && !file.endsWith('.source.json')) total += JSON.parse(await IOUtils.readUTF8(file)).requests.length;
+      return total;
+    };
+    const requests = await countStoredRequests();
     report.recordedRequests = requests;
     if (!config.live) {
       const currentRequests = conversationA
@@ -711,7 +723,8 @@ async function runHostSmoke(config) {
     if (config.live) {
       report.notRun = report.notRun.filter(name => !['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'in-flight-model-stop'].includes(name));
       if (config.liveCoreFlows) {
-        report.liveCoreFlows = { status: 'waiting-for-official-login', loginWaitSeconds: config.loginWaitSeconds ?? 0, driverClickedLogin: false, driverReadAuthFiles: false, modelTurns: 0 };
+        const requestsBeforeLogin = await countStoredRequests();
+        report.liveCoreFlows = { status: 'waiting-for-official-login', loginWaitSeconds: config.loginWaitSeconds ?? 0, driverClickedLogin: false, driverReadAuthFiles: false, modelTurns: 0, requestsBeforeLogin };
         await save();
         const waitStarted = Date.now();
         while (panel().dataset.zchatgptAuth !== 'signedIn' && Date.now() - waitStarted < (config.loginWaitSeconds ?? 0) * 1000) { await delay(500); }
@@ -721,7 +734,10 @@ async function runHostSmoke(config) {
           await skip('live-core-organization-flow', 'BLOCKED: complete the official login manually in this dedicated profile; the driver does not click login or inspect authentication files.');
           await save(); return;
         }
-        report.liveCoreFlows.status = 'running'; report.liveCoreFlows.loginObserved = 'signedIn'; await save();
+        await delay(2500);
+        const requestsAfterLogin = await countStoredRequests();
+        await check('live-core-login-starts-no-incidental-request', requestsAfterLogin === requestsBeforeLogin, { requestsBeforeLogin, requestsAfterLogin });
+        report.liveCoreFlows.status = 'running'; report.liveCoreFlows.loginObserved = 'signedIn'; report.liveCoreFlows.requestsAfterLogin = requestsAfterLogin; await save();
       }
       await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
       const picker = panel().querySelector('[data-zchatgpt-picker]');
