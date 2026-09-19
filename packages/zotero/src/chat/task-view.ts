@@ -20,9 +20,23 @@ export interface TaskViewActions {
 type TaskItem = ActionTaskRecord['items'][number];
 const TASK_LABEL = { preparing: 'Preparing', review: 'Review', running: 'Running', completed: 'Completed', partial: 'Partly completed', cancelled: 'Cancelled', uncertain: 'Unconfirmed', undone: 'Undone', conflict: 'Conflict', failed: 'Failed' } as const;
 const ITEM_LABEL = { candidate: 'Ready', unresolved: 'Unresolved', skipped: 'Skipped', writing: 'Writing…', applied: 'Applied', 'metadata-only': 'Metadata saved', failed: 'Failed', uncertain: 'Unconfirmed', undoing: 'Undoing…', undone: 'Undone', conflict: 'Changed output preserved' } as const;
-function eligible(item: TaskItem): boolean { return item.status === 'candidate' && (item.kind === 'annotation' ? item.resolution?.status === 'resolved' : !!item.preview?.candidates.length); }
-function hasOutput(item: TaskItem): boolean { return item.status !== 'undone' && (item.kind === 'annotation' ? !!item.annotation : !!item.item); }
+function eligible(item: TaskItem): boolean {
+  if (item.status !== 'candidate') return false;
+  if (item.kind === 'annotation') return item.resolution?.status === 'resolved';
+  if (item.kind === 'acquisition') return !!item.preview?.candidates.length;
+  return item.proposal.tags.length > 0 || item.proposal.collections.length > 0;
+}
+function hasOutput(item: TaskItem): boolean {
+  if (item.status === 'undone') return false;
+  if (item.kind === 'annotation') return !!item.annotation;
+  if (item.kind === 'acquisition') return !!item.item;
+  return !!item.change;
+}
 function itemOutcome(item: TaskItem): string {
+  if (item.kind === 'organization') {
+    if (item.status === 'applied') return item.change ? 'Verified additions saved' : 'Saved output not verified';
+    return ITEM_LABEL[item.status];
+  }
   if (item.kind !== 'acquisition' || !item.item || item.status === 'undone' || item.status === 'conflict' || item.status === 'uncertain') return ITEM_LABEL[item.status];
   if (item.attachmentUndone) return 'Metadata saved; PDF removed';
   if (item.acquisition?.status === 'attached') return 'PDF attached';
@@ -95,7 +109,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       const row = create('article', '', 'zchatgpt-task-row'); row.dataset.zchatgptTaskItemId = item.id;
       const header = create('div', '', 'zchatgpt-task-row-header'); const include = create('label', 'Include', 'zchatgpt-task-check'); const check = create('input'); check.type = 'checkbox'; check.dataset.zchatgptTaskSelect = item.id; check.setAttribute('aria-label', 'Include this candidate'); include.prepend(check);
       const itemStatus = create('span', '', 'zchatgpt-task-muted'); header.append(include, itemStatus);
-      const quote = create('blockquote', '', 'zchatgpt-task-quote'); const reason = create('p', '', 'zchatgpt-task-muted'); const page = create('p', '', 'zchatgpt-task-muted'); const itemError = create('p', '', 'zchatgpt-task-muted');
+      const quote = create('blockquote', '', 'zchatgpt-task-quote'); const reason = create('p', '', 'zchatgpt-task-muted'); const page = create('p', '', 'zchatgpt-task-muted'); const organizationDetail = create('p', '', 'zchatgpt-task-muted'); const itemError = create('p', '', 'zchatgpt-task-muted');
       const fields = create('div');
       const field = (label: string, select: HTMLSelectElement) => { const node = create('label', label, 'zchatgpt-task-field'); node.append(select); fields.append(node); return node; };
       const metadata = create('select'); metadata.dataset.zchatgptMetadataChoice = item.id; field('Verified metadata', metadata);
@@ -105,7 +119,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       const rowControls = create('div', '', 'zchatgpt-task-actions');
       const source = button('Open source', 'source', () => execute(`source:${item.id}`, () => actions.openSource(task.id, item.id), source));
       const output = button('Open saved output', 'output', () => execute(`output:${item.id}`, () => actions.openOutput(task.id, item.id), output)); rowControls.append(source, output);
-      row.append(header, quote, reason, page, fields, itemError, rowControls);
+      row.append(header, quote, reason, page, fields, organizationDetail, itemError, rowControls);
       check.addEventListener('change', () => { selected.set(item.id, check.checked); refresh(); });
       metadata.addEventListener('change', () => {
         if (item.kind !== 'acquisition') return; const { choice } = choiceFor(item);
@@ -126,10 +140,11 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
         source.hidden = item.kind !== 'annotation' || item.resolution?.status !== 'resolved'; source.disabled = pending.has(`source:${item.id}`);
         output.hidden = !hasOutput(item); output.disabled = pending.has(`output:${item.id}`);
         fields.hidden = item.kind !== 'acquisition' || task.state !== 'review';
+        organizationDetail.hidden = item.kind !== 'organization';
         if (item.kind === 'annotation') {
           quote.textContent = item.proposal.quote; reason.textContent = item.proposal.reason;
           page.textContent = item.resolution?.status === 'resolved' ? `p. ${item.resolution.candidate.pageLabel}` : `Proposed p. ${item.proposal.pageIndex + 1} · ${item.resolution?.status === 'ambiguous' ? `${item.resolution.matches} matching passages` : 'Source not resolved'}`;
-        } else {
+        } else if (item.kind === 'acquisition') {
           const resolved = choiceFor(item); const candidates = item.preview?.candidates ?? [];
           quote.textContent = item.item?.metadata.title ?? resolved.metadata?.title ?? item.identifier; reason.textContent = item.identifier; page.textContent = '';
           const nextMetadata = JSON.stringify(candidates);
@@ -140,6 +155,20 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
           duplicateField.hidden = !resolved.duplicates.length; duplicate.value = resolved.choice.duplicateKey ?? ''; duplicate.disabled = !canReview || resolved.duplicates.length < 2;
           metadataDetail.textContent = resolved.metadata ? [resolved.metadata.DOI, resolved.metadata.date, resolved.duplicates.length ? `${resolved.duplicates.length} existing match(es)` : 'Create a new item'].filter(Boolean).join(' · ') : 'Choose the metadata to review existing matches.';
           pdf.checked = resolved.choice.downloadPDF !== false; pdf.disabled = !canReview;
+        } else {
+          const label = (target: NativeCollectionTarget) => { try { return actions.collectionLabel(target) || target.collectionKey; } catch { return target.collectionKey; } };
+          const proposedCollections = item.proposal.collections.map(label);
+          quote.textContent = item.before.metadata.title;
+          reason.textContent = `Add tags: ${item.proposal.tags.join(', ') || 'none'}`;
+          page.textContent = `Add to collections: ${proposedCollections.join(', ') || 'none'}`;
+          const existingTags = item.before.tags.length; const existingCollections = item.before.collectionKeys.length;
+          if (item.status === 'undone') organizationDetail.textContent = 'Undo verified: approved additions removed; other item data preserved.';
+          else if (item.status === 'conflict') organizationDetail.textContent = 'Later changes were preserved; undo was not reported as successful.';
+          else if (item.status === 'applied' && item.change) {
+            const tags = item.change.addedTags.length; const collections = item.change.addedCollectionKeys.length;
+            organizationDetail.textContent = `Verified saved: ${tags} ${tags === 1 ? 'tag' : 'tags'} and ${collections} ${collections === 1 ? 'collection' : 'collections'} added.`;
+          } else if (item.status === 'applied') organizationDetail.textContent = 'Saved output not verified; reconcile before relying on this result.';
+          else organizationDetail.textContent = `Existing ${existingTags} ${existingTags === 1 ? 'tag' : 'tags'} and ${existingCollections} ${existingCollections === 1 ? 'collection' : 'collections'} stay unchanged; approval only adds the entries shown above.`;
         }
       } };
     };
@@ -147,16 +176,22 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
       if (removed) return;
       question.textContent = task.question;
       if (task.kind === 'annotations') scope.textContent = `PDF ${task.paper.attachmentKey} · candidate pages ${[...new Set(task.items.map(item => item.proposal.pageIndex + 1))].join(', ') || 'none'}`;
-      else { let label = ''; try { label = actions.collectionLabel(task.target); } catch { /* Keep the recorded key available. */ } scope.textContent = `Target collection: ${label || task.target.collectionKey}`; }
+      else if (task.kind === 'acquisition') { let label = ''; try { label = actions.collectionLabel(task.target); } catch { /* Keep the recorded key available. */ } scope.textContent = `Target collection: ${label || task.target.collectionKey}`; }
+      else {
+        const positions = task.items.map(item => item.sourceIndex + 1).sort((a, b) => a - b); const first = positions[0]; const last = positions.at(-1);
+        scope.textContent = first === undefined ? 'Selection positions: none' : first === last ? `Selection position ${first} · ${task.items.length} proposed item` : `Selection positions ${first}–${last} · ${task.items.length} proposed items`;
+      }
       const itemNodes = task.items.map(item => { let row = rowViews.get(item.id); if (!row) { row = rowFor(item); rowViews.set(item.id, row); } row.update(item); return row.node; }); placeChildren(rows, itemNodes);
       const ids = new Set(task.items.map(item => item.id)); for (const id of rowViews.keys()) if (!ids.has(id)) { rowViews.delete(id); selected.delete(id); choices.delete(id); }
       const ready = task.items.filter(eligible); const selectedItems = ready.filter(item => selected.get(item.id));
       const validChoices = selectedItems.every(item => item.kind !== 'acquisition' || choiceFor(item).valid);
       const outputs = task.items.filter(hasOutput); const metadataOnly = task.items.filter(item => item.kind === 'acquisition' && item.item && item.status !== 'undone' && (item.acquisition?.status !== 'attached' || item.attachmentUndone)).length;
       const done = task.items.filter(item => ['applied', 'metadata-only'].includes(item.status)).length;
-      const outcome = task.state === 'review' ? `${selectedItems.length}/${ready.length} selected` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : `${metadataOnly} metadata item(s) · ${task.items.filter(item => item.acquisition?.status === 'attached' && !item.attachmentUndone && item.status === 'applied').length} PDFs attached`;
-      summary.textContent = `${task.kind === 'annotations' ? 'Annotations' : 'Acquire literature'} · ${TASK_LABEL[task.state]} · ${outcome}`;
-      const stateCounts = new Map<string, number>(); for (const item of task.items) stateCounts.set(ITEM_LABEL[item.status], (stateCounts.get(ITEM_LABEL[item.status]) ?? 0) + 1);
+      const verifiedOrganization = task.items.filter(item => item.kind === 'organization' && item.status === 'applied' && item.change).length;
+      const outcome = task.state === 'review' ? `${selectedItems.length}/${ready.length} selected${task.kind === 'organization' ? ' items' : ''}` : task.kind === 'annotations' ? `${done}/${task.items.length} annotations applied` : task.kind === 'organization' ? `${verifiedOrganization}/${task.items.length} items organized` : `${metadataOnly} metadata item(s) · ${task.items.filter(item => item.kind === 'acquisition' && item.acquisition?.status === 'attached' && !item.attachmentUndone && item.status === 'applied').length} PDFs attached`;
+      const taskName = task.kind === 'annotations' ? 'Annotations' : task.kind === 'organization' ? 'Organize library' : 'Acquire literature';
+      summary.textContent = `${taskName} · ${TASK_LABEL[task.state]} · ${outcome}`;
+      const stateCounts = new Map<string, number>(); for (const item of task.items) { const label = item.kind === 'organization' ? itemOutcome(item) : ITEM_LABEL[item.status]; stateCounts.set(label, (stateCounts.get(label) ?? 0) + 1); }
       counts.textContent = [...stateCounts].map(([name, count]) => `${count} ${name.toLowerCase()}`).join(' · ');
       const uncertain = task.state === 'uncertain' || task.items.some(item => ['writing', 'uncertain', 'undoing'].includes(item.status));
       approve.hidden = task.state !== 'review' || !!task.approvedAt; approve.disabled = mutating() || !selectedItems.length || !validChoices;
