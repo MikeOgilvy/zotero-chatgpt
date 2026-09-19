@@ -14,7 +14,8 @@ export interface PreparedRuntime { spec: ProcessSpec; storage: StoragePort; code
  */
 export interface RuntimePaths { root: string; home: string; account: string; cwd: string; temporary: string; records: string; config: string; cache: string; data: string }
 export function runtimePaths(host: RuntimeHost): RuntimePaths {
-  const root = host.join(host.profileDir, 'zotero-chatgpt/v1');
+  // `PathUtils.join` requires each component to be a single path segment, so the tree is joined stepwise.
+  const root = host.join(host.join(host.profileDir, 'zotero-chatgpt'), 'v1');
   const home = host.join(root, 'home');
   return {
     root,
