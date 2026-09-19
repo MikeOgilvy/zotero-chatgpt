@@ -13,13 +13,37 @@ const MAX_TEXT = 512_000;
 const ACCEPT_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 const SEND_READY_TIMEOUT_MS = 5_000;
+const MOBILE_COMPOSER_ID = 'mobile-composer-prompt';
 
 function inside(node, container) {
   return node === container || Boolean(node && container?.contains?.(node));
 }
 
+function safeMobileForm(document, composer) {
+  if (composer?.localName !== 'textarea' || composer.id !== MOBILE_COMPOSER_ID) return null;
+  const form = composer.closest?.('form');
+  if (!form) return null;
+  const action = String(form.getAttribute('action') || '').trim();
+  if (action) {
+    try {
+      const target = new URL(action, document.location.href);
+      if (target.protocol !== 'https:' || target.hostname !== 'chatgpt.com' || target.username || target.password || (target.port && target.port !== '443')) return null;
+    } catch { return null; }
+  }
+  // The known mobile composer form is not an authentication form. Presence of any common credential
+  // control disables the fallback; no value is read.
+  if (form.querySelector('input[type="password"], input[type="email"], input[autocomplete="username"], input[autocomplete="current-password"], input[autocomplete="new-password"]')) return null;
+  return form;
+}
+
 function sendButton(document, composer = findChatGPTComposer(document)) {
-  const button = composer?.closest?.('form')?.querySelector?.(SEND_SELECTOR) ?? null;
+  const form = composer?.closest?.('form') ?? null;
+  let button = form?.querySelector?.(SEND_SELECTOR) ?? null;
+  if (!button) {
+    const mobile = safeMobileForm(document, composer);
+    const submits = mobile ? [...mobile.querySelectorAll('button[type="submit"]')] : [];
+    button = submits.length === 1 ? submits[0] : null;
+  }
   return button?.localName === 'button' ? button : null;
 }
 
@@ -78,7 +102,7 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
     if (event.isTrusted && event.type === 'click' && readChatGPTComposer(composer).trim()) {
       const button = event.target?.closest?.('button');
       const form = composer.closest?.('form');
-      if (button && form?.contains(button) && !button.matches(SEND_SELECTOR)) {
+      if (button && form?.contains(button) && button !== sendButton(this.document, composer)) {
         event.preventDefault(); event.stopImmediatePropagation();
         this.sendAsyncMessage('readiness', { status: 'unsupported-send' });
         return;

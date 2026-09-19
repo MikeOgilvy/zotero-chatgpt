@@ -18,7 +18,7 @@ function page() {
   return { window, doc: doc as unknown as Document, composer, send };
 }
 
-function actorFor(current: ReturnType<typeof page>) {
+function actorFor(current: { doc: Document; window: unknown }) {
   const actor = new Child();
   actor.document = current.doc;
   actor.contentWindow = current.window;
@@ -26,7 +26,17 @@ function actorFor(current: ReturnType<typeof page>) {
   return actor;
 }
 
-function acceptedOnClick(current: ReturnType<typeof page>, marker: string): void {
+function mobilePage(options: { action?: string; credential?: boolean; submits?: number } = {}) {
+  const window = new Window({ url: 'https://chatgpt.com/' }); const doc = window.document;
+  const form = doc.createElement('form'); if (options.action !== undefined) form.setAttribute('action', options.action);
+  const composer = doc.createElement('textarea'); composer.id = 'mobile-composer-prompt'; form.append(composer);
+  if (options.credential) { const credential = doc.createElement('input'); credential.type = 'password'; form.append(credential); }
+  const buttons = Array.from({ length: options.submits ?? 1 }, () => { const button = doc.createElement('button'); button.type = 'submit'; form.append(button); return button; });
+  doc.body.append(form);
+  return { window, doc: doc as unknown as Document, composer, send: buttons[0]!, buttons };
+}
+
+function acceptedOnClick(current: { doc: Document; send: { addEventListener(type: string, listener: () => void): void } }, marker: string): void {
   current.send.addEventListener('click', () => {
     const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user';
     message.textContent = `accepted [Zotero request ${marker}]`; current.doc.body.append(message);
@@ -70,6 +80,15 @@ describe('official ChatGPT child send transaction', () => {
     expect(current.composer.textContent).toBe('question plus a new thought');
   });
 
+  it('refuses an explicit More-details submission when the official composer already has another draft', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'my unrelated unsent draft';
+    const prepare = vi.fn(() => Promise.resolve({ status: 'prepared', text: 'should never replace', marker: 'marker-explicit' }));
+    actor.sendQuery = prepare;
+    await expect(actor.submitQuestion('Explain the selected passage.')).resolves.toEqual({ status: 'blocked', reason: 'draft-changed' });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(current.composer.textContent).toBe('my unrelated unsent draft');
+  });
+
   it('does not replay into a new document after navigation completes during extraction', async () => {
     const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
     let finish!: (value: unknown) => void;
@@ -101,5 +120,18 @@ describe('official ChatGPT child send transaction', () => {
     });
     current.composer.closest('form')!.append(late);
     await expect(submission).resolves.toEqual({ status: 'accepted' });
+  });
+
+  it('uses the observed unique mobile form submit button without broadening to unsafe forms', async () => {
+    const current = mobilePage(); const actor = actorFor(current); current.composer.value = 'question';
+    await expect(actor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'draft' });
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'mobile frozen [Zotero request marker-mobile]', marker: 'marker-mobile' });
+    acceptedOnClick(current, 'marker-mobile');
+    await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'accepted' });
+
+    for (const unsafe of [mobilePage({ action: 'https://evil.invalid/submit' }), mobilePage({ credential: true }), mobilePage({ submits: 2 })]) {
+      const unsafeActor = actorFor(unsafe);
+      await expect(unsafeActor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'composer-ready' });
+    }
   });
 });
