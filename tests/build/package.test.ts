@@ -59,12 +59,16 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
   const sourceDirectory = path.join(parentDirectory, "package-source");
   await Promise.all([
     mkdir(path.join(sourceDirectory, "content/assets"), { recursive: true }),
+    mkdir(path.join(sourceDirectory, "content/actors"), { recursive: true }),
     mkdir(path.join(sourceDirectory, "locale/en-US"), { recursive: true }),
     mkdir(path.join(sourceDirectory, "docs"), { recursive: true }),
   ]);
 
   const requiredFiles = ["bootstrap.js", "content/zchatgpt.js", "manifest.json", "LICENSE"];
   await cp(path.join(builtExtension, "content/runtime"), path.join(sourceDirectory, "content/runtime"), { recursive: true });
+  for (const name of ["OfficialChatParent.mjs", "OfficialChatChild.mjs", "chatgpt-dom.mjs"]) {
+    await cp(path.join(builtExtension, "content/actors", name), path.join(sourceDirectory, "content/actors", name));
+  }
   await Promise.all(
     requiredFiles.map(async (file) => {
       const destination = path.join(sourceDirectory, file);
@@ -87,6 +91,9 @@ async function createPackagingFixture(parentDirectory: string): Promise<{
   const packagedFiles = [
     "bootstrap.js",
     "content/assets/example.css",
+    "content/actors/OfficialChatChild.mjs",
+    "content/actors/OfficialChatParent.mjs",
+    "content/actors/chatgpt-dom.mjs",
     "content/zchatgpt.js",
     "content/runtime/codex-aarch64-apple-darwin",
     "content/runtime/manifest.json",
@@ -195,6 +202,44 @@ describe("development XPI packaging", () => {
     }
 
     expect(stderr).toContain("Missing required runtime file: bootstrap.js");
+  });
+
+  it("requires exactly the three production actor modules", async () => {
+    const root = await makeTemporaryDirectory();
+    const { sourceDirectory } = await createPackagingFixture(root);
+    await rm(path.join(sourceDirectory, "content/actors/OfficialChatChild.mjs"));
+    await expect(execFileAsync(process.execPath, ["tests/runtime/package-fixture.mjs", "package", "--source", sourceDirectory, "--output", path.join(root, "missing-actor.xpi")], { cwd: repositoryRoot }))
+      .rejects.toSatisfy((error: unknown) => /OfficialChatChild\.mjs/u.test(error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)));
+
+    await cp(path.join(builtExtension, "content/actors/OfficialChatChild.mjs"), path.join(sourceDirectory, "content/actors/OfficialChatChild.mjs"));
+    await writeFile(path.join(sourceDirectory, "content/actors/UnexpectedActor.mjs"), "export {};\n");
+    await expect(execFileAsync(process.execPath, ["tests/runtime/package-fixture.mjs", "package", "--source", sourceDirectory, "--output", path.join(root, "extra-actor.xpi")], { cwd: repositoryRoot }))
+      .rejects.toSatisfy((error: unknown) => /UnexpectedActor\.mjs/u.test(error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)));
+  });
+
+  it("rejects host drivers and web-acceptance assets from the product package", async () => {
+    const root = await makeTemporaryDirectory();
+    const { sourceDirectory } = await createPackagingFixture(root);
+    await writeFile(path.join(sourceDirectory, "driver.js"), "// host test driver\n");
+    await mkdir(path.join(sourceDirectory, "content/web-acceptance"), { recursive: true });
+    await writeFile(path.join(sourceDirectory, "content/web-acceptance/web-acceptance-actor.mjs"), "export {};\n");
+    await expect(execFileAsync(process.execPath, ["tests/runtime/package-fixture.mjs", "package", "--source", sourceDirectory, "--output", path.join(root, "driver.xpi")], { cwd: repositoryRoot }))
+      .rejects.toSatisfy((error: unknown) => /driver\.js|web-acceptance/u.test(error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)));
+  });
+
+  it("rejects private runtime files and Node imports before writing the product package", async () => {
+    const root = await makeTemporaryDirectory();
+    const { sourceDirectory } = await createPackagingFixture(root);
+    await mkdir(path.join(sourceDirectory, "content/account"), { recursive: true });
+    await writeFile(path.join(sourceDirectory, "content/account/token.json"), '{"token":"secret"}');
+    await expect(execFileAsync(process.execPath, ["tests/runtime/package-fixture.mjs", "package", "--source", sourceDirectory, "--output", path.join(root, "private.xpi")], { cwd: repositoryRoot }))
+      .rejects.toSatisfy((error: unknown) => /token\.json/u.test(error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)));
+
+    await rm(path.join(sourceDirectory, "content/account"), { recursive: true });
+    const actor = path.join(sourceDirectory, "content/actors/OfficialChatChild.mjs");
+    await writeFile(actor, `${await readFile(actor, "utf8")}\nimport "fs";\n`);
+    await expect(execFileAsync(process.execPath, ["tests/runtime/package-fixture.mjs", "package", "--source", sourceDirectory, "--output", path.join(root, "node.xpi")], { cwd: repositoryRoot }))
+      .rejects.toSatisfy((error: unknown) => /Node builtin fs/u.test(error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)));
   });
 
   it("rejects a manifest missing Zotero's required update URL", async () => {

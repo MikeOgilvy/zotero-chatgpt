@@ -11,6 +11,7 @@ const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const zoteroPackage = path.join(repositoryRoot, "packages/zotero");
 const defaultOutputDirectory = path.join(repositoryRoot, "build/dev");
 const require = createRequire(import.meta.url);
+const officialChatActors = ["OfficialChatParent.mjs", "OfficialChatChild.mjs", "chatgpt-dom.mjs"];
 
 function requireNode24() {
   if (process.versions.node.split(".")[0] !== "24") {
@@ -42,6 +43,12 @@ async function copyIfPresent(source, destination) {
   }
 }
 
+async function copyOfficialChatActors(outputDirectory) {
+  const destination = path.join(outputDirectory, "content/actors");
+  await mkdir(destination, { recursive: true });
+  await Promise.all(officialChatActors.map(name => cp(path.join(zoteroPackage, "actors", name), path.join(destination, name))));
+}
+
 export async function copyStaticFiles(outputDirectory) {
   await Promise.all([
     cp(path.join(zoteroPackage, "manifest.json"), path.join(outputDirectory, "manifest.json")),
@@ -57,6 +64,9 @@ export async function copyStaticFiles(outputDirectory) {
       path.join(zoteroPackage, "preferences"),
       path.join(outputDirectory, "content/preferences"),
     ),
+    // These are the complete content-readable actor surface. Copy exact runtime modules so type
+    // declarations, test actors and future scratch files cannot become XPI resources by proximity.
+    copyOfficialChatActors(outputDirectory),
     copyIfPresent(path.join(zoteroPackage, "locale"), path.join(outputDirectory, "locale")),
   ]);
   await copyThirdPartyAssets(outputDirectory);
