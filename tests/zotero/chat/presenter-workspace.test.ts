@@ -405,9 +405,12 @@ it('freezes Agent mode and the native organization scope when Queue is clicked',
 it('reports a failed selection freeze and keeps the organization draft', async () => {
   const f = fixture(); f.workspaceSettings().skills.push(defaultSettings().skills.find(skill => skill.id === 'builtin-organize')!);
   f.library.selectedItems.mockRejectedValueOnce(new ReaderError('INVALID_REQUEST', 'Select Zotero items first.'));
-  await f.presenter.activate(); f.presenter.setMode('agent'); f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
+  await f.presenter.activate(); f.presenter.setMode('agent'); await vi.waitFor(() => expect(f.services.ensureAgent).toHaveBeenCalled());
+  vi.mocked(f.services.ensureAgent).mockClear(); vi.mocked(f.services.ensureAgent).mockRejectedValue(new Error('Agent login is unavailable.'));
+  f.presenter.setQuestion('按主题打标签，并归入合适的集合。'); await f.presenter.send();
   expect(f.sent).toHaveLength(0); expect(f.presenter.snapshot().draft.question).toBe('按主题打标签，并归入合适的集合。');
-  expect(f.presenter.snapshot().message).toBe('Select Zotero items first.'); f.presenter.dispose();
+  expect(f.presenter.snapshot().message).toBe('Select Zotero items first.');
+  expect(f.services.ensureAgent).not.toHaveBeenCalled(); f.presenter.dispose();
 });
 
 it('refuses a write workflow in the default Chat mode instead of sending it', async () => {

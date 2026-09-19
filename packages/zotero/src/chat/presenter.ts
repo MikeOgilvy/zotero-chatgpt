@@ -1200,6 +1200,11 @@ export class ConversationPresenter {
   }
   private async sendDraft(draft: WorkspaceDraft, version: number, settings: GenerationSettings | null, document: RequestContext, workspace: Promise<WorkspaceSettings | null>, target: Conversation | null, queued: boolean, mode: RequestMode, organizationFlight: Promise<FrozenOrganizationResult> | null): Promise<void> {
     try {
+      // Scope failures win over login/runtime preparation: selection was frozen at the owner's click,
+      // and a failed freeze must never start Codex, disappear behind a login message, or retarget a
+      // later selection. The settled union also makes an early rejection safe while Queue is waiting.
+      let organization: OrganizationContext | undefined;
+      if (organizationFlight) { const frozen = await organizationFlight; if (!frozen.ok) throw frozen.error; organization = frozen.value; }
       await this.loadLocal();
       const configuration = await workspace; if (this.disposed) return;
       await this.connect();
@@ -1207,7 +1212,7 @@ export class ConversationPresenter {
       const conversation = target ?? await this.ensureConversation();
       const resolved = ConversationPresenter.withoutStaleProfile(draft, configuration);
       const input = makeAsk(resolved.draft, conversation.id, this.services.uuid(), settings ?? conversation.settings, this.paperIdentity());
-      if (organizationFlight) { const frozen = await organizationFlight; if (!frozen.ok) throw frozen.error; input.organization = frozen.value; }
+      if (organization) input.organization = organization;
       await this.submit(conversation, input, document, resolved.draft, configuration, queued, mode);
       // Remember what was sent so Stop can return it to the composer.
       this.submitted.set(conversation.id, clone(resolved.draft));
