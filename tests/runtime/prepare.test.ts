@@ -53,6 +53,7 @@ it('prepares only private profile state and resets executable environments befor
   expect(await readFile(path.join(env.CODEX_HOME!, 'environments.toml'), 'utf8')).toBe('include_local = false\n');
   expect(await readFile(path.join(env.CODEX_HOME!, 'config.toml'), 'utf8')).toBe('');
   expect(await readFile(path.join(env.CODEX_HOME!, 'auth.json'), 'utf8')).toBe('synthetic credentials marker');
-  await prepared.storage.writeAtomic('s2-requests.json', new Uint8Array([1]));
-  expect(await readdir(path.join(privateRoot, 'records'))).toEqual(['s2-requests.json']);
+  // Local records belong to `openLocalStorage`, not to the Agent-only preparation: preparing Codex
+  // must not create or touch the shared records directory.
+  await expect(readdir(path.join(privateRoot, 'records'))).rejects.toMatchObject({ code: 'ENOENT' });
 });

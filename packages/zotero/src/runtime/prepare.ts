@@ -1,10 +1,10 @@
 import { PINNED_RUNTIME } from '../../../../runtime/manifest.ts';
 import { codexLaunchArgs } from '../../../core/src/codex/reader-policy.ts';
-import type { ProcessSpec, StoragePort } from '../../../contracts/src/runtime.ts';
+import type { ProcessSpec } from '../../../contracts/src/runtime.ts';
 import { ensureBundledRuntime, type AssetHost, type RuntimeManifest } from './bundled.ts';
 import { GeckoStorage, privateDirectory } from './storage.ts';
 export interface RuntimeHost extends AssetHost { profileDir: string }
-export interface PreparedRuntime { spec: ProcessSpec; storage: StoragePort; codexVersion: string }
+export interface PreparedRuntime { spec: ProcessSpec; codexVersion: string }
 /**
  * The private runtime paths, computed without touching the filesystem.
  *
@@ -40,7 +40,6 @@ export async function prepareRuntime(host: RuntimeHost, rootURI: string, manifes
   const account = await privateDirectory(host, root, 'account');
   const cwd = await privateDirectory(host, root, 'scratch');
   const temporary = await privateDirectory(host, root, 'tmp');
-  const records = await privateDirectory(host, root, 'records');
   const config = await privateDirectory(host, home, 'config');
   const cache = await privateDirectory(host, home, 'cache');
   const data = await privateDirectory(host, home, 'data');
@@ -52,7 +51,6 @@ export async function prepareRuntime(host: RuntimeHost, rootURI: string, manifes
   const executable = await ensureBundledRuntime(host, rootURI, root, manifest);
   return {
     codexVersion: manifest.codexVersion,
-    storage: new GeckoStorage(host, records),
     spec: { executable, args: codexLaunchArgs(), cwd, env: { HOME: home, CODEX_HOME: account, TMPDIR: temporary + '/', XDG_CONFIG_HOME: config, XDG_CACHE_HOME: cache, XDG_DATA_HOME: data, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', CODEX_EXEC_SERVER_URL: 'none', CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1' } },
   };
 }
