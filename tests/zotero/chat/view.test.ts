@@ -1102,8 +1102,9 @@ it('keeps the one-time PDF send consent reachable without the removed panel', as
   const { root, presenter } = await mountReadyChat({ messages: [], sent, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {}, needsDisclosure: () => true } });
   const disclosure = root.querySelector<HTMLElement>('[data-zchatgpt-context-disclosure]')!;
   expect(disclosure.hasAttribute('hidden')).toBe(true);
-  // An explain with automatic PDF text on needs consent. The removed panel used to own that gate,
-  // so without the surviving consent line the explain would be dropped with no signal at all.
+  // Native explain belongs to Agent; hosted Chat selection actions use the official page actor.
+  // With automatic PDF text on, Agent still needs the surviving one-time consent line.
+  presenter.setMode('agent');
   await presenter.explain(citationA);
   expect(disclosure.hasAttribute('hidden')).toBe(false);
   const action = disclosure.querySelector<HTMLButtonElement>('[data-zchatgpt-action="acknowledge-context"]')!;
