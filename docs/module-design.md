@@ -1,6 +1,6 @@
 # 架构与契约
 
-本文描述 **0.4.0a17 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
+本文描述 **0.4.0a18 工作树实现**。产品行为由[产品规格](zotero-chatgpt-user-flow.md)定义，命令见[开发与测试](development.md)，已验证范围和剩余问题统一见[进度与验收](progress.md)。代码、单元测试、真实宿主、真实模型和最终 XPI 是不同层次的证据。
 
 运行路径为 Zotero 9 原生扩展 → TypeScript core → Gecko Subprocess 私有 stdio → 随包 Codex App Server。Node 24 只用于构建和测试。模型没有通用脚本、库写入或文件系统工具；本地阅读、标注、文献导入通过有明确输入和权限边界的原生端口完成。
 
@@ -15,6 +15,26 @@ Reader → Current Document Context → ExecutionRouter ┤
 ```
 
 上下文分层取用（轻量元数据 / 即时 reader 上下文 / 按需全文检索），不要求每轮整篇发送；模式随每轮请求冻结并写入请求快照，切换模式不新建会话、不丢草稿、不重放写入。完整产品行为见[产品规格](zotero-chatgpt-user-flow.md)。
+
+### Chat Mode 的实际承载：宿主内的 chatgpt.com（0.4.0a18）
+
+从 0.4.0a18 起，**发行的 Chat 档不是我们自己的对话实现，而是宿主里的真实 `chatgpt.com` 页面**：侧栏在 Chat 档把宿主创建的 chrome 浏览器面覆盖在 dock 的 slot 上，应用自己拥有会话列表、输入框、流式渲染、模型选择、历史与上传。因此 Chat 档的实际模型请求、流式与取消都由该应用与用户的官方会话完成，本仓库不实现、不代理、不读取这条通道。
+
+```text
+Reader(dock) → slot 几何 ──┐
+                           ├─ chat/embed.ts：主窗口 XUL <browser>（HTML div 承载，按 slot 定位）
+chatgpt.com（远程顶层文档）─┘        └ 不显示时停在屏幕外（不卸载）→ 会话与 cookie 持续
+```
+
+- 承载方式（`packages/zotero/src/chat/embed.ts`）：在主窗口（XUL 文档）用 `createXULElement('browser')` 创建 content 浏览器，带上 Zotero 自身远程页查看器使用的属性集（`type=content`、`remote=false`、`disableglobalhistory`、`maychangeremoteness`、`messagemanagergroup`），把 `src` 在创建时立即设为应用 URL（构造即开始加载），并挂在一个绝对定位的 HTML `div` 上。**为什么不用 iframe**：dock 所在的 reader 文档是 HTML，无法创建 XUL 元素，且远程页面在 iframe 里的加载被站点安全头拒绝——两者都由 `tests/host/embed-driver.js` 在同一宿主上实测记录，而不是推断。
+- 生命周期：dock 关闭、切到 Agent、切换 reader、窗口缩放都只移动那个 div 的几何；应用文档**不被重载、不被销毁**（host 断言同一元素、同一 `currentURI` 跨模式往返）。div 在不可见时停在屏幕外且保持真实尺寸，因为“渲染中的 box”才是文档保持存活的条件。窗口卸载或插件关闭才 `destroy()`。
+- 模式隔离：Chat 档不接触 Agent 执行路径。presenter 以 `chatHostedExternally: true` 装配，因此 Chat 档**不**为原生请求准备 PDF、不初始化 Codex，原生 transcript/composer 仍挂载但被隐藏且不可达（`hidden` 祖先使其无法输入）。切到 Agent 仍是原来的惰性 Codex 路径，字节与行为不变。
+- 抽象端口仍然存在但不是发行路径：`core/chat/executor.ts` + `ChatTransport`（占位、`available=false`）保留为“原生对话实现”的设计位置，本 build 的 Chat 档不经过它；任何“把 `ChatTransport` 接到 Codex 上”的改动都是被禁止的，也是不必要的。
+- **当前 PDF 上下文（Milestone B）**：远程页面是别人的文档，宿主没有受支持的注入通道，因此不采用硬编码选择器/DOM 注入；发行实现是两条**显式用户动作 + 剪贴板**路径，并把“已复制到剪贴板，请粘贴”如实写进状态行（不声称应用已收到）：
+  - `core/chat/document-brief.ts`（纯函数）：论文身份 + 本地已读页文本，超限截断并注明；`DOCUMENT_BRIEF_LIMIT` 默认 12000 字符；单页过长时截断该页而不是交出一个没有正文的块。
+  - `zotero/chat/clipboard-file.ts`：把**当前 PDF 文件本身**以 `application/x-moz-file` 放到系统剪贴板，用户在 ChatGPT 自己的输入框粘贴即可走站点自己的上传路径。写入面与读图面共用同一 `GeckoClipboardAccess` 解析（`clipboardService`），无权限的 realm 返回 `unsupported` 而不是假称已复制。
+  - 选区路径使用 Zotero 自己 `renderTextSelectionPopup` 事件给出的最近一次 citation，不二次读取 reader DOM。
+- 安全边界：页面是远程内容，本仓库不向它注入脚本、不暴露任何 Zotero 特权 API、不读它的表单或凭据；宿主侧只做“创建顶层浏览器面 + 定位 + 剪贴板写入”，cookie 与登录会话由站点自己持有（独立 `.zotero-chatgpt-dev/embed` 树仅用于宿主观察）。
 
 ### Chat / Agent 执行路径与能力边界
 

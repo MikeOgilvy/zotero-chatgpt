@@ -1,6 +1,6 @@
 # 开发、测试与发行
 
-Zotero ChatGPT 当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a15**（2026-09-18 重命名为 Zotero ChatGPT 升到 a11 后，7 阶段 Chat/Agent 重构改变了 bundle 字节，按“新字节先升版本”升到 a12；随后 Stage 8 Chat/Agent 执行路径分离再次改动 `content/zchatgpt.js` 与 manifest 字节，升到 a13；同日 Chat/Agent 模式修复改了模式控件渲染、核心边界与 `content/zchatgpt.js` 字节，升到 a14；2026-09-19 的 core 执行边界重构（execution router + 真实 ChatExecutor + Chat 不再进入 Codex 执行路径）再次改动 bundle 字节，升到 a15；npm 工作区版本不是侧载身份，未随动）。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
+Zotero ChatGPT 当前开发版本是 npm **0.4.0-alpha.1** / Zotero **0.4.0a18**（2026-09-18 重命名为 Zotero ChatGPT 升到 a11 后，7 阶段 Chat/Agent 重构改变了 bundle 字节，按“新字节先升版本”升到 a12；随后 Stage 8 与 Core 执行边界重构分别升到 a13、a15，惰性 Codex 轮升到 a16/a17；2026-09-19 Chat 档改为直接承载 `chatgpt.com`（嵌入式 web 应用 + 两条剪贴板上下文路径）再次改动 bundle 字节，升到 a18；npm 工作区版本不是侧载身份，未随动）。从仓库根目录执行，Node **24.x**（`.nvmrc` 为 24.11.0）、npm **11.6.1**；最终身份以 package.json、manifest 和实际 XPI 为准。当前目标平台是 macOS Apple Silicon / Zotero 9.0.6。
 
 四份权威文档分别负责[产品行为](zotero-chatgpt-user-flow.md)、[架构与数据契约](module-design.md)、本文的开发操作、[进度与验收结果](progress.md)。不要再复制旧阶段计划或把单元、宿主、模型、发行证据混写成一个 PASS。
 
@@ -73,10 +73,11 @@ node scripts/prepare-host-test.mjs --context --acceptance
 | `node scripts/prepare-host-test.mjs --context --native` | 将工作树生产模块编入独立测试 driver；新建合成条目、PDF、collection 和标注，执行审批/撤销/冲突、SHA、截图、后台引用；并对冻结 revision 用合成 quote 实跑临时高亮导航（不写文献库）；还会尝试固定公开 DOI 的**未保存网络元数据预览**，不调用模型或下载 OA PDF |
 | `node scripts/prepare-host-test.mjs --context --live` | 本地检查后对合成 PDF **真实调用已登录账户的模型**，检查回答来源及停止/完成竞态；会消耗实际可用额度，执行前必须有对应授权 |
 | `node scripts/prepare-host-test.mjs --context --acceptance` | 无自动 driver 的人工试用 |
+| `node scripts/prepare-host-test.mjs --embed` | Chat 档真实承载 `chatgpt.com` 的宿主观察，专用 `.zotero-chatgpt-dev/embed/{profile,data}` 树：比对 iframe / 主窗口 XUL `<browser>`（含 Zotero 自身远程页属性集）等宿主面、记录加载与 console/Cloudflare 标记、cookie 数；随后驱动**产品自己的 dock**（Chat 档托管面出现、覆盖 slot、`currentURI` 为应用、切 Agent 再回 Chat 后同一元素同一文档），并点击两条上下文控件的真实按钮，回读剪贴板确认**论文文本块**与**PDF 文件本身**确实写入。不点击登录、不输入、不发模型请求、不读认证文件；登录/会话/流式/模型选择/上传一律记 NOT RUN |
 
 `--native` 不与 `--live` 或 `--acceptance` 合用。`--live` 不等于新登录测试，也不自动证明图像生成；实际模型、回答、取消结果和能力均以当次报告为准。脚本可优先选择目录中存在的 Spark，不通过改推理强度伪造速度档位，不因旧限额日期推断当前账户状态。
 
-context 报告写入 `.zotero-chatgpt-dev/context/host-report.json`。每次重跑前归档明确的失败报告；记录 subject 版本、包 hash、工作树/driver 来源、设备和实际执行范围。不要覆盖失败后只留下 PASS。native driver 直接导入工作树适配器，装着旧 subject XPI 时的通过不能当成新包 UI 验收。已有工作树 native API 证据、最终包验证及未运行项统一记在 [progress](progress.md)。
+context 报告写入 `.zotero-chatgpt-dev/context/host-report.json`；`--embed` 报告写入它自己的专用树 `.zotero-chatgpt-dev/embed/host-report.json`（`--url` 可把探测面指向本地 fixture，用来把“我们的面坏了”和“远端拒绝我们”分开；产品路径始终加载真实应用，与该覆盖无关）。每次重跑前归档明确的失败报告；记录 subject 版本、包 hash、工作树/driver 来源、设备和实际执行范围。不要覆盖失败后只留下 PASS。native driver 直接导入工作树适配器，装着旧 subject XPI 时的通过不能当成新包 UI 验收。已有工作树 native API 证据、最终包验证及未运行项统一记在 [progress](progress.md)。
 
 自动 driver 完成后，先退出该专用实例并重新准备 `--context --acceptance`，再进行人工交互。不要在自动测试正在运行时操作其窗口，也不要让 CUA 自动切回日常 Zotero 后继续操作。bootstrap、原生注册、跨 realm 适配或进程代码变更需要重新打包并完成宿主生命周期重载；watch 不是重载证据。
 
@@ -90,7 +91,7 @@ npm run test:unit -- tests/zotero/document-version.test.ts tests/zotero/reader-l
 npm run test:unit -- tests/runtime/generated-image.test.ts
 ```
 
-保留的 `--s5` 与 `--s6` 是测试驱动标识，不是新的产品授权范围。s5 在 `.zotero-chatgpt-dev/{profile,data}` 上管理自己启动的运行进程（TERM 后恢复、禁用/启用、uncertain 残留隔离）；s6 用独立 virgin/upgrade 树验证安装生命周期。旧的 S1–S4 驱动（外壳启停、原生 runtime、选区、交互）针对的是已被 in-reader dock 取代的 context-pane UI 钩子，无法再对当前产品运行，已于 2026-09-15 删除，其历史证据见 progress 的“历史”一节。`prepare-host-test.mjs` 没有隐式默认阶段：必须显式传 `--context`、`--live-model`、`--s5`、`--s6` 或 `--acceptance` 之一，否则拒绝准备任何 profile。运行前读相应 driver 与参数，不复用正常或用途不明的 profile。
+保留的 `--s5` 与 `--s6` 是测试驱动标识，不是新的产品授权范围。s5 在 `.zotero-chatgpt-dev/{profile,data}` 上管理自己启动的运行进程（TERM 后恢复、禁用/启用、uncertain 残留隔离）；s6 用独立 virgin/upgrade 树验证安装生命周期；`--embed` 用独立 `.zotero-chatgpt-dev/embed` 树（它会在该树内访问 `chatgpt.com` 并可能留下站点 cookie，因此绝不复用 context 或 live 树）。旧的 S1–S4 驱动（外壳启停、原生 runtime、选区、交互）针对的是已被 in-reader dock 取代的 context-pane UI 钩子，无法再对当前产品运行，已于 2026-09-15 删除，其历史证据见 progress 的“历史”一节。`prepare-host-test.mjs` 没有隐式默认阶段：必须显式传 `--context`、`--live-model`、`--s5`、`--s6` 或 `--acceptance` 之一，否则拒绝准备任何 profile。运行前读相应 driver 与参数，不复用正常或用途不明的 profile。
 
 ```sh
 node scripts/prepare-host-test.mjs --s6

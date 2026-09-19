@@ -15,6 +15,21 @@ Zotero ChatGPT 是深度融入 Zotero 的 GPT 式文献阅读与问答产品：�
 
 **Chat Mode 是完整的一等产品，不是弱化的 Agent Mode。** 产品定位是“一个 ChatGPT 式的论文阅读侧栏，Agent Mode 是可选的、作用于 Zotero 与文件的能力”。
 
+### Chat Mode 的实际界面（0.4.0a18 起）
+
+发行的 Chat 档**不是自建对话界面，而是承载真实的 `chatgpt.com`**：选中 `Chat` 后，侧栏把宿主创建的顶层浏览器面覆盖在对话区，ChatGPT 自己的会话列表、输入框、流式渲染、模型选择、历史与文件上传都在其中；切换 `Agent` / 关闭侧栏 / 切换 PDF 都**不重载、不销毁**那个文档，因此会话与 cookie 保持。模式控件 `Chat | Agent` 仍在对话区顶部，Agent 档仍是原来的原生界面与惰性 Codex 行为。上面“两模式共用同一会话/记录”的叙述描述的是保留在树里的原生 composer 路径；发行 Chat 档的对话由应用自己持有，不与 Agent 记录混合（见[架构](module-design.md)的“Chat Mode 的实际承载”）。
+
+Chat 档的条带只提供应用自己无法知道的一件事——当前打开的论文——并如实说明它去了哪里：
+
+- **Copy paper context**：把当前论文（身份 + 本地已读页文本，超限截断）复制到剪贴板，由用户粘贴进应用；文本不随任何请求发出。
+- **Attach current PDF**：把**当前 PDF 文件本身**复制到剪贴板，用户在应用的输入框粘贴即走站点自己的上传路径。
+- **Copy selection**：复制 Zotero 最近一次文本选择。
+- **Reload ChatGPT**：重新加载应用文档。
+
+条带的状态行只说“已复制到剪贴板，请粘贴”，**不声称应用已收到**；新的动作开始时会清掉上一条答案。宿主不向远程页面注入脚本、不按 ChatGPT 的 DOM 选择器做自动化、不读取或搬运其登录凭据，也不调用未文档化的 JSON 接口。
+
+未观察到（NOT RUN，需人工验收）：真实登录（含 Cloudflare 挑战）、登录后的会话、流式渲染、模型选择、历史、上传、以及重启 Zotero 后的会话保持。
+
 模式分层不定义产品主体，也不改变默认阅读路径；未取得证据的自主动作不按已完成描述。
 
 ## 安装、登录、更新
@@ -219,8 +234,21 @@ node scripts/prepare-host-test.mjs --context --acceptance
 25. **布局/主题/窄窗 [目视·已知风险]** — 窄 dock、深浅主题、大字号下模式控件不溢出、不遮挡 composer。失败：控件被裁切或遮挡输入。
 26. **可访问性/减少动态效果 [目视]** — 尊重 reduced-motion；状态不只靠颜色；图标有名称。失败：动效不受控、仅颜色区分。
 
+### G. Chat 档承载的真实 ChatGPT（0.4.0a18，人工验收）
+
+准备：`npm run package:dev` → `node scripts/prepare-host-test.mjs --embed dist/zotero-chatgpt-0.4.0a18-dev.xpi` → 用专用启动命令打开该实例（`.zotero-chatgpt-dev/embed/{profile,data}`）。自动 driver 已装在该 profile 里，它会自己做 13 项产品检查（不输入、不登录、不发模型请求）并在 `.zotero-chatgpt-dev/embed/host-report.json` 写报告；人工步骤**不**与它同时进行。要做人工项时改为 `--context --acceptance` 的 driver-free 准备方式打开同一棵树，或先等自动 driver 跑完再退出该实例。
+
+- 1. **应用渲染 [目视]** — 选中 `Chat` 后侧栏出现真实 ChatGPT 界面（不是我们自己的 composer），并占据对话区；`Agent` 档仍是原生界面。失败：空白面、只能看到我们自己的聊天 UI、面压在其它控件上。
+- 2. **官方登录 [人工]** — 在应用自己的界面完成一次官方登录（含 Cloudflare 挑战）。宿主不代填、不点击登录控件、不读取凭据。失败：面无法交互、挑战无法通过、登录后没有任何反应。
+- 3. **会话与流式 [目视]** — 发一条消息：回答流式出现、可停止、历史列表可用、模型选择可用。
+- 4. **上传 [目视]** — 用条带的 **Attach current PDF** 复制当前 PDF，然后在应用输入框粘贴：应用应把它作为附件上传（这是站点自己的上传路径）。
+- 5. **上下文条带 [目视]** — **Copy paper context** 后粘贴到应用输入框，块首应为 `Context from the PDF open in Zotero:`，并含当前论文标题与已读页正文；状态行只说“已复制到剪贴板”。
+- 6. **会话保持 [目视]** — 切到 `Agent` 再切回 `Chat`、关闭再打开侧栏、切换 PDF、重启 Zotero：应用文档**不被重载**，登录状态与已打开的会话仍在（这是本架构的核心收益）。
+- 7. **隔离 [目视]** — 全程停留在 `Chat` 档时，私有运行目录里不应出现 Codex 进程（`ps` 按本 profile 路径核对）；点击 `Agent` 后才出现。
+
 ### 本轮未运行（不要当作通过）
 
+- Chat 档真实登录/会话/流式/模型选择/历史/上传与重启保持：**NOT RUN**（见 G 组）。
 - 真实模型回答/流式/停止/在途恢复、真实图像生成、真实档位与用量：`--live`/`--live-model` **NOT RUN**。
 - `--context --native`（真实文件选择/导出、审批/撤销/对账）**NOT RUN**。
 - 签名公开发行、无 Node 安装、下载隔离、干净 checkout 重建、升级/回退验收 **NOT RUN**。
