@@ -353,7 +353,7 @@ it('releases a paused two-pass core batch on cancellation and starts the ordinar
     };
     complete(1); await settle(); complete(2); await settle();
     expect((await coordinator.get(job.id)).status).toBe('paused'); expect((await client.get(conversation.id)).activeBatchId).toBe(job.id);
-    const ordinary = { requestId: f.clock.uuid(), conversationId: conversation.id, action: 'ask' as const, question: 'An ordinary queued follow-up.', citations: [], settings: selected };
+    const ordinary = { requestId: f.clock.uuid(), conversationId: conversation.id, action: 'ask' as const, question: 'An ordinary queued follow-up.', citations: [], settings: selected, mode: 'agent' as const };
     expect((await client.enqueue!(ordinary)).state).toBe('accepted'); expect(turns()).toHaveLength(2);
     expect((await coordinator.cancel(job.id)).status).toBe('cancelled'); await settle();
     expect((await client.get(conversation.id)).activeBatchId).toBeUndefined(); expect((await client.request(conversation.id, ordinary.requestId)).state).toBe('running'); expect(turns()).toHaveLength(3);

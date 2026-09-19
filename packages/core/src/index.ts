@@ -4,12 +4,15 @@ import type { Conversation, ErrorCode, GenerationSettings, ImageAttachment, Pape
 import { RpcTransport, record } from './codex/transport.ts';
 import { mergeRateLimitNotice, parseModel, parseProviderCapabilities, parseRateLimits, string, visibleRateLimits, type RateLimitBuckets } from './codex/models.ts';
 import { validatePolicy } from './codex/reader-policy.ts';
+import type { Trace } from './conversation/trace.ts';
+import { ChatExecutor } from './chat/executor.ts';
+import { unavailableChatTransport } from './chat/chat-transport.ts';
 import { ConversationStore } from './sessions/store.ts';
 import { ReaderService } from './sessions/service.ts';
 export { shareableDiagnostics } from './sessions/diagnostics.ts';
 export type { ShareableDiagnostics } from './sessions/diagnostics.ts';
 /** `codexHome`, when known to the caller, must equal the account directory the runtime reports. */
-export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => string; pluginVersion?: string; loginTimeoutMs?: number; codexHome?: string; deltaFlushMs?: number; now?: () => string; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment> }
+export interface ReaderOptions { codexVersion: string; cwd: string; uuid: () => string; pluginVersion?: string; loginTimeoutMs?: number; codexHome?: string; deltaFlushMs?: number; now?: () => string; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment>; /** Development sink for the Chat/Agent execution trace; off unless supplied. */ trace?: Trace }
 export async function createReaderClient(process: ManagedProcess, storage: StoragePort, options: ReaderOptions): Promise<ReaderClient> {
   let rpc: RpcTransport | null = null;
   try {
@@ -53,7 +56,10 @@ class RuntimeSession implements ReaderClient {
       ready: () => this.state.runtime === 'ready' && !this.closing,
       signedIn: () => this.state.account.state === 'signedIn',
       breach: () => { this.state.runtime = 'error'; this.state.error = 'Reader policy rejected an unsupported interaction.'; this.emit(); void this.rpc.close().catch(() => undefined); },
-    }, { cwd: options.cwd, uuid: options.uuid, now, ...(options.deltaFlushMs !== undefined ? { deltaFlushMs: options.deltaFlushMs } : {}), ...(options.generatedImage ? { generatedImage: options.generatedImage } : {}) });
+    }, // Chat and Agent are sibling executors of one shared conversation controller. Chat's concrete
+      // ChatGPT transport is an unresolved platform boundary, so this build wires the honest
+      // unavailable placeholder: Chat fails truthfully instead of falling back to the Codex runtime.
+      { cwd: options.cwd, uuid: options.uuid, now, ...(options.deltaFlushMs !== undefined ? { deltaFlushMs: options.deltaFlushMs } : {}), ...(options.generatedImage ? { generatedImage: options.generatedImage } : {}), chat: new ChatExecutor(unavailableChatTransport()), ...(options.trace ? { trace: options.trace } : {}) });
     rpc.subscribe(message => {
       if (this.closing || this.failureStarted) return;
       if (this.queued >= 1024) { void this.transportFailed(); return; }

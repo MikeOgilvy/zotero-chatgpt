@@ -21,8 +21,12 @@ async function setup(configure?: (s: ReturnType<typeof server>) => void, storage
 async function signedIn(configure?: (s: ReturnType<typeof server>) => void, storage?: MemoryStorage) {
   const rig = await setup(configure, storage); await rig.c.refreshAccount();
   const conversation = await rig.c.current(paperA, 'Synthetic Paper A');
-  const explain = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, ...overrides });
-  return { ...rig, conversation, explain };
+  // `absent` freezes no mode, so it is a Chat request (D3). `explain` is the Codex-protocol helper the
+  // protocol tests below use: it declares Agent explicitly, because after the runtime split a request
+  // without `mode: 'agent'` never reaches the Codex runtime.
+  const absent = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, ...overrides });
+  const explain = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ ...absent(n, overrides), mode: overrides.mode ?? 'agent' });
+  return { ...rig, conversation, explain, absent };
 }
 const tick = (ms = 5) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const stream = (p: ReturnType<typeof server>['p'], threadId: string, turnId: string, itemId: string, delta: string) => p.emit({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId, delta } });
@@ -116,11 +120,11 @@ it('starts every multi-pass step in a fresh thread without replaying previous ra
   expect(last.params.input[0]?.text).toContain('First part findings'); expect(last.params.input[0]?.text).not.toContain('hidden state');
 });
 it('refuses Agent work sent as Chat at the runtime, not just in the composer', async () => {
-  const { c, p, explain } = await signedIn();
+  const { c, p, explain, absent } = await signedIn();
   const batch = { id: requestId(791), index: 0, total: 2, phase: 'map' as const, question: 'Read all pages' };
   // An absent mode is Chat (D3), and a multi-pass batch is Agent work: the session service refuses
   // both, so a caller that skipped the presenter cannot start a reading job as Chat.
-  await expect(c.send(explain(790, { batch }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
+  await expect(c.send(absent(790, { batch }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
   await expect(c.send(explain(792, { mode: 'chat', batch }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
   const diagram = { skill: builtinSkills().find(skill => skill.id === 'builtin-diagram')!, preferences: DEFAULT_PREFERENCES, profileId: null };
   await expect(c.send(explain(793, { mode: 'chat', workflow: diagram }))).rejects.toMatchObject({ code: 'UNSUPPORTED_INTERACTION' });
@@ -164,8 +168,8 @@ it('stores one verified image per native item and disables generation on the nex
   expect((await c.request(conversation.id, input.requestId)).state).toBe('completed');
   expect((await c.get(conversation.id)).messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
   expect(decode).toHaveBeenCalledTimes(1); expect(events.filter(event => event.type === 'image')).toHaveLength(1);
-  // The follow-up is an ordinary Chat question: both the Agent-mode freeze and the non-read skill are dropped.
-  const { workflow: _workflow, mode: _mode, ...ordinary } = input; void _workflow; void _mode;
+  // The follow-up is an ordinary Agent question: the non-read skill is dropped but it is still Agent work.
+  const { workflow: _workflow, ...ordinary } = input; void _workflow;
   await c.send({ ...ordinary, requestId: requestId(751), question: 'Explain the diagram' }); await tick();
   const resume = p.writes.map(line => JSON.parse(line) as { method: string; params: { config: Record<string, unknown> } }).find(line => line.method === 'thread/resume');
   expect(resume?.params.config['features.image_generation']).toBe(false);
@@ -451,7 +455,7 @@ describe('attachment conversations', () => {
   it('routes concurrent generations to their own conversations', async () => {
     const { c, p, events, explain } = await signedIn(); const b = await c.current(paperB, 'Supplement B');
     await c.send(explain(1)); await flush();
-    await c.send({ requestId: requestId(2), conversationId: b.id, action: 'explain', question: '', citations: [citationB], settings }); await flush();
+    await c.send({ requestId: requestId(2), conversationId: b.id, action: 'explain', question: '', citations: [citationB], settings, mode: 'agent' }); await flush();
     stream(p, 'thread-1', 'turn-1', 'a1', 'answer for A'); stream(p, 'thread-2', 'turn-2', 'b1', 'answer for B'); await tick(10);
     const a = await c.get(explain(1).conversationId); const bb = await c.get(b.id);
     expect(a.messages.map(m => m.text)).toEqual(['', 'answer for A']); expect(bb.messages.map(m => m.text)).toEqual(['', 'answer for B']);
@@ -549,7 +553,7 @@ describe('attachment conversations', () => {
     const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => current }); clients.push(c);
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Scheduled timing');
-    const input: SendInput = { requestId: requestId(801), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings };
+    const input: SendInput = { requestId: requestId(801), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, mode: 'agent' };
     await c.send(input); await flush();
     const running = (await c.get(conversation.id)).requestTiming?.find(timing => timing.requestId === input.requestId);
     expect(running).toEqual({ requestId: input.requestId, acceptedAt: '2026-09-09T08:00:00.000Z', firstTextAt: null, settledAt: null });
@@ -566,7 +570,7 @@ describe('attachment conversations', () => {
     expect(saved.requests[0]?.firstTokenAt).toBe('2026-09-09T08:00:04.000Z');
     // A single completed item with no streamed deltas is still first visible text, not a missing value.
     current = '2026-09-09T08:01:00.000Z';
-    const oneShotInput: SendInput = { requestId: requestId(802), conversationId: conversation.id, action: 'ask', question: 'Follow-up?', citations: [citationA], settings };
+    const oneShotInput: SendInput = { requestId: requestId(802), conversationId: conversation.id, action: 'ask', question: 'Follow-up?', citations: [citationA], settings, mode: 'agent' };
     await c.send(oneShotInput); await flush();
     current = '2026-09-09T08:01:03.000Z';
     complete(s.p, 'thread-1', 'turn-2', 'item-2', 'One-shot answer'); await flush();
@@ -581,7 +585,7 @@ describe('attachment conversations', () => {
     const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Reasoning liveness');
-    const input: SendInput = { requestId: requestId(810), conversationId: conversation.id, action: 'ask', question: '这本书是讲什么的', citations: [], settings };
+    const input: SendInput = { requestId: requestId(810), conversationId: conversation.id, action: 'ask', question: '这本书是讲什么的', citations: [], settings, mode: 'agent' };
     await c.send(input); await tick();
     const timing = async () => (await c.get(conversation.id)).requestTiming?.find(entry => entry.requestId === input.requestId);
     const pings = () => events.filter(event => event.type === 'progress');
@@ -630,7 +634,7 @@ describe('attachment conversations', () => {
     const events: ReaderEvent[] = []; c.subscribe(e => events.push(e));
     await c.refreshAccount();
     const conversation = await c.current(paperA, 'Per-run throttle');
-    const send = async (n: number): Promise<SendInput> => { const input: SendInput = { requestId: requestId(n), conversationId: conversation.id, action: 'ask', question: `Question ${n}`, citations: [], settings }; await c.send(input); await tick(); return input; };
+    const send = async (n: number): Promise<SendInput> => { const input: SendInput = { requestId: requestId(n), conversationId: conversation.id, action: 'ask', question: `Question ${n}`, citations: [], settings, mode: 'agent' }; await c.send(input); await tick(); return input; };
     const reasoning = (turnId: string) => s.p.emit({ method: 'item/reasoning/textDelta', params: { threadId: 'thread-1', turnId, itemId: 'reasoning-1', contentIndex: 0, delta: 'think' } });
 
     await send(820);

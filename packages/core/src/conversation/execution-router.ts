@@ -1,4 +1,5 @@
 import type { AgentExecutorPort, ChatExecutorPort, ConversationExecutor, ExecutionMode } from '../../../contracts/src/execution.ts';
+import type { Trace } from './trace.ts';
 
 /**
  * The single point where the frozen mode selects an execution runtime.
@@ -12,14 +13,12 @@ import type { AgentExecutorPort, ChatExecutorPort, ConversationExecutor, Executi
  * conversation, never Agent execution.
  */
 export class ExecutionRouter {
-  constructor(private readonly executors: { chat: ChatExecutorPort; agent: AgentExecutorPort }) {}
+  constructor(private readonly executors: { chat: ChatExecutorPort; agent: AgentExecutorPort }, private readonly trace?: Trace) {}
 
   select(mode: ExecutionMode | undefined): ConversationExecutor {
-    switch (mode) {
-      case 'agent': return this.executors.agent;
-      case 'chat': return this.executors.chat;
-      default: return this.executors.chat;
-    }
+    const executor = mode === 'agent' ? this.executors.agent : this.executors.chat;
+    this.trace?.(`[execution-router] executor=${executor.mode}`);
+    return executor;
   }
 
   /** The Chat executor itself, for callers that must not route through the union (e.g. preflight). */

@@ -30,8 +30,11 @@ async function setup(configure?: (s: ReturnType<typeof server>) => void, storage
 async function signedIn(configure?: (s: ReturnType<typeof server>) => void, storage?: MemoryStorage) {
   const rig = await setup(configure, storage); await rig.c.refreshAccount();
   const conversation = await rig.c.current(paperA, 'Synthetic Paper A');
-  const explain = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, ...overrides });
-  return { ...rig, conversation, explain };
+  // Recovery is Agent-only: only a Codex request can be interrupted with native work to reconcile, so
+  // these helpers declare `mode: 'agent'` explicitly. `absent` is the Chat request (D3) variant.
+  const absent = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, ...overrides });
+  const explain = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ ...absent(n, overrides), mode: overrides.mode ?? 'agent' });
+  return { ...rig, conversation, explain, absent };
 }
 const tick = (ms = 5) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const stream = (p: ReturnType<typeof server>['p'], threadId: string, turnId: string, itemId: string, delta: string) => p.emit({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId, delta } });
@@ -40,10 +43,10 @@ describe('process restart and uncertain reconciliation', () => {
     const storage = new MemoryStorage();
     const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
     const created = await store.create(paperA, 'Synthetic Paper A', settings);
-    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings };
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings, mode: 'agent' };
     const hash = await hashInput(input);
     created.requests.push({ requestId: input.requestId, hash, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'explain' });
-    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed', mode: 'agent' });
     created.activeRequestId = input.requestId;
     await store.save(created);
     const { c, p } = await signedIn(undefined, storage);
@@ -69,7 +72,7 @@ describe('process restart and uncertain reconciliation', () => {
     expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
     expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
   });
-  it('treats a hashVersion 3 request with no mode as chat, not as uncertain (D3)', async () => {
+  it('redelivers a hashVersion 3 request with no mode as chat and never enters the Codex runtime (D3)', async () => {
     const storage = new MemoryStorage();
     const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
     const created = await store.create(paperA, 'Synthetic Paper A', settings);
@@ -81,17 +84,18 @@ describe('process restart and uncertain reconciliation', () => {
     await store.save(created);
     const { c, p } = await signedIn(undefined, storage);
     await flush(); await tick(20);
-    expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(1);
-    expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });
+    // Chat has no Codex thread to resume: redelivery reaches the chat transport and fails honestly.
+    expect(methods(p).filter(m => m === 'turn/start')).toHaveLength(0);
+    expect(await c.request(created.id, input.requestId)).toMatchObject({ state: 'failed' });
   });
   it('keeps a hashVersion 2 record written before the mode field reconstructable (invariant 11)', async () => {
     const storage = new MemoryStorage();
     const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
     const created = await store.create(paperA, 'Synthetic Paper A', settings);
-    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings };
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings, mode: 'agent' };
     const hash = await hashInput(input, 2);
     created.requests.push({ requestId: input.requestId, hash, hashVersion: 2, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'explain' });
-    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed', mode: 'agent' });
     created.activeRequestId = input.requestId;
     await store.save(created);
     const { c, p } = await signedIn(undefined, storage);
@@ -104,10 +108,10 @@ describe('process restart and uncertain reconciliation', () => {
     const storage = new MemoryStorage();
     const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
     const created = await store.create(paperA, 'Synthetic Paper A', settings);
-    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings };
+    const input: SendInput = { requestId: requestId(1), conversationId: created.id, action: 'explain', question: '', citations: [citationA], settings, mode: 'agent' };
     const hash = await hashInput(input);
     created.requests.push({ requestId: input.requestId, hash, state: 'accepted', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'explain' });
-    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed' });
+    created.messages.push({ id: 'm-user', requestId: input.requestId, role: 'user', phase: null, settings, text: '', citations: [citationA], status: 'completed', mode: 'agent' });
     created.activeRequestId = input.requestId;
     await store.save(created);
     const unsigned = await setup(s => {

@@ -4,7 +4,10 @@ import { clone } from '../../../contracts/src/clone.ts';
 import { documentSummary } from '../../../contracts/src/document.ts';
 import { RuntimeFailure, type ModelOption } from '../../../contracts/src/runtime.ts';
 import { validatePaperScope, validateSendInput, validateSettings } from '../../../contracts/src/validation.ts';
+import type { AgentExecutionRequest, ChatExecutorPort, ChatMessage, ChatRequest } from '../../../contracts/src/execution.ts';
 import { assertModeBoundary } from '../chat/mode-boundary.ts';
+import { ExecutionRouter } from '../conversation/execution-router.ts';
+import type { Trace } from '../conversation/trace.ts';
 import { record } from '../codex/transport.ts';
 import { string } from '../codex/models.ts';
 import { parseThreadUsage } from '../codex/model-capabilities.ts';
@@ -22,10 +25,12 @@ export interface ServiceUpstream {
   /** Reader policy breach: the runtime must stop; the service has already marked the request. */
   breach(): void;
 }
-export interface ServiceOptions { cwd: string; uuid: () => string; now: () => string; deltaFlushMs?: number; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment> }
+export interface ServiceOptions { cwd: string; uuid: () => string; now: () => string; deltaFlushMs?: number; generatedImage?: (item: unknown, model: string) => Promise<ImageAttachment>; chat: ChatExecutorPort; trace?: Trace }
 interface Run {
   conversationId: UUID; requestId: UUID; input: SendInput; resolved: ResolvedSettings;
   threadId: string | null; turnId: string | null; cancelWanted: boolean; interrupted: boolean; submitted: boolean; settled: boolean;
+  /** Set while a Chat completion is streaming, so Stop can abort it without touching Codex. */
+  chatAbort?: AbortController | null;
   items: Map<string, UUID>; pending: Map<UUID, string>; flushTimer: ReturnType<typeof setTimeout> | null;
   /** In-memory liveness: last time any notification for this turn reached the service. */
   lastEventAt: string | null;
@@ -112,7 +117,19 @@ export class ReaderService {
   private lastErrorCodes = new Map<UUID, ErrorCode>();
   private closed = false;
   private opening = new Map<string, Promise<Conversation>>();
-  constructor(private store: ConversationStore, private upstream: ServiceUpstream, private options: ServiceOptions) {}
+  /**
+   * Shared conversation controller with two sibling executors behind one router. Chat is a plain
+   * completion (its transport is abstract and currently unavailable); Agent is the Codex runtime.
+   * This service owns persistence, request records and event publication for both, so the two
+   * experiences share one conversation without sharing an execution lifecycle.
+   */
+  private readonly router: ExecutionRouter;
+  constructor(private store: ConversationStore, private upstream: ServiceUpstream, private options: ServiceOptions) {
+    this.router = new ExecutionRouter({
+      chat: options.chat,
+      agent: { mode: 'agent', execute: request => this.dispatchAgentRequest(request) },
+    }, options.trace);
+  }
   subscribe(listener: (event: ReaderEvent) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   // ---- conversations -------------------------------------------------------------------------
   current(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
@@ -215,8 +232,12 @@ export class ReaderService {
     const leftover = conversation.requests.filter(r => r.state === 'dispatching' || r.state === 'running');
     if (leftover.length) {
       const now = this.options.now();
-      for (const request of leftover) { request.state = 'uncertain'; request.updatedAt = now; }
-      for (const message of conversation.messages) if (message.role === 'assistant' && ['pending', 'streaming'].includes(message.status)) message.status = 'uncertain';
+      // Only an interrupted Agent request is *uncertain*: it may have run Codex work that needs
+      // reconciling against `thread/read`. An interrupted Chat request produced no side effects and
+      // has no thread to reconcile, so it is simply failed and never blocks the conversation.
+      const modeOf = (requestId: UUID) => conversation.messages.find(m => m.requestId === requestId && m.role === 'user')?.mode;
+      for (const request of leftover) { request.state = modeOf(request.requestId) === 'agent' ? 'uncertain' : 'failed'; request.updatedAt = now; }
+      for (const message of conversation.messages) if (message.role === 'assistant' && ['pending', 'streaming'].includes(message.status)) message.status = modeOf(message.requestId) === 'agent' ? 'uncertain' : 'failed';
       if (conversation.activeRequestId && leftover.some(r => r.requestId === conversation.activeRequestId)) conversation.activeRequestId = null;
       await this.store.save(conversation).catch(() => undefined);
     }
@@ -555,7 +576,90 @@ export class ReaderService {
     if (outcome.run) void this.dispatch(outcome.run);
     return outcome.receipt;
   }
+  /**
+   * The one runtime selection point. After this line the two experiences never share a lifecycle:
+   * Chat streams through the chat executor and touches no Codex state, while Agent runs the Codex
+   * thread/turn machinery below. Both keep using this service's persist/emit/receipt bookkeeping.
+   */
   private async dispatch(run: Run): Promise<void> {
+    this.options.trace?.(`[conversation] mode=${run.input.mode ?? 'chat'}`);
+    const executor = this.router.select(run.input.mode);
+    if (executor.mode === 'chat') { await this.dispatchChat(run, executor); return; }
+    await executor.execute({ requestId: run.requestId, conversationId: run.conversationId, input: run.input });
+  }
+  private async dispatchAgentRequest(request: AgentExecutionRequest): Promise<void> {
+    const run = this.runs.get(request.requestId);
+    if (!run || run.conversationId !== request.conversationId) return;
+    await this.dispatchCodex(run);
+  }
+  /**
+   * Chat: one conversational completion, no Codex. It never calls `thread/start`, `thread/resume`,
+   * `turn/start`, the reading coordinator or any task. `ChatExecutor` and its transport are the only
+   * things this path may touch, which is what keeps a Chat request out of the Agent quota path.
+   */
+  private async dispatchChat(run: Run, chat: ChatExecutorPort): Promise<void> {
+    const { conversationId, requestId } = run;
+    try {
+      if (run.cancelWanted) { await this.settle(run, { kind: 'cancelled' }); return; }
+      await this.mutate(conversationId, c => { this.setState(c, requestId, 'dispatching'); });
+      if (run.settled) return;
+      if (this.closed) throw new ReaderError('RUNTIME_UNAVAILABLE', 'The plugin stopped; no chat request was sent.', true);
+      const request = await this.chatRequest(run);
+      if (run.settled) return;
+      run.submitted = true;
+      this.options.trace?.(`[chat] request_started request=${requestId}`);
+      // Real state, not a label: only the Codex path ever assigns a turn id, and a Chat run never does.
+      this.options.trace?.(`[agent] runtime_started=${run.turnId !== null}`);
+      const controller = new AbortController(); run.chatAbort = controller;
+      await this.mutate(conversationId, c => { this.setState(c, requestId, 'running'); });
+      const itemId = `chat:${requestId}`;
+      for await (const event of chat.stream(request, controller.signal)) {
+        if (run.settled || run.cancelWanted) break;
+        if (event.type === 'chat.started') { this.noteActivity(run); continue; }
+        if (event.type === 'chat.delta') { await this.bufferDelta(run, itemId, event.text); continue; }
+        if (event.type === 'chat.completed') { await this.commitChatAnswer(run, itemId, event.text); await this.settle(run, { kind: 'completed' }); return; }
+        if (event.type === 'chat.failed') { await this.settle(run, { kind: 'failed', failure: { code: event.code, message: event.message, retryable: false } }); return; }
+        await this.settle(run, { kind: 'cancelled' }); return;
+      }
+      if (run.settled) return;
+      await this.settle(run, run.cancelWanted ? { kind: 'cancelled' } : { kind: 'failed', failure: { code: 'INTERNAL_ERROR', message: 'The chat transport ended without a final response.', retryable: false } });
+    } catch (error) {
+      if (run.settled) return;
+      const failure: TurnFailure = error instanceof ReaderError
+        ? { code: error.code, message: error.message, retryable: error.retryable }
+        : { code: 'INTERNAL_ERROR', message: 'Chat failed before a response was produced.', retryable: false };
+      await this.settle(run, { kind: 'failed', failure });
+    } finally { run.chatAbort = null; }
+  }
+  /** Freeze the shared context and the conversation history a Chat completion may see. */
+  private async chatRequest(run: Run): Promise<ChatRequest> {
+    const conversation = await this.load(run.conversationId);
+    const history: ChatMessage[] = conversation.messages
+      .filter(message => message.status === 'completed' && message.requestId !== run.requestId)
+      .map(message => ({ role: message.role, text: message.text, citations: message.citations }));
+    history.push({ role: 'user', text: run.input.question, citations: run.input.citations });
+    return {
+      requestId: run.requestId, conversationId: run.conversationId, messages: history,
+      context: {
+        paper: run.input.paper ?? null, document: run.input.document ?? null, citations: run.input.citations,
+        references: run.input.references ?? [], images: run.input.images ?? [], contextReport: run.input.contextReport ?? null,
+      },
+      modelConfig: run.input.settings,
+    };
+  }
+  private async commitChatAnswer(run: Run, itemId: string, text: string): Promise<void> {
+    const messageId = await this.ensureMessage(run, itemId);
+    run.pending.delete(messageId);
+    if (run.flushTimer) { clearTimeout(run.flushTimer); run.flushTimer = null; }
+    await this.commit(run.conversationId, (c, emit) => {
+      const message = c.messages.find(m => m.id === messageId); if (!message) return;
+      this.recordFirstText(c, run.requestId, text.length > 0);
+      message.text = text; message.phase = 'final'; message.status = 'completed';
+      emit({ type: 'messageCompleted', requestId: run.requestId, messageId, finalText: text, phase: 'final' });
+    });
+  }
+  /** The Codex Agent executor. Everything below this line is Agent-only: threads, turns, usage, images. */
+  private async dispatchCodex(run: Run): Promise<void> {
     const { conversationId, requestId, resolved } = run; const cwd = this.options.cwd;
     try {
       if (run.cancelWanted) { await this.settle(run, { kind: 'cancelled' }); return; }
@@ -596,6 +700,7 @@ export class ReaderService {
       const turnId = string(record(result.turn).id);
       if (run.turnId && run.turnId !== turnId) throw new Error('turn mismatch');
       run.turnId = turnId;
+      this.options.trace?.(`[agent] runtime_started=${run.turnId !== null}`);
       if (!run.settled) await this.mutate(conversationId, c => { const request = this.setState(c, requestId, 'running'); if (request) request.turnId = turnId; });
       void this.maybeInterrupt(run);
     } catch (error) {
@@ -663,7 +768,16 @@ export class ReaderService {
     return this.request(conversationId, requestId);
   }
   private async maybeInterrupt(run: Run): Promise<void> {
-    if (!run.cancelWanted || run.interrupted || run.settled || !run.threadId || !run.turnId) return;
+    if (!run.cancelWanted || run.interrupted || run.settled) return;
+    // Chat: abort the local completion and tell the chat transport. A Codex `turn/interrupt` here
+    // would be an Agent call for a Chat request, so the branch is explicit and returns.
+    if (run.input.mode !== 'agent') {
+      run.interrupted = true;
+      run.chatAbort?.abort();
+      await this.router.chat().cancel(run.requestId).catch(() => undefined);
+      return;
+    }
+    if (!run.threadId || !run.turnId) return;
     run.interrupted = true;
     try { await this.upstream.request('turn/interrupt', { threadId: run.threadId, turnId: run.turnId }); }
     catch { void this.settle(run, { kind: 'uncertain', message: 'Codex did not confirm the stop request; this request will not be resent.' }); }
