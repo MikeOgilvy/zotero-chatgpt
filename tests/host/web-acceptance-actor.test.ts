@@ -28,6 +28,7 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     documentReadyState: 'interactive',
     challenge: { running: false, stage: false, iframe: false },
     loginEntryPresent: false,
+    errorSurfaceVisible: false,
     inputReady: true,
     sendReady: true,
     draftMatchesExactTestQuestion: true,
@@ -58,6 +59,14 @@ it('reports only fixed challenge and login structure booleans', () => {
   const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
   expect(result.challenge).toEqual({ running: true, stage: false, iframe: true }); expect(result.loginEntryPresent).toBe(true);
   expect(JSON.stringify(result)).not.toContain('private label');
+});
+
+it('reports an error surface as a bounded boolean without returning its text', () => {
+  const document = new HappyWindow({ url: 'https://chatgpt.com/' }).document;
+  document.body.innerHTML = '<div role="alert">You have reached a private limit message</div>';
+  const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
+  expect(result.errorSurfaceVisible).toBe(true);
+  expect(JSON.stringify(result)).not.toContain('private limit message');
 });
 
 it('reports only false for an unrelated existing draft and never returns its text', () => {

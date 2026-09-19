@@ -922,6 +922,24 @@ async function runHostSmoke(config) {
         product.webLive.status = 'blocked'; product.webLive.blockedStage = productActorReady ? 'official-input-readiness' : 'product-actor-readiness'; product.webLive.reason = productActorReady ? (!draftSafe ? 'unrelated-existing-draft' : (baseline?.reason ?? 'official-input-unavailable')) : (product.actorProbe.status ?? 'product-actor-unavailable');
         product.notRun.push('conversation-send', 'streaming-render'); await save();
       } else {
+        // A brand-new conversation can expose its composer before the page has finished hydrating, so
+        // require the same ready observation twice before submitting. This is harness timing only:
+        // the product still has to make the send work, and the number of clicks it needed is recorded
+        // as `attempts` in productSubmit below.
+        let stableSamples = 0;
+        await until(async () => {
+          try {
+            const observed = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+            const state = { status: observed?.status ?? null, inputReady: observed?.inputReady === true, canonicalURL: observed?.canonicalURL ?? null, documentReadyState: observed?.documentReadyState ?? null };
+            stableSamples = state.status === 'ok' && state.inputReady ? stableSamples + 1 : 0;
+            product.webLive.preSubmitReadiness = { ...state, stableSamples };
+            return stableSamples >= 2 ? state : null;
+          } catch (error) {
+            const text = message(error);
+            if (/WindowGlobal unavailable|timed out|NS_ERROR_NOT_INITIALIZED|dead object|actor/iu.test(text)) { stableSamples = 0; return null; }
+            throw error;
+          }
+        }, 'stable-official-composer-before-web-live-submit', 30000).catch(() => null);
         const consent = doc.querySelector('[data-zchatgpt-action="continue-with-pdf"]');
         if (consent && !consent.hidden) { consent.click(); await until(() => consent.hidden, 'web-live-pdf-disclosure-acknowledged', 30000); product.webLive.pdfDisclosureAcknowledged = true; }
         else product.webLive.pdfDisclosureAcknowledged = false;
@@ -947,7 +965,7 @@ async function runHostSmoke(config) {
         product.webLive.status = 'submitting'; product.webLive.submissionAttempts = 1; product.webLive.confirmedServiceReply = false; await save();
         const submitted = await boundedQuery('ZoteroChatGPTOfficialChat', 'submitQuestion', { question }, 90000);
         product.webLive.productSubmit = submitted.value && typeof submitted.value === 'object'
-          ? { status: submitted.value.status ?? 'invalid-response', reason: submitted.value.reason ?? null }
+          ? { status: submitted.value.status ?? 'invalid-response', reason: submitted.value.reason ?? null, attempts: Number.isInteger(submitted.value.attempts) ? submitted.value.attempts : null }
           : { status: 'invalid-response', reason: null };
         product.webLive.sameWindowGlobalAtSubmit = submitted.global === globalBeforeSubmit;
         product.webLive.status = 'observing-submit-outcome'; await save();
@@ -961,7 +979,7 @@ async function runHostSmoke(config) {
               ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true, currentCanonicalURL: latest?.canonicalURL ?? null,
               inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true,
               streaming: latest?.streaming === true, userMarkerMessages: Number(latest?.userMarkerMessages ?? 0), assistantMessages: Number(latest?.assistantMessages ?? 0),
-              latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, roleStructure: latest?.roleStructure ?? null,
+              latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, roleStructure: latest?.roleStructure ?? null, errorSurfaceVisible: latest?.errorSurfaceVisible === true,
             });
             if (latest?.status === 'ok' && latest.officialURL === true && latest.userMarkerMessages > baseline.userMarkerMessages && latest.assistantMessages > baseline.assistantMessages && latest.latestAssistantContainsToken === true && latest.streaming === false) break;
           } catch (error) { product.webLive.timeline.push({ ms: Date.now() - started, status: 'query-error', error: message(error).slice(0, 200) }); }
@@ -979,7 +997,7 @@ async function runHostSmoke(config) {
           officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null, currentCanonicalURL: latest?.canonicalURL ?? null,
           userMarkerDelta, assistantDelta, latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
           draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true, roleStructure: latest?.roleStructure ?? null, streamingObserved,
-          codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
+          codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length, errorSurfaceVisible: latest?.errorSurfaceVisible === true,
         };
         const passed = confirmedServiceReply && userMarkerDelta === 1 && product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com' && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0;
         product.webLive.status = passed ? 'passed' : confirmedFailure ? 'confirmed-failure' : 'unknown';

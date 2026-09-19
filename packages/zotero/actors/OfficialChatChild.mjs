@@ -9,10 +9,13 @@ import {
 } from './chatgpt-dom.mjs';
 
 const SEND_SELECTOR = 'button[data-testid="send-button"]';
+const STOP_SELECTOR = 'button[data-testid="stop-button"]';
 const MAX_TEXT = 512_000;
 const ACCEPT_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 const SEND_READY_TIMEOUT_MS = 5_000;
+/** How long one send click is given to be consumed by the page before the identical send is retried. */
+const CONSUME_WINDOW_MS = 1_200;
 const MOBILE_COMPOSER_ID = 'mobile-composer-prompt';
 
 function inside(node, container) {
@@ -146,7 +149,7 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
     }
     if (message.name === 'probe') {
       if (this.inFlight) return { status: 'busy' };
-      if (this.document.querySelector('button[data-testid="stop-button"]')) return { status: 'generating' };
+      if (this.document.querySelector(STOP_SELECTOR)) return { status: 'generating' };
       const composer = findChatGPTComposer(this.document);
       if (composer) {
         if (readChatGPTComposer(composer).trim()) return { status: 'draft' };
@@ -211,16 +214,53 @@ export class ZoteroChatGPTOfficialChatChild extends JSWindowActorChild {
         this.sendAsyncMessage('status', { status: reason === 'submit-missing' ? 'submit-missing' : 'context-blocked', marker: prepared.marker ?? null, reason });
         return { status: 'blocked', reason };
       }
-      this.replaying = true;
-      try { button.click(); }
-      finally { originalWindow.setTimeout(() => { this.replaying = false; }, 0); }
+      // A click the page ignores leaves the exact prepared text untouched and starts nothing. That was
+      // observed once on a brand-new conversation, where the official composer was hydrated but the
+      // first click on its send control had no effect. One retry of the identical submission is
+      // allowed, and only while every observable signal says the page has not taken the first one:
+      // the same draft, no marker message, no generation. A page that consumed the send clears the
+      // composer (and usually opens the stop control) before this window elapses, so the draft can
+      // never be sent twice by a review of the same submission.
+      let attempts = 0;
+      const clickSend = () => {
+        attempts += 1;
+        this.replaying = true;
+        try { button.click(); }
+        finally { originalWindow.setTimeout(() => { this.replaying = false; }, 0); }
+      };
+      clickSend();
+      if (!await this.waitForConsumption(prepared.marker, originalDocument, originalWindow, composer, insertedText)) {
+        const retry = sendButton(originalDocument, composer);
+        if (retry && !retry.disabled && readChatGPTComposer(composer) === insertedText) {
+          this.replaying = true;
+          try { retry.click(); }
+          finally { originalWindow.setTimeout(() => { this.replaying = false; }, 0); }
+          attempts += 1;
+        }
+      }
       const accepted = await this.waitForMarker(prepared.marker, originalDocument, originalWindow);
       const acceptedStatus = prepared.status === 'prepared' ? 'accepted' : 'accepted-without-context';
       this.sendAsyncMessage('status', { status: accepted ? acceptedStatus : 'not-accepted', marker: prepared.marker });
-      return { status: accepted ? 'accepted' : 'not-accepted' };
+      return { status: accepted ? 'accepted' : 'not-accepted', attempts };
     } finally {
       this.inFlight = false;
     }
+  }
+
+  /** Resolves once the page visibly took the send: draft cleared, marker message, or a generation. */
+  waitForConsumption(marker, originalDocument, originalWindow, composer, expectedText) {
+    const started = Date.now();
+    return new Promise(resolve => {
+      const check = () => {
+        if (this.document !== originalDocument || this.contentWindow !== originalWindow || !isChatGPTDocument(originalDocument)) { resolve(true); return; }
+        if (hasAcceptedRequestMarker(originalDocument, marker)) { resolve(true); return; }
+        if (originalDocument.querySelector(STOP_SELECTOR)) { resolve(true); return; }
+        if (readChatGPTComposer(composer) !== expectedText) { resolve(true); return; }
+        if (Date.now() - started >= CONSUME_WINDOW_MS) { resolve(false); return; }
+        originalWindow.setTimeout(check, 50);
+      };
+      check();
+    });
   }
 
   waitForMarker(marker, originalDocument, originalWindow) {

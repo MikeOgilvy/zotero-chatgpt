@@ -99,7 +99,7 @@ describe('official ChatGPT child send transaction', () => {
     await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'blocked', reason: 'busy' });
     acceptedOnClick(current, 'marker-1');
     finish({ status: 'prepared', text: 'frozen [Zotero request marker-1]', marker: 'marker-1' });
-    await expect(first).resolves.toEqual({ status: 'accepted' });
+    await expect(first).resolves.toMatchObject({ status: 'accepted' });
     expect(sendQuery).toHaveBeenCalledTimes(1);
   });
 
@@ -139,7 +139,7 @@ describe('official ChatGPT child send transaction', () => {
     const status = vi.fn(); actor.sendAsyncMessage = (name, data) => { status(name, data); };
     actor.sendQuery = () => Promise.resolve({ status: 'allow', marker: 'marker-off' });
     acceptedOnClick(current, 'marker-off');
-    await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'accepted' });
+    await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted' });
     expect(status).toHaveBeenCalledWith('status', { status: 'accepted-without-context', marker: 'marker-off' });
   });
 
@@ -153,7 +153,7 @@ describe('official ChatGPT child send transaction', () => {
       const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user'; message.textContent = '[Zotero request marker-late]'; current.doc.body.append(message);
     });
     current.composer.closest('form')!.append(late);
-    await expect(submission).resolves.toEqual({ status: 'accepted' });
+    await expect(submission).resolves.toMatchObject({ status: 'accepted' });
   });
 
   it('uses the observed unique mobile form submit button without broadening to unsafe forms', async () => {
@@ -161,11 +161,48 @@ describe('official ChatGPT child send transaction', () => {
     await expect(actor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'draft' });
     actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'mobile frozen [Zotero request marker-mobile]', marker: 'marker-mobile' });
     acceptedOnClick(current, 'marker-mobile');
-    await expect(actor.submitQuestion('question')).resolves.toEqual({ status: 'accepted' });
+    await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted' });
 
     for (const unsafe of [mobilePage({ action: 'https://evil.invalid/submit' }), mobilePage({ credential: true }), mobilePage({ submits: 2 })]) {
       const unsafeActor = actorFor(unsafe);
       await expect(unsafeActor.receiveMessage({ name: 'probe' })).resolves.toMatchObject({ status: 'composer-ready' });
     }
+  });
+
+  it('retries the identical submission once when the official send control ignores the first click', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-retry]', marker: 'marker-retry' });
+    let clicks = 0;
+    current.send.addEventListener('click', () => {
+      clicks += 1;
+      // A brand-new conversation was observed accepting the composer but consuming the send only on a
+      // second, identical click.
+      if (clicks < 2) return;
+      const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user';
+      message.textContent = '[Zotero request marker-retry]'; current.doc.body.append(message);
+    });
+
+    await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted', attempts: 2 });
+    expect(clicks).toBe(2);
+    expect(current.doc.querySelectorAll('[data-message-author-role="user"]').length).toBe(1);
+  });
+
+  it('never sends a second time when the page consumed the first click', async () => {
+    const current = page(); const actor = actorFor(current); current.composer.textContent = 'question';
+    actor.sendQuery = () => Promise.resolve({ status: 'prepared', text: 'frozen [Zotero request marker-consumed]', marker: 'marker-consumed' });
+    let clicks = 0;
+    current.send.addEventListener('click', () => {
+      clicks += 1;
+      // The real page clears its composer the moment it consumes the send; a slower marker message
+      // must not be read as "the click was ignored".
+      current.composer.textContent = '';
+      current.window.setTimeout(() => {
+        const message = current.doc.createElement('div'); message.dataset.messageAuthorRole = 'user';
+        message.textContent = '[Zotero request marker-consumed]'; current.doc.body.append(message);
+      }, 150);
+    });
+
+    await expect(actor.submitQuestion('question')).resolves.toMatchObject({ status: 'accepted', attempts: 1 });
+    expect(clicks).toBe(1);
   });
 });
