@@ -30,6 +30,7 @@ async function setup(configure?: (s: ReturnType<typeof server>) => void, storage
 async function signedIn(configure?: (s: ReturnType<typeof server>) => void, storage?: MemoryStorage) {
   const rig = await setup(configure, storage); await rig.c.refreshAccount();
   const conversation = await rig.c.current(paperA, 'Synthetic Paper A');
+  await rig.c.ensureAgentReady!();
   // Recovery is Agent-only: only a Codex request can be interrupted with native work to reconcile, so
   // these helpers declare `mode: 'agent'` explicitly. `absent` is the Chat request (D3) variant.
   const absent = (n: number, overrides: Partial<SendInput> = {}): SendInput => ({ requestId: requestId(n), conversationId: conversation.id, action: 'explain', question: '', citations: [citationA], settings, ...overrides });
@@ -142,6 +143,7 @@ describe('process restart and uncertain reconciliation', () => {
     unsigned.handlers.set('account/read', () => ({ account: { type: 'chatgpt', email: 'private@example.test', planType: 'plus' }, requiresOpenaiAuth: true }));
     await unsigned.c.refreshAccount();
     await unsigned.c.get(created.id);
+    await unsigned.c.ensureAgentReady!();
     await flush(); await tick(20);
     expect(methods(unsigned.p).filter(m => m === 'turn/start')).toHaveLength(1);
     expect(await unsigned.c.request(created.id, input.requestId)).toMatchObject({ state: 'running' });

@@ -160,7 +160,6 @@ export class ReaderService {
     const existing = await this.store.current(scope);
     if (existing) {
       await this.load(existing.id, existing);
-      await this.ensureRecovered(existing.id);
       return toPublic(await this.load(existing.id));
     }
     return this.create(scope, title, settings);
@@ -171,7 +170,6 @@ export class ReaderService {
     const existing = await this.store.current(scope);
     if (!existing) return null;
     await this.load(existing.id, existing);
-    await this.ensureRecovered(existing.id);
     return toPublic(await this.load(existing.id));
   }
   newConversation(paper: PaperScope, title: string, settings?: GenerationSettings): Promise<Conversation> {
@@ -195,13 +193,11 @@ export class ReaderService {
     return result;
   }
   async get(conversationId: string): Promise<Conversation> {
-    await this.ensureRecovered(conversationId);
     return toPublic(await this.load(conversationId));
   }
   async select(paper: PaperScope, conversationId: string): Promise<Conversation> {
     const selected = await this.store.select(validatePaperScope(paper), conversationId);
     await this.load(selected.id, selected);
-    await this.ensureRecovered(selected.id);
     return toPublic(await this.load(selected.id));
   }
   async deleteConversation(paper: PaperScope, conversationId: string): Promise<Conversation | null> {
@@ -275,6 +271,10 @@ export class ReaderService {
   private ensureRecovered(conversationId: UUID): Promise<void> {
     if (this.recovered.has(conversationId) && !this.recovering.has(conversationId)) return Promise.resolve();
     return this.serial(conversationId, () => this.recoverOnce(conversationId)).then(run => { if (run) return this.dispatch(run); });
+  }
+  /** Explicit Agent activation: local Chat/history browsing never calls this recovery edge. */
+  async activateAgent(): Promise<void> {
+    for (const conversationId of [...this.loaded.keys()]) await this.ensureRecovered(conversationId);
   }
   /** Accepted leftover is dispatched once. Uncertain leftover: resume the thread, then match `thread/read` history. */
   private async recover(conversationId: UUID): Promise<Run | null> {
@@ -538,7 +538,7 @@ export class ReaderService {
     const chat = (input.mode ?? 'chat') === 'chat';
     if (chat && !this.options.chatAvailable) throw new ReaderError('UNSUPPORTED_INTERACTION', this.options.chatUnavailable ?? 'Chat is unavailable in this build.');
     const hash = await hashInput(input);
-    await this.ensureRecovered(input.conversationId);
+    if (!chat) await this.ensureRecovered(input.conversationId);
     const outcome = await this.serial(input.conversationId, async (): Promise<{ receipt: SendReceipt; run: Run | null }> => {
       const live = await this.load(input.conversationId);
       const existing = live.requests.find(r => r.requestId === input.requestId);
@@ -778,7 +778,6 @@ export class ReaderService {
     });
   }
   async request(conversationId: string, requestId: string): Promise<SendReceipt> {
-    await this.ensureRecovered(conversationId);
     const live = await this.load(conversationId);
     const request = live.requests.find(r => r.requestId === requestId);
     if (!request) throw new ReaderError('NOT_FOUND', 'Unknown request');

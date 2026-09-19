@@ -183,9 +183,9 @@ it('reconciles a completed image task from native history after restart without 
   await first.c.send(input); await tick(); await first.c.close();
   const generated = { ...imageA, origin: { kind: 'generated' as const, model: settings.model } };
   const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'imageGeneration', id: 'recovered-output', status: 'completed', result: imageA.dataUrl }] }] } })), storage, { generatedImage: () => Promise.resolve(generated) });
-  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Synthetic Paper A');
+  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Synthetic Paper A'); await next.c.ensureAgentReady!();
   expect((await next.c.request(restored.id, input.requestId)).state).toBe('completed');
-  expect(restored.messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
+  expect((await next.c.get(restored.id)).messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
   expect(methods(next.p)).not.toContain('turn/start');
 });
 it('keeps queued questions behind the complete reading batch, including the gaps between passes', async () => {
@@ -221,7 +221,7 @@ it('updates the same assistant item after in-progress recovery instead of retain
   const input = first.explain(783); await first.c.send(input); await tick();
   stream(first.p, 'thread-1', 'turn-1', 'same-item', 'Partial'); await tick(); await first.c.close();
   const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'agentMessage', id: 'same-item', text: 'Partial', phase: 'final_answer' }] }] } })), storage);
-  await next.c.refreshAccount(); await next.c.current(paperA, 'Synthetic Paper A');
+  await next.c.refreshAccount(); await next.c.current(paperA, 'Synthetic Paper A'); await next.c.ensureAgentReady!();
   complete(next.p, 'thread-1', 'turn-1', 'same-item', 'Partial followed by complete answer'); await tick();
   const assistants = (await next.c.get(input.conversationId)).messages.filter(message => message.role === 'assistant');
   expect(assistants).toHaveLength(1); expect(assistants[0]?.text).toBe('Partial followed by complete answer');
@@ -230,7 +230,7 @@ it('rejects forbidden native tool activity during history recovery just as it do
   const storage = new MemoryStorage(); const first = await signedIn(undefined, storage);
   const input = first.explain(784); await first.c.send(input); await tick(); await first.c.close();
   const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, { type: 'commandExecution', id: 'forbidden' }, { type: 'agentMessage', id: 'answer', text: 'Untrusted result', phase: 'final_answer' }] }] } })), storage);
-  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Synthetic Paper A');
+  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Synthetic Paper A'); await next.c.ensureAgentReady!();
   expect((await next.c.request(restored.id, input.requestId)).state).not.toBe('completed');
   expect(next.c.snapshot().runtime).toBe('error'); expect(methods(next.p)).not.toContain('turn/start');
 });
@@ -241,7 +241,7 @@ it('retains an already persisted image when its temporary native output path has
   const item = { type: 'imageGeneration', id: 'saved-image', status: 'completed', result: '', savedPath: '/expired.png' };
   await first.c.send(input); await tick(); first.p.emit({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item } }); await tick(); await first.c.close();
   const next = await setup(server => server.handlers.set('thread/read', () => ({ thread: { ...threadResponse.thread, turns: [{ ...turn, status: 'completed', items: [{ type: 'userMessage', clientId: input.requestId }, item] }] } })), storage, { generatedImage: () => Promise.reject(new Error('Expired')) });
-  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Diagram');
+  await next.c.refreshAccount(); const restored = await next.c.current(paperA, 'Diagram'); await next.c.ensureAgentReady!();
   expect((await next.c.request(restored.id, input.requestId)).state).toBe('completed');
   expect(restored.messages.flatMap(message => message.generatedImages ?? [])).toEqual([generated]);
 });
