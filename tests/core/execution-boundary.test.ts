@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createReaderClient } from '../../packages/core/src/index.ts';
+import { ConversationStore } from '../../packages/core/src/sessions/store.ts';
 import type { ReaderClient } from '../../packages/contracts/src/runtime.ts';
 import type { SendInput } from '../../packages/contracts/src/index.ts';
 import { MemoryStorage, flush } from './doubles.ts';
@@ -25,9 +26,8 @@ const complete = (p: ReturnType<typeof server>['p'], threadId: string, turnId: s
   p.emit({ method: 'turn/completed', params: { threadId, turn: { ...turn, id: turnId, status: 'completed', items: [{ type: 'agentMessage', id: itemId, text, phase: 'final_answer' }] } } });
 };
 
-async function setup(lines: string[] = []) {
+async function setup(lines: string[] = [], storage = new MemoryStorage()) {
   const s = server();
-  const storage = new MemoryStorage();
   const c = await createReaderClient(s.p, storage, { codexVersion: '0.154.0', cwd: '/isolated', uuid, loginTimeoutMs: 1000, deltaFlushMs: 1, now: () => '2026-09-09T08:00:00.000Z', trace: line => lines.push(line) });
   clients.push(c);
   await c.refreshAccount();
@@ -45,6 +45,25 @@ describe('Chat never enters the Codex Agent runtime', () => {
     expect(methods(p)).not.toContain('thread/start');
     expect(agentEntries(p)).toEqual([]);
     expect(conversation.activeRequestId).toBeNull();
+  });
+
+  it('H: an interrupted chat request fails instead of entering Agent reconciliation', async () => {
+    const storage = new MemoryStorage();
+    const store = new ConversationStore(storage, { uuid, now: () => '2026-09-09T08:00:00.000Z' });
+    const created = await store.create(paperA, 'Synthetic Paper A', settings);
+    // A chat request left running, in a conversation that already holds an Agent thread. If chat runs
+    // were `uncertain`, reopening would resume that thread — an Agent call caused by a Chat request.
+    created.messages.push({ id: 'm-user', requestId: requestId(9), role: 'user', phase: null, settings, text: 'hello', citations: [], status: 'completed' });
+    created.requests.push({ requestId: requestId(9), hash: 'unused', state: 'running', turnId: null, createdAt: 'now', updatedAt: 'now', action: 'ask' });
+    created.activeRequestId = requestId(9);
+    created.upstream.threadId = 'thread-from-an-earlier-agent-turn';
+    await store.save(created);
+
+    const { c, p } = await setup([], storage);
+    await flush();
+    expect(await c.request(created.id, requestId(9))).toMatchObject({ state: 'failed' });
+    expect(methods(p)).not.toContain('thread/resume');
+    expect(methods(p)).not.toContain('thread/read');
   });
 
   it('A: a plain chat message never touches the Codex runtime and fails honestly', async () => {

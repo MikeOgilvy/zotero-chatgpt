@@ -235,9 +235,8 @@ export class ReaderService {
       // Only an interrupted Agent request is *uncertain*: it may have run Codex work that needs
       // reconciling against `thread/read`. An interrupted Chat request produced no side effects and
       // has no thread to reconcile, so it is simply failed and never blocks the conversation.
-      const modeOf = (requestId: UUID) => conversation.messages.find(m => m.requestId === requestId && m.role === 'user')?.mode;
-      for (const request of leftover) { request.state = modeOf(request.requestId) === 'agent' ? 'uncertain' : 'failed'; request.updatedAt = now; }
-      for (const message of conversation.messages) if (message.role === 'assistant' && ['pending', 'streaming'].includes(message.status)) message.status = modeOf(message.requestId) === 'agent' ? 'uncertain' : 'failed';
+      for (const request of leftover) { request.state = this.modeOf(conversation, request.requestId) === 'agent' ? 'uncertain' : 'failed'; request.updatedAt = now; }
+      for (const message of conversation.messages) if (message.role === 'assistant' && ['pending', 'streaming'].includes(message.status)) message.status = this.modeOf(conversation, message.requestId) === 'agent' ? 'uncertain' : 'failed';
       if (conversation.activeRequestId && leftover.some(r => r.requestId === conversation.activeRequestId)) conversation.activeRequestId = null;
       await this.store.save(conversation).catch(() => undefined);
     }
@@ -262,7 +261,9 @@ export class ReaderService {
   /** Accepted leftover is dispatched once. Uncertain leftover: resume the thread, then match `thread/read` history. */
   private async recover(conversationId: UUID): Promise<Run | null> {
     const live = await this.load(conversationId);
-    const uncertain = [...live.requests].reverse().find(r => r.state === 'uncertain');
+    // Only an Agent request is reconcilable: a legacy record could still hold a Chat request as
+    // `uncertain`, and resuming a native thread for it would be an Agent call caused by Chat.
+    const uncertain = [...live.requests].reverse().find(r => r.state === 'uncertain' && this.modeOf(live, r.requestId) === 'agent');
     if (!uncertain) {
       const accepted = this.nextAccepted(live);
       if (accepted && (!live.activeRequestId || live.activeRequestId === accepted.requestId)) return this.redeliver(live, accepted);
@@ -311,9 +312,12 @@ export class ReaderService {
     const input = await this.reconstructInput(conversation, request);
     const model = input ? this.upstream.models().find(m => m.id === input.settings.model) : undefined;
     if (!input || !model) {
+      // Undeliverable Agent work is uncertain (it may have native side effects); undeliverable Chat
+      // work has none, so it fails rather than joining the reconciliation queue.
+      const agent = this.modeOf(conversation, request.requestId) === 'agent';
       await this.commit(conversation.id, c => {
         const rec = c.requests.find(r => r.requestId === request.requestId);
-        if (rec && rec.state === 'accepted') { rec.state = 'uncertain'; rec.updatedAt = this.options.now(); }
+        if (rec && rec.state === 'accepted') { rec.state = agent ? 'uncertain' : 'failed'; rec.updatedAt = this.options.now(); }
         if (c.activeRequestId === request.requestId) c.activeRequestId = null;
       });
       return null;
@@ -977,12 +981,22 @@ export class ReaderService {
       if (run) await this.dispatch(run);
     } catch { /* The durable accepted record remains available for reconnect. */ }
   }
+  /** The frozen mode recorded on a request's user message; an absent mode is Chat (D3). */
+  private modeOf(conversation: StoredConversation, requestId: UUID): 'chat' | 'agent' {
+    return conversation.messages.find(m => m.requestId === requestId && m.role === 'user')?.mode === 'agent' ? 'agent' : 'chat';
+  }
   private nextAccepted(c: StoredConversation): RequestRecord | undefined {
     return c.requests.find(request => request.state === 'accepted' && (!c.activeBatchId || c.messages.find(message => message.requestId === request.requestId && message.role === 'user')?.batch?.id === c.activeBatchId));
   }
-  /** Transport loss or shutdown: every unsettled request becomes uncertain; nothing is resent. */
+  /**
+   * Transport loss or shutdown; nothing is resent. Only an Agent request becomes uncertain — it may
+   * have native work to reconcile. A Chat request has no side effects, so it fails and never enters
+   * the Agent reconciliation path.
+   */
   settleAll(reason: string): Promise<void> {
-    return Promise.all([...this.runs.values()].map(run => this.settle(run, { kind: 'uncertain', message: reason }))).then(() => undefined);
+    return Promise.all([...this.runs.values()].map(run => this.settle(run, run.input.mode === 'agent'
+      ? { kind: 'uncertain', message: reason }
+      : { kind: 'failed', failure: { code: 'RUNTIME_UNAVAILABLE', message: reason, retryable: true } }))).then(() => undefined);
   }
   /** A server-initiated request reached a thread: that request fails closed. */
   failThread(threadId: string, code: ErrorCode, message: string): Promise<void> {
