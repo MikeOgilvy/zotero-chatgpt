@@ -70,24 +70,32 @@ export function summarizeOfficialPage(document, verificationToken) {
   if (typeof verificationToken !== 'string' || !TOKEN.test(verificationToken)) return { status: 'blocked', reason: 'invalid-token' };
   const composer = document.querySelector('#prompt-textarea, #mobile-composer-prompt');
   const send = knownSendButton(composer);
-  const draftMatchesExactTestQuestion = composer
-    ? (composer.localName === 'textarea' ? String(composer.value ?? '') : String(composer.textContent ?? '')) === HARNESS_QUESTION
-    : false;
+  const draft = composer ? (composer.localName === 'textarea' ? String(composer.value ?? '') : String(composer.textContent ?? '')) : '';
+  const draftMatchesExactTestQuestion = draft === HARNESS_QUESTION;
   const users = [...document.querySelectorAll('[data-message-author-role="user"]')];
   const assistants = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
   const latestAssistant = assistants.at(-1);
+  const current = new URL(String(document.location.href));
+  const roleStructure = users.length || assistants.length ? null : [...document.querySelectorAll('main, [role="log"], [data-testid*="conversation"], [data-message-author-role]')].slice(0, 20).map(node => ({
+    tag: String(node.localName ?? '').slice(0, 40) || null,
+    dataTestid: attribute(node, 'data-testid'), dataMessageAuthorRole: attribute(node, 'data-message-author-role'), role: attribute(node, 'role'),
+  }));
   return {
     status: 'ok',
     officialURL: true,
     canonicalOrigin: OFFICIAL_ORIGIN,
+    canonicalURL: `${current.origin}${current.pathname}`.slice(0, 320),
     inputReady: Boolean(composer),
     sendReady: Boolean(send && !send.disabled),
     draftMatchesExactTestQuestion,
+    draftLength: draft.length,
+    draftHasZoteroRequestMarker: REQUEST_MARKER.test(draft),
     userMessages: users.length,
     assistantMessages: assistants.length,
     userMarkerMessages: users.filter(node => REQUEST_MARKER.test(String(node.textContent ?? ''))).length,
     latestAssistantContainsToken: Boolean(latestAssistant && String(latestAssistant.textContent ?? '').includes(verificationToken)),
     streaming: Boolean(document.querySelector('button[data-testid="stop-button"]')),
+    roleStructure,
     observations: structuralObservations(document),
   };
 }

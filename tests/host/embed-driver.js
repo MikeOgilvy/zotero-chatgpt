@@ -934,50 +934,44 @@ async function runHostSmoke(config) {
         } else {
         const codexBefore = await ownCodexProcesses();
         const globalBeforeSubmit = before.global;
-        product.webLive.status = 'submitting'; product.webLive.modelTurnsStarted = 1; await save();
+        product.webLive.status = 'submitting'; product.webLive.submissionAttempts = 1; product.webLive.modelTurnsStarted = 1; product.webLive.confirmedServiceReply = false; await save();
         const submitted = await boundedQuery('ZoteroChatGPTOfficialChat', 'submitQuestion', { question }, 90000);
         product.webLive.productSubmit = submitted.value && typeof submitted.value === 'object'
           ? { status: submitted.value.status ?? 'invalid-response', reason: submitted.value.reason ?? null }
           : { status: 'invalid-response', reason: null };
         product.webLive.sameWindowGlobalAtSubmit = submitted.global === globalBeforeSubmit;
-        if (submitted.value?.status === 'blocked') {
-          product.webLive.status = 'blocked'; product.webLive.blockedStage = 'product-submit'; product.webLive.reason = submitted.value.reason ?? 'blocked'; await save();
-        } else {
-          await check('product-web-live-submission-accepted', submitted.value?.status === 'accepted', { ...product.webLive.productSubmit, sameWindowGlobalAtSubmit: product.webLive.sameWindowGlobalAtSubmit });
-          product.notRun = product.notRun.filter(name => !['conversation-send', 'streaming-render'].includes(name));
-          product.webLive.status = 'waiting-for-official-assistant';
-          const started = Date.now(); const deadline = started + 180000; let latest = baseline;
-          while (Date.now() < deadline) {
-            try {
-              const sample = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
-              latest = sample.value;
-              product.webLive.timeline.push({
-                ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true,
-                inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, streaming: latest?.streaming === true,
-                userMarkerMessages: Number(latest?.userMarkerMessages ?? 0), assistantMessages: Number(latest?.assistantMessages ?? 0),
-                latestAssistantContainsToken: latest?.latestAssistantContainsToken === true,
-              });
-              if (latest?.status === 'ok' && latest.officialURL === true && latest.userMarkerMessages > baseline.userMarkerMessages && latest.assistantMessages > baseline.assistantMessages && latest.latestAssistantContainsToken === true && latest.streaming === false) break;
-            } catch (error) { product.webLive.timeline.push({ ms: Date.now() - started, status: 'query-error', error: message(error).slice(0, 200) }); }
-            product.webLive.timeline = product.webLive.timeline.slice(-120); await save(); await delay(500);
-          }
-          const codexAfter = await ownCodexProcesses();
-          product.webLive.timeline = product.webLive.timeline.slice(-120);
-          product.webLive.result = {
-            officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null,
-            userMarkerDelta: Number(latest?.userMarkerMessages ?? 0) - Number(baseline.userMarkerMessages ?? 0),
-            assistantDelta: Number(latest?.assistantMessages ?? 0) - Number(baseline.assistantMessages ?? 0),
-            latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
-            codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
-          };
-          await check('product-web-live-official-answer-uses-random-pdf-token',
-            product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com'
-            && product.webLive.result.userMarkerDelta === 1 && product.webLive.result.assistantDelta >= 1
-            && product.webLive.result.latestAssistantContainsToken && !product.webLive.result.streaming
-            && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0,
-            product.webLive.result);
-          product.webLive.status = 'passed'; await save();
+        product.notRun = product.notRun.filter(name => !['conversation-send', 'streaming-render'].includes(name));
+        product.webLive.status = 'observing-submit-outcome'; await save();
+        const started = Date.now(); const deadline = started + 180000; let latest = baseline;
+        while (Date.now() < deadline) {
+          try {
+            const sample = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
+            latest = sample.value;
+            product.webLive.timeline.push({
+              ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true, currentCanonicalURL: latest?.canonicalURL ?? null,
+              inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true,
+              streaming: latest?.streaming === true, userMarkerMessages: Number(latest?.userMarkerMessages ?? 0), assistantMessages: Number(latest?.assistantMessages ?? 0),
+              latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, roleStructure: latest?.roleStructure ?? null,
+            });
+            if (latest?.status === 'ok' && latest.officialURL === true && latest.userMarkerMessages > baseline.userMarkerMessages && latest.assistantMessages > baseline.assistantMessages && latest.latestAssistantContainsToken === true && latest.streaming === false) break;
+          } catch (error) { product.webLive.timeline.push({ ms: Date.now() - started, status: 'query-error', error: message(error).slice(0, 200) }); }
+          product.webLive.timeline = product.webLive.timeline.slice(-120); await save(); await delay(500);
         }
+        const codexAfter = await ownCodexProcesses(); product.webLive.timeline = product.webLive.timeline.slice(-120);
+        const userMarkerDelta = Number(latest?.userMarkerMessages ?? 0) - Number(baseline.userMarkerMessages ?? 0); const assistantDelta = Number(latest?.assistantMessages ?? 0) - Number(baseline.assistantMessages ?? 0);
+        const confirmedServiceReply = assistantDelta >= 1 && latest?.latestAssistantContainsToken === true && latest?.streaming === false;
+        const confirmedFailure = !confirmedServiceReply && userMarkerDelta === 0 && latest?.draftHasZoteroRequestMarker === true && latest?.streaming === false;
+        product.webLive.confirmedServiceReply = confirmedServiceReply;
+        product.webLive.result = {
+          officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null, currentCanonicalURL: latest?.canonicalURL ?? null,
+          userMarkerDelta, assistantDelta, latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
+          draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true, roleStructure: latest?.roleStructure ?? null,
+          codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
+        };
+        const passed = confirmedServiceReply && userMarkerDelta === 1 && product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com' && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0;
+        product.webLive.status = passed ? 'passed' : confirmedFailure ? 'confirmed-failure' : 'unknown';
+        report.checks.push({ name: 'product-web-live-official-answer-uses-random-pdf-token', ok: passed, details: { ...product.webLive.result, productSubmitStatus: product.webLive.productSubmit.status, outcome: product.webLive.status } });
+        await save();
         }
       }
     }
@@ -1290,7 +1284,8 @@ async function runHostSmoke(config) {
       await save();
     }
 
-    report.status = report.product?.webLive?.status === 'blocked' ? 'blocked' : 'completed';
+    const webStatus = report.product?.webLive?.status;
+    report.status = webStatus === 'blocked' ? 'blocked' : webStatus === 'confirmed-failure' ? 'failed' : webStatus === 'unknown' ? 'uncertain' : 'completed';
     report.finishedAt = new Date().toISOString();
     await save();
   } catch (error) {

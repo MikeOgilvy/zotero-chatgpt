@@ -24,14 +24,18 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     status: 'ok',
     officialURL: true,
     canonicalOrigin: 'https://chatgpt.com',
+    canonicalURL: 'https://chatgpt.com/c/synthetic',
     inputReady: true,
     sendReady: true,
     draftMatchesExactTestQuestion: true,
+    draftLength: harnessQuestion.length,
+    draftHasZoteroRequestMarker: false,
     userMessages: 1,
     assistantMessages: 1,
     userMarkerMessages: 1,
     latestAssistantContainsToken: true,
     streaming: true,
+    roleStructure: null,
     observations: {
       editables: [{ tag: 'textarea', id: 'mobile-composer-prompt', role: null, contenteditable: null, parent: { tag: 'form', id: 'composer-form', role: null, dataTestid: 'composer-form' }, form: { tag: 'form', id: 'composer-form', role: null, dataTestid: 'composer-form' } }],
       buttons: [
@@ -49,7 +53,20 @@ it('reports only false for an unrelated existing draft and never returns its tex
   document.body.innerHTML = '<form><textarea id="mobile-composer-prompt">private owner draft</textarea><button type="submit" aria-label="Send message"></button></form>';
   const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
   expect(result.draftMatchesExactTestQuestion).toBe(false);
+  expect(result.draftLength).toBe('private owner draft'.length);
   expect(JSON.stringify(result)).not.toContain('private owner draft');
+});
+
+it('returns only bounded transcript structure when official role markers are absent', () => {
+  const document = new HappyWindow({ url: 'https://chatgpt.com/c/synthetic' }).document;
+  document.body.innerHTML = '<main role="main"><section data-testid="conversation-turn"><div role="log">private answer</div></section></main>';
+  const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
+  expect(result.roleStructure).toEqual([
+    { tag: 'main', dataTestid: null, dataMessageAuthorRole: null, role: 'main' },
+    { tag: 'section', dataTestid: 'conversation-turn', dataMessageAuthorRole: null, role: null },
+    { tag: 'div', dataTestid: null, dataMessageAuthorRole: null, role: 'log' },
+  ]);
+  expect(JSON.stringify(result)).not.toContain('private answer');
 });
 
 it('rejects a lookalike origin and an invalid expected token without inspecting messages', () => {
