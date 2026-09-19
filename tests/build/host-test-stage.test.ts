@@ -185,6 +185,13 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--live'])).resolves.toMatchObject({ stage: 'context', installDriver: true });
   });
 
+  it('gates installed-XPI live core flows behind explicit live mode and a bounded login wait', async () => {
+    await expect(select(['--context', '--live', '--live-core-flows', '--login-wait-seconds', '900'])).resolves.toMatchObject({ stage: 'context', driver: 'tests/host/context-driver.js', installDriver: true });
+    await expect(select(['--context', '--live-core-flows'])).rejects.toThrow(/requires --context --live/u);
+    await expect(select(['--context', '--live', '--login-wait-seconds', '30'])).rejects.toThrow(/requires --live-core-flows/u);
+    await expect(select(['--context', '--live', '--live-core-flows', '--login-wait-seconds', '3601'])).rejects.toThrow(/between 0 and 3600/u);
+  });
+
   it('registers the human-gated live model-catalog stage on its own isolated tree', async () => {
     await expect(select(['--live-model'])).resolves.toMatchObject({ stage: 'live-model', driver: 'tests/host/live-model-driver.js', installDriver: true });
     const { stdout } = await execFileAsync(process.execPath, [

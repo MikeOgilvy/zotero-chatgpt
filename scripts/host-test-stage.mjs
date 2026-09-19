@@ -24,6 +24,17 @@ function readRunId(argv) {
   return value;
 }
 
+function readLoginWaitSeconds(argv) {
+  const positions = argv.flatMap((value, index) => value === '--login-wait-seconds' ? [index] : []);
+  if (positions.length === 0) return undefined;
+  if (positions.length !== 1) throw new Error('Pass --login-wait-seconds only once');
+  const raw = argv[positions[0] + 1];
+  if (!raw || raw.startsWith('--')) throw new Error('--login-wait-seconds requires a value');
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 3600) throw new Error('--login-wait-seconds must be between 0 and 3600');
+  return value;
+}
+
 /**
  * @param {string[]} argv
  * @returns {{ stage: string, driver: string | null, installDriver: boolean }}
@@ -32,8 +43,12 @@ export function selectHostStage(argv) {
   const acceptance = argv.includes('--acceptance');
   const selected = EXCLUSIVE.filter(name => argv.includes(`--${name}`));
   const runId = readRunId(argv);
+  const liveCoreFlows = argv.includes('--live-core-flows');
+  const loginWaitSeconds = readLoginWaitSeconds(argv);
   if (runId && (selected.length !== 1 || selected[0] !== 'context')) throw new Error('--run-id requires --context');
   if (runId && argv.includes('--live')) throw new Error('--run-id cannot be combined with --live');
+  if (liveCoreFlows && (selected.length !== 1 || selected[0] !== 'context' || !argv.includes('--live'))) throw new Error('--live-core-flows requires --context --live');
+  if (loginWaitSeconds !== undefined && !liveCoreFlows) throw new Error('--login-wait-seconds requires --live-core-flows');
   if (argv.includes('--native') && (acceptance || argv.includes('--live') || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--native requires only the dedicated --context driver');
   if (argv.includes('--live') && (acceptance || selected.length !== 1 || selected[0] !== 'context')) throw new Error('--live requires only the dedicated --context driver');
   const manualContext = acceptance && selected.length === 1 && selected[0] === 'context';

@@ -27,7 +27,7 @@ function readRawOption(name) {
 }
 
 function positionalXpi() {
-  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id']);
+  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--login-wait-seconds']);
   const skip = new Set();
   const found = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -148,6 +148,8 @@ if (twoVersion) {
 }
 const config = {
   live: liveRun,
+  liveCoreFlows: argumentsList.includes('--live-core-flows'),
+  loginWaitSeconds: Number(readRawOption('--login-wait-seconds') ?? 0),
   // True only for an atomically reserved --run-id tree that did not exist before this preparation.
   cleanRuntimeTree,
   verificationToken,

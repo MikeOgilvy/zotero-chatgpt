@@ -41,10 +41,21 @@ async function runHostSmoke(config) {
     await check('full-xpi-active', addon?.isActive && addon.version === config.subjectVersion);
     const title = 'ZCHATGPT current-PDF synthetic context and native interaction test';
     const parent = new Zotero.Item('journalArticle'); parent.setField('title', title);
+    let organizationFixture = null;
+    if (config.liveCoreFlows) {
+      const libraryID = Zotero.Libraries.userLibraryID;
+      const controlCollection = new Zotero.Collection(); controlCollection.libraryID = libraryID; controlCollection.name = `Synthetic preserved collection ${verificationToken}`; await controlCollection.saveTx();
+      const targetCollection = new Zotero.Collection(); targetCollection.libraryID = libraryID; targetCollection.name = `Synthetic target collection ${verificationToken}`; await targetCollection.saveTx();
+      parent.addTag(`preserve-parent-${verificationToken}`); parent.addToCollection(controlCollection.key);
+      organizationFixture = { controlCollection, targetCollection, peer: null };
+    }
     const queue = new Zotero.Notifier.Queue(); await parent.saveTx({ notifierQueue: queue });
+    if (organizationFixture) {
+      const peer = new Zotero.Item('journalArticle'); peer.libraryID = Zotero.Libraries.userLibraryID; peer.setField('title', `Synthetic selected peer ${verificationToken}`); peer.addTag(`preserve-peer-${verificationToken}`); peer.addToCollection(organizationFixture.controlCollection.key); await peer.saveTx({ notifierQueue: queue }); organizationFixture.peer = peer;
+    }
     const a = await Zotero.Attachments.importFromFile({ file: config.pdfPath, parentItemID: parent.id, title: 'Main synthetic PDF', saveOptions: { notifierQueue: queue } });
     const b = await Zotero.Attachments.importFromFile({ file: config.supplementPdfPath ?? config.pdfPath, parentItemID: parent.id, title: 'Supplement synthetic PDF', saveOptions: { notifierQueue: queue } });
-    await Promise.all([parent.loadAllData(), a.loadAllData(), b.loadAllData()]); await Zotero.Notifier.commit(queue);
+    await Promise.all([parent.loadAllData(), a.loadAllData(), b.loadAllData(), ...(organizationFixture?.peer ? [organizationFixture.peer.loadAllData()] : [])]); await Zotero.Notifier.commit(queue);
     win.Zotero_Tabs.closeAll(); await until(() => Zotero.Reader._readers.length === 0, 'close-only-this-profile-tabs');
     Zotero.Prefs.set('extensions.zchatgpt.automaticPdfText', true, true);
     Zotero.Prefs.set('extensions.zchatgpt.pdfTextDisclosureSeen', false, true);
@@ -684,12 +695,71 @@ async function runHostSmoke(config) {
     await until(() => shell()?.dataset.attachmentKey === a.key, 'restore-main-attachment', 60000);
     if (config.live) {
       report.notRun = report.notRun.filter(name => !['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'in-flight-model-stop'].includes(name));
+      if (config.liveCoreFlows) {
+        report.liveCoreFlows = { status: 'waiting-for-official-login', loginWaitSeconds: config.loginWaitSeconds ?? 0, driverClickedLogin: false, driverReadAuthFiles: false, modelTurns: 0 };
+        await save();
+        const waitStarted = Date.now();
+        while (panel().dataset.zchatgptAuth !== 'signedIn' && Date.now() - waitStarted < (config.loginWaitSeconds ?? 0) * 1000) { await delay(500); }
+        if (panel().dataset.zchatgptAuth !== 'signedIn') {
+          report.liveCoreFlows.status = 'blocked'; report.liveCoreFlows.reason = 'official-login-required'; report.status = 'blocked'; report.finishedAt = new Date().toISOString();
+          await skip('live-core-annotation-flow', 'BLOCKED: complete the official login manually in this dedicated profile; the driver does not click login or inspect authentication files.');
+          await skip('live-core-organization-flow', 'BLOCKED: complete the official login manually in this dedicated profile; the driver does not click login or inspect authentication files.');
+          await save(); return;
+        }
+        report.liveCoreFlows.status = 'running'; report.liveCoreFlows.loginObserved = 'signedIn'; await save();
+      }
       await check('live-account-signed-in', panel().dataset.zchatgptAuth === 'signedIn');
       const picker = panel().querySelector('[data-zchatgpt-picker]'); picker.click();
       const spark = [...panel().querySelectorAll('[data-zchatgpt-setting="model"]')].find(node => /spark/i.test(node.textContent));
       if (spark) spark.click();
       if (picker.getAttribute('aria-expanded') === 'true') picker.click();
       report.liveModel = picker.textContent;
+      if (config.liveCoreFlows) {
+        const tagNames = item => item.getTags().map(entry => entry.tag).sort();
+        const collectionKeys = item => item.getCollections().map(id => Zotero.Collections.get(id)).filter(Boolean).map(collection => collection.key).sort();
+        const taskCard = label => [...panel().querySelectorAll('[data-zchatgpt-task-id]')].find(card => String(card.querySelector('summary')?.textContent ?? '').includes(label));
+        const sendAgent = async (question, label, afterClick) => {
+          if (modeSwitch().dataset.zchatgptMode !== 'agent') { click(modeButton('agent')); await until(() => modeSwitch().dataset.zchatgptMode === 'agent', `${label}-agent-mode`); }
+          input().value = question; input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
+          const send = panel().querySelector('[data-zchatgpt-action="send"]'); await until(() => !send.disabled, `${label}-send-enabled`, 30000); click(send); if (afterClick) await afterClick();
+          await until(() => panel()?.dataset.zchatgptGenerating === 'true', `${label}-request-accepted`, 30000);
+          await until(() => panel()?.dataset.zchatgptGenerating === 'false', `${label}-request-terminal`, 180000);
+          report.liveCoreFlows.modelTurns += 1; await save();
+        };
+        const annotationsBefore = a.getAnnotations().length;
+        await sendAgent('Highlight the exact sentence in the current PDF that defines a prior, and the exact sentence that defines a likelihood. Use native Zotero highlights and propose only quotations that appear verbatim in this PDF.', 'live-annotation');
+        const annotationCard = await until(() => taskCard('Annotations'), 'live-annotation-review', 60000);
+        await check('live-core-annotation-review-before-write', annotationCard.dataset.state === 'review' && annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length > 0 && a.getAnnotations().length === annotationsBefore, { candidates: annotationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, nativeAnnotationsBefore: annotationsBefore });
+        click(annotationCard.querySelector('[data-zchatgpt-task-action="approve"]'));
+        await until(() => annotationCard.dataset.state === 'completed', 'live-annotation-applied', 60000); await a.loadAllData();
+        const createdAnnotations = a.getAnnotations().length - annotationsBefore;
+        await check('live-core-annotation-native-readback', createdAnnotations > 0, { createdAnnotations, attachmentKey: a.key });
+        toggle().click(); await until(() => !panel(), 'live-annotation-sidebar-closed'); toggle().click(); await until(() => taskCard('Annotations')?.dataset.state === 'completed', 'live-annotation-sidebar-reopened', 60000);
+        const reopenedAnnotationCard = taskCard('Annotations'); const viewer = pdfViewer(); viewer.currentScaleValue = 'page-width'; const scaleBeforeOutput = viewer.currentScaleValue;
+        let rotationBeforeOutput = viewer.pagesRotation; if (typeof rotationBeforeOutput === 'number') { viewer.pagesRotation = (rotationBeforeOutput + 90) % 360; rotationBeforeOutput = viewer.pagesRotation; }
+        click(reopenedAnnotationCard.querySelector('[data-zchatgpt-task-action="output"]')); await delay(500);
+        await check('live-core-annotation-output-reopens-with-view-state', viewer.currentScaleValue === scaleBeforeOutput && viewer.pagesRotation === rotationBeforeOutput, { zoom: viewer.currentScaleValue, rotation: viewer.pagesRotation ?? null });
+        click(reopenedAnnotationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => reopenedAnnotationCard.dataset.state === 'undone', 'live-annotation-undone', 60000); await a.loadAllData();
+        await check('live-core-annotation-undo-readback', a.getAnnotations().length === annotationsBefore, { nativeAnnotationsAfterUndo: a.getAnnotations().length, baseline: annotationsBefore });
+
+        if (!organizationFixture?.peer) throw new Error('Live organization fixtures were not prepared.');
+        const peer = organizationFixture.peer; const proposedTag = `live-organized-${verificationToken}`; const laterTag = `later-user-edit-${verificationToken}`;
+        const parentExistingTag = `preserve-parent-${verificationToken}`; const peerExistingTag = `preserve-peer-${verificationToken}`;
+        const selectedIDs = [parent.id, peer.id]; await win.ZoteroPane.selectItems(selectedIDs, { inLibraryRoot: true });
+        await until(() => win.ZoteroPane.getSelectedItems(true).length === 2, 'live-organization-native-selection');
+        await sendAgent(`Organize the selected Zotero items by adding the tag ${proposedTag} and placing both items in the collection named "${organizationFixture.targetCollection.name}". Preserve every existing tag and collection.`, 'live-organization', async () => {
+          await win.ZoteroPane.selectItems([parent.id], { inLibraryRoot: true, noTabSwitch: true }); win.Zotero_Tabs.select(tabId);
+        });
+        const organizationCard = await until(() => taskCard('Organize library'), 'live-organization-review', 60000);
+        await parent.loadAllData(); await peer.loadAllData();
+        await check('live-core-organization-frozen-review-before-write', organizationCard.dataset.state === 'review' && organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 2 && !tagNames(parent).includes(proposedTag) && !tagNames(peer).includes(proposedTag), { candidates: organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, selectionChangedAfterSend: true });
+        click(organizationCard.querySelector('[data-zchatgpt-task-action="approve"]')); await until(() => organizationCard.dataset.state === 'completed', 'live-organization-applied', 60000); await parent.loadAllData(); await peer.loadAllData();
+        const targetKey = organizationFixture.targetCollection.key; const controlKey = organizationFixture.controlCollection.key;
+        await check('live-core-organization-additive-native-readback', [parent, peer].every(item => tagNames(item).includes(proposedTag) && collectionKeys(item).includes(targetKey) && collectionKeys(item).includes(controlKey)) && tagNames(parent).includes(parentExistingTag) && tagNames(peer).includes(peerExistingTag), { parentTags: tagNames(parent), peerTags: tagNames(peer), parentCollections: collectionKeys(parent), peerCollections: collectionKeys(peer) });
+        peer.addTag(laterTag); await peer.saveTx({ skipSelect: true }); click(organizationCard.querySelector('[data-zchatgpt-task-action="undo"]')); await until(() => organizationCard.dataset.state === 'conflict', 'live-organization-undo-conflict', 60000); await parent.loadAllData(); await peer.loadAllData();
+        await check('live-core-organization-undo-preserves-later-edit', !tagNames(parent).includes(proposedTag) && !collectionKeys(parent).includes(targetKey) && tagNames(parent).includes(parentExistingTag) && tagNames(peer).includes(proposedTag) && tagNames(peer).includes(laterTag) && tagNames(peer).includes(peerExistingTag) && collectionKeys(peer).includes(targetKey) && collectionKeys(peer).includes(controlKey), { parentTags: tagNames(parent), peerTags: tagNames(peer), parentCollections: collectionKeys(parent), peerCollections: collectionKeys(peer), taskState: organizationCard.dataset.state });
+        report.liveCoreFlows.status = 'passed'; report.liveCoreFlows.annotationCandidates = createdAnnotations; report.liveCoreFlows.organizationItems = 2; await save();
+      } else {
       input().value = 'What is the hidden verification token on the second physical page of this synthetic PDF, and what combines prior beliefs and likelihood? Cite the page label. Answer briefly.';
       input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
       const started = win.performance.now(); panel().querySelector('[data-zchatgpt-action="send"]').click();
@@ -720,6 +790,7 @@ async function runHostSmoke(config) {
       report.live.stopState = terminal;
       await check('live-stop-confirmed-or-completion-race', terminal === 'cancelled' || terminal === 'completed', { state: terminal });
       if (terminal === 'completed') report.notRun.push('stop-during-stream-completed-too-fast');
+      }
     }
     try {
       const doc = pdf().pdfDocument;
