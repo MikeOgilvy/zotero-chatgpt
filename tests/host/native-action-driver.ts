@@ -31,7 +31,7 @@ interface SmokeItem extends NativeHostItem {
 }
 interface SmokeCollection extends NativeHostCollection { name: string; saveTx(): Promise<number | boolean> }
 interface SmokeWindow extends ZoteroWindow {
-  ZoteroPane?: { loaded?: boolean; itemsView?: unknown; getSelectedItems(): SmokeItem[] };
+  ZoteroPane?: { loaded?: boolean; itemsView?: { getSelectedItems(asIDs?: false): SmokeItem[] } };
   Zotero_Tabs: { selectedID: string; getTabInfo(id: string): { id?: string; data?: { itemID?: number } }; select(id: string): void };
 }
 interface SmokeReader extends HostReader { tabID: string; _window: SmokeWindow; _initPromise?: Promise<void>; close(): void }
@@ -211,6 +211,11 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     currentStage = 'construct-task-controller';
     const storage = new GeckoStorage(host, ledger);
     tasks = new ActionTaskController(storage, native, { uuid: () => host.uuid(), key: () => Zotero.Utilities.generateObjectKey(), now: () => new Date().toISOString() });
+    const taskController = tasks;
+    unsubscribe = taskController.subscribe(record => {
+      if (report.retained && !report.retained.taskIds.includes(record.id)) report.retained.taskIds.push(record.id);
+      reportTail = reportTail.then(save).catch(() => { /* The next awaited report save exposes failures. */ });
+    });
     report.retained = { parentKey: fixture.parent.key, attachmentKeys: [fixture.main.key, fixture.supplement.key], collectionKey: fixture.collection.key, taskIds: [], ledger: ledgerName, organizationItemKeys: [fixture.parent.key, fixture.peer.key] };
     const organizationReview = await step('organization-review-freezes-two-selected-items-without-writing', 'synthetic-proposal-real-host-write', async () => {
       guard(); const targetCollection = new Zotero.Collection(); targetCollection.libraryID = libraryID; targetCollection.name = `[Synthetic organization target] ${report.runId}`; await targetCollection.saveTx();
@@ -275,11 +280,6 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
       requireCheck(resolution.status === 'resolved', 'QUOTE_DID_NOT_RESOLVE');
       requireCheck(resolution.candidate.position.pageIndex === 0 && resolution.candidate.position.rects.length > 0 && resolution.candidate.pageLabel === 'i', 'QUOTE_COORDINATES_UNAVAILABLE');
       return { value: resolution.candidate, details: { pageLabel: resolution.candidate.pageLabel, pageIndex: 0, rectangles: resolution.candidate.position.rects.length, sortIndex: resolution.candidate.sortIndex } };
-    });
-    const taskController = tasks;
-    unsubscribe = taskController.subscribe(record => {
-      if (report.retained && !report.retained.taskIds.includes(record.id)) report.retained.taskIds.push(record.id);
-      reportTail = reportTail.then(save).catch(() => { /* The next awaited report save exposes failures. */ });
     });
     const proposals = [
       { quote: 'A prior describes beliefs before a measurement is observed.', pageIndex: 0, reason: 'Synthetic candidate: definition of prior.' },
