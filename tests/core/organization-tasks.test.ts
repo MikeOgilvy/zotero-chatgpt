@@ -136,7 +136,7 @@ it('rejects a corrupt persisted delta that claims a pre-existing tag as task-own
   const f = fixture(); const task = await f.controller.planOrganization(f.input);
   await f.controller.approve(task.id, task.items.map(item => item.id));
   const path = `tasks/${task.id}.json`;
-  const raw = JSON.parse(new TextDecoder().decode(f.storage.files.get(path)!)) as { items: Array<{ change: { addedTags: string[] } }> };
+  const raw = JSON.parse(new TextDecoder().decode(f.storage.files.get(path))) as { items: Array<{ change: { addedTags: string[] } }> };
   raw.items[0]!.change.addedTags = ['existing']; f.storage.files.set(path, new TextEncoder().encode(JSON.stringify(raw)));
   await expect(f.controller.get(task.id)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' });
   expect(f.current().tags).toEqual(['existing', 'topic-a']);
