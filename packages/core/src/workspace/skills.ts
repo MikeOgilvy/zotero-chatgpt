@@ -36,12 +36,13 @@ function fullPreferences(value: unknown): Personalization {
   return { ...DEFAULT_PREFERENCES, ...checked };
 }
 function workflow(value: unknown): WorkflowKind {
-  if (value !== 'read' && value !== 'annotate' && value !== 'acquire' && value !== 'diagram') invalid(); return value;
+  if (value !== 'read' && value !== 'annotate' && value !== 'acquire' && value !== 'organize' && value !== 'diagram') invalid(); return value;
 }
 const permissions: Record<WorkflowKind, string[]> = {
   read: ['Read only explicitly supplied sources.'],
   annotate: ['Preview native annotation candidates; write only after task approval.'],
   acquire: ['Preview metadata and duplicates; create items and fetch lawful PDFs only after task approval.'],
+  organize: ['Preview additive tags and collection memberships for the frozen Zotero selection; write only after task approval.'],
   diagram: ['Generate an explicitly requested diagram in a separate image task.'],
 };
 const definitions: Array<{ name: string; workflow: WorkflowKind; description: string; input: string; steps: string[]; output: string }> = [
@@ -50,6 +51,7 @@ const definitions: Array<{ name: string; workflow: WorkflowKind; description: st
   { name: 'compare', workflow: 'read', description: 'Compare explicitly supplied research sources.', input: 'At least two explicitly referenced sources and the comparison criterion.', steps: ['Record coverage and scope for each source.', 'Compare objectives, assumptions, mechanisms, evidence and limitations on common criteria.', 'Identify disagreements and tests that would distinguish the claims.'], output: 'A comparison table with source-specific evidence and unresolved questions.' },
   { name: 'annotate', workflow: 'annotate', description: 'Propose and, after approval, add targeted native annotations.', input: 'The reading goal and an explicitly selected PDF scope.', steps: ['Choose relevant definitions, assumptions, derivations, evidence and limitations.', 'Resolve exact quotations and native page coordinates; reject ambiguous locations.', 'Present removable candidates, obtain task approval and record each native write.'], output: 'Reviewed native annotation candidates and a ledger of approved writes or failures.' },
   { name: 'acquire', workflow: 'acquire', description: 'Review identifiers and acquire verified literature into a chosen collection.', input: 'Explicit DOI or URL identifiers and a chosen collection.', steps: ['Resolve and inspect metadata, versions and existing DOI duplicates.', 'Preview the intended items and obtain bounded task approval.', 'Create only approved entries, obtain lawful PDFs, verify identity and report partial failures.'], output: 'Verified collection entries and a per-item acquisition report with unresolved cases.' },
+  { name: 'organize', workflow: 'organize', description: 'Propose and, after approval, add tags and collection memberships to selected Zotero items.', input: 'The items selected in the active Zotero library pane and the editable collections in their libraries.', steps: ['Freeze the actual native selection and bounded item metadata.', 'Propose concrete additive tags and collection memberships using only frozen item and collection indexes.', 'Present one review, apply approved additions, read them back and keep an exact undo ledger.'], output: 'A per-item organization preview and verified additive changes, with conflicts left untouched.' },
   { name: 'diagram', workflow: 'diagram', description: 'Create a clearly labeled explanatory diagram.', input: 'An explicit image-generation request and supplied evidence or diagram brief.', steps: ['Distinguish a new explanatory figure from figures in the paper.', 'Use a separate task with image generation enabled only for the requested scope.', 'Check the returned artifact and label generated content; report unavailable output honestly.'], output: 'A generated explanatory image, its provenance and a concise caption.' },
 ];
 export function builtinSkills(): ReaderSkill[] {

@@ -1,4 +1,5 @@
-import { ReaderError, type Citation, type GenerationSettings, type ImageAttachment, type PaperIdentity, type PaperScope, type Rect, type RequestMode, type SendInput } from './index.ts';
+import { ReaderError, type Citation, type GenerationSettings, type ImageAttachment, type OrganizationContext, type PaperIdentity, type PaperScope, type Rect, type RequestMode, type SendInput } from './index.ts';
+import type { NativeCreator, NativeMetadata, NativeOrganizationItemSnapshot } from './native.ts';
 import { validateDocument, validateRevision } from './document.ts';
 import { validateBatch, validateContextReport, validateReferenceInput, validateWorkflow } from './workspace-validation.ts';
 // Limits are first-version engineering choices from the contracts appendix.
@@ -49,10 +50,14 @@ function rect(value: unknown): Rect {
 export function validateCitation(value: unknown): Citation {
   const citation = record(value, ['id', 'paper', 'text', 'title', 'authors', 'year', 'doi', 'pageLabel', 'positions', 'capturedAt', 'contextScope', 'sourceRevision', 'documentRevision'], 'citation');
   if (!Array.isArray(citation.authors) || citation.authors.length > LIMITS.authors) invalid('citation.authors is out of range');
-  if (!Array.isArray(citation.positions) || citation.positions.length !== 1) invalid('citation must cover exactly one page');
-  const position = record(citation.positions[0], ['pageIndex', 'rects'], 'citation.positions[0]');
-  if (typeof position.pageIndex !== 'number' || !Number.isSafeInteger(position.pageIndex) || position.pageIndex < 0) invalid('citation page index must be a non-negative integer');
-  if (!Array.isArray(position.rects) || position.rects.length === 0 || position.rects.length > LIMITS.rectsPerPage) invalid('citation rects are out of range');
+  if (!Array.isArray(citation.positions) || citation.positions.length < 1 || citation.positions.length > 2) invalid('citation must cover one page or two adjacent pages');
+  const positions = citation.positions.map((value, index) => {
+    const position = record(value, ['pageIndex', 'rects'], `citation.positions[${index}]`);
+    if (typeof position.pageIndex !== 'number' || !Number.isSafeInteger(position.pageIndex) || position.pageIndex < 0) invalid('citation page index must be a non-negative integer');
+    if (!Array.isArray(position.rects) || position.rects.length === 0 || position.rects.length > LIMITS.rectsPerPage) invalid('citation rects are out of range');
+    return { pageIndex: position.pageIndex, rects: position.rects.map(rect) };
+  });
+  if (positions[1] && positions[1].pageIndex !== positions[0]!.pageIndex + 1) invalid('citation page positions must be adjacent and ordered');
   if (citation.contextScope !== 'selection') invalid('citation.contextScope must be selection');
   if (typeof citation.capturedAt !== 'string' || !ISO_DATE.test(citation.capturedAt)) invalid('citation.capturedAt must be an ISO 8601 UTC timestamp');
   const result: Citation = {
@@ -62,7 +67,7 @@ export function validateCitation(value: unknown): Citation {
     title: text(citation.title, 'citation.title', LIMITS.titleChars),
     authors: citation.authors.map(author => text(author, 'citation.authors[]', LIMITS.authorChars, 1)),
     pageLabel: text(citation.pageLabel, 'citation.pageLabel', 32),
-    positions: [{ pageIndex: position.pageIndex, rects: position.rects.map(rect) }],
+    positions,
     capturedAt: citation.capturedAt,
     contextScope: 'selection',
   };
@@ -118,6 +123,62 @@ function requestMode(value: unknown): RequestMode {
   if (value !== 'chat' && value !== 'agent') invalid('request.mode must be chat or agent');
   return value;
 }
+const NATIVE_ITEM_TYPES = ['journalArticle', 'conferencePaper', 'preprint', 'book', 'bookSection', 'report', 'thesis', 'webpage'] as const;
+const NATIVE_METADATA_FIELDS = ['DOI', 'url', 'date', 'publicationTitle', 'bookTitle', 'conferenceName', 'volume', 'issue', 'pages', 'publisher', 'place', 'ISBN', 'abstractNote', 'language'] as const;
+function stringList(value: unknown, label: string, max: number): string[] {
+  if (!Array.isArray(value) || value.length > max) invalid(`${label} is out of range`);
+  const result = value.map(entry => text(entry, `${label}[]`, 8192));
+  if (new Set(result).size !== result.length) invalid(`${label} repeats a value`);
+  return result;
+}
+function nativeMetadata(value: unknown): NativeMetadata {
+  const metadata = record(value, ['itemType', 'title', 'creators', ...NATIVE_METADATA_FIELDS], 'organization item metadata');
+  if (!NATIVE_ITEM_TYPES.includes(metadata.itemType as typeof NATIVE_ITEM_TYPES[number])) invalid('organization item type is unsupported');
+  if (!Array.isArray(metadata.creators) || metadata.creators.length > 100) invalid('organization item creators are out of range');
+  const creators: NativeCreator[] = metadata.creators.map((value, index) => {
+    const creator = record(value, ['creatorType', 'firstName', 'lastName', 'name'], `organization item creator ${index}`);
+    if (creator.creatorType !== 'author' && creator.creatorType !== 'editor') invalid('organization item creator role is unsupported');
+    const result: NativeCreator = { creatorType: creator.creatorType };
+    for (const field of ['firstName', 'lastName', 'name'] as const) if (creator[field] !== undefined) result[field] = text(creator[field], `organization creator ${field}`, 512, 1);
+    if (!result.name && !result.lastName) invalid('organization item creator has no name');
+    return result;
+  });
+  const result: NativeMetadata = { itemType: metadata.itemType as NativeMetadata['itemType'], title: text(metadata.title, 'organization item title', 8192, 1), creators };
+  for (const field of NATIVE_METADATA_FIELDS) if (metadata[field] !== undefined) result[field] = text(metadata[field], `organization metadata ${field}`, field === 'abstractNote' ? 32768 : 8192, 1);
+  return result;
+}
+function nativeItemSnapshot(value: unknown): NativeOrganizationItemSnapshot {
+  const item = record(value, ['clientId', 'libraryId', 'key', 'metadata', 'tags', 'collectionKeys', 'attachmentKeys', 'dateModified', 'contentSignature', 'organizationSignature'], 'organization item');
+  if (!Number.isSafeInteger(item.libraryId) || (item.libraryId as number) < 1) invalid('organization item library is invalid');
+  if (typeof item.key !== 'string' || !ATTACHMENT_KEY.test(item.key)) invalid('organization item key is invalid');
+  return {
+    clientId: uuid(item.clientId, 'organization item client'), libraryId: item.libraryId as number, key: item.key,
+    metadata: nativeMetadata(item.metadata), tags: stringList(item.tags, 'organization item tags', 256),
+    collectionKeys: stringList(item.collectionKeys, 'organization item collections', 1000).map(key => ATTACHMENT_KEY.test(key) ? key : invalid('organization collection key is invalid')),
+    attachmentKeys: stringList(item.attachmentKeys, 'organization item attachments', 1000).map(key => ATTACHMENT_KEY.test(key) ? key : invalid('organization attachment key is invalid')),
+    dateModified: text(item.dateModified, 'organization item modification time', 128),
+    contentSignature: text(item.contentSignature, 'organization item signature', 1024 * 1024),
+    organizationSignature: text(item.organizationSignature, 'organization item organization signature', 1024 * 1024),
+  };
+}
+export function validateOrganizationContext(value: unknown): OrganizationContext {
+  const context = record(value, ['selection', 'collections'], 'request.organization');
+  if (!Array.isArray(context.selection) || !context.selection.length || context.selection.length > 50) invalid('request.organization.selection is out of range');
+  if (!Array.isArray(context.collections) || context.collections.length > 1000) invalid('request.organization.collections is out of range');
+  let encoded = 0; try { encoded = new TextEncoder().encode(JSON.stringify(context)).length; } catch { invalid('request.organization is not serializable'); }
+  if (encoded > 8 * 1024 * 1024) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The selected Zotero scope is too large to freeze safely.');
+  const selection = context.selection.map(nativeItemSnapshot);
+  const collections = context.collections.map((value, index) => {
+    const collection = record(value, ['clientId', 'libraryId', 'collectionKey', 'name'], `organization collection ${index}`);
+    if (!Number.isSafeInteger(collection.libraryId) || (collection.libraryId as number) < 1 || typeof collection.collectionKey !== 'string' || !ATTACHMENT_KEY.test(collection.collectionKey)) invalid('organization collection identity is invalid');
+    return { clientId: uuid(collection.clientId, 'organization collection client'), libraryId: collection.libraryId as number, collectionKey: collection.collectionKey, name: text(collection.name, 'organization collection name', 1024, 1) };
+  });
+  if (new Set(selection.map(item => `${item.clientId}:${item.libraryId}:${item.key}`)).size !== selection.length) invalid('request.organization.selection repeats an item');
+  if (new Set(collections.map(item => `${item.clientId}:${item.libraryId}:${item.collectionKey}`)).size !== collections.length) invalid('request.organization.collections repeats a collection');
+  const scopes = new Set(selection.map(item => `${item.clientId}:${item.libraryId}`));
+  if (scopes.size !== 1 || collections.some(item => !scopes.has(`${item.clientId}:${item.libraryId}`))) invalid('request.organization must stay inside the selected library');
+  return { selection, collections };
+}
 /** Returns a checked copy or throws a ReaderError carrying INVALID_REQUEST or PAYLOAD_TOO_LARGE. */
 export function validateSendInput(value: unknown): SendInput {
   let withoutImages: unknown = value;
@@ -125,13 +186,14 @@ export function validateSendInput(value: unknown): SendInput {
     const rest = { ...(value as Record<string, unknown>) };
     delete rest.images;
     delete rest.document;
+    delete rest.organization;
     if (Array.isArray(rest.references)) rest.references = rest.references.map((ref: unknown) => { if (!ref || typeof ref !== 'object') return ref; const result = { ...(ref as Record<string, unknown>) }; delete result.document; return result; });
     withoutImages = rest;
   }
   let serialized: string;
   try { serialized = JSON.stringify(withoutImages) ?? ''; } catch { invalid('request is not serializable'); }
   if (new TextEncoder().encode(serialized).length > LIMITS.payloadBytes) throw new ReaderError('PAYLOAD_TOO_LARGE', 'The request is larger than the reader accepts; select less text.');
-  const input = record(value, ['requestId', 'conversationId', 'action', 'question', 'citations', 'settings', 'paper', 'images', 'document', 'workflow', 'references', 'batch', 'contextReport', 'mode'], 'request');
+  const input = record(value, ['requestId', 'conversationId', 'action', 'question', 'citations', 'settings', 'paper', 'images', 'document', 'workflow', 'references', 'batch', 'contextReport', 'organization', 'mode'], 'request');
   if (input.action !== 'explain' && input.action !== 'ask') invalid('request.action must be explain or ask');
   if (!Array.isArray(input.citations) || input.citations.length > LIMITS.citationsPerRequest) invalid('request.citations is out of range');
   const question = text(input.question, 'request.question', LIMITS.questionCodePoints);
@@ -145,6 +207,7 @@ export function validateSendInput(value: unknown): SendInput {
   if (input.workflow !== undefined) result.workflow = validateWorkflow(input.workflow);
   if (input.batch !== undefined) result.batch = validateBatch(input.batch);
   if (input.contextReport !== undefined) result.contextReport = validateContextReport(input.contextReport);
+  if (input.organization !== undefined) result.organization = validateOrganizationContext(input.organization);
   if (input.references !== undefined) {
     if (!Array.isArray(input.references) || input.references.length > 16) invalid('Too many references');
     result.references = input.references.map(validateReferenceInput);

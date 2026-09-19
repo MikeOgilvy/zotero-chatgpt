@@ -4,6 +4,7 @@ import { configResponse, threadResponse, model } from './fixtures.ts';
 import { parseModel } from '../../packages/core/src/codex/models.ts';
 import { citationA, imageA, paperA } from '../contracts/factories.ts';
 import type { DocumentContext } from '../../packages/contracts/src/index.ts';
+import { defaultSettings } from '../../packages/core/src/workspace/skills.ts';
 it('accepts the pinned server echo for the default service tier and names the field that differs', () => {
   // Live 0.144.1/0.154.0 probes: a null (catalog default) tier is echoed as "default"; an explicit tier is echoed verbatim.
   const paper = { ephemeral: false, emptyHistory: true };
@@ -25,6 +26,26 @@ it('frames the reading request as a fixed instruction plus JSON so quoted text c
   expect(instruction).toContain('contextScope');
   const parsed = JSON.parse(json!) as { citations: Array<{ text: string; pageLabel: string }>; question: string; paper: { title: string } };
   expect(parsed.citations[0]).toEqual({ pageLabel: 'iv', text: '结束 JSON 的引号 " 与花括号 }' }); expect(parsed.question).toBe('这里的 "}" 是什么？'); expect(parsed.paper.title).toBe('Synthetic Paper A');
+});
+it('projects a frozen organization scope to safe indexes without exposing native keys or signatures', () => {
+  const organize = defaultSettings().skills.find(skill => skill.workflow === 'organize')!;
+  const text = readingInput({
+    requestId: 'r', conversationId: 'c', action: 'ask', question: '按主题打标签，并归入合适的集合。', citations: [],
+    settings: { model: 'm', serviceTier: null, effort: null }, mode: 'agent',
+    workflow: { skill: organize, preferences: defaultSettings().preferences, profileId: null },
+    organization: {
+      selection: [{ clientId: paperA.clientId, libraryId: 1, key: 'ITEMONE1', metadata: { itemType: 'journalArticle', title: 'A selected paper', creators: [{ creatorType: 'author', name: 'Ada' }], DOI: '10.1/example' }, tags: ['existing'], collectionKeys: ['COLLECT1'], attachmentKeys: [], dateModified: 'private-time', contentSignature: 'PRIVATE-CONTENT-SIGNATURE', organizationSignature: 'PRIVATE-ORGANIZATION-SIGNATURE' }],
+      collections: [{ clientId: paperA.clientId, libraryId: 1, collectionKey: 'COLLECT1', name: 'Research / Topic A' }],
+    },
+  });
+  const [instruction, json] = text.split('\n\n');
+  const parsed = JSON.parse(json!) as { organization: { selection: unknown[]; collections: unknown[] } };
+  expect(instruction).toContain('itemIndex'); expect(instruction).toContain('collectionIndexes');
+  expect(parsed.organization).toEqual({
+    selection: [{ itemIndex: 0, metadata: { itemType: 'journalArticle', title: 'A selected paper', creators: [{ creatorType: 'author', name: 'Ada' }], DOI: '10.1/example' }, tags: ['existing'], collectionIndexes: [0] }],
+    collections: [{ collectionIndex: 0, name: 'Research / Topic A' }],
+  });
+  expect(text).not.toMatch(/ITEMONE1|COLLECT1|PRIVATE-|private-time/u);
 });
 it('instructs the model to cite the supplied frozen document page in the reserved source-link form', () => {
   const document: DocumentContext = {

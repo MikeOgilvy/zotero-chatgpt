@@ -1,9 +1,9 @@
 import { clone } from '../../../contracts/src/clone.ts';
-import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeCollectionTarget } from '../../../contracts/src/native.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeCollectionTarget, type NativeOrganizationItemSnapshot } from '../../../contracts/src/native.ts';
 import { ReaderError, type DocumentRevision } from '../../../contracts/src/index.ts';
 import { validatePaperScope } from '../../../contracts/src/validation.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
-import { validateAnnotationProposal as proposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem } from '../../../contracts/src/tasks.ts';
+import { validateAnnotationProposal as proposal, validateOrganizationProposal, type AcquisitionChoice, type AcquisitionTaskItem, type ActionTaskOperation, type ActionTaskRecord, type ActionTasks, type AnnotationTaskItem, type OrganizationTaskItem } from '../../../contracts/src/tasks.ts';
 export interface ActionTaskClock { uuid(): string; key(): string; now(): string }
 interface TaskCoordination { queue: Promise<void>; active: Map<string, AbortController>; stopRequests: Set<string> }
 const coordinationByStorage = new WeakMap<StoragePort, TaskCoordination>();
@@ -11,7 +11,7 @@ const ID = /^[a-zA-Z0-9-]{1,128}$/u;
 const KEY = /^[A-Z0-9]{8}$/u;
 const STATES = ['preparing', 'review', 'running', 'completed', 'partial', 'cancelled', 'uncertain', 'undone', 'conflict', 'failed'];
 const ITEM_STATES = ['candidate', 'unresolved', 'skipped', 'writing', 'applied', 'metadata-only', 'failed', 'uncertain', 'undoing', 'undone', 'conflict'];
-const OPERATIONS = ['annotation-create', 'metadata-create', 'collection-add', 'pdf-acquire', 'annotation-delete', 'collection-remove', 'item-trash', 'attachment-trash'];
+const OPERATIONS = ['annotation-create', 'metadata-create', 'collection-add', 'pdf-acquire', 'annotation-delete', 'collection-remove', 'item-trash', 'attachment-trash', 'organization-add', 'organization-remove'];
 function invalid(): never { throw new ReaderError('INVALID_REQUEST', 'The task input is invalid or no longer matches its review.'); }
 function unavailable(): never { throw new ReaderError('HISTORY_UNAVAILABLE', 'Task records could not be read and remain untouched.'); }
 function id(value: unknown): string { if (typeof value !== 'string' || !ID.test(value)) invalid(); return value; }
@@ -37,6 +37,18 @@ function collectionTarget(value: unknown): NativeCollectionTarget {
   validatePaperScope({ clientId: t.clientId, libraryId: t.libraryId, attachmentKey: key(t.collectionKey) });
   return { clientId: t.clientId as string, libraryId: t.libraryId as number, collectionKey: t.collectionKey as string };
 }
+function strings(value: unknown, maxItems: number, maxLength: number, keys = false): string[] {
+  if (!Array.isArray(value) || value.length > maxItems) invalid();
+  const result = value.map(item => keys ? key(item) : text(item, maxLength, 1));
+  if (new Set(result).size !== result.length) invalid(); return result;
+}
+function itemSnapshot(value: unknown): NativeOrganizationItemSnapshot {
+  const item = record(value, ['clientId', 'libraryId', 'key', 'metadata', 'tags', 'collectionKeys', 'attachmentKeys', 'dateModified', 'contentSignature', 'organizationSignature']);
+  validatePaperScope({ clientId: item.clientId, libraryId: item.libraryId, attachmentKey: key(item.key) });
+  record(item.metadata); strings(item.tags, 1000, 128); strings(item.collectionKeys, 1000, 8, true); strings(item.attachmentKeys, 1000, 8, true);
+  text(item.dateModified, 128); text(item.contentSignature, 1024 * 1024); text(item.organizationSignature, 1024 * 1024);
+  return clone(item) as unknown as NativeOrganizationItemSnapshot;
+}
 function choice(value: unknown): AcquisitionChoice {
   const c = record(value, ['metadataIndex', 'duplicateKey', 'downloadPDF']);
   if (c.metadataIndex !== undefined && (!Number.isSafeInteger(c.metadataIndex) || (c.metadataIndex as number) < 0 || (c.metadataIndex as number) >= 20)) invalid();
@@ -46,15 +58,17 @@ function choice(value: unknown): AcquisitionChoice {
 }
 export function validateTaskRecord(value: unknown): ActionTaskRecord {
   const raw = record(value, ['schemaVersion', 'id', 'conversationId', 'kind', 'state', 'question', 'createdAt', 'updatedAt', 'revision', 'approvedAt', 'cancelRequested', 'paper', 'documentRevision', 'modelRequestId', 'target', 'items']);
-  if (raw.schemaVersion !== 1 || !STATES.includes(String(raw.state)) || !['annotations', 'acquisition'].includes(String(raw.kind))) invalid();
+  if (raw.schemaVersion !== 1 || !STATES.includes(String(raw.state)) || !['annotations', 'acquisition', 'organization'].includes(String(raw.kind))) invalid();
   id(raw.id); id(raw.conversationId); text(raw.question, 16000); text(raw.createdAt, 64, 1); text(raw.updatedAt, 64, 1);
   if (!Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0 || !Array.isArray(raw.items) || raw.items.length > 50 || (raw.cancelRequested !== undefined && raw.cancelRequested !== true)) invalid();
+  if (raw.kind === 'organization' && raw.items.length === 0) invalid();
   if (raw.approvedAt !== undefined) text(raw.approvedAt, 64, 1);
   if (raw.kind === 'annotations') { validatePaperScope(raw.paper); documentRevision(raw.documentRevision); if (raw.modelRequestId !== undefined) id(raw.modelRequestId); }
-  else collectionTarget(raw.target);
+  else if (raw.kind === 'acquisition') collectionTarget(raw.target);
+  else if (raw.modelRequestId !== undefined) id(raw.modelRequestId);
   const ids = new Set<string>(); const keys = new Set<string>();
   for (const value of raw.items) {
-    const entry = record(value, ['id', 'kind', 'reservedKey', 'status', 'operation', 'errorCode', 'selected', 'proposal', 'resolution', 'annotation', 'identifier', 'preview', 'duplicates', 'choice', 'item', 'created', 'collectionAddition', 'acquisition', 'attachmentUndone']);
+    const entry = record(value, ['id', 'kind', 'reservedKey', 'status', 'operation', 'errorCode', 'selected', 'proposal', 'resolution', 'annotation', 'identifier', 'preview', 'duplicates', 'choice', 'item', 'created', 'collectionAddition', 'acquisition', 'attachmentUndone', 'sourceIndex', 'before', 'change']);
     const itemID = id(entry.id); const itemKey = key(entry.reservedKey);
     if (ids.has(itemID) || keys.has(itemKey) || !ITEM_STATES.includes(String(entry.status)) || (entry.selected !== undefined && typeof entry.selected !== 'boolean') || (entry.operation !== undefined && (typeof entry.operation !== 'string' || !OPERATIONS.includes(entry.operation)))) invalid();
     ids.add(itemID); keys.add(itemKey);
@@ -67,14 +81,29 @@ export function validateTaskRecord(value: unknown): ActionTaskRecord {
         if (resolution.status === 'resolved') { const candidate = record(resolution.candidate); const source = record(candidate.source); if (!equal(source.paper, raw.paper) || !equal(source.revision, raw.documentRevision)) invalid(); text(candidate.text, 16000, 2); }
       }
       if (entry.annotation !== undefined) { const annotation = record(entry.annotation); if (annotation.key !== itemKey || !equal(annotation.paper, raw.paper)) invalid(); }
-    } else {
+    } else if (raw.kind === 'acquisition') {
       if (entry.kind !== 'acquisition') invalid(); text(entry.identifier, 8192, 1); if (!Array.isArray(entry.duplicates) || entry.duplicates.length > 1000) invalid();
       if (entry.preview !== undefined) { const preview = record(entry.preview); if (!Array.isArray(preview.candidates) || preview.candidates.length > 20) invalid(); }
       if (entry.choice !== undefined) choice(entry.choice);
       if (entry.created !== undefined && typeof entry.created !== 'boolean') invalid();
       if (entry.attachmentUndone !== undefined && entry.attachmentUndone !== true) invalid();
       if (entry.item !== undefined) { const item = record(entry.item); const target = record(raw.target); if (item.clientId !== target.clientId || item.libraryId !== target.libraryId || (entry.created && item.key !== itemKey)) invalid(); }
+    } else {
+      if (entry.kind !== 'organization' || !Number.isSafeInteger(entry.sourceIndex) || (entry.sourceIndex as number) < 0 || (entry.sourceIndex as number) >= 50) invalid();
+      const before = itemSnapshot(entry.before); const change = entry.change === undefined ? undefined : record(entry.change, ['before', 'after', 'addedTags', 'addedCollectionKeys']);
+      const p = record(entry.proposal, ['tags', 'collections']); strings(p.tags, 24, 128);
+      if (!Array.isArray(p.collections) || p.collections.length > 24) invalid();
+      for (const target of p.collections) { const checked = collectionTarget(target); if (checked.clientId !== before.clientId || checked.libraryId !== before.libraryId) invalid(); }
+      if (change) {
+        if (!equal(itemSnapshot(change.before), before)) invalid();
+        const after = itemSnapshot(change.after); if (after.clientId !== before.clientId || after.libraryId !== before.libraryId || after.key !== before.key) invalid();
+        strings(change.addedTags, 24, 128); strings(change.addedCollectionKeys, 24, 8, true);
+      }
     }
+  }
+  if (raw.kind === 'organization') {
+    const scope = raw.items.map(value => { const entry = record(value); const before = record(entry.before); return `${String(before.clientId)}:${String(before.libraryId)}`; });
+    if (new Set(scope).size !== 1) invalid();
   }
   return clone(raw) as unknown as ActionTaskRecord;
 }
@@ -118,6 +147,21 @@ export class ActionTaskController implements ActionTasks {
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> { const result = this.coordination.queue.then(operation); this.coordination.queue = result.then(() => undefined, () => undefined); return result; }
   private path(value: string): string { return `tasks/${id(value)}.json`; }
+  private sameAnnotationCandidate(left: AnnotationTaskItem, right: AnnotationTaskItem): boolean {
+    return left.resolution?.status === 'resolved' && right.resolution?.status === 'resolved' && left.resolution.candidate.text === right.resolution.candidate.text && equal(left.resolution.candidate.position, right.resolution.candidate.position);
+  }
+  /** Existing output or unknown in-flight intent blocks a second key; review-only/failed/undone work does not. */
+  private async annotationClaimed(task: Extract<ActionTaskRecord, { kind: 'annotations' }>, item: AnnotationTaskItem): Promise<boolean> {
+    for (const candidate of await this.list()) {
+      if (candidate.kind !== 'annotations' || candidate.id === task.id || !equal(candidate.paper, task.paper) || !equal(candidate.documentRevision, task.documentRevision)) continue;
+      for (const prior of candidate.items) {
+        if (!this.sameAnnotationCandidate(prior, item) || prior.status === 'undone' || prior.status === 'failed' || prior.status === 'skipped' || prior.status === 'unresolved' || prior.status === 'candidate') continue;
+        if (['writing', 'uncertain'].includes(prior.status) && prior.operation === 'annotation-create') return true;
+        if (prior.annotation && await this.native.inspectAnnotation({ paper: candidate.paper, key: prior.annotation.key })) return true;
+      }
+    }
+    return false;
+  }
   private async load(value: string): Promise<ActionTaskRecord> {
     let bytes: Uint8Array | null;
     try { bytes = await this.storage.read(this.path(value)); } catch { unavailable(); }
@@ -177,12 +221,59 @@ export class ActionTaskController implements ActionTasks {
         for (const item of task.items) {
           if (abort.signal.aborted) break;
           if (existing && item.resolution) continue;
-          try { item.resolution = await readWhileActive(this.native.resolveQuote({ paper: task.paper, revision: task.documentRevision, quote: item.proposal.quote, pageIndexes: [item.proposal.pageIndex] }, abort.signal), abort.signal); item.status = item.resolution.status === 'resolved' ? 'candidate' : 'unresolved'; }
+          try {
+            // The model page is an untrusted hint, never authority to hide another occurrence. Native
+            // resolution establishes global uniqueness and the real position across the frozen PDF.
+            item.resolution = await readWhileActive(this.native.resolveQuote({ paper: task.paper, revision: task.documentRevision, quote: item.proposal.quote }, abort.signal), abort.signal);
+            item.status = item.resolution.status === 'resolved' ? 'candidate' : 'unresolved';
+            if (item.resolution.status === 'resolved') {
+              const resolved = item.resolution.candidate;
+              const duplicate = task.items.slice(0, task.items.indexOf(item)).some(candidate => candidate.resolution?.status === 'resolved' && candidate.resolution.candidate.text === resolved.text && equal(candidate.resolution.candidate.position, resolved.position)) || await this.annotationClaimed(task, item);
+              if (duplicate) { item.status = 'skipped'; item.errorCode = 'DUPLICATE_PROPOSAL'; }
+            }
+          }
           catch (error) { item.status = 'unresolved'; item.errorCode = errorCode(error); }
           if (abort.signal.aborted) break;
           await this.save(task);
         }
         if (abort.signal.aborted) { task.cancelRequested = true; task.state = 'cancelled'; } else task.state = 'review';
+        await this.save(task); return clone(task);
+      } finally { this.active.delete(task.id); }
+    });
+  };
+  planOrganization: ActionTasks['planOrganization'] = value => {
+    const input = clone(value);
+    if (!Array.isArray(input.selection) || !input.selection.length || input.selection.length > 50 || !Array.isArray(input.collections) || input.collections.length > 1000 || !Array.isArray(input.proposals) || !input.proposals.length || input.proposals.length > 50) invalid();
+    const selection = input.selection.map(itemSnapshot);
+    const identities = selection.map(item => `${item.clientId}:${item.libraryId}:${item.key}`); if (new Set(identities).size !== identities.length || new Set(selection.map(item => item.libraryId)).size !== 1) invalid();
+    const collections = input.collections.map(collectionTarget);
+    if (new Set(collections.map(target => `${target.clientId}:${target.libraryId}:${target.collectionKey}`)).size !== collections.length) invalid();
+    const proposals = input.proposals.map(validateOrganizationProposal);
+    if (new Set(proposals.map(entry => entry.itemIndex)).size !== proposals.length || proposals.some(entry => entry.itemIndex >= selection.length || entry.collectionIndexes.some(index => index >= collections.length))) invalid();
+    const frozen = {
+      conversationId: id(input.conversationId), question: text(input.question, 16000),
+      items: proposals.map(entry => {
+        const before = selection[entry.itemIndex]!;
+        const targets = entry.collectionIndexes.map(index => collections[index]!);
+        if (targets.some(target => target.clientId !== before.clientId || target.libraryId !== before.libraryId)) invalid();
+        return { kind: 'organization' as const, id: id(this.clock.uuid()), reservedKey: key(this.clock.key()), status: 'candidate' as const, sourceIndex: entry.itemIndex, before, proposal: { tags: entry.tags, collections: targets } };
+      }),
+    };
+    const requestID = input.modelRequestId === undefined ? undefined : id(input.modelRequestId);
+    return this.serial(async () => {
+      if (requestID) {
+        let bytes: Uint8Array | null; try { bytes = await this.storage.read(this.path(requestID)); } catch { unavailable(); }
+        if (bytes) {
+          const stored = await this.load(requestID);
+          if (stored.kind !== 'organization' || stored.modelRequestId !== requestID || stored.conversationId !== frozen.conversationId || stored.question !== frozen.question || !equal(stored.items.map(item => ({ sourceIndex: item.sourceIndex, before: item.before, proposal: item.proposal })), frozen.items.map(item => ({ sourceIndex: item.sourceIndex, before: item.before, proposal: item.proposal })))) throw new ReaderError('REQUEST_CONFLICT', 'This model request already belongs to a different organization task.');
+          return this.recovered(stored);
+        }
+      }
+      const task: Extract<ActionTaskRecord, { kind: 'organization' }> = { ...this.base(frozen.conversationId, frozen.question), ...(requestID ? { id: requestID, modelRequestId: requestID } : {}), kind: 'organization', items: frozen.items };
+      const abort = await this.begin(task);
+      try {
+        if (abort.signal.aborted || this.stopRequests.has(task.id)) { task.cancelRequested = true; task.state = 'cancelled'; }
+        else task.state = 'review';
         await this.save(task); return clone(task);
       } finally { this.active.delete(task.id); }
     });
@@ -209,7 +300,7 @@ export class ActionTaskController implements ActionTasks {
       } finally { this.active.delete(task.id); }
     });
   };
-  private async write<T>(task: ActionTaskRecord, item: AnnotationTaskItem | AcquisitionTaskItem, operation: ActionTaskOperation, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+  private async write<T>(task: ActionTaskRecord, item: AnnotationTaskItem | AcquisitionTaskItem | OrganizationTaskItem, operation: ActionTaskOperation, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
     item.status = operation.endsWith('delete') || operation.endsWith('remove') || operation.endsWith('trash') ? 'undoing' : 'writing'; item.operation = operation; delete item.errorCode;
     await this.save(task);
     try { return { ok: true, value: await run() }; }
@@ -232,7 +323,7 @@ export class ActionTaskController implements ActionTasks {
         if (!item.selected) { item.status = 'skipped'; continue; }
         if (item.status !== 'candidate') invalid();
         if (item.kind === 'annotation') { if (item.resolution?.status !== 'resolved') invalid(); }
-        else {
+        else if (item.kind === 'acquisition') {
           item.choice = choice(choices[item.id] ?? {});
           const candidates = item.preview?.candidates; if (!candidates?.length || (candidates.length > 1 && item.choice.metadataIndex === undefined)) invalid();
           const metadata = candidates[item.choice.metadataIndex ?? 0]; if (!metadata) invalid();
@@ -240,6 +331,8 @@ export class ActionTaskController implements ActionTasks {
           if (item.choice.duplicateKey && !duplicates.some(duplicate => duplicate.key === item.choice!.duplicateKey)) invalid();
           if (!item.choice.duplicateKey && duplicates.length > 1) invalid();
           if (!item.choice.duplicateKey && duplicates.length === 1) item.choice.duplicateKey = duplicates[0]!.key;
+        } else {
+          if (task.kind !== 'organization' || (!item.proposal.tags.length && !item.proposal.collections.length)) invalid();
         }
       }
       task.approvedAt = this.clock.now(); task.state = 'running';
@@ -251,10 +344,15 @@ export class ActionTaskController implements ActionTasks {
           if (abort.signal.aborted) break;
           if (item.kind === 'annotation' && task.kind === 'annotations') {
             if (item.resolution?.status !== 'resolved') invalid();
+            if (await this.annotationClaimed(task, item)) { item.status = 'skipped'; item.errorCode = 'DUPLICATE_PROPOSAL'; await this.save(task); continue; }
             const candidate = item.resolution.candidate;
             const result = await this.write(task, item, 'annotation-create', () => this.native.createAnnotation({ candidate, key: item.reservedKey, type: 'highlight', color: '#ffd400', comment: item.proposal.reason }, abort.signal));
             if (result.ok) { item.annotation = result.value; item.status = 'applied'; await this.save(task); }
           } else if (item.kind === 'acquisition' && task.kind === 'acquisition') await this.acquire(task, item, abort.signal);
+          else if (item.kind === 'organization' && task.kind === 'organization') {
+            const result = await this.write(task, item, 'organization-add', () => this.native.organizeItem({ expected: item.before, tags: item.proposal.tags, collections: item.proposal.collections }, abort.signal));
+            if (result.ok) { item.change = result.value; item.status = 'applied'; await this.save(task); }
+          }
           if (['uncertain'].includes(item.status)) break;
         }
         if (abort.signal.aborted) task.cancelRequested = true;
@@ -344,6 +442,23 @@ export class ActionTaskController implements ActionTasks {
             if (!current || !current.collectionKeys.includes(item.collectionAddition.collectionKey)) { item.status = 'undone'; delete item.errorCode; }
             else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
           } else { item.status = 'uncertain'; item.errorCode = 'COLLECTION_RESULT_UNCONFIRMED'; }
+        } else if (item.kind === 'organization' && task.kind === 'organization') {
+          const current = await this.native.inspectOrganizationItem(item.before);
+          if (item.operation === 'organization-add') {
+            if (item.change) {
+              if (current && equal(current, item.change.after)) { item.status = 'applied'; delete item.errorCode; }
+              else { item.status = current ? 'conflict' : 'failed'; item.errorCode = current ? 'OUTPUT_CHANGED' : 'WRITE_NOT_OBSERVED'; }
+            } else {
+              // Desired values have no provenance: a user may independently have added the same tag
+              // or collection after the crash. Without a durably recorded post-write snapshot, never
+              // adopt current state as task-owned or make it undoable.
+              if (current && equal(current, item.before)) { item.status = 'failed'; item.errorCode = 'WRITE_NOT_OBSERVED'; }
+              else { item.status = 'uncertain'; item.errorCode = current ? 'OUTPUT_UNCONFIRMED' : 'WRITE_NOT_OBSERVED'; }
+            }
+          } else if (item.operation === 'organization-remove' && item.change) {
+            if (current && current.organizationSignature === item.change.before.organizationSignature && equal(current.metadata, item.change.before.metadata) && equal(current.tags, item.change.before.tags) && equal(current.collectionKeys, item.change.before.collectionKeys) && equal(current.attachmentKeys, item.change.before.attachmentKeys)) { item.status = 'undone'; delete item.errorCode; }
+            else { item.status = 'conflict'; item.errorCode = 'REMOVAL_NOT_CONFIRMED'; }
+          } else { item.status = 'uncertain'; item.errorCode = 'ORGANIZATION_RESULT_UNCONFIRMED'; }
         }
       } catch { item.status = 'uncertain'; item.errorCode = 'INSPECTION_UNAVAILABLE'; }
       await this.save(task);
@@ -385,6 +500,10 @@ export class ActionTaskController implements ActionTasks {
               if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; await this.save(task); }
             }
           }
+        } else if (item.kind === 'organization' && item.change) {
+          const expected = item.change;
+          const result = await this.write(task, item, 'organization-remove', () => this.native.undoOrganization({ expected }, abort.signal));
+          if (result.ok) { item.status = result.value.status === 'conflict' ? 'conflict' : 'undone'; if (item.status === 'conflict') item.errorCode = 'OUTPUT_CHANGED'; else delete item.errorCode; await this.save(task); }
         }
         if (item.status === 'uncertain') break;
       }

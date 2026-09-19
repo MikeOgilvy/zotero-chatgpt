@@ -93,6 +93,7 @@ export function createNativeReaderPort(support: NativeSupport): NativeReaderPort
       return results;
     }),
     inspectItem: (input, signal) => boundary(async () => { checkSignal(signal); const item = support.getItem(input); if (!item) return null; await item.loadAllData?.(); checkSignal(signal); return support.itemSnapshot(item); }),
+    inspectOrganizationItem: (input, signal) => boundary(async () => { checkSignal(signal); const item = support.getItem(input); if (!item) return null; await item.loadAllData?.(); checkSignal(signal); return support.organizationItemSnapshot(item); }),
     previewMetadata: (value, signal) => boundary(async () => {
       checkSignal(signal); const identifier = string(value.identifier, 8192); if (!identifier) fail('INVALID_INPUT', 'Enter a DOI or a public article link.');
       const identifiers = z.Utilities.extractIdentifiers(identifier);

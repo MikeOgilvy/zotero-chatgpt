@@ -5,6 +5,10 @@ import type { LibraryReferencePort, ReaderReference } from '../../../contracts/s
 import { paperIdentityOf, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
 import { nativeDocumentSource, type DocumentSource, type ReaderDocumentCache } from '../reader/document.ts';
 import type { HostReader, ZoteroHost } from '../reader/host-types.ts';
+import type { NativeZoteroHost } from '../host/native.ts';
+import { createNativeSupport } from './native-support.ts';
+import { createNativeReaderPort } from './native-read.ts';
+import { captureSelectedLibraryItems, type SelectedLibraryWindow } from './selection.ts';
 import { boundary, createNativeFiles, fail, type NativeFileOptions } from './native-files.ts';
 
 export interface LibraryItem {
@@ -33,7 +37,7 @@ export interface LibraryTabs {
   add?(options: { id: string; type: 'reader'; title: string; data: { itemID: number }; select: false }): { id: string };
   close?(id: string): void;
 }
-export interface LibraryWindow { Zotero_Tabs?: LibraryTabs }
+export interface LibraryWindow extends SelectedLibraryWindow { Zotero_Tabs?: LibraryTabs }
 export interface LibraryReader extends Pick<HostReader, 'itemID' | 'tabID' | '_internalReader'> {
   _window?: LibraryWindow; _initPromise?: Promise<void>; close?(): void;
 }
@@ -77,6 +81,7 @@ function sameRevision(a: DocumentRevision, b: DocumentRevision): boolean { retur
 export function createLibraryReferencePort(zotero: unknown, options: LibraryReferenceOptions): NativeLibraryReferencePort {
   const z = zotero as NativeLibraryHost;
   const files = createNativeFiles(zotero, options);
+  const nativeReader = createNativeReaderPort(createNativeSupport({ clientId: options.clientId, zotero: zotero as NativeZoteroHost }));
   const globals = () => files.globals();
   const now = () => options.now?.() ?? new Date().toISOString();
   const window = () => options.getWindow?.() ?? z.getMainWindow?.();
@@ -223,6 +228,7 @@ export function createLibraryReferencePort(zotero: unknown, options: LibraryRefe
     }), 'The native PDF image could not be rendered. This reader may not support page capture.');
   };
   return {
+    ...(options.getWindow ? { selectedItems: () => captureSelectedLibraryItems({ clientId: options.clientId, getWindow: () => options.getWindow!(), reader: nativeReader }) } : {}),
     collections: () => boundary(async () => {
       if (!z.Libraries || !z.Collections) fail('Native collection listing is unavailable.', 'UNSUPPORTED_INTERACTION');
       const targets: Array<NativeCollectionTarget & { name: string }> = [];

@@ -62,7 +62,7 @@ const ANSWER_LIMIT = 1024 * 1024;
 /** At most one liveness `progress` event per run per second; reasoning deltas arrive far faster. */
 const PROGRESS_INTERVAL_MS = 1000;
 async function hashInput(input: SendInput, version: 1 | 2 | 3 = 3): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version >= 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
+  const bytes = new TextEncoder().encode(JSON.stringify({ conversationId: input.conversationId, action: input.action, question: input.question, citations: input.citations, settings: input.settings, images: input.images ?? [], ...(input.document ? { document: input.document, paper: input.paper } : {}), ...(version >= 2 && !input.document && input.paper ? { paper: input.paper } : {}), ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.references ? { references: input.references } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(version === 3 && input.organization ? { organization: input.organization } : {}), ...(version === 3 ? { mode: input.mode ?? 'chat' } : {}) }));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -367,10 +367,10 @@ export class ReaderService {
     if (user.referenceDocuments?.some(source => !conversation.documents?.[source.document.id])) return null;
     // A record written before the field existed has no `mode`; `hashInput` hashes `'chat'` for v3 (D3),
     // so an absent mode reconstructs consistently instead of making the request `uncertain`.
-    const restoredFields = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}), ...(user.mode ? { mode: user.mode } : {}) };
+    const restoredFields = { ...(user.images?.length ? { images: user.images } : {}), ...(document ? { document } : {}), ...(references ? { references } : {}), ...(user.workflow ? { workflow: user.workflow } : {}), ...(user.batch ? { batch: user.batch } : {}), ...(user.contextReport ? { contextReport: user.contextReport } : {}), ...(user.organization ? { organization: user.organization } : {}), ...(user.mode ? { mode: user.mode } : {}) };
     if (request.action) {
       const restored = { requestId: request.requestId, conversationId: conversation.id, action: request.action, question: user.text, citations: user.citations, settings: user.settings, ...(paper ? { paper } : {}), ...restoredFields };
-      if ((version >= 2 || user.workflow || user.references || user.batch || user.contextReport) && await hashInput(restored, version) !== request.hash) return null;
+      if ((version >= 2 || user.workflow || user.references || user.batch || user.contextReport || user.organization) && await hashInput(restored, version) !== request.hash) return null;
       return restored;
     }
     for (const action of ['explain', 'ask'] as const) {
@@ -596,7 +596,7 @@ export class ReaderService {
         c.messages.push({ id: this.options.uuid(), requestId: input.requestId, role: 'user', phase: null, settings: input.settings, text: input.question, citations: input.citations, status: 'completed', action: input.action,
           ...(input.mode ? { mode: input.mode } : {}),
           ...(input.images?.length ? { images: input.images } : {}), ...(input.paper ? { paper: input.paper } : {}), ...(input.document ? { document: documentSummary(input.document) } : {}),
-          ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}),
+          ...(input.workflow ? { workflow: input.workflow } : {}), ...(input.batch ? { batch: input.batch } : {}), ...(input.contextReport ? { contextReport: input.contextReport } : {}), ...(input.organization ? { organization: input.organization } : {}),
           ...(references ? { references, referenceDocuments: input.references!.flatMap(ref => ref.document ? [{ referenceId: ref.id, document: documentSummary(ref.document) }] : []) } : {}),
         });
         if (!waiting) { c.activeRequestId = input.requestId; if (input.batch) c.activeBatchId = input.batch.id; }

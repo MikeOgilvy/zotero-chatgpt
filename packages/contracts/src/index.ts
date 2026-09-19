@@ -261,7 +261,14 @@ export interface Message {
   referenceDocuments?: Array<{ referenceId: string; document: DocumentSummary }>;
   batch?: ContextBatch;
   contextReport?: ContextReport;
+  /** Host-frozen native selection for an organization request; never rebuilt from current focus. */
+  organization?: OrganizationContext;
   generatedImages?: ImageAttachment[];
+}
+
+export interface OrganizationContext {
+  selection: import('./native.ts').NativeOrganizationItemSnapshot[];
+  collections: Array<import('./native.ts').NativeCollectionTarget & { name: string }>;
 }
 
 export interface Conversation {
@@ -312,6 +319,8 @@ export interface SendInput {
   references?: import('./workspace.ts').ReferenceInput[];
   batch?: ContextBatch;
   contextReport?: ContextReport;
+  /** Full local validation scope. The model receives only its bounded index-based projection. */
+  organization?: OrganizationContext;
 }
 
 export interface SendReceipt {

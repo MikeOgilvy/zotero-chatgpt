@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata } from '../../packages/contracts/src/native.ts';
+import { NATIVE_ANNOTATION_PROVENANCE, NativeOperationError, type NativeActionPort, type NativeAnnotationSnapshot, type NativeAttachmentSnapshot, type NativeItemSnapshot, type NativeMetadata, type NativeOrganizationItemSnapshot } from '../../packages/contracts/src/native.ts';
 import { ActionTaskController } from '../../packages/core/src/tasks/controller.ts';
 import { parseAnnotationCandidates } from '../../packages/contracts/src/tasks.ts';
 import { MemoryStorage, flush } from './doubles.ts';
@@ -26,6 +26,9 @@ function fixture() {
     previewMetadata: input => Promise.resolve({ identifier: input.identifier, source: 'identifier', candidates: [structuredClone(metadata)] }),
     findDuplicateDOI: () => Promise.resolve([...items.values()].map(item => structuredClone(item))),
     inspectItem: input => Promise.resolve(structuredClone(items.get(input.key) ?? null)),
+    inspectOrganizationItem: input => {
+      const item = items.get(input.key); return Promise.resolve(item ? { ...structuredClone(item), tags: [], organizationSignature: item.contentSignature } : null);
+    },
     createItem: input => {
       const saved: NativeItemSnapshot = { clientId: input.target.clientId, libraryId: input.target.libraryId, key: input.key, metadata: structuredClone(input.metadata), collectionKeys: [input.target.collectionKey], attachmentKeys: [], dateModified: '2026-09-12 10:00:00', contentSignature: 'unchanged' };
       items.set(input.key, structuredClone(saved)); return Promise.resolve(saved);
@@ -38,6 +41,19 @@ function fixture() {
       const item = items.get(input.expected.after.key); if (!item) return Promise.resolve({ status: 'absent' });
       if (JSON.stringify(item) !== JSON.stringify(input.expected.after)) return Promise.resolve({ status: 'conflict' });
       item.collectionKeys = item.collectionKeys.filter(key => key !== input.expected.collectionKey); return Promise.resolve({ status: 'removed' });
+    },
+    organizeItem: input => {
+      const raw = items.get(input.expected.key);
+      if (!raw) return Promise.reject(new NativeOperationError('NOT_FOUND', 'missing'));
+      const current = raw as NativeOrganizationItemSnapshot;
+      const after = { ...structuredClone(current), tags: [...new Set([...current.tags, ...input.tags])].sort(), collectionKeys: [...new Set([...current.collectionKeys, ...input.collections.map(target => target.collectionKey)])].sort(), contentSignature: 'organized' };
+      const change = { before: structuredClone(input.expected), after, addedTags: input.tags.filter(tag => !input.expected.tags.includes(tag)), addedCollectionKeys: input.collections.map(target => target.collectionKey).filter(key => !input.expected.collectionKeys.includes(key)) };
+      items.set(after.key, after); return Promise.resolve(change);
+    },
+    undoOrganization: input => {
+      const current = items.get(input.expected.after.key); if (!current) return Promise.resolve({ status: 'absent' });
+      if (JSON.stringify(current) !== JSON.stringify(input.expected.after)) return Promise.resolve({ status: 'conflict' });
+      items.set(input.expected.before.key, structuredClone(input.expected.before)); return Promise.resolve({ status: 'removed', after: structuredClone(input.expected.before) });
     },
     undoCreatedItem: input => { const current = items.get(input.expected.key); if (!current) return Promise.resolve({ status: 'absent' }); if (JSON.stringify(current) !== JSON.stringify(input.expected)) return Promise.resolve({ status: 'conflict' }); items.delete(input.expected.key); return Promise.resolve({ status: 'trashed' }); },
     acquireOpenAccessPDF: input => {
@@ -194,6 +210,18 @@ it('rejects conflicting content for a reused model request instead of replacing 
   const original = await f.controller.planAnnotations(input);
   for (const changed of [{ ...input, question: 'Different task' }, { ...input, candidates: [{ quote: 'Different definition', pageIndex: 0, reason: 'Definition' }] }, { ...input, conversationId: 'conversation-b' }]) await expect(f.controller.planAnnotations(changed)).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
   expect(await f.controller.get(original.id)).toEqual(original); expect(f.creates()).toBe(0);
+});
+it('suppresses a second request for a verified annotation but allows it after confirmed undo', async () => {
+  const f = fixture();
+  const input = (modelRequestId: string) => ({ conversationId: 'conversation-a', paper: paperA, revision, question: 'Mark the definition.', modelRequestId, candidates: [{ quote: 'A definition', pageIndex: 99, reason: 'Definition' }] });
+  const first = await f.controller.planAnnotations(input('model-request-a')); await f.controller.approve(first.id, first.items.map(item => item.id));
+  const duplicate = await f.controller.planAnnotations(input('model-request-b'));
+  expect(duplicate).toMatchObject({ state: 'review', items: [{ status: 'skipped', errorCode: 'DUPLICATE_PROPOSAL' }] });
+  expect(f.creates()).toBe(1);
+  expect(await f.controller.undo(first.id)).toMatchObject({ state: 'undone' });
+  const retry = await f.controller.planAnnotations(input('model-request-c'));
+  expect(retry).toMatchObject({ items: [{ status: 'candidate' }] });
+  await f.controller.approve(retry.id, retry.items.map(item => item.id)); expect(f.creates()).toBe(2);
 });
 it('coordinates concurrent recovered controller instances over the same storage port', async () => {
   const f = fixture(); const other = new ActionTaskController(f.storage, f.native, f.clock);

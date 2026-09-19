@@ -304,7 +304,8 @@ export class WorkspaceStore implements ReaderWorkspace {
         task = validateTaskRecord(await this.readJson(`tasks/${file}`, 8 * 1024 * 1024));
         if (task.id !== file.slice(0, -5)) unavailable(); timestamp(task.createdAt); timestamp(task.updatedAt);
       } catch { unavailable(); }
-      const taskClient = task.kind === 'annotations' ? task.paper.clientId : task.target.clientId;
+      const taskClient = task.kind === 'annotations' ? task.paper.clientId : task.kind === 'acquisition' ? task.target.clientId : task.items[0]?.before.clientId;
+      if (!taskClient || (task.kind === 'organization' && task.items.some(item => item.before.clientId !== taskClient))) unavailable();
       if (this.clientId && taskClient !== this.clientId) unavailable();
       const conversation = conversations.get(task.conversationId);
       if (!conversation) continue; // A deleted conversation's ledger remains available to the task controller.
