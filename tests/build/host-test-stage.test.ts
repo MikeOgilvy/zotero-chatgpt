@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -151,8 +152,17 @@ describe('dedicated host-test stage selection', () => {
         const pdf = (await readFile(path.join(runRoot, 'fixtures/reading.pdf'))).toString('latin1');
         const token = /Hidden verification token on this page: (RUN-[a-f0-9]{24})\./u.exec(pdf)?.[1];
         expect(token).toMatch(/^RUN-[a-f0-9]{24}$/u);
-        const bootstrap = await readArchiveEntry(path.join(runRoot, 'profile/extensions/zchatgpt-host-test@local.xpi'), 'bootstrap.js');
+        const driverXpi = path.join(runRoot, 'profile/extensions/zchatgpt-host-test@local.xpi');
+        const bootstrap = await readArchiveEntry(driverXpi, 'bootstrap.js');
+        const driverSource = await readArchiveEntry(driverXpi, 'driver.js');
+        const driverManifest = JSON.parse(await readArchiveEntry(driverXpi, 'manifest.json')) as { version: string };
+        const driverSourceHash = createHash('sha256').update(driverSource).digest('hex');
         expect(bootstrap).toContain(`"verificationToken":"${token}"`);
+        expect(bootstrap).toContain('loadSubScriptWithOptions');
+        expect(bootstrap).toContain('ignoreCache: true');
+        expect(bootstrap).toContain(`"driverSourceHash":"${driverSourceHash}"`);
+        expect(driverManifest.version).toMatch(/^0\.0\.[1-9][0-9]*$/u);
+        expect(driverManifest.version).not.toBe('0.0.1');
         observed.push(token!);
       }
       expect(new Set(observed).size).toBe(2);

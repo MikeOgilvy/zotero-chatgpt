@@ -148,8 +148,7 @@ if (twoVersion) {
 }
 const config = {
   live: liveRun,
-  // True only when preparation really removed the private runtime tree, so the driver knows whether
-  // asserting "Chat prepared nothing" is a real precondition or a vacuous one (a signed-in tree).
+  // True only for an atomically reserved --run-id tree that did not exist before this preparation.
   cleanRuntimeTree,
   verificationToken,
   subjectID,
@@ -190,17 +189,22 @@ const config = {
 const driverOut = join(profile, 'extensions', 'zchatgpt-host-test@local.xpi');
 if (installDriver) {
   if (!driverPath) throw new Error('Host stage is missing its driver');
+  const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZchatgptHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
+  const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZchatgptHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
+  const driverSourceHash = createHash('sha256').update(driverContents).digest('hex');
+  config.driverSourceHash = driverSourceHash;
+  const driverVersion = `0.0.${(Number.parseInt(driverSourceHash.slice(0, 8), 16) % 2147483646) + 1}`;
   const manifest = {
     manifest_version: 2,
     name: 'ZCHATGPT isolated host test driver',
-    version: '0.0.1',
+    version: driverVersion,
     applications: { zotero: { id: 'zchatgpt-host-test@local', update_url: 'https://zotero-chatgpt-dev.invalid/driver-updates.json', strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
   };
   const bootstrap = `function startup(data) {
   Zotero.initializationPromise.then(async () => {
     Components.utils.importGlobalProperties(['AbortController', 'atob', 'btoa']);
     const scope = { Zotero, ChromeUtils, PathUtils, IOUtils, Services, TextDecoder, TextEncoder, crypto, URL, fetch, AbortController, atob, btoa, setTimeout, clearTimeout, Cu: Components.utils, Cc: Components.classes, Ci: Components.interfaces };
-    Services.scriptloader.loadSubScript(data.rootURI + "driver.js", scope);
+    Services.scriptloader.loadSubScriptWithOptions(data.rootURI + "driver.js", { target: scope, ignoreCache: true });
     await scope.runHostSmoke(${JSON.stringify(config)});
   }).catch(error => Zotero.logError(error));
 }
@@ -208,8 +212,6 @@ function shutdown() {}
 function install() {}
 function uninstall() {}
 `;
-  const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZchatgptHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
-  const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZchatgptHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
   const zip = new ZipFile();
   for (const [name, contents] of [
     ['manifest.json', JSON.stringify(manifest)],

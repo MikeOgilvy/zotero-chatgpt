@@ -3,7 +3,7 @@
 // performance on a real host. Only --live sends bounded synthetic requests.
 async function runHostSmoke(config) {
   const verificationToken = typeof config.verificationToken === 'string' && /^RUN-[a-f0-9]{24}$/u.test(config.verificationToken) ? config.verificationToken : 'ORCHID-72';
-  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash }, fixture: { verificationToken } };
+  const report = { startedAt: new Date().toISOString(), stage: 'current-pdf', status: 'running', checks: [], notRun: ['real-model-answer', 'live-status-shows-responding-and-waiting-seconds', 'official-login', 'in-flight-model-stop', 'long-term-memory', 'image-understanding'], build: { version: config.subjectVersion, sha256: config.artifactHash, driverSourceHash: config.driverSourceHash ?? null }, fixture: { verificationToken } };
   const delay = ms => Zotero.Promise.delay(ms);
   const save = () => Zotero.File.putContentsAsync(config.reportPath, JSON.stringify(report, null, 2));
   let step = 'startup';

@@ -21,6 +21,7 @@ export interface NativeSmokeConfig {
   subjectVersion: string;
   artifactHash: string;
   verificationToken?: string;
+  driverSourceHash?: string;
 }
 interface SmokeItem extends NativeHostItem {
   setField(name: string, value: string): void;
@@ -71,7 +72,7 @@ export interface NativeSmokeReport {
   startedAt: string;
   completedAt?: string;
   status: 'running' | 'passed' | 'partial' | 'failed';
-  build: { expectedVersion: string; expectedArtifactHash: string; artifactHashSource: 'prepare-script'; adapterSource: 'working-tree-production-modules-in-test-driver'; subjectScope: 'installed-addon-identity-only'; actualVersion?: string };
+  build: { expectedVersion: string; expectedArtifactHash: string; artifactHashSource: 'prepare-script'; adapterSource: 'working-tree-production-modules-in-test-driver'; subjectScope: 'installed-addon-identity-only'; driverSourceHash: string | null; actualVersion?: string };
   environment?: { zotero: string; os: string; abi: string; width: number; height: number; dpr: number };
   driverIssuedModelRequests: 0;
   modelProposalSource: 'deterministic-synthetic-fixture';
@@ -126,7 +127,7 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
   requireCheck(!host.isSymlink(reportPath), 'REPORT_SYMLINK_REJECTED');
   const report: NativeSmokeReport = {
     schemaVersion: 1, stage: 'native-agent', runId: host.uuid(), startedAt: new Date().toISOString(), status: 'running',
-    build: { expectedVersion: config.subjectVersion, expectedArtifactHash: config.artifactHash, artifactHashSource: 'prepare-script', adapterSource: 'working-tree-production-modules-in-test-driver', subjectScope: 'installed-addon-identity-only' },
+    build: { expectedVersion: config.subjectVersion, expectedArtifactHash: config.artifactHash, artifactHashSource: 'prepare-script', adapterSource: 'working-tree-production-modules-in-test-driver', subjectScope: 'installed-addon-identity-only', driverSourceHash: config.driverSourceHash ?? null },
     driverIssuedModelRequests: 0, modelProposalSource: 'deterministic-synthetic-fixture', verificationToken, checks: [],
     notRun: [
       { name: 'real-model-proposal', reason: 'The driver supplies explicit synthetic annotation proposals. They are not model output.' },
