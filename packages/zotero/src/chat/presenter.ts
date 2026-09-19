@@ -359,6 +359,11 @@ export class ConversationPresenter {
     return models.length ? alignSettings(models, current) : current;
   }
   private draftKey(): string { return this.state.conversation?.id ?? 'unbound'; }
+  private transferUnboundMode(conversationId: string): void {
+    const mode = this.modes.get('unbound');
+    if (!mode) return;
+    this.modes.delete('unbound'); this.modes.set(conversationId, mode);
+  }
   private emptyDraft(settings: GenerationSettings | null = this.currentSettings()): WorkspaceDraft {
     return workspaceDraft({ settings, paper: this.paper, question: '', citations: [], images: [] });
   }
@@ -385,7 +390,10 @@ export class ConversationPresenter {
       this.update({ workspace: settings });
       // A cleared selection is new-chat state: the persisted pointer to the just-closed chat must
       // not silently restore it while the reader is composing the next question.
-      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) this.update({ conversation: current, openConversations: this.withOpen(current), conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
+      if (!this.state.conversation && !this.selectionCleared && current && paperId(current.paper) === paperId(this.paper)) {
+        this.transferUnboundMode(current.id);
+        this.update({ conversation: current, openConversations: this.withOpen(current), conversations: [current], draft: { ...this.state.draft, settings: this.state.draft.settings ?? current.settings } });
+      }
       const id = this.state.conversation?.id ?? null;
       const saved = await workspace.readDraft(this.paper, id) ?? (id ? await workspace.readDraft(this.paper, null) : null);
       if (this.disposed) return;
@@ -959,8 +967,7 @@ export class ConversationPresenter {
     if (this.state.conversation || this.selectionCleared) return this.state.conversation;
     // A click made while the unbound pane was loading belongs to the pane the owner can see when the
     // load settles. Absence still means the product default Chat mode.
-    const unboundMode = this.modes.get('unbound');
-    if (unboundMode) { this.modes.delete('unbound'); this.modes.set(conversation.id, unboundMode); }
+    this.transferUnboundMode(conversation.id);
     this.update({ conversation, openConversations: this.withOpen(conversation), draft: { ...this.state.draft, settings: this.state.draft.settings ?? conversation.settings }, connection: 'ready', message });
     return conversation;
   }

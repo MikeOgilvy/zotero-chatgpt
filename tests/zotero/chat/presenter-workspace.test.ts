@@ -84,6 +84,17 @@ it('restores local chat, rich draft and scroll while runtime is unavailable, the
   f.presenter.dispose();
 });
 
+it('keeps an explicit Agent click while the workspace current conversation is loading', async () => {
+  const f = fixture(); let resolve!: (conversation: Conversation) => void;
+  const delayed = new Promise<Conversation>(done => { resolve = done; });
+  vi.mocked(f.workspace.currentConversation).mockReturnValueOnce(delayed);
+  const activating = f.presenter.activate(); await vi.waitFor(() => expect(f.workspace.currentConversation).toHaveBeenCalled());
+  expect(f.presenter.snapshot().conversation).toBeNull(); expect(f.presenter.snapshot().mode).toBe('chat');
+  f.presenter.setMode('agent'); resolve(copy(f.conversation())); await activating;
+  expect(f.presenter.snapshot().conversation?.id).toBe(f.conversation().id);
+  expect(f.presenter.snapshot().mode).toBe('agent');
+});
+
 it('sends the whole PDF after a legacy draft with a saved page range is loaded', async () => {
   const f = fixture({ document: true }); const id = f.conversation().id;
   f.saved.set(id, { schemaVersion: 1, conversationId: id, paper: paperA, updatedAt: '2026-09-12T00:00:00Z', scrollTop: 40, pageRange: [2, 2], draft: { paper: paperA, settings, question: 'Summarize the whole paper', citations: [], images: [], references: [], skillId: null, profileId: null, overrides: {} } });
