@@ -9,7 +9,7 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
   document.body.innerHTML = `
     <form id="composer-form" data-testid="composer-form">
       <textarea id="mobile-composer-prompt"></textarea>
-      <button data-testid="send-button" aria-label="Send message"></button>
+      <button type="submit" aria-label="Send message"></button>
       <button type="button" aria-label="Start voice mode"></button>
     </form>
     <button data-testid="stop-button"></button>
@@ -33,7 +33,7 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     observations: {
       editables: [{ tag: 'textarea', id: 'mobile-composer-prompt', role: null, contenteditable: null, parent: { tag: 'form', id: 'composer-form', role: null, dataTestid: 'composer-form' }, form: { tag: 'form', id: 'composer-form', role: null, dataTestid: 'composer-form' } }],
       buttons: [
-        { tag: 'button', id: null, dataTestid: 'send-button', type: null, disabled: false, ariaLabelCategory: 'send' },
+        { tag: 'button', id: null, dataTestid: null, type: 'submit', disabled: false, ariaLabelCategory: 'send' },
         { tag: 'button', id: null, dataTestid: null, type: 'button', disabled: false, ariaLabelCategory: 'voice' },
       ],
     },

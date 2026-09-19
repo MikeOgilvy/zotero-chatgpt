@@ -300,8 +300,8 @@ async function runHostSmoke(config) {
     // skin (the regression this observes) leaves the selected mode invisible and the control
     // looking like two plain buttons. `aria-pressed` is painted from presenter state, so a real
     // click that does not move it means the switch is not wired. Nothing here sends a request.
-    const modeSwitch = () => panel()?.querySelector('[data-zchatgpt-mode-switch]');
-    const modeButton = mode => panel()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
+    const modeSwitch = () => shell()?.querySelector('[data-zchatgpt-mode-switch]');
+    const modeButton = mode => modeSwitch()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
     const pressed = mode => modeButton(mode)?.getAttribute('aria-pressed') === 'true';
     await until(() => modeSwitch() && modeButton('chat') && modeButton('agent'), 'mode-switch-rendered');
     const modeShape = {
@@ -312,10 +312,12 @@ async function runHostSmoke(config) {
       chatPressed: pressed('chat'), agentPressed: pressed('agent'),
       chatSegmented: modeButton('chat').classList.contains('zchatgpt-mode-option') && modeButton('agent').classList.contains('zchatgpt-mode-option'),
       genericButtonSkin: modeButton('chat').classList.contains('zchatgpt-button') || modeButton('agent').classList.contains('zchatgpt-button'),
+      visible: !modeSwitch().closest('[hidden]'),
+      inHostedChatBar: Boolean(modeSwitch().parentElement?.hasAttribute('data-zchatgpt-embed-bar')),
     };
     await check('mode-selector-defaults-to-chat-with-segmented-options',
       modeShape.role === 'group' && Boolean(modeShape.groupLabel) && modeShape.mode === 'chat' && modeShape.chatPressed && !modeShape.agentPressed
-        && modeShape.chatSegmented && !modeShape.genericButtonSkin,
+        && modeShape.chatSegmented && !modeShape.genericButtonSkin && modeShape.visible && modeShape.inHostedChatBar,
       modeShape);
     // --- Chat is not an Agent path, observed on the real dock ---
     // There is no supported Chat transport in this build, so Chat mode must state that itself rather

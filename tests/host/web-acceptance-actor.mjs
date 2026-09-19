@@ -29,6 +29,25 @@ function structuralNode(node) {
   };
 }
 
+function buttonCategory(node) {
+  const value = `${attribute(node, 'data-testid') ?? ''} ${attribute(node, 'aria-label') ?? ''}`.toLocaleLowerCase();
+  if (/send|submit/u.test(value)) return 'send';
+  if (/stop|cancel/u.test(value)) return 'stop';
+  if (/voice|speech|microphone/u.test(value)) return 'voice';
+  if (/upload|attach|file/u.test(value)) return 'upload';
+  return 'other';
+}
+
+function knownSendButton(composer) {
+  const form = composer?.closest?.('form') ?? null;
+  if (!form) return null;
+  const desktop = form.querySelector('button[data-testid="send-button"]');
+  if (desktop?.disabled === false) return desktop;
+  if (composer.id !== 'mobile-composer-prompt') return null;
+  const mobile = [...form.querySelectorAll('button[type="submit"]')].filter(node => !node.disabled && !attribute(node, 'id') && !attribute(node, 'data-testid') && buttonCategory(node) === 'send');
+  return mobile.length === 1 ? mobile[0] : null;
+}
+
 function structuralObservations(document) {
   const editables = [...document.querySelectorAll('textarea, [contenteditable]')].slice(0, 10).map(node => ({
     tag: String(node.localName ?? '').slice(0, 40) || null,
@@ -37,17 +56,9 @@ function structuralObservations(document) {
   }));
   const composer = document.querySelector('#prompt-textarea, #mobile-composer-prompt');
   const form = composer?.closest?.('form') ?? null;
-  const category = node => {
-    const value = `${attribute(node, 'data-testid') ?? ''} ${attribute(node, 'aria-label') ?? ''}`.toLocaleLowerCase();
-    if (/send|submit/u.test(value)) return 'send';
-    if (/stop|cancel/u.test(value)) return 'stop';
-    if (/voice|speech|microphone/u.test(value)) return 'voice';
-    if (/upload|attach|file/u.test(value)) return 'upload';
-    return 'other';
-  };
   const buttons = [...(form?.querySelectorAll('button') ?? [])].slice(0, 20).map(node => ({
     tag: String(node.localName ?? '').slice(0, 40) || null,
-    id: attribute(node, 'id'), dataTestid: attribute(node, 'data-testid'), type: attribute(node, 'type'), disabled: node.disabled === true, ariaLabelCategory: category(node),
+    id: attribute(node, 'id'), dataTestid: attribute(node, 'data-testid'), type: attribute(node, 'type'), disabled: node.disabled === true, ariaLabelCategory: buttonCategory(node),
   }));
   return { editables, buttons };
 }
@@ -57,7 +68,7 @@ export function summarizeOfficialPage(document, verificationToken) {
   if (!trustedOfficialDocument(document)) return { status: 'blocked', reason: 'untrusted-origin' };
   if (typeof verificationToken !== 'string' || !TOKEN.test(verificationToken)) return { status: 'blocked', reason: 'invalid-token' };
   const composer = document.querySelector('#prompt-textarea, #mobile-composer-prompt');
-  const send = composer?.closest?.('form')?.querySelector('button[data-testid="send-button"]') ?? null;
+  const send = knownSendButton(composer);
   const users = [...document.querySelectorAll('[data-message-author-role="user"]')];
   const assistants = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
   const latestAssistant = assistants.at(-1);
