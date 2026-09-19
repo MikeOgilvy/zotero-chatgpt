@@ -26,6 +26,7 @@ async function prepareScriptSandbox(): Promise<{ root: string; script: string; x
       .map(file => cp(path.join(repositoryRoot, 'scripts', file), path.join(root, 'scripts', file))),
     cp(path.join(repositoryRoot, 'tests/fixtures/create-pdf.mjs'), path.join(root, 'tests/fixtures/create-pdf.mjs')),
     cp(path.join(repositoryRoot, 'tests/host/context-driver.js'), path.join(root, 'tests/host/context-driver.js')),
+    cp(path.join(repositoryRoot, 'tests/host/live-core-driver.js'), path.join(root, 'tests/host/live-core-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/embed-driver.js'), path.join(root, 'tests/host/embed-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/web-acceptance-actor.mjs'), path.join(root, 'tests/host/web-acceptance-actor.mjs')),
     cp(path.join(repositoryRoot, 'runtime/manifest.ts'), path.join(root, 'runtime/manifest.ts')),
@@ -201,6 +202,26 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--live', '--live-core-flows', '--login-wait-seconds', '3601'])).rejects.toThrow(/between 0 and 3600/u);
   });
 
+  it('selects a minimal live-core rerun on the preserved context tree', async () => {
+    await expect(select(['--live-core', '--login-wait-seconds', '900'])).resolves.toEqual({ stage: 'live-core', driver: 'tests/host/live-core-driver.js', installDriver: true });
+    const tree = await selectTree(['--live-core', '--login-wait-seconds', '900']);
+    expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/context/profile'));
+    expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/context/data'));
+    await expect(select(['--live-core', '--context'])).rejects.toThrow(/only one/u);
+    await expect(select(['--live-core', '--acceptance'])).rejects.toThrow();
+  });
+
+  it('packages live-core as an explicit two-turn driver without clearing the context tree', async () => {
+    const sandbox = await prepareScriptSandbox();
+    try {
+      await execFileAsync(process.execPath, [sandbox.script, '--live-core', '--login-wait-seconds', '900', sandbox.xpi], { cwd: sandbox.root });
+      const driverXpi = path.join(sandbox.root, '.zotero-chatgpt-dev/context/profile/extensions/zchatgpt-host-test@local.xpi');
+      const bootstrap = await readArchiveEntry(driverXpi, 'bootstrap.js'); const driver = await readArchiveEntry(driverXpi, 'driver.js');
+      expect(bootstrap).toContain('"live":true'); expect(bootstrap).toContain('"liveCoreFlows":true'); expect(bootstrap).toContain('"loginWaitSeconds":900');
+      expect(driver).toContain("stage: 'live-core'"); expect(driver).toContain('modelTurnsAuthorized: 2');
+    } finally { await rm(sandbox.root, { recursive: true, force: true }); }
+  });
+
   it('registers the human-gated live model-catalog stage on its own isolated tree', async () => {
     await expect(select(['--live-model'])).resolves.toMatchObject({ stage: 'live-model', driver: 'tests/host/live-model-driver.js', installDriver: true });
     const { stdout } = await execFileAsync(process.execPath, [
@@ -246,7 +267,7 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();
   });
   it('refuses to prepare a profile without an explicit stage', async () => {
-    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
+    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-core, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
   });
 
   it('registers the embedded ChatGPT probe on its own isolated tree', async () => {
@@ -362,7 +383,7 @@ describe('dedicated host-test stage selection', () => {
   });
 
   it('rejects combining exclusive stage flags', async () => {
-    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
-    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
   });
 });

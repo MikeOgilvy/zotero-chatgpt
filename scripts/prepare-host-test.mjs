@@ -111,7 +111,7 @@ await mkdir(join(profile, 'extensions'), { recursive: true });
 await mkdir(dataDir, { recursive: true });
 await mkdir(join(pdfPath, '..'), { recursive: true });
 const verificationToken = `RUN-${randomBytes(12).toString('hex')}`;
-const liveCoreFlows = argumentsList.includes('--live-core-flows');
+const liveCoreFlows = argumentsList.includes('--live-core-flows') || tree.stage === 'live-core';
 const webLive = argumentsList.includes('--web-live');
 const liveCorePageProse = [
   [
@@ -131,9 +131,9 @@ await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', 
 // Runtime records and account state have their own lifetime. Preparing a host driver must never
 // clear them, even in the dedicated context profile. A separate, verified-new tree is required for
 // checks whose precondition is that no runtime has been prepared yet.
-const liveRun = argumentsList.includes('--live');
+const liveRun = argumentsList.includes('--live') || tree.stage === 'live-core';
 const cleanRuntimeTree = tree.cleanRuntimeTree === true;
-const supplementPdfPath = tree.stage === 'context' ? join(pdfPath, '..', 'supplement.pdf') : undefined;
+const supplementPdfPath = ['context', 'live-core'].includes(tree.stage) ? join(pdfPath, '..', 'supplement.pdf') : undefined;
 if (supplementPdfPath) await writeFile(supplementPdfPath, createFixturePdf('ZCHATGPT synthetic supplement fixture', 'BAMBOO-19'));
 const prefs = {
   'extensions.zotero.useDataDir': true,
@@ -145,7 +145,7 @@ const prefs = {
   'extensions.startupScanScopes': 1,
   'extensions.update.enabled': false,
   'extensions.zotero.httpServer.enabled': false,
-  'extensions.zotero.integration.port': tree.stage === 'context' ? 50014 : tree.stage === 'embed' ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
+  'extensions.zotero.integration.port': ['context', 'live-core'].includes(tree.stage) ? 50014 : tree.stage === 'embed' ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
   'extensions.zoteroMacWordIntegration.skipInstallation': true,
   'extensions.zoteroOpenOfficeIntegration.skipInstallation': true,
   'app.update.enabled': false,
