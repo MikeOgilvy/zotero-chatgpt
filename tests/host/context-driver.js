@@ -718,7 +718,9 @@ async function runHostSmoke(config) {
         const sendAgent = async (question, label, afterClick) => {
           if (modeSwitch().dataset.zchatgptMode !== 'agent') { click(modeButton('agent')); await until(() => modeSwitch().dataset.zchatgptMode === 'agent', `${label}-agent-mode`); }
           input().value = question; input().dispatchEvent(new (reader()._iframeWindow.Event)('input', { bubbles: true }));
-          const send = panel().querySelector('[data-zchatgpt-action="send"]'); await until(() => !send.disabled, `${label}-send-enabled`, 30000); click(send); if (afterClick) await afterClick();
+          const send = panel().querySelector('[data-zchatgpt-action="send"]'); await until(() => !send.disabled, `${label}-send-enabled`, 30000);
+          await check(`${label}-visible-reader-send`, win.Zotero_Tabs.selectedID === tabId && send.isConnected && !send.hidden && Boolean(panel()), { selectedTab: win.Zotero_Tabs.selectedID, readerTab: tabId, sendHidden: send.hidden });
+          click(send); if (afterClick) await afterClick();
           await until(() => panel()?.dataset.zchatgptGenerating === 'true', `${label}-request-accepted`, 30000);
           await until(() => panel()?.dataset.zchatgptGenerating === 'false', `${label}-request-terminal`, 180000);
           report.liveCoreFlows.modelTurns += 1; await save();
@@ -743,13 +745,14 @@ async function runHostSmoke(config) {
         const peer = organizationFixture.peer; const proposedTag = `live-organized-${verificationToken}`; const laterTag = `later-user-edit-${verificationToken}`;
         const parentExistingTag = `preserve-parent-${verificationToken}`; const peerExistingTag = `preserve-peer-${verificationToken}`;
         const selectedIDs = [parent.id, peer.id]; await win.ZoteroPane.selectItems(selectedIDs, { inLibraryRoot: true });
-        await until(() => win.ZoteroPane.getSelectedItems(true).length === 2, 'live-organization-native-selection');
+        await until(() => win.ZoteroPane.itemsView.getSelectedItems(true).length === 2, 'live-organization-native-selection'); win.Zotero_Tabs.select(tabId);
+        await until(() => shell()?.dataset.attachmentKey === a.key && input(), 'live-organization-reader-restored');
         await sendAgent(`Organize the selected Zotero items by adding the tag ${proposedTag} and placing both items in the collection named "${organizationFixture.targetCollection.name}". Preserve every existing tag and collection.`, 'live-organization', async () => {
-          await win.ZoteroPane.selectItems([parent.id], { inLibraryRoot: true, noTabSwitch: true }); win.Zotero_Tabs.select(tabId);
+          await win.ZoteroPane.selectItems([parent.id], { inLibraryRoot: true, noTabSwitch: true });
         });
         const organizationCard = await until(() => taskCard('Organize library'), 'live-organization-review', 60000);
         await parent.loadAllData(); await peer.loadAllData();
-        await check('live-core-organization-frozen-review-before-write', organizationCard.dataset.state === 'review' && organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 2 && !tagNames(parent).includes(proposedTag) && !tagNames(peer).includes(proposedTag), { candidates: organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, selectionChangedAfterSend: true });
+        await check('live-core-organization-frozen-review-before-write', organizationCard.dataset.state === 'review' && organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length === 2 && !tagNames(parent).includes(proposedTag) && !tagNames(peer).includes(proposedTag), { candidates: organizationCard.querySelectorAll('[data-zchatgpt-task-item-id]').length, selectedTitles: [parent.getField('title'), peer.getField('title')], selectionChangedAfterSend: true, visibleReaderSend: true });
         click(organizationCard.querySelector('[data-zchatgpt-task-action="approve"]')); await until(() => organizationCard.dataset.state === 'completed', 'live-organization-applied', 60000); await parent.loadAllData(); await peer.loadAllData();
         const targetKey = organizationFixture.targetCollection.key; const controlKey = organizationFixture.controlCollection.key;
         await check('live-core-organization-additive-native-readback', [parent, peer].every(item => tagNames(item).includes(proposedTag) && collectionKeys(item).includes(targetKey) && collectionKeys(item).includes(controlKey)) && tagNames(parent).includes(parentExistingTag) && tagNames(peer).includes(peerExistingTag), { parentTags: tagNames(parent), peerTags: tagNames(peer), parentCollections: collectionKeys(parent), peerCollections: collectionKeys(peer) });
