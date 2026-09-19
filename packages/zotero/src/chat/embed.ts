@@ -353,7 +353,10 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
       const status = typeof result?.status === 'string' ? result.status : 'actor-unavailable';
       bridgeIdle = !pendingRestore && ['ready', 'composer-ready', 'composer-missing'].includes(status);
       if (bridgeIdle) activeMarker = null;
-      const interactive = !pendingRestore && ['ready', 'composer-ready', 'draft', 'busy', 'generating', 'composer-missing'].includes(status);
+      // A page with no composer may expose only sign-in or challenge controls. Those ordinary page
+      // controls stay clickable while the pending-restore guards below keep PDF/send commands off.
+      const interactive = status === 'composer-missing'
+        || (!pendingRestore && ['ready', 'composer-ready', 'draft', 'busy', 'generating'].includes(status));
       browser.style.pointerEvents = interactive ? 'auto' : 'none';
       browser.setAttribute('data-zchatgpt-bridge-ready', status);
       if (status === 'composer-missing') announce('Sign in to official ChatGPT. Automatic PDF context will start only after its supported composer is available.');

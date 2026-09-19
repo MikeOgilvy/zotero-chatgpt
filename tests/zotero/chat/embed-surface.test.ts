@@ -358,6 +358,29 @@ it('blocks composer preparation and parent submission while a saved conversation
   surface.destroy();
 });
 
+it('keeps a login-only official page interactive while saved conversation restore remains pending', async () => {
+  const { win, doc } = chromeWindow();
+  const sendQuery = vi.fn((name: string) => Promise.resolve({ status: name === 'probe' ? 'composer-missing' : 'unexpected-command' }));
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+    currentURI: { spec: string };
+    browsingContext: { currentWindowGlobal: unknown };
+  };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+  const { slot, frame } = sidebar(doc); surface.show(slot, frame);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect(browser.style.pointerEvents).toBe('auto');
+  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('composer-missing');
+  expect(browser.getAttribute('src')).toBe(CHAT_APP_URL);
+  await expect(surface.submitQuestion('must remain unavailable')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+  expect(sendQuery.mock.calls.filter(([name]) => name !== 'probe')).toEqual([]);
+  surface.hide(); expect(surface.evictable()).toBe(false);
+  surface.destroy();
+});
+
 it('fails closed when the official page has an unknown editor and opens only recognized or login-only pages', async () => {
   const { win, doc } = chromeWindow();
   let status = 'unsupported-composer';
