@@ -27,7 +27,7 @@ function readRawOption(name) {
 }
 
 function positionalXpi() {
-  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--login-wait-seconds', '--recover-organization', '--request-id', '--expected-token', '--origin-version']);
+  const flagsWithValue = new Set(['--upgrade-xpi', '--rollback-xpi', '--url', '--probe-timeout-ms', '--watch-seconds', '--run-id', '--login-wait-seconds', '--recover-organization', '--web-resume', '--request-id', '--expected-token', '--origin-version']);
   const skip = new Set();
   const found = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -109,11 +109,11 @@ if (processes.split('\n').some((line) => line.startsWith('/Applications/Zotero.a
 if (tree.exclusiveRoot) await reserveExclusiveRoot(tree.exclusiveRoot);
 await mkdir(join(profile, 'extensions'), { recursive: true });
 await mkdir(dataDir, { recursive: true });
-const recoveryOnly = tree.stage === 'recover-organization';
-if (!recoveryOnly) await mkdir(join(pdfPath, '..'), { recursive: true });
+const recoveryOnly = tree.stage === 'recover-organization'; const webResume = tree.stage === 'web-resume'; const noFixtureWrite = recoveryOnly || webResume;
+if (!noFixtureWrite) await mkdir(join(pdfPath, '..'), { recursive: true });
 const verificationToken = `RUN-${randomBytes(12).toString('hex')}`;
 const liveCoreFlows = argumentsList.includes('--live-core-flows') || tree.stage === 'live-core';
-const webLive = argumentsList.includes('--web-live');
+const webLive = argumentsList.includes('--web-live'); const webAcceptanceEnabled = webLive || webResume;
 const liveCorePageProse = [
   [
     'The prior distribution weights plausible latent states before the synthetic observation arrives.',
@@ -128,7 +128,7 @@ const liveCorePageProse = [
     'An intervention is informative when competing models predict measurably different outcomes.',
   ],
 ];
-if (!recoveryOnly) await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', verificationToken, liveCoreFlows ? { pageProse: liveCorePageProse } : undefined));
+if (!noFixtureWrite) await writeFile(pdfPath, createFixturePdf('ZCHATGPT synthetic reading fixture', verificationToken, liveCoreFlows ? { pageProse: liveCorePageProse } : undefined));
 // Runtime records and account state have their own lifetime. Preparing a host driver must never
 // clear them, even in the dedicated context profile. A separate, verified-new tree is required for
 // checks whose precondition is that no runtime has been prepared yet.
@@ -146,7 +146,7 @@ const prefs = {
   'extensions.startupScanScopes': 1,
   'extensions.update.enabled': false,
   'extensions.zotero.httpServer.enabled': false,
-  'extensions.zotero.integration.port': ['context', 'live-core', 'recover-organization'].includes(tree.stage) ? 50014 : tree.stage === 'embed' ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
+  'extensions.zotero.integration.port': ['context', 'live-core', 'recover-organization'].includes(tree.stage) ? 50014 : ['embed', 'web-resume'].includes(tree.stage) ? 50015 : tree.stage === 's6' ? (twoVersion ? 50013 : 50012) : 50011,
   'extensions.zoteroMacWordIntegration.skipInstallation': true,
   'extensions.zoteroOpenOfficeIntegration.skipInstallation': true,
   'app.update.enabled': false,
@@ -172,6 +172,7 @@ const config = {
   cleanRuntimeTree,
   verificationToken,
   ...(recoveryOnly ? { recoveryConversationId: readRawOption('--recover-organization'), recoveryRequestId: readRawOption('--request-id'), recoveryToken: readRawOption('--expected-token'), recoveryOriginVersion: readRawOption('--origin-version') } : {}),
+  ...(webResume ? { webResumeConversationId: readRawOption('--web-resume'), webResumeToken: readRawOption('--expected-token'), webResumeOriginVersion: readRawOption('--origin-version'), webStopTest: argumentsList.includes('--stop-test') } : {}),
   subjectID,
   subjectVersion: twoVersion ? rollbackIdentity.version : subjectManifest.version,
   artifactHash: createHash('sha256').update(await readFile(subjectXpi)).digest('hex'),
@@ -212,7 +213,7 @@ if (installDriver) {
   if (!driverPath) throw new Error('Host stage is missing its driver');
   const compiled = driverPath.endsWith('.ts') ? await build({ entryPoints: [join(root, driverPath)], bundle: true, format: 'iife', globalName: 'ZchatgptHostDriver', write: false, target: 'firefox140', platform: 'browser' }) : null;
   const driverContents = compiled ? compiled.outputFiles[0].text + '\nvar runHostSmoke = ZchatgptHostDriver.runHostSmoke;\n' : await readFile(join(root, driverPath));
-  const webAcceptanceContents = webLive ? await readFile(join(root, 'tests/host/web-acceptance-actor.mjs')) : null;
+  const webAcceptanceContents = webAcceptanceEnabled ? await readFile(join(root, 'tests/host/web-acceptance-actor.mjs')) : null;
   const driverSourceHash = createHash('sha256').update(driverContents).digest('hex');
   config.driverSourceHash = driverSourceHash;
   if (webAcceptanceContents) config.webAcceptanceSourceHash = createHash('sha256').update(webAcceptanceContents).digest('hex');
@@ -224,7 +225,7 @@ if (installDriver) {
     version: driverVersion,
     applications: { zotero: { id: 'zchatgpt-host-test@local', update_url: 'https://zotero-chatgpt-dev.invalid/driver-updates.json', strict_min_version: '9.0.6', strict_max_version: '9.0.*' } },
   };
-  const webAcceptanceStartup = webLive ? `
+  const webAcceptanceStartup = webAcceptanceEnabled ? `
     const resource = Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler);
     const resourceFlags = Ci.nsISubstitutingProtocolHandler.ALLOW_CONTENT_ACCESS | Ci.nsISubstitutingProtocolHandler.RESOLVE_JAR_URI;
     resource.setSubstitutionWithFlags("zotero-chatgpt-web-acceptance", Services.io.newURI(data.rootURI + "content/web-acceptance/"), resourceFlags);
@@ -234,7 +235,7 @@ if (installDriver) {
       child: { esModuleURI: "resource://zotero-chatgpt-web-acceptance/web-acceptance-actor.mjs" },
       matches: ["https://chatgpt.com/*"], messageManagerGroups: ["zchatgpt"], allFrames: false,
     });` : '';
-  const webAcceptanceShutdown = webLive ? `
+  const webAcceptanceShutdown = webAcceptanceEnabled ? `
   try { ChromeUtils.unregisterWindowActor("ZoteroChatGPTWebAcceptance"); } catch {}
   try { Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler).setSubstitution("zotero-chatgpt-web-acceptance", null); } catch {}` : '';
   const bootstrap = `function startup(data) {

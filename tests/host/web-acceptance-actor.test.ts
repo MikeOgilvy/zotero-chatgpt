@@ -73,6 +73,16 @@ it('clears only the exact known harness question through the native textarea edi
   expect(textarea.value).toContain('extra private words');
 });
 
+it('clicks only one exact enabled official stop control', () => {
+  const document = new HappyWindow({ url: 'https://chatgpt.com/c/synthetic' }).document; let clicks = 0;
+  document.body.innerHTML = '<button data-testid="stop-button"></button>';
+  document.querySelector('button')?.addEventListener('click', () => { clicks += 1; });
+  const actor = new ZoteroChatGPTWebAcceptanceChild() as ZoteroChatGPTWebAcceptanceChild & { document: Document }; actor.document = document as unknown as Document;
+  expect(actor.receiveMessage({ name: 'stopKnownGeneration' })).toEqual({ status: 'clicked', reason: null, knownStop: true }); expect(clicks).toBe(1);
+  document.body.insertAdjacentHTML('beforeend', '<button data-testid="stop-button"></button>');
+  expect(actor.receiveMessage({ name: 'stopKnownGeneration' })).toMatchObject({ status: 'blocked', reason: 'ambiguous-stop', knownStop: false });
+});
+
 it('returns only bounded transcript structure when official role markers are absent', () => {
   const document = new HappyWindow({ url: 'https://chatgpt.com/c/synthetic' }).document;
   document.body.innerHTML = '<main role="main"><section data-testid="conversation-turn"><div role="log">private answer</div></section></main>';

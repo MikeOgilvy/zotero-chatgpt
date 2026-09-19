@@ -171,6 +171,12 @@ export class ZoteroChatGPTWebAcceptanceChild extends ChildBase {
       const cleared = replaceComposerNative(composer, ''); const after = composer ? (composer.localName === 'textarea' ? String(composer.value ?? '') : String(composer.textContent ?? '')) : '';
       return { status: cleared && after === '' ? 'cleared' : 'blocked', reason: cleared && after === '' ? null : 'clear-unconfirmed', discardedKnownSyntheticDraft: cleared && after === '', empty: after === '' };
     }
+    if (message?.name === 'stopKnownGeneration') {
+      if (!trustedOfficialDocument(this.document)) return { status: 'blocked', reason: 'untrusted-origin', knownStop: false };
+      const buttons = [...this.document.querySelectorAll('button[data-testid="stop-button"]')].filter(button => !button.disabled);
+      if (buttons.length !== 1) return { status: 'blocked', reason: buttons.length ? 'ambiguous-stop' : 'stop-missing', knownStop: false };
+      buttons[0].click(); return { status: 'clicked', reason: null, knownStop: true };
+    }
     return { status: 'blocked', reason: 'invalid-request' };
   }
 }

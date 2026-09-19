@@ -944,19 +944,19 @@ async function runHostSmoke(config) {
         } else {
         const codexBefore = await ownCodexProcesses();
         const globalBeforeSubmit = before.global;
-        product.webLive.status = 'submitting'; product.webLive.submissionAttempts = 1; product.webLive.modelTurnsStarted = 1; product.webLive.confirmedServiceReply = false; await save();
+        product.webLive.status = 'submitting'; product.webLive.submissionAttempts = 1; product.webLive.confirmedServiceReply = false; await save();
         const submitted = await boundedQuery('ZoteroChatGPTOfficialChat', 'submitQuestion', { question }, 90000);
         product.webLive.productSubmit = submitted.value && typeof submitted.value === 'object'
           ? { status: submitted.value.status ?? 'invalid-response', reason: submitted.value.reason ?? null }
           : { status: 'invalid-response', reason: null };
         product.webLive.sameWindowGlobalAtSubmit = submitted.global === globalBeforeSubmit;
-        product.notRun = product.notRun.filter(name => !['conversation-send', 'streaming-render'].includes(name));
         product.webLive.status = 'observing-submit-outcome'; await save();
-        const started = Date.now(); const deadline = started + 180000; let latest = baseline;
+        const started = Date.now(); const deadline = started + 180000; let latest = baseline; let streamingObserved = false;
         while (Date.now() < deadline) {
           try {
             const sample = await boundedQuery('ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.verificationToken });
             latest = sample.value;
+            if (latest?.streaming === true) streamingObserved = true;
             product.webLive.timeline.push({
               ms: Date.now() - started, status: latest?.status ?? 'invalid-response', officialURL: latest?.officialURL === true, currentCanonicalURL: latest?.canonicalURL ?? null,
               inputReady: latest?.inputReady === true, sendReady: latest?.sendReady === true, draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true,
@@ -971,11 +971,14 @@ async function runHostSmoke(config) {
         const userMarkerDelta = Number(latest?.userMarkerMessages ?? 0) - Number(baseline.userMarkerMessages ?? 0); const assistantDelta = Number(latest?.assistantMessages ?? 0) - Number(baseline.assistantMessages ?? 0);
         const confirmedServiceReply = assistantDelta >= 1 && latest?.latestAssistantContainsToken === true && latest?.streaming === false;
         const confirmedFailure = !confirmedServiceReply && userMarkerDelta === 0 && latest?.draftHasZoteroRequestMarker === true && latest?.streaming === false;
+        if (streamingObserved || assistantDelta >= 1) product.webLive.modelTurnsStarted = 1;
+        if (userMarkerDelta === 1) product.notRun = product.notRun.filter(name => name !== 'conversation-send');
+        if (streamingObserved) product.notRun = product.notRun.filter(name => name !== 'streaming-render');
         product.webLive.confirmedServiceReply = confirmedServiceReply;
         product.webLive.result = {
           officialURL: latest?.officialURL === true, canonicalOrigin: latest?.canonicalOrigin ?? null, currentCanonicalURL: latest?.canonicalURL ?? null,
           userMarkerDelta, assistantDelta, latestAssistantContainsToken: latest?.latestAssistantContainsToken === true, streaming: latest?.streaming === true,
-          draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true, roleStructure: latest?.roleStructure ?? null,
+          draftLength: Number(latest?.draftLength ?? 0), draftHasOwnMarker: latest?.draftHasZoteroRequestMarker === true, roleStructure: latest?.roleStructure ?? null, streamingObserved,
           codexProcessesBefore: codexBefore.length, codexProcessesAfter: codexAfter.length,
         };
         const passed = confirmedServiceReply && userMarkerDelta === 1 && product.webLive.result.officialURL && product.webLive.result.canonicalOrigin === 'https://chatgpt.com' && product.webLive.result.codexProcessesBefore === 0 && product.webLive.result.codexProcessesAfter === 0;

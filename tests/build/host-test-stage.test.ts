@@ -28,6 +28,7 @@ async function prepareScriptSandbox(): Promise<{ root: string; script: string; x
     cp(path.join(repositoryRoot, 'tests/host/context-driver.js'), path.join(root, 'tests/host/context-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/live-core-driver.js'), path.join(root, 'tests/host/live-core-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/recover-organization-driver.js'), path.join(root, 'tests/host/recover-organization-driver.js')),
+    cp(path.join(repositoryRoot, 'tests/host/web-resume-driver.js'), path.join(root, 'tests/host/web-resume-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/embed-driver.js'), path.join(root, 'tests/host/embed-driver.js')),
     cp(path.join(repositoryRoot, 'tests/host/web-acceptance-actor.mjs'), path.join(root, 'tests/host/web-acceptance-actor.mjs')),
     cp(path.join(repositoryRoot, 'runtime/manifest.ts'), path.join(root, 'runtime/manifest.ts')),
@@ -288,7 +289,7 @@ describe('dedicated host-test stage selection', () => {
     await expect(select(['--context', '--native', '--acceptance'])).rejects.toThrow();
   });
   it('refuses to prepare a profile without an explicit stage', async () => {
-    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
+    await expect(select([])).rejects.toSatisfy((error: unknown) => /Pass one of --context, --live-core, --recover-organization, --web-resume, --embed, --live-model, --s5, --s6, or --acceptance/.test(failureMessage(error)));
   });
 
   it('registers the embedded ChatGPT probe on its own isolated tree', async () => {
@@ -338,6 +339,24 @@ describe('dedicated host-test stage selection', () => {
     } finally {
       await rm(sandbox.root, { recursive: true, force: true });
     }
+  });
+
+  it('selects existing official-conversation resume with an optional single stop turn', async () => {
+    const argv = ['--web-resume', '6aae72c2-a440-83ea-8ca7-cc87eb75b85c', '--expected-token', 'RUN-0123456789abcdef01234567', '--origin-version', '0.4.0a28', '--stop-test'];
+    await expect(select(argv)).resolves.toEqual({ stage: 'web-resume', driver: 'tests/host/web-resume-driver.js', installDriver: true });
+    const tree = await selectTree(argv); expect(tree.profile).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/embed/profile')); expect(tree.dataDir).toBe(path.join(repositoryRoot, '.zotero-chatgpt-dev/embed/data'));
+    await expect(select(['--web-resume', 'short', '--expected-token', argv[3]!, '--origin-version', argv[5]!])).rejects.toThrow(/conversation id/u);
+    await expect(select(['--web-resume', argv[1]!])).rejects.toThrow(/expected-token/u);
+  });
+
+  it('packages web resume with the observer actor and no replacement fixture', async () => {
+    const sandbox = await prepareScriptSandbox(); const argv = ['--web-resume', '6aae72c2-a440-83ea-8ca7-cc87eb75b85c', '--expected-token', 'RUN-0123456789abcdef01234567', '--origin-version', '0.4.0a28', '--stop-test'];
+    try {
+      await execFileAsync(process.execPath, [sandbox.script, ...argv, sandbox.xpi], { cwd: sandbox.root });
+      await expect(stat(path.join(sandbox.root, '.zotero-chatgpt-dev/embed/fixtures/reading.pdf'))).rejects.toMatchObject({ code: 'ENOENT' });
+      const driverXpi = path.join(sandbox.root, '.zotero-chatgpt-dev/embed/profile/extensions/zchatgpt-host-test@local.xpi'); expect(await listArchiveEntries(driverXpi)).toContain('content/web-acceptance/web-acceptance-actor.mjs');
+      const bootstrap = await readArchiveEntry(driverXpi, 'bootstrap.js'); expect(bootstrap).toContain('"webResumeConversationId":"6aae72c2-a440-83ea-8ca7-cc87eb75b85c"'); expect(bootstrap).toContain('"webStopTest":true');
+    } finally { await rm(sandbox.root, { recursive: true, force: true }); }
   });
 
   it('selects the S5 restart driver', async () => {
@@ -404,7 +423,7 @@ describe('dedicated host-test stage selection', () => {
   });
 
   it('rejects combining exclusive stage flags', async () => {
-    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
-    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --recover-organization, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--s5', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --recover-organization, --web-resume, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
+    await expect(select(['--context', '--s6'])).rejects.toSatisfy((error: unknown) => /Pass only one of --context, --live-core, --recover-organization, --web-resume, --embed, --live-model, --s5, --s6/.test(failureMessage(error)));
   });
 });
