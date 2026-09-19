@@ -51,6 +51,29 @@ export function replaceChatGPTComposer(composer, text) {
   const view = document?.defaultView;
   const selection = view?.getSelection?.();
   if (!document || !selection || typeof document.createRange !== 'function' || typeof document.execCommand !== 'function') return false;
+  const originalText = readChatGPTComposer(composer);
+  const originalFocus = document.activeElement;
+  const originalRanges = [];
+  try {
+    for (let index = 0; index < selection.rangeCount; index++) originalRanges.push(selection.getRangeAt(index).cloneRange());
+  } catch { /* an inaccessible selection is left alone */ }
+  const connected = node => {
+    if (!node) return false;
+    if (node === document) return true;
+    const element = node.nodeType === 3 ? node.parentNode : node;
+    return Boolean(element && document.contains(element));
+  };
+  const restoreInteraction = () => {
+    // execCommand is synchronous. If the page changed the composer during its handlers, keep that
+    // newer state and do not move focus or selection back over it.
+    if (readChatGPTComposer(composer) !== originalText) return;
+    try { if (originalFocus && document.contains(originalFocus) && typeof originalFocus.focus === 'function') originalFocus.focus(); }
+    catch { /* a detached or inaccessible old focus target is not restored */ }
+    try {
+      selection.removeAllRanges();
+      for (const range of originalRanges) if (connected(range.commonAncestorContainer)) selection.addRange(range);
+    } catch { /* keep the page's current selection if a cloned range became invalid */ }
+  };
   try {
     composer.focus?.();
     const range = document.createRange();
@@ -58,8 +81,11 @@ export function replaceChatGPTComposer(composer, text) {
     selection.removeAllRanges(); selection.addRange(range);
     // Gecko's native editing command produces the trusted beforeinput/input sequence ProseMirror uses
     // to update its state. Direct textContent plus a synthetic InputEvent only changes visible DOM.
-    return document.execCommand('insertText', false, text) === true;
+    const changed = document.execCommand('insertText', false, text) === true;
+    if (!changed) restoreInteraction();
+    return changed;
   } catch {
+    restoreInteraction();
     return false;
   }
 }

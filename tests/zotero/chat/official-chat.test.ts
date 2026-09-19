@@ -145,15 +145,45 @@ describe('official ChatGPT DOM adapter', () => {
     expect(execCommand).toHaveBeenCalledTimes(1);
     expect(execCommand).toHaveBeenCalledWith('insertText', false, 'frozen rich text');
     expect(model.text).toBe('frozen rich text');
+    expect(doc.activeElement).toBe(composer);
   });
 
-  it('fails closed without changing rich text when Gecko refuses the native editing command', async () => {
+  it('restores an unrelated draft focus and selection when Gecko refuses the native editing command', async () => {
     const dom = await import('../../../packages/zotero/actors/chatgpt-dom.mjs');
     const doc = new Window({ url: 'https://chatgpt.com/' }).document;
     const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true'; composer.textContent = 'keep this draft'; doc.body.append(composer);
+    const unrelated = doc.createElement('div'); unrelated.contentEditable = 'true'; unrelated.textContent = 'unrelated selected draft'; doc.body.append(unrelated); unrelated.focus();
+    const range = doc.createRange(); range.setStart(unrelated.firstChild!, 0); range.setEnd(unrelated.firstChild!, 9);
+    const view = doc.defaultView; if (!view) throw new Error('No test window');
+    const selection = view.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     Object.assign(doc, { execCommand: vi.fn(() => false) });
     expect(dom.replaceChatGPTComposer(composer, 'must not appear')).toBe(false);
     expect(composer.textContent).toBe('keep this draft');
+    expect(doc.activeElement).toBe(unrelated);
+    expect(selection.toString()).toBe('unrelated');
+  });
+
+  it('restores the same-composer caret when the native editing command throws', async () => {
+    const dom = await import('../../../packages/zotero/actors/chatgpt-dom.mjs');
+    const doc = new Window({ url: 'https://chatgpt.com/' }).document;
+    const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true'; composer.textContent = 'keep this draft'; doc.body.append(composer); composer.focus();
+    const view = doc.defaultView; if (!view) throw new Error('No test window');
+    const selection = view.getSelection(); const range = doc.createRange(); range.setStart(composer.firstChild!, 4); range.collapse(true); selection.removeAllRanges(); selection.addRange(range);
+    Object.assign(doc, { execCommand: vi.fn(() => { throw new Error('editing refused'); }) });
+    expect(dom.replaceChatGPTComposer(composer, 'must not appear')).toBe(false);
+    expect(composer.textContent).toBe('keep this draft'); expect(doc.activeElement).toBe(composer);
+    expect(selection.isCollapsed).toBe(true); expect(selection.anchorNode).toBe(composer.firstChild); expect(selection.anchorOffset).toBe(4);
+  });
+
+  it('keeps page-owned synchronous text and interaction state when a failed command changed the composer', async () => {
+    const dom = await import('../../../packages/zotero/actors/chatgpt-dom.mjs');
+    const doc = new Window({ url: 'https://chatgpt.com/' }).document;
+    const composer = doc.createElement('div'); composer.id = 'prompt-textarea'; composer.contentEditable = 'true'; composer.textContent = 'old'; doc.body.append(composer);
+    const unrelated = doc.createElement('button'); doc.body.append(unrelated); unrelated.focus();
+    Object.assign(doc, { execCommand: vi.fn(() => { composer.textContent = 'page-owned newer value'; return false; }) });
+    expect(dom.replaceChatGPTComposer(composer, 'requested')).toBe(false);
+    expect(composer.textContent).toBe('page-owned newer value');
+    expect(doc.activeElement).toBe(composer);
   });
 
   it('supports the exact mobile composer observed in a narrow Zotero dock', async () => {
