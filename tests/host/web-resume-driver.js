@@ -26,26 +26,30 @@ async function runHostSmoke(config) {
     if (!/^[A-Za-z0-9-]{8,128}$/u.test(config.webResumeConversationId) || !/^RUN-[a-f0-9]{24}$/u.test(config.webResumeToken)) throw new Error('Resume identifiers invalid.');
     const profile = String(config.profile); const match = profile.match(/^(.*\/\.zotero-chatgpt-dev\/embed)\/profile$/u);
     await check('dedicated-preserved-embed-profile', Boolean(match) && PathUtils.profileDir === profile && config.dataDir === `${match?.[1]}/data` && Zotero.DataDirectory.dir === config.dataDir);
+    step = 'main-window-library-ready'; const win = await until(() => Zotero.getMainWindow(), 'main-window'); await until(() => win.ZoteroPane?.loaded && win.ZoteroPane?.itemsView, 'library-pane-ready'); await Zotero.Libraries.get(Zotero.Libraries.userLibraryID).waitForDataLoad('item');
     const loadOwnedAttachment = async itemID => {
-      const attachment = Number.isSafeInteger(itemID) ? Zotero.Items.get(itemID) : null; if (!attachment) return { attachment: null, parent: null };
-      await attachment.loadAllData(); const parent = attachment.parentItem ?? null; if (parent) await parent.loadAllData(); return { attachment, parent };
+      if (!Number.isSafeInteger(itemID)) return { attachment: null, parent: null };
+      const attachment = await Zotero.Items.getAsync(itemID); if (!attachment) return { attachment: null, parent: null }; await attachment.loadAllData();
+      const parent = Number.isSafeInteger(attachment.parentID) ? await Zotero.Items.getAsync(attachment.parentID) : null; if (parent) await parent.loadAllData(); return { attachment, parent };
     };
-    const resumePath = PathUtils.join(match[1], 'web-resume.json'); let resumeManifest = null;
+    step = 'read-resume-manifest'; const resumePath = PathUtils.join(match[1], 'web-resume.json'); let resumeManifest = null;
     if (await IOUtils.exists(resumePath)) { try { resumeManifest = JSON.parse(await IOUtils.readUTF8(resumePath)); } catch { throw new Error('Stored web-resume manifest is unreadable.'); } }
     if (!resumeManifest) {
+      step = 'derive-persisted-binding';
       let store = {}; try { const raw = Zotero.Prefs.get('extensions.zchatgpt.officialChatConversationURLs', true); if (typeof raw === 'string' && raw.length <= 128 * 1024) store = JSON.parse(raw); } catch { store = {}; }
       const matches = Object.entries(store).filter(([, entry]) => entry && typeof entry === 'object' && entry.url === targetURL); if (matches.length !== 1) throw new Error('Exact persisted official conversation binding unavailable.');
-      const [binding] = matches[0]; const itemID = Number(String(binding).split(':').at(-1)); const { attachment, parent } = await loadOwnedAttachment(itemID);
+      const [binding] = matches[0]; const itemID = Number(String(binding).split(':').at(-1)); step = 'load-derived-attachment'; const { attachment, parent } = await loadOwnedAttachment(itemID);
       if (!attachment?.isPDFAttachment() || parent?.getField('title') !== 'ZCHATGPT embedded web surface probe') throw new Error('Persisted binding is not the owned synthetic PDF.');
       resumeManifest = { schemaVersion: 1, conversationId: config.webResumeConversationId, canonicalURL: targetURL, token: config.webResumeToken, binding, itemID, attachmentKey: attachment.key, parentKey: parent.key, parentTitle: parent.getField('title'), originVersion: config.webResumeOriginVersion, firstReplyVerified: false };
       await IOUtils.writeUTF8(resumePath, JSON.stringify(resumeManifest, null, 2));
     }
+    step = 'validate-resume-manifest';
     if (resumeManifest.schemaVersion !== 1 || resumeManifest.conversationId !== config.webResumeConversationId || resumeManifest.canonicalURL !== targetURL || resumeManifest.token !== config.webResumeToken || resumeManifest.originVersion !== config.webResumeOriginVersion || !Number.isSafeInteger(resumeManifest.itemID) || typeof resumeManifest.binding !== 'string') throw new Error('Stored web-resume manifest does not match the explicit recovery scope.');
-    const binding = resumeManifest.binding; const itemID = resumeManifest.itemID; const { attachment, parent } = await loadOwnedAttachment(itemID);
+    const binding = resumeManifest.binding; const itemID = resumeManifest.itemID; step = 'load-manifest-attachment'; const { attachment, parent } = await loadOwnedAttachment(itemID);
     await check('persisted-binding-points-to-owned-synthetic-pdf', Boolean(attachment?.isPDFAttachment() && parent?.getField('title') === 'ZCHATGPT embedded web surface probe' && (!resumeManifest.attachmentKey || resumeManifest.attachmentKey === attachment.key) && (!resumeManifest.parentKey || resumeManifest.parentKey === parent.key)), { bindingMatched: true, itemID, attachmentKeyMatched: !resumeManifest.attachmentKey || resumeManifest.attachmentKey === attachment?.key, parentKeyMatched: !resumeManifest.parentKey || resumeManifest.parentKey === parent?.key, parentSynthetic: parent?.getField('title') === 'ZCHATGPT embedded web surface probe' });
-    const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs'); const addon = await AddonManager.getAddonByID(config.subjectID);
+    step = 'installed-addon-identity'; const { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs'); const addon = await AddonManager.getAddonByID(config.subjectID);
     await check('installed-resume-xpi-active', addon?.isActive && addon.version === config.subjectVersion, { actualVersion: addon?.version ?? null });
-    const win = await until(() => Zotero.getMainWindow(), 'main-window'); const opened = await Zotero.Reader.open(attachment.id); const reader = () => Zotero.Reader.getByTabID(opened.tabID); const doc = () => reader()?._iframeWindow?.document;
+    step = 'open-persisted-reader'; const opened = await Zotero.Reader.open(attachment.id); const reader = () => Zotero.Reader.getByTabID(opened.tabID); const doc = () => reader()?._iframeWindow?.document;
     await until(() => doc()?.querySelector('[data-zchatgpt-toggle]'), 'toolbar-toggle'); doc().querySelector('[data-zchatgpt-toggle]').click();
     await until(() => { const section = doc()?.querySelector('[data-zchatgpt-embed]'); return section && !section.hidden ? section : null; }, 'hosted-chat-visible', 60000);
     const browser = await until(() => [...win.document.querySelectorAll('[data-zchatgpt-embed-browser]')].find(node => node.getAttribute('data-zchatgpt-context-binding') === binding), 'bound-official-browser', 60000);
@@ -78,5 +82,8 @@ async function runHostSmoke(config) {
     const codexAfter = await ownCodexProcesses(profile);
     await check('one-visible-turn-stops-without-fallback', report.submissionAttempts === 1 && report.modelTurnsStarted === 1 && report.exactVisibleStopClicked === true && generating.streaming === true && terminal.streaming === false && terminal.officialURL === true && terminal.canonicalURL === targetURL && terminal.userMarkerMessages === baseline.userMarkerMessages + 1 && codexBefore === 0 && codexAfter === 0, { submissionAttempts: report.submissionAttempts, modelTurnsStarted: report.modelTurnsStarted, productSubmitStatus: report.productSubmitStatus, exactVisibleStopClicked: report.exactVisibleStopClicked, streamingTransitions: report.streamingTransitions, officialURL: terminal.officialURL, canonicalURL: terminal.canonicalURL, userMarkerDelta: terminal.userMarkerMessages - baseline.userMarkerMessages, codexProcessesBefore: codexBefore, codexProcessesAfter: codexAfter });
     report.status = 'passed'; report.finishedAt = new Date().toISOString(); await save();
-  } catch (error) { report.status = 'failed'; report.failedStep = step; report.failureClass = String(error?.name ?? 'Error').slice(0, 80); report.finishedAt = new Date().toISOString(); try { await save(); } catch { /* no remaining evidence channel */ } }
+  } catch (error) {
+    const stageCodes = { 'main-window': 'MAIN_WINDOW_UNAVAILABLE', 'library-pane-ready': 'LIBRARY_PANE_UNAVAILABLE', 'main-window-library-ready': 'LIBRARY_ITEMS_UNAVAILABLE', 'read-resume-manifest': 'RESUME_MANIFEST_READ_FAILED', 'derive-persisted-binding': 'PERSISTED_BINDING_UNAVAILABLE', 'load-derived-attachment': 'DERIVED_ATTACHMENT_LOAD_FAILED', 'validate-resume-manifest': 'RESUME_MANIFEST_SCOPE_MISMATCH', 'load-manifest-attachment': 'MANIFEST_ATTACHMENT_LOAD_FAILED', 'installed-addon-identity': 'ADDON_IDENTITY_UNAVAILABLE', 'open-persisted-reader': 'PERSISTED_READER_OPEN_FAILED', 'toolbar-toggle': 'READER_TOOLBAR_UNAVAILABLE', 'hosted-chat-visible': 'HOSTED_CHAT_UNAVAILABLE', 'bound-official-browser': 'BOUND_BROWSER_UNAVAILABLE', 'persisted-official-conversation-restored': 'OFFICIAL_HISTORY_RESTORE_TIMEOUT', 'persisted-official-answer-visible': 'OFFICIAL_HISTORY_EVIDENCE_TIMEOUT', 'official-generation-observed': 'GENERATION_NOT_OBSERVED', 'official-generation-stopped': 'STOP_NOT_CONFIRMED' };
+    report.status = 'failed'; report.failedStep = step; report.failureCode = stageCodes[step] ?? 'UNCLASSIFIED_DRIVER_FAILURE'; report.failureClass = String(error?.name ?? 'Error').slice(0, 80); report.finishedAt = new Date().toISOString(); try { await save(); } catch { /* no remaining evidence channel */ }
+  }
 }
