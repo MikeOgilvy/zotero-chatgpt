@@ -276,14 +276,22 @@ export async function runHostSmoke(config: NativeSmokeConfig): Promise<NativeSmo
     });
     requireCheck(document, 'DOCUMENT_NOT_PREPARED');
     await step('native-quote-coordinate-resolution', 'real-host-api', async () => {
-      const resolution = await native.resolveQuote({ paper, revision: document.revision, quote: 'A prior describes beliefs before a measurement is observed.', pageIndexes: [0] });
+      const quote = 'Calibration constant for this synthetic example: 37. A prior describes beliefs before a measurement is observed.';
+      const resolution = await native.resolveQuote({ paper, revision: document.revision, quote });
       requireCheck(resolution.status === 'resolved', 'QUOTE_DID_NOT_RESOLVE');
-      requireCheck(resolution.candidate.position.pageIndex === 0 && resolution.candidate.position.rects.length > 0 && resolution.candidate.pageLabel === 'i', 'QUOTE_COORDINATES_UNAVAILABLE');
-      return { value: resolution.candidate, details: { pageLabel: resolution.candidate.pageLabel, pageIndex: 0, rectangles: resolution.candidate.position.rects.length, sortIndex: resolution.candidate.sortIndex } };
+      requireCheck(resolution.candidate.position.pageIndex === 0 && resolution.candidate.position.rects.length >= 2 && resolution.candidate.pageLabel === 'i', 'QUOTE_COORDINATES_UNAVAILABLE');
+      return { value: resolution.candidate, details: { pageLabel: resolution.candidate.pageLabel, pageIndex: 0, rectangles: resolution.candidate.position.rects.length, multiLineQuote: true, sortIndex: resolution.candidate.sortIndex } };
+    });
+    await step('globally-ambiguous-quote-stays-unresolved-and-unwritten', 'synthetic-proposal-real-host-write', async () => {
+      const repeated = 'A prior describes beliefs before a measurement is observed.';
+      const task = await taskController.planAnnotations({ conversationId: host.uuid(), paper, revision: document.revision, question: 'Synthetic ambiguity control: do not write a quote that occurs on both pages.', modelRequestId: host.uuid(), candidates: [{ quote: repeated, pageIndex: 0, reason: 'The model page is only a hint and cannot hide the second occurrence.' }] });
+      const item = task.kind === 'annotations' ? task.items[0] : undefined; await fixture.main.loadAllData();
+      requireCheck(task.state === 'review' && item?.status === 'unresolved' && item.resolution?.status === 'ambiguous' && item.resolution.matches === 2 && fixture.main.getAnnotations().length === 0, 'AMBIGUOUS_QUOTE_WAS_NOT_SKIPPED');
+      return { value: true, details: { modelProposedPage: 0, nativeOutcome: item.resolution.status, nativeMatches: item.resolution.matches, nativeWrites: 0, approveEligible: false } };
     });
     const proposals = [
-      { quote: 'A prior describes beliefs before a measurement is observed.', pageIndex: 0, reason: 'Synthetic candidate: definition of prior.' },
-      { quote: 'A likelihood describes the measurement under each candidate state.', pageIndex: 0, reason: 'Synthetic candidate: definition of likelihood.' },
+      { quote: 'Calibration constant for this synthetic example: 37. A prior describes beliefs before a measurement is observed.', pageIndex: 0, reason: 'Synthetic unique multi-line candidate on the first physical page.' },
+      { quote: `Hidden verification token on this page: ${verificationToken}. A prior describes beliefs before a measurement is observed.`, pageIndex: 1, reason: 'Synthetic unique multi-line candidate on the second physical page.' },
     ];
     const conversationId = host.uuid();
     const plan = async () => taskController.planAnnotations({ conversationId, paper, revision: document.revision, question: 'Synthetic smoke: annotate the two supplied definitions.', modelRequestId: host.uuid(), candidates: proposals });
