@@ -31,6 +31,8 @@ export interface HostReader {
   tabID?: string;
   type: string;
   _window: ZoteroWindow;
+  /** The chrome `<browser>` that hosts the reader document; its rect is the reader viewport. */
+  _iframe?: Element;
   _iframeWindow?: Window;
   _internalReader?: { _lastView?: PdfView; _primaryView?: PdfView };
   zoomPageWidth(): void;

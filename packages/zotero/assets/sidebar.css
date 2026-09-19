@@ -120,6 +120,20 @@ body.zchatgpt-dock-open #split-view .primary-view,
 
 .zchatgpt-chat { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 0; }
 .zchatgpt-chat [hidden] { display: none !important; }
+/* Chat mode hosting the real ChatGPT application. The native chrome above stays mounted but hidden
+   (so a switch back rebuilds nothing), and the only native chrome is the mode bar. The application
+   itself is a chrome <browser> the host paints over `.zchatgpt-embed-slot`; this sheet only reserves
+   the rectangle it covers and keeps every other control out of it. */
+.zchatgpt-chat[hidden] { display: none !important; }
+.zchatgpt-embed { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.zchatgpt-embed[hidden], .zchatgpt-embed-slot[hidden] { display: none !important; }
+/* The bar wraps: the controls stay on one row, and a long answer from a clipboard action takes the
+   line below it instead of squeezing the controls or being cut off. */
+.zchatgpt-embed-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 34px; padding: 4px 8px; box-sizing: border-box; border-bottom: 1px solid var(--zchatgpt-border, GrayText); }
+.zchatgpt-embed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.zchatgpt-embed-status { flex: 1 1 100%; min-width: 0; color: var(--fill-secondary, GrayText); font-size: calc(11px * var(--zchatgpt-chat-text-scale, 1)); line-height: 15px; overflow-wrap: anywhere; }
+.zchatgpt-embed-status[hidden] { display: none !important; }
+.zchatgpt-embed-slot { flex: 1 1 auto; min-height: 0; min-width: 0; background: var(--material-background, Canvas); }
 .zchatgpt-chat p { margin: 0; line-height: 1.45; }
 .zchatgpt-chat-main {
   position: relative;

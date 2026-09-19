@@ -18,6 +18,38 @@ import { attachmentsFromClipboard, clipboardHasImage, clipboardHasText, readGeck
 import { activeCitation, type AttachmentIdentity } from '../reader/context.ts';
 /** Re-exported so the reader shell and its callers keep naming the attachment the one reader context names. */
 export type { AttachmentIdentity };
+/**
+ * Chat mode's surface. When the host supplies one, Chat mode is the real ChatGPT web application:
+ * this view renders a mode bar and an empty slot, and the host paints the web surface over that
+ * slot. The native transcript, composer, history and model picker are Agent-mode chrome then, so
+ * ChatGPT's own UI is not duplicated (see `./embed.ts` for why the surface is a chrome browser).
+ */
+/**
+ * What one clipboard action in the embed bar did. The hosted application owns its own conversation
+ * and this host cannot put context into it, so the bar's answer is always "this is on your clipboard
+ * now, paste it in" or an honest statement of why nothing was.
+ */
+export type EmbedClipboardOutcome =
+  | { copied: true; kind: 'document'; pages: number; totalPages: number; truncated: boolean }
+  | { copied: true; kind: 'selection'; pageLabel: string }
+  /** The real PDF file is on the clipboard, for the application's own paste-to-attach path. */
+  | { copied: true; kind: 'file' }
+  | { copied: false; reason: 'unavailable' | 'no-text' | 'no-selection' | 'no-file' | 'failed' };
+
+export interface ChatEmbedHook {
+  /** Paint the hosted application over `anchor`, which is this view's slot element. */
+  show(anchor: HTMLElement): void;
+  /** Stop painting without unloading the application, keeping its session and conversation. */
+  hide(): void;
+  /** Navigate the application document again; used by the embed bar's own reload control. */
+  reload?(): void;
+  /** Prepare the current paper and put it on the clipboard for the owner to paste in. */
+  copyContext?(): Promise<EmbedClipboardOutcome>;
+  /** Put the last selection Zotero reported on the clipboard for the owner to paste in. */
+  copySelection?(): Promise<EmbedClipboardOutcome>;
+  /** Put the current PDF file itself on the clipboard, for the application's paste-to-attach path. */
+  copyPdfFile?(): Promise<EmbedClipboardOutcome>;
+}
 export interface ChatViewHooks {
   openCitation?(citation: Citation): Promise<void>;
   openDocumentPage?(document: DocumentPageTarget, pageIndex: number, quote?: string | null): Promise<SourceOpenOutcome | void>;
@@ -35,6 +67,8 @@ export interface ChatViewHooks {
    */
   closeDock?(): void;
   uuid?(): string;
+  /** Present when Chat mode hosts the real ChatGPT web application instead of the native composer. */
+  chatEmbed?: ChatEmbedHook;
 }
 const HTML = 'http://www.w3.org/1999/xhtml';
 const SVG = 'http://www.w3.org/2000/svg';
@@ -121,6 +155,24 @@ const COPY = {
    * line names that instead of borrowing the Agent sign-in state.
    */
   chatUnavailable: 'Chat is unavailable in this build. Use Agent mode.',
+  // Chat mode's only native chrome when the host hosts the real ChatGPT application. The application
+  // owns its own conversation, transcript and model picker, so nothing of that is duplicated here;
+  // the bar only carries what the web app cannot know about this host, which is the paper it has open.
+  embedLabel: 'Reload ChatGPT',
+  embedCopyContext: 'Copy paper context',
+  embedAttachPdf: 'Attach current PDF',
+  embedCopySelection: 'Copy selection',
+  embedFileCopied: 'The PDF file is on your clipboard — paste it into ChatGPT to attach it.',
+  embedFileUnavailable: 'Copying the PDF file is unavailable here.',
+  embedFileMissing: 'This attachment has no local PDF file to copy.',
+  embedFileFailed: 'The PDF file could not be copied.',
+  embedContextCopied: (pages: number, total: number) => `Copied ${pages} of ${total} pages — paste into ChatGPT.`,
+  embedContextShortened: (pages: number, total: number) => `Copied a shortened ${pages} of ${total} pages — paste into ChatGPT.`,
+  embedSelectionCopied: (pageLabel: string) => `Copied the selection from page ${pageLabel} — paste into ChatGPT.`,
+  embedContextUnavailable: 'This PDF is not readable here, so there is nothing to copy.',
+  embedContextEmpty: 'No text was read from this PDF, so there is nothing to copy.',
+  embedContextFailed: 'The paper context could not be prepared.',
+  embedSelectionMissing: 'Select text in the PDF first, then copy it here.',
   /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
   sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
   continueWithPdf: 'Continue with current PDF',
@@ -160,6 +212,7 @@ const ICONS = {
   check: 'M3.5 8.25 6.5 11.25 12.5 4.75',
   historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
   historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
+  reload: 'M13.1 8a5.1 5.1 0 1 1-1.5-3.6M13.1 2.4v2.5h-2.5',
 } as const;
 /** The unbound composer tab. It is not a stored conversation id; the first send creates the record. */
 const NEW_CHAT_TAB_ID = 'new-chat';
@@ -622,6 +675,69 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const columns = el('div', 'zchatgpt-columns');
   columns.append(main);
   chat.append(chrome, renameForm, contextSource, documentStatus, scopeNotice, columns); root.append(chat);
+  /**
+   * Chat mode's chrome when the host hosts the real ChatGPT application. It holds the one mode
+   * control (so Agent stays reachable) and the slot the host paints the web surface over; ChatGPT's
+   * own conversation list, composer, model picker and streaming renderer are the application's, so
+   * none of them is rebuilt here. The native chrome above stays mounted while Chat is shown, which
+   * is what lets `Chat -> Agent -> Chat` switch without rebuilding a transcript or dropping a draft.
+   */
+  const embedSection = hooks.chatEmbed ? el('section', 'zchatgpt-embed') : null;
+  const embedBar = embedSection ? el('div', 'zchatgpt-embed-bar') : null;
+  const embedSlot = embedSection ? el('div', 'zchatgpt-embed-slot') : null;
+  /** The bar's own one-line answer to the last action; it replaces the previous answer each time. */
+  const embedStatus = embedSection ? el('span', 'zchatgpt-embed-status') : null;
+  if (embedSection && embedBar && embedSlot && embedStatus) {
+    embedSection.dataset.zchatgptEmbed = '';
+    embedBar.dataset.zchatgptEmbedBar = '';
+    embedSlot.dataset.zchatgptEmbedSlot = '';
+    embedStatus.dataset.zchatgptEmbedStatus = '';
+    embedStatus.hidden = true;
+    /**
+     * The one thing this host knows that the web application does not is which PDF the reader has
+     * open, and there is no supported way to hand it to the page. Both context controls therefore end
+     * in the clipboard and say so, instead of pretending the application received anything.
+     */
+    const announce = (text: string): void => { embedStatus.textContent = text; embedStatus.hidden = false; };
+    const copyAction = (run: () => Promise<EmbedClipboardOutcome>) => {
+      // The previous answer is about the previous action, so it is cleared while the new one runs;
+      // the owner never reads a stale "copied" line next to a control they just pressed.
+      embedStatus.textContent = '';
+      embedStatus.hidden = true;
+      void run().then(outcome => {
+        if (!outcome.copied) {
+          announce(outcome.reason === 'unavailable' ? COPY.embedContextUnavailable
+            : outcome.reason === 'no-text' ? COPY.embedContextEmpty
+            : outcome.reason === 'no-selection' ? COPY.embedSelectionMissing
+            : outcome.reason === 'no-file' ? COPY.embedFileMissing
+            : COPY.embedContextFailed);
+          return;
+        }
+        announce(outcome.kind === 'selection' ? COPY.embedSelectionCopied(outcome.pageLabel)
+          : outcome.kind === 'file' ? COPY.embedFileCopied
+          : outcome.truncated ? COPY.embedContextShortened(outcome.pages, outcome.totalPages)
+          : COPY.embedContextCopied(outcome.pages, outcome.totalPages));
+      }).catch(() => announce(COPY.embedContextFailed));
+    };
+    const action = (label: string, id: string, run: () => Promise<EmbedClipboardOutcome>) => {
+      const control = button(label, id, () => copyAction(run));
+      control.dataset.zchatgptAction = id;
+      return control;
+    };
+    const embedActions = el('div', 'zchatgpt-embed-actions');
+    embedActions.dataset.zchatgptEmbedActions = '';
+    embedActions.append(
+      action(COPY.embedCopyContext, 'copy-context', () => hooks.chatEmbed?.copyContext?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
+      // The file route is how the actual document reaches the application: it goes on the clipboard
+      // as a file and the owner pastes it into ChatGPT's own composer, whose own upload path runs.
+      action(COPY.embedAttachPdf, 'copy-pdf-file', () => hooks.chatEmbed?.copyPdfFile?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
+      action(COPY.embedCopySelection, 'copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
+      button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'clock'),
+    );
+    embedBar.append(embedActions, embedStatus);
+    embedSection.append(embedBar, embedSlot);
+    root.append(embedSection);
+  }
   const localizer = mountUILocale(root);
   let lastLanguage: 'en' | 'zh' | null = null;
   /** JSON key of the rendered context report, so the ring's details rebuild only when it changes. */
@@ -1486,6 +1602,24 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const update = (state: PresenterState) => {
     latestViewState = state;
     paintTiming(state);
+    /**
+     * Chat mode with a host surface is the real ChatGPT application. The native chrome stays mounted
+     * (so a switch back rebuilds nothing) but is hidden, and the one mode control moves between the
+     * composer and the embed bar so exactly one control is ever visible.
+     */
+    const embedActive = !!hooks.chatEmbed && state.mode === 'chat';
+    if (embedSection && embedBar && embedSlot && hooks.chatEmbed) {
+      root.dataset.zchatgptEmbedActive = String(embedActive);
+      embedSection.hidden = !embedActive;
+      chat.hidden = embedActive;
+      if (embedActive) {
+        if (modeSwitch.parentElement !== embedBar) embedBar.append(modeSwitch);
+        hooks.chatEmbed.show(embedSlot);
+      } else {
+        if (modeSwitch.parentElement !== leading) leading.append(modeSwitch);
+        hooks.chatEmbed.hide();
+      }
+    }
     // Chat mode is the read-only surface: Agent-only affordances (approvals, ledger, reconciliation,
     // undo, annotation review) never appear, even if a stored conversation still carries tasks. The
     // tasks stay only in presenter state; the view simply does not render them (invariants 3 and 4).
@@ -1688,11 +1822,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   const unbind = presenter.bind(update);
   return () => {
+    hooks.chatEmbed?.hide();
     presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose(); clearTimingInterval();
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKey);
     for (const target of pasteDocuments) target.removeEventListener('paste', onPaste, true);
     pasteWindow?.removeEventListener('paste', onPaste, true);
     chat.remove();
+    embedSection?.remove();
   };
 }

@@ -194,6 +194,65 @@ describe('conversation presenter', () => {
     expect(presenter.snapshot().document.prepared).toEqual(documentA);
     expect(f.sent).toHaveLength(0);
   });
+  it('does not start the local PDF read for a host-hosted Chat surface, and starts it on Agent', async () => {
+    const f = fixture();
+    const prepare = vi.fn(() => Promise.resolve(documentA)); const validate = vi.fn(async () => {});
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), {
+      ...f.services, chatHostedExternally: true,
+      document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} },
+    });
+    await presenter.activate();
+    // Chat mode is the hosted ChatGPT application: it sends nothing from this presenter, so the PDF
+    // read that only a native Chat request needs is not started for a surface that is not rendered.
+    expect(prepare).not.toHaveBeenCalled();
+    expect(presenter.snapshot().document.phase).toBe('idle');
+    presenter.setMode('agent');
+    await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('ready'));
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(f.sent).toHaveLength(0);
+  });
+  it('prepares the current paper as clipboard text for the hosted Chat surface without a request', async () => {
+    const f = fixture();
+    const prepare = vi.fn(() => Promise.resolve(documentA)); const validate = vi.fn(async () => {});
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
+      ...f.services, chatHostedExternally: true,
+      document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} },
+    });
+    await presenter.activate();
+    const brief = await presenter.exportDocumentBrief();
+    expect(brief).toMatchObject({ ok: true, pages: 2, totalPages: 2, truncated: false });
+    if (!brief.ok) throw new Error('expected a brief');
+    expect(brief.text).toContain('Paper: Synthetic Paper A');
+    expect(brief.text).toContain('Definition: x denotes the hidden state.');
+    // The hosted application owns the conversation: preparing text for the clipboard starts no
+    // request, no session and no task, even though the local PDF read did run.
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(f.sent).toHaveLength(0);
+  });
+  it('reports an unreadable PDF and a disabled document instead of promising an empty brief', async () => {
+    const f = fixture();
+    const empty = { ...documentA, pages: documentA.pages.map(page => ({ ...page, text: '', status: 'empty' as const })) };
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), {
+      ...f.services, document: { prepare: () => Promise.resolve(empty), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+    });
+    await presenter.activate();
+    expect(await presenter.exportDocumentBrief()).toEqual({ ok: false, reason: 'no-text' });
+    const disabled = new ConversationPresenter(presenterContext(paperA, 'A'), {
+      ...f.services, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
+    });
+    await disabled.activate();
+    expect(await disabled.exportDocumentBrief()).toEqual({ ok: false, reason: 'unavailable' });
+  });
+  it('reports a failed local read as a failure, keeping the reading error on the presenter', async () => {
+    const f = fixture();
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), {
+      ...f.services, document: { prepare: () => Promise.reject(new Error('The PDF could not be read.')), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
+    });
+    await presenter.activate();
+    expect(await presenter.exportDocumentBrief()).toEqual({ ok: false, reason: 'failed' });
+    expect(f.sent).toHaveLength(0);
+  });
   it('plans a send against the one core request-budget authority when no port is injected (R5)', async () => {
     const f = fixture();
     const presenter = new ConversationPresenter(presenterContext(paperA, 'A'), { ...f.services, document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} } });

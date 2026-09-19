@@ -305,3 +305,29 @@ it('translates the attach-file row and the file refusals while leaving the file 
   expect(chip.textContent).toBe('Send');
   locale.update('en'); expect(title.textContent).toBe('Attach file…'); expect(error.textContent).toBe('This file has no text to attach.'); locale.dispose();
 });
+
+it('translates the hosted-application bar while keeping its page numbers and labels verbatim', () => {
+  const { root, add } = setup();
+  const bar = add('div', 'zchatgpt-embed-bar', '', root);
+  const copy = add('button', 'zchatgpt-button', 'Copy paper context', bar); copy.dataset.zchatgptAction = 'copy-context';
+  const selection = add('button', 'zchatgpt-button', 'Copy selection', bar); selection.dataset.zchatgptAction = 'copy-selection';
+  const attach = add('button', 'zchatgpt-button', 'Attach current PDF', bar); attach.dataset.zchatgptAction = 'copy-pdf-file';
+  const reload = add('button', 'zchatgpt-button', 'Reload ChatGPT', bar); reload.dataset.zchatgptAction = 'reload-chat';
+  const status = add('span', 'zchatgpt-embed-status', 'Copied 3 of 12 pages — paste into ChatGPT.', bar);
+  const locale = mountUILocale(root); locale.update('zh');
+  expect(copy.textContent).toBe('复制论文上下文');
+  expect(selection.textContent).toBe('复制选中内容');
+  expect(attach.textContent).toBe('附加当前 PDF');
+  expect(reload.textContent).toBe('重新加载 ChatGPT');
+  // The counts are data: the sentence around them translates, the numbers do not.
+  expect(status.textContent).toBe('已复制 3/12 页 — 请粘贴到 ChatGPT。');
+  // A line that arrives after the language switch is picked up by the observer, not just at update().
+  status.textContent = 'Copied the selection from page iv — paste into ChatGPT.';
+  return Promise.resolve().then(() => {
+    expect(status.textContent).toBe('已复制第 iv 页的选中内容 — 请粘贴到 ChatGPT。');
+    locale.update('en');
+    expect(status.textContent).toBe('Copied the selection from page iv — paste into ChatGPT.');
+    expect(copy.textContent).toBe('Copy paper context');
+    locale.dispose();
+  });
+});

@@ -10,6 +10,7 @@ import { estimateRequestBudget, type ContextBudget } from '../../../core/src/cod
 import { planContext, type ContextPlan } from '../../../core/src/context/planner.ts';
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { conversationHasAgentWork } from '../../../core/src/chat/agent-work.ts';
+import { documentBrief } from '../../../core/src/chat/document-brief.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
@@ -26,6 +27,14 @@ const STALE_PROFILE_MESSAGE = 'The saved research profile is no longer available
  * composition root and tests already use; `AgentCapability` is the same interface.
  */
 export type { AgentCapability, PresenterAgent, PresenterReading } from './capability.ts';
+/**
+ * The outcome of preparing the current paper for the clipboard. It is a result rather than an
+ * exception because "this PDF has no readable text" and "copying is unavailable here" are ordinary
+ * answers the owner sees, not failures of the sidebar.
+ */
+export type DocumentBriefResult =
+  | { ok: true; text: string; pages: number; totalPages: number; truncated: boolean }
+  | { ok: false; reason: 'unavailable' | 'no-text' | 'failed' };
 export interface PresenterServices {
   /**
    * The one shared reader client. Obtaining it performs no Codex work: opening the sidebar, listing
@@ -39,6 +48,13 @@ export interface PresenterServices {
   ensureAgent(): Promise<void>;
   /** The honest reason a Chat send cannot run in this build, or null when a transport is integrated. */
   chatUnavailableReason(): string | null;
+  /**
+   * True when the host owns Chat mode by hosting the real ChatGPT application, so this presenter's
+   * Chat path never produces a Chat answer. Chat mode then renders no native transcript, and the
+   * local PDF read that only a native Chat request needs is not started for it; Agent mode is
+   * unaffected and still prepares the shared document when it is selected.
+   */
+  chatHostedExternally?: boolean;
   openAuthorization(url: string): void; uuid(): string; now(): string; document?: DocumentServices;
   getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
@@ -287,6 +303,10 @@ export class ConversationPresenter {
     // infrastructure, so switching to Agent is what licenses the first Codex startup and refresh.
     // Selecting Chat again is free of both.
     if (mode === 'agent') {
+      // Agent's sends carry the document, and a host-hosted Chat surface never prepares it eagerly,
+      // so selecting Agent is what starts the local read; the send path would otherwise do it and
+      // make the first Agent request wait for a whole PDF.
+      if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
       void this.services.ensureAgent().then(() => this.refreshTaskState()).catch(error => {
         if (this.state.mode === 'agent') this.reportError(this.errorText(error));
       });
@@ -704,7 +724,11 @@ export class ConversationPresenter {
   // ---- runtime ----------------------------------------------------------------------------------
   async activate(): Promise<void> {
     try { await this.loadLocal(); } catch { /* Preserve unreadable records and report the local failure. */ }
-    if (this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
+    // The local PDF read is what a native Chat request needs as context. When the host hosts Chat
+    // itself, Chat mode sends nothing from here, so the read waits for Agent mode (which prepares
+    // the same shared document through its own send path) instead of running for an unused surface.
+    const chatNeedsDocument = !this.services.chatHostedExternally || this.state.mode === 'agent';
+    if (chatNeedsDocument && this.state.document.enabled && this.state.document.phase === 'idle') void this.prepareContext().catch(() => {});
     // Opening the sidebar restores local chats only. The Codex-backed catalog is not a precondition
     // for showing the reader's own history, and nothing here starts Codex.
     try {
@@ -747,6 +771,24 @@ export class ConversationPresenter {
     if (pending) { this.update({ pendingExplain: null }); void this.explain(pending); }
   }
   prepareContext(): Promise<DocumentContext> { return this.prepareDocument(this.state.document.range); }
+  /**
+   * The current paper as clipboard text, for Chat mode's hosted application. The web app owns its own
+   * conversation and this host has no supported way to inject context into it, so the owner is handed
+   * the text they paste themselves. That makes this a local read, not a request: it may start the PDF
+   * read the hosted surface never needed, and it touches no Codex session, task, tool or approval.
+   */
+  async exportDocumentBrief(): Promise<DocumentBriefResult> {
+    if (!this.state.document.enabled) return { ok: false, reason: 'unavailable' };
+    try {
+      const brief = documentBrief(this.identity, await this.prepareContext());
+      if (!brief) return { ok: false, reason: 'no-text' };
+      return { ok: true, text: brief.text, pages: brief.included, totalPages: brief.totalPages, truncated: brief.truncated };
+    } catch {
+      // The reading failure is already reported on the presenter's own error surface; the clipboard
+      // call site only needs to know that nothing was copied.
+      return { ok: false, reason: 'failed' };
+    }
+  }
   private prepareDocument(range: readonly [number, number] | null): Promise<DocumentContext> {
     const key = JSON.stringify(range);
     if (this.documentJob?.range === key && !this.documentJob.controller.signal.aborted) return this.documentJob.promise;

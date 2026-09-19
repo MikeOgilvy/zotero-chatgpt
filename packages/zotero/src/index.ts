@@ -1,11 +1,14 @@
 import { mountChatView, renderReaderShell } from './chat/view.ts';
 import { ConversationPresenter, type PresenterAgent } from './chat/presenter.ts';
+import { createChatEmbedSurface, type ChatEmbedSurface } from './chat/embed.ts';
 import { createAgentRuntime, type AgentRuntime } from './runtime/agent-runtime.ts';
 import { createLocalServices, openLocalStorage } from './runtime/local-services.ts';
 import { runtimePaths } from './runtime/prepare.ts';
 import { createGeneratedImageLoader } from './runtime/generated-image.ts';
 import { createReaderClient } from '../../core/src/index.ts';
 import { CHAT_TRANSPORT_UNAVAILABLE_MESSAGE } from '../../core/src/chat/chat-transport.ts';
+import { selectionBrief } from '../../core/src/chat/document-brief.ts';
+import { copyFileToClipboard } from './chat/clipboard-file.ts';
 import type { ReaderClient } from '../../contracts/src/runtime.ts';
 import type { ChatTransport } from '../../contracts/src/execution.ts';
 import { PINNED_RUNTIME } from '../../../runtime/manifest.ts';
@@ -26,7 +29,7 @@ import { ReaderError, paperId, type Citation, type PaperScope } from '../../cont
 declare const Zotero: ZoteroHost;
 declare const crypto: { randomUUID(): string };
 export interface PluginContext { rootURI: string; pluginID: string; version?: string }
-interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string }
+interface ReaderEntry { pane: NativeReaderPane; buttons: Set<HTMLButtonElement>; bar: SelectionActionBar; latestSelectionId?: string; latestCitation?: Citation }
 const CLIENT_ID_PREF = 'extensions.zchatgpt.clientId';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 let context: PluginContext | undefined;
@@ -38,15 +41,28 @@ let notifierID: string | undefined;
  * the protocol handshake only happen when `connection()` is called, which only Agent actions do.
  */
 let agent: AgentRuntime | undefined;
-/** The one shared reader client. Built from local storage; its construction performs no Codex work. */
+/**
+ * The one shared reader client. Built from local storage; its construction performs no Codex work.
+ */
 let clientPromise: Promise<ReaderClient> | null = null;
 let client: ReaderClient | null = null;
 /**
- * Chat's backend is an unresolved platform boundary. There is deliberately no concrete transport in
- * this build, so Chat fails with the honest reason instead of ever being routed through Codex. A
- * future supported transport is injected here and nowhere else.
+ * Chat's transport is no longer a boundary of ours: Chat mode hosts the real ChatGPT application in
+ * a chrome browser surface (`chat/embed.ts`), so the native Chat transport stays unconfigured and is
+ * never reached. Agent keeps the bundled Codex runtime.
  */
 const CHAT_TRANSPORT: ChatTransport | undefined = undefined;
+/**
+ * Chat mode's hosted surfaces, one per main window. They are created lazily on the first Chat dock
+ * and then kept for the window's life: the ChatGPT session, its cookies and the open conversation
+ * belong to that document, so `Agent -> Chat`, a reader switch or a sidebar close must not reload it.
+ */
+const chatSurfaces = new Map<ZoteroWindow, ChatEmbedSurface>();
+function chatSurface(win: ZoteroWindow): ChatEmbedSurface {
+  let surface = chatSurfaces.get(win);
+  if (!surface) { surface = createChatEmbedSurface(win); chatSurfaces.set(win, surface); }
+  return surface;
+}
 let documentCache: ReaderDocumentCache | undefined;
 let localServices: ReturnType<typeof createLocalServices> | undefined;
 let preferencePanes: PreferencePaneRegistrar | undefined;
@@ -125,7 +141,9 @@ function ensureAgent(): Promise<void> {
 }
 /**
  * Known without starting Codex, because the transport choice is compile-time in this build. Chat
- * mode states this itself instead of borrowing the Agent sign-in status line.
+ * mode never renders this in production any more — Chat is the hosted ChatGPT application — but the
+ * native Chat path still refuses rather than silently borrowing Agent's runtime, so the reason is
+ * still reported to the few callers that could reach it.
  */
 function chatUnavailableReason(): string | null { return CHAT_TRANSPORT ? null : CHAT_TRANSPORT_UNAVAILABLE_MESSAGE; }
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
@@ -144,6 +162,9 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
       client: sharedClient,
       ensureAgent,
       chatUnavailableReason,
+      // Chat mode's surface is the hosted ChatGPT application, so this presenter's Chat path is
+      // never the producer of a Chat answer and must not start the work that only it needs.
+      chatHostedExternally: true,
       openAuthorization: url => Zotero.launchURL(url),
       uuid: () => crypto.randomUUID(),
       now: () => new Date().toISOString(),
@@ -227,6 +248,42 @@ function entry(reader: HostReader): ReaderEntry {
         // restoring the previous Zotero context pane, zoom/anchor and focus. The view calls it only
         // when the last unarchived chat for this attachment is closed.
         closeDock: close,
+        // Chat mode is the real ChatGPT web application. The surface is created on the first Chat
+        // dock and kept for the window, so no mode switch, reader switch or sidebar close unloads
+        // the session; the reader's own browser is the frame whose rect the surface is measured in.
+        chatEmbed: {
+          show: anchor => chatSurface(reader._window).show(anchor, reader._iframe ?? null),
+          hide: () => chatSurfaces.get(reader._window)?.hide(),
+          reload: () => chatSurfaces.get(reader._window)?.reload(),
+          // The application owns its own conversation and this host has no supported way to put
+          // context into it, so both controls prepare text and say plainly that it is on the
+          // clipboard. Neither one sends anything, and neither starts Codex.
+          copyContext: async () => {
+            const brief = await presenter.exportDocumentBrief();
+            if (!brief.ok) return { copied: false, reason: brief.reason };
+            hooks.copyText(brief.text);
+            return { copied: true, kind: 'document', pages: brief.pages, totalPages: brief.totalPages, truncated: brief.truncated };
+          },
+          // The one route that hands the real document to the application: the file itself goes on
+          // the clipboard and the owner pastes it into ChatGPT's own composer. Nothing here touches
+          // the remote page or its upload control.
+          copyPdfFile: async () => {
+            const item = Zotero.Items.get(reader.itemID);
+            const path = item?.getFilePathAsync ? await item.getFilePathAsync() : false;
+            if (!path) return { copied: false, reason: 'no-file' as const };
+            const outcome = copyFileToClipboard(path);
+            if (outcome === 'copied') return { copied: true, kind: 'file' as const };
+            return { copied: false, reason: outcome === 'unsupported' ? 'unavailable' as const : 'failed' as const };
+          },
+          copySelection: () => {
+            // The last selection Zotero reported through its own reader event; the sidebar never
+            // re-reads the reader's DOM to guess at a newer one.
+            const citation = readers.get(reader)?.latestCitation ?? null;
+            if (!citation) return Promise.resolve({ copied: false as const, reason: 'no-selection' as const });
+            hooks.copyText(selectionBrief(citation));
+            return Promise.resolve({ copied: true as const, kind: 'selection' as const, pageLabel: citation.pageLabel });
+          },
+        },
         uuid: () => crypto.randomUUID(),
         readerZoom: {
           zoomIn: () => { pane.controller.manualZoom(); zoomReader(reader, 'in'); },
@@ -264,6 +321,9 @@ function onSelectionPopup(event: SelectionPopupEvent): void {
     const citation = captureSelection(event, paperScope(clientId(), identity), metadata, { uuid: () => crypto.randomUUID(), now: () => new Date().toISOString() });
     const version = freezeCitationVersion(Zotero, event.reader, citation);
     current.latestSelectionId = citation.id;
+    // Chat mode hosts the web application, whose conversation this host cannot feed. The most recent
+    // selection Zotero reported is what its "Copy selection" control can hand to the owner's clipboard.
+    current.latestCitation = citation;
     citationVersions.set(citation, version);
     void version.catch(() => { if (active && current.latestSelectionId === citation.id) current.bar.showNotice(event, 'This PDF version could not be verified. Reopen the PDF and select the passage again.'); });
     current.bar.show(event, citation);
@@ -294,6 +354,9 @@ function reconcile(): void {
       readers.delete(reader);
     } else current.pane.reconcile();
   }
+  // A tab change moves the reader browser that the Chat surface is pinned to, and the tab notifier
+  // is the only signal that arrives before the frame is re-laid-out.
+  for (const surface of chatSurfaces.values()) surface.sync();
 }
 export function startup(options: PluginContext): void {
   if (active) return;
@@ -381,6 +444,9 @@ export function onMainWindowLoad(window: Window): void {
 }
 export function onMainWindowUnload(window: Window): void {
   const win = window as ZoteroWindow;
+  // The window is going away, so its Chat surface goes with it: the document cannot outlive the
+  // window it was created in.
+  chatSurfaces.get(win)?.destroy(); chatSurfaces.delete(win);
   for (const [reader, current] of readers) {
     if (reader._window !== win) continue;
     for (const button of current.buttons) button.remove();
@@ -391,6 +457,8 @@ export function onMainWindowUnload(window: Window): void {
 export async function shutdown(): Promise<void> {
   active = false;
   for (const win of windows.keys()) onMainWindowUnload(win);
+  for (const surface of chatSurfaces.values()) surface.destroy();
+  chatSurfaces.clear();
   for (const current of readers.values()) { for (const button of current.buttons) button.remove(); current.pane.dispose(); current.bar.dispose(); }
   readers.clear();
   preferencePanes?.remove(); preferencePanes = undefined;

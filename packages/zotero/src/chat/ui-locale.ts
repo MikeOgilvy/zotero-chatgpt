@@ -12,6 +12,21 @@ const COPY: Readonly<Record<string, string>> = {
   'Codex is unavailable': 'Codex 暂不可用', 'Finish signing in to ChatGPT in your browser.': '请在浏览器中完成 ChatGPT 登录。',
   'Sign in with ChatGPT to ask a question.': '使用 ChatGPT 登录后即可提问。', 'Responding…': '正在回答…',
   'Chat is unavailable in this build. Use Agent mode.': '此版本未集成 Chat 通道，请使用 Agent 模式。',
+  // Chat mode's hosted application bar. The application's own UI is not translated here; these are
+  // only the controls this host adds, and what they did with the user's clipboard.
+  'Reload ChatGPT': '重新加载 ChatGPT',
+  'Copy paper context': '复制论文上下文',
+  'Attach current PDF': '附加当前 PDF',
+  'Copy selection': '复制选中内容',
+  // The file route puts the real PDF on the clipboard; the paste into ChatGPT is the owner's step.
+  'The PDF file is on your clipboard — paste it into ChatGPT to attach it.': 'PDF 文件已复制到剪贴板 — 粘贴到 ChatGPT 即可附加。',
+  'Copying the PDF file is unavailable here.': '此处无法复制 PDF 文件。',
+  'This attachment has no local PDF file to copy.': '此附件没有可复制的本地 PDF 文件。',
+  'The PDF file could not be copied.': '无法复制该 PDF 文件。',
+  'This PDF is not readable here, so there is nothing to copy.': '此处无法读取该 PDF，没有可复制的内容。',
+  'No text was read from this PDF, so there is nothing to copy.': '未能从该 PDF 读取到文本，没有可复制的内容。',
+  'The paper context could not be prepared.': '无法准备论文上下文。',
+  'Select text in the PDF first, then copy it here.': '请先在 PDF 中选中文本，再复制。',
   Recorded: '已记录', Stopped: '已停止', Failed: '失败', Queued: '已排队', 'Cancelled before sending': '发送前已取消',
   'Unconfirmed: the connection was interrupted. The request was not sent again.': '状态未确认：连接已中断，未重新发送此请求。',
   'No saved chats match this search.': '没有匹配的已保存对话。',
@@ -143,9 +158,11 @@ const TEXT = [
   '[data-zchatgpt-collection-target] option[value=""]', '.zchatgpt-plus-menu', '.zchatgpt-plus-heading', '.zchatgpt-plus-row-title', '.zchatgpt-plus-row-description', '.zchatgpt-acquisition-target', '.zchatgpt-command-heading', '.zchatgpt-command-status',
   '.zchatgpt-task-card > summary', '.zchatgpt-task-row-header > .zchatgpt-task-muted', '.zchatgpt-task-check', '.zchatgpt-task-field',
   '.zchatgpt-task-field option[value=""]', '.zchatgpt-task-counts', '.zchatgpt-task-body > .zchatgpt-task-muted',
-  '[data-zchatgpt-reading-job] .zchatgpt-task-row > p:first-child', '[data-zchatgpt-ui="true"]', '.zchatgpt-context-ring', '.zchatgpt-request-timing-text',
+  '[data-zchatgpt-reading-job] .zchatgpt-task-row > p:first-child', '[data-zchatgpt-ui="true"]',   '.zchatgpt-context-ring', '.zchatgpt-request-timing-text',
   // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
   '.zchatgpt-document-status',
+  // The hosted-application bar's answer line: page counts and labels are re-emitted verbatim.
+  '.zchatgpt-embed-status',
   // The unbound New chat tab is copy, unlike named chat titles.
   '.zchatgpt-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
@@ -205,6 +222,14 @@ function progress(text: string): string {
   if (match) return `已在本地读取 ${match[2]} 页中的 ${match[1]} 页`;
   match = /^No text could be read from this PDF locally$/u.exec(text);
   if (match) return '无法在本地从此 PDF 提取到文本';
+  // Clipboard answers from Chat mode's hosted-application bar. Every page count, page label and
+  // total is data and is re-emitted verbatim; only the sentence around it is translated.
+  match = /^Copied a shortened (\d+) of (\d+) pages — paste into ChatGPT\.$/u.exec(text);
+  if (match) return `已复制精简后的 ${match[1]}/${match[2]} 页 — 请粘贴到 ChatGPT。`;
+  match = /^Copied (\d+) of (\d+) pages — paste into ChatGPT\.$/u.exec(text);
+  if (match) return `已复制 ${match[1]}/${match[2]} 页 — 请粘贴到 ChatGPT。`;
+  match = /^Copied the selection from page (.+) — paste into ChatGPT\.$/u.exec(text);
+  if (match) return `已复制第 ${match[1]} 页的选中内容 — 请粘贴到 ChatGPT。`;
   match = /^Target collection: (.*)$/u.exec(text);
   if (match) return `目标分类：${match[1]}`;
   match = /^Source: (\S+)\nPermissions: (.*)\nUnsupported dependencies: (.*)$/u.exec(text);
