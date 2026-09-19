@@ -45,6 +45,19 @@ function itemOutcome(item: TaskItem): string {
   if (item.choice?.downloadPDF === false) return 'Metadata saved; PDF not requested';
   return item.status === 'metadata-only' ? 'Metadata saved; PDF not attempted' : 'Metadata saved';
 }
+function annotationSource(item: Extract<TaskItem, { kind: 'annotation' }>): string {
+  const resolution = item.resolution;
+  if (resolution?.status === 'resolved') return `Verified source: p. ${resolution.candidate.pageLabel}`;
+  if (resolution?.status === 'ambiguous') return `Proposed model page ${item.proposal.pageIndex + 1} · ${resolution.matches} matching passages`;
+  const reason = resolution?.status === 'unresolved' ? {
+    'not-found': 'Exact quote not found',
+    'incomplete-text': 'Page text incomplete',
+    'invalid-geometry': 'Quote geometry unavailable',
+    'range-required': 'Page range required',
+    'unsupported-span': 'Quote crosses an unsupported page span',
+  }[resolution.reason] : 'Source has not been resolved';
+  return `Proposed model page ${item.proposal.pageIndex + 1} · ${reason}`;
+}
 function placeChildren(parent: HTMLElement, nodes: HTMLElement[]): void {
   const wanted = new Set(nodes);
   for (const child of [...parent.children]) if (!wanted.has(child as HTMLElement)) child.remove();
@@ -143,7 +156,7 @@ export function mountTaskView(container: HTMLElement, actions: TaskViewActions):
         organizationDetail.hidden = item.kind !== 'organization';
         if (item.kind === 'annotation') {
           quote.textContent = item.proposal.quote; reason.textContent = item.proposal.reason;
-          page.textContent = item.resolution?.status === 'resolved' ? `p. ${item.resolution.candidate.pageLabel}` : `Proposed p. ${item.proposal.pageIndex + 1} · ${item.resolution?.status === 'ambiguous' ? `${item.resolution.matches} matching passages` : 'Source not resolved'}`;
+          page.textContent = annotationSource(item);
         } else if (item.kind === 'acquisition') {
           const resolved = choiceFor(item); const candidates = item.preview?.candidates ?? [];
           quote.textContent = item.item?.metadata.title ?? resolved.metadata?.title ?? item.identifier; reason.textContent = item.identifier; page.textContent = '';

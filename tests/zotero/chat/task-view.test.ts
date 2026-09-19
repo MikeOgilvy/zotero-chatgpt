@@ -38,6 +38,7 @@ function setup(overrides: Partial<TaskViewActions> = {}) {
 it('shows source-resolved annotation review and preserves checkbox state and focus across updates', async () => {
   const { container, view, actions, change, action, document } = setup(); const original = task(); view.update({ tasks: [original] });
   expect(container.textContent).toContain(original.question); expect(container.textContent).toContain('iv'); expect(container.textContent).toContain('Defines the central variable');
+  expect(container.querySelector('[data-zchatgpt-task-item-id="three"]')?.textContent).toContain('Proposed model page 1 · Exact quote not found');
   const second = container.querySelector<HTMLInputElement>('[data-zchatgpt-task-select="two"]')!;
   second.checked = false; change(second); second.focus();
   view.update({ tasks: [{ ...original, revision: 2, updatedAt: 'later' }] });
