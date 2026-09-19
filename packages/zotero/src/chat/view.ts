@@ -690,13 +690,17 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const embedSlot = embedSection ? el('div', 'zchatgpt-embed-slot') : null;
   /** The bar's own one-line answer to the last action; it replaces the previous answer each time. */
   const embedStatus = embedSection ? el('span', 'zchatgpt-embed-status') : null;
+  /** Actor/readiness/submission lifecycle; clipboard controls use `embedStatus` independently. */
+  const embedBridgeStatus = embedSection ? el('span', 'zchatgpt-embed-status zchatgpt-embed-bridge-status') : null;
   const embedContextNotice = embedSection ? el('p', 'zchatgpt-embed-context-notice') : null;
   const embedConsent = embedSection ? button(COPY.continueWithPdf, 'continue-with-pdf', () => presenter.acknowledgeContext()) : null;
-  if (embedSection && embedBar && embedSlot && embedStatus && embedContextNotice && embedConsent) {
+  if (embedSection && embedBar && embedSlot && embedStatus && embedBridgeStatus && embedContextNotice && embedConsent) {
     embedSection.dataset.zchatgptEmbed = '';
     embedBar.dataset.zchatgptEmbedBar = '';
     embedSlot.dataset.zchatgptEmbedSlot = '';
     embedStatus.dataset.zchatgptEmbedStatus = '';
+    embedBridgeStatus.dataset.zchatgptBridgeStatusLine = '';
+    embedBridgeStatus.hidden = true;
     embedContextNotice.dataset.zchatgptEmbedContextNotice = '';
     embedContextNotice.setAttribute('data-zchatgpt-ui', 'true');
     embedConsent.dataset.zchatgptAction = 'continue-with-pdf';
@@ -742,7 +746,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       action(COPY.embedCopySelection, 'copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
       button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'clock'),
     );
-    embedBar.append(embedActions, embedContextNotice, embedConsent, embedStatus);
+    embedBar.append(embedActions, embedContextNotice, embedConsent, embedBridgeStatus, embedStatus);
     embedSection.append(embedBar, embedSlot);
     root.append(embedSection);
   }

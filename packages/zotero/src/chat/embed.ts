@@ -309,7 +309,7 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
   const officialDocument = (): boolean => isOfficialChatURL(browser.currentURI?.spec ?? null);
   const announce = (message: string): void => {
     const host = anchor?.closest?.('[data-zchatgpt-embed]') ?? null;
-    const status = host?.querySelector<HTMLElement>('[data-zchatgpt-embed-status]') ?? null;
+    const status = host?.querySelector<HTMLElement>('[data-zchatgpt-bridge-status-line]') ?? null;
     if (!status) return;
     status.textContent = message; status.hidden = false;
   };

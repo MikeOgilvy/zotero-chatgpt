@@ -176,7 +176,7 @@ const TEXT = [
   // Local reading status: the counts inside the sentence are re-emitted verbatim by `progress`.
   '.zchatgpt-document-status',
   // The hosted-application bar's answer line: page counts and labels are re-emitted verbatim.
-  '.zchatgpt-embed-status', '.zchatgpt-embed-context-notice',
+  '.zchatgpt-embed-status', '.zchatgpt-embed-bridge-status', '.zchatgpt-embed-context-notice',
   // The unbound New chat tab is copy, unlike named chat titles.
   '.zchatgpt-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.

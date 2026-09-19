@@ -323,3 +323,24 @@ it('fails closed when the official page has an unknown editor and opens only rec
   expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('ready');
   surface.destroy();
 });
+
+it('keeps actor readiness messages separate from clipboard-action results', () => {
+  const { win, doc } = chromeWindow();
+  const surface = createChatEmbedSurface(win);
+  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & { currentURI: { spec: string } };
+  browser.currentURI = { spec: CHAT_APP_URL };
+  const host = doc.createElement('section'); host.dataset.zchatgptEmbed = '';
+  const bridge = doc.createElement('span'); bridge.dataset.zchatgptBridgeStatusLine = ''; bridge.hidden = true;
+  const clipboard = doc.createElement('span'); clipboard.dataset.zchatgptEmbedStatus = ''; clipboard.textContent = 'Copied 2 of 2 pages — paste into ChatGPT.';
+  const slot = place(doc.createElement('div'), { left: 10, top: 20, width: 300, height: 500 });
+  host.append(bridge, clipboard, slot); doc.documentElement.append(host);
+  surface.show(slot, null);
+  const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+  browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+    detail: { kind: 'readiness', binding: browser.getAttribute('data-zchatgpt-embed-binding'), status: 'unsupported-send' },
+  }));
+  expect(bridge.hidden).toBe(false);
+  expect(bridge.textContent).toContain('send control is unsupported');
+  expect(clipboard.textContent).toBe('Copied 2 of 2 pages — paste into ChatGPT.');
+  surface.destroy();
+});
