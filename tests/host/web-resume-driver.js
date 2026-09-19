@@ -60,10 +60,12 @@ async function runHostSmoke(config) {
       try { const value = await boundedQuery(browser, 'ZoteroChatGPTOfficialChat', 'probe', {}, 5000); productStatus = typeof value?.status === 'string' ? value.status : 'invalid-response'; } catch { productStatus = 'unavailable'; }
       try {
         const value = await boundedQuery(browser, 'ZoteroChatGPTWebAcceptance', 'probe', { verificationToken: config.webResumeToken }, 5000);
-        structure = value?.status === 'ok' ? { draftLength: Number(value.draftLength ?? 0), streaming: value.streaming === true, inputReady: value.inputReady === true, sendReady: value.sendReady === true } : { status: value?.status ?? 'invalid-response' };
+        structure = value?.status === 'ok' ? { draftLength: Number(value.draftLength ?? 0), streaming: value.streaming === true, inputReady: value.inputReady === true, sendReady: value.sendReady === true, documentReadyState: value.documentReadyState ?? 'other', challenge: value.challenge ?? { running: false, stage: false, iframe: false }, loginEntryPresent: value.loginEntryPresent === true } : { status: value?.status ?? 'invalid-response' };
       } catch { structure = { status: 'unavailable' }; }
       const mode = doc()?.querySelector('[data-zchatgpt-mode-switch]')?.dataset.zchatgptMode ?? null;
-      const sample = { ms: Date.now() - restoreStarted, currentCanonicalURL: current, targetMatched: current === targetURL, bindingMatched: browser.getAttribute('data-zchatgpt-context-binding') === binding, mode, productStatus, structure };
+      let rectNonZero = false; let browserHidden = null; let docShellIsActive = null;
+      try { const rect = browser.getBoundingClientRect(); rectNonZero = rect.width > 0 && rect.height > 0; browserHidden = Boolean(browser.hidden || win.getComputedStyle(browser).display === 'none'); docShellIsActive = browser.docShell ? Boolean(browser.docShell.isActive) : null; } catch { /* bounded structure only */ }
+      const sample = { ms: Date.now() - restoreStarted, currentCanonicalURL: current, targetMatched: current === targetURL, bindingMatched: browser.getAttribute('data-zchatgpt-context-binding') === binding, mode, productStatus, structure, painted: String(browser.getAttribute('data-zchatgpt-embed-painted') || ''), rectNonZero, browserHidden, docShellIsActive, readerSelectedTab: win.Zotero_Tabs.selectedID === opened.tabID };
       const prior = restoreSamples.at(-1); if (!prior || JSON.stringify({ ...prior, ms: 0 }) !== JSON.stringify({ ...sample, ms: 0 })) restoreSamples.push(sample);
       report.restoreDiagnostics = { status: current === targetURL ? 'restored' : 'waiting', samples: restoreSamples.slice(-60), latest: sample };
       if (Date.now() - lastSave >= 5000 || current === targetURL) { lastSave = Date.now(); await save(); }

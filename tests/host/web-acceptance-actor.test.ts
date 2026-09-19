@@ -25,6 +25,9 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
     officialURL: true,
     canonicalOrigin: 'https://chatgpt.com',
     canonicalURL: 'https://chatgpt.com/c/synthetic',
+    documentReadyState: 'interactive',
+    challenge: { running: false, stage: false, iframe: false },
+    loginEntryPresent: false,
     inputReady: true,
     sendReady: true,
     draftMatchesExactTestQuestion: true,
@@ -47,6 +50,14 @@ it('returns only bounded official-page booleans and counts for web acceptance', 
   });
   expect(Object.keys(result)).not.toEqual(expect.arrayContaining(['transcript', 'text', 'formValue', 'cookie', 'href', 'pathname', 'search']));
   expect(JSON.stringify(result)).not.toMatch(/hidden transcript text|temporary=secret|Send message|Start voice mode/u);
+});
+
+it('reports only fixed challenge and login structure booleans', () => {
+  const document = new HappyWindow({ url: 'https://chatgpt.com/' }).document;
+  document.body.innerHTML = '<div id="challenge-running"></div><iframe src="https://challenges.cloudflare.com/widget"></iframe><a href="/auth/login">private label</a>';
+  const result = summarizeOfficialPage(document, 'RUN-0123456789abcdef01234567');
+  expect(result.challenge).toEqual({ running: true, stage: false, iframe: true }); expect(result.loginEntryPresent).toBe(true);
+  expect(JSON.stringify(result)).not.toContain('private label');
 });
 
 it('reports only false for an unrelated existing draft and never returns its text', () => {

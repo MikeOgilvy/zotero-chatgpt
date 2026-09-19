@@ -130,6 +130,13 @@ export function summarizeOfficialPage(document, verificationToken) {
   const assistants = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
   const latestAssistant = assistants.at(-1);
   const current = new URL(String(document.location.href));
+  const readyState = ['loading', 'interactive', 'complete'].includes(String(document.readyState)) ? String(document.readyState) : 'other';
+  const challenge = {
+    running: Boolean(document.querySelector('#challenge-running')),
+    stage: Boolean(document.querySelector('#challenge-stage')),
+    iframe: Boolean(document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="challenge-platform"], iframe[title*="challenge" i]')),
+  };
+  const loginEntryPresent = Boolean(document.querySelector('a[href="/auth/login"], a[href^="/auth/login?"], [data-testid="login-button"]'));
   const roleStructure = users.length || assistants.length ? null : [...document.querySelectorAll('main, [role="log"], [data-testid*="conversation"], [data-message-author-role]')].slice(0, 20).map(node => ({
     tag: String(node.localName ?? '').slice(0, 40) || null,
     dataTestid: attribute(node, 'data-testid'), dataMessageAuthorRole: attribute(node, 'data-message-author-role'), role: attribute(node, 'role'),
@@ -139,6 +146,9 @@ export function summarizeOfficialPage(document, verificationToken) {
     officialURL: true,
     canonicalOrigin: OFFICIAL_ORIGIN,
     canonicalURL: `${current.origin}${current.pathname}`.slice(0, 320),
+    documentReadyState: readyState,
+    challenge,
+    loginEntryPresent,
     inputReady: Boolean(composer),
     sendReady: Boolean(send && !send.disabled),
     draftMatchesExactTestQuestion,
