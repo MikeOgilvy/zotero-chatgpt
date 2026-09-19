@@ -281,6 +281,19 @@ async function runHostSmoke(config) {
     const coldStart = win.performance.now(); toggle().click();
     await until(() => input(), 'immediate-input');
     report.coldInputMs = win.performance.now() - coldStart;
+    // KaTeX must load through the add-on's narrow resource mapping inside the real reader document.
+    // `link.sheet` and readable rules are host evidence; a source-string href alone cannot prove CSS
+    // or fonts survived Gecko's security boundary.
+    const katexLink = await until(() => rdoc()?.querySelector('link[data-zchatgpt-katex-css]'), 'katex-stylesheet-link', 30000);
+    await until(() => katexLink.sheet, 'katex-stylesheet-loaded', 30000);
+    const katexStyle = { href: katexLink.getAttribute('href'), sheet: Boolean(katexLink.sheet), rulesAccessible: false, ruleCount: 0, hasKatexRule: false, accessError: null };
+    try {
+      const rules = [...katexLink.sheet.cssRules]; katexStyle.rulesAccessible = true; katexStyle.ruleCount = rules.length;
+      katexStyle.hasKatexRule = rules.some(rule => rule.type === 5 || /@font-face|\.katex\b/u.test(String(rule.cssText ?? '')));
+    } catch (error) { katexStyle.accessError = String(error?.name ?? 'UnknownError').slice(0, 80); }
+    await check('katex-stylesheet-loads-through-scoped-resource',
+      katexStyle.href === 'resource://zotero-chatgpt-katex/katex.min.css' && katexStyle.sheet && katexStyle.rulesAccessible && katexStyle.ruleCount > 0 && katexStyle.hasKatexRule,
+      katexStyle);
     // --- The composer's Chat / Agent routing control, in the real dock ---
     // The unit DOM cannot reproduce this: the option's pressed fill and pill geometry are
     // `.zchatgpt-mode-option[...]`, so rendering the options with the generic `.zchatgpt-button`
