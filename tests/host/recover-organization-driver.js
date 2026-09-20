@@ -45,7 +45,7 @@ async function runHostSmoke(config) {
     const shell = () => doc()?.querySelector('[data-zchatgpt-sidebar]'); const panel = () => doc()?.querySelector('[data-zchatgpt-chat]'); const toggle = () => doc()?.querySelector('[data-zchatgpt-toggle]');
     await until(() => toggle(), 'toolbar-toggle'); toggle().click(); await until(() => shell(), 'sidebar-shell', 60000);
     const modeSwitch = () => shell()?.querySelector('[data-zchatgpt-mode-switch]'); const modeButton = mode => modeSwitch()?.querySelector(`[data-zchatgpt-action="mode-${mode}"]`);
-    const historyPanel = () => panel()?.querySelector('[data-zchatgpt-history]'); const historyRow = () => historyPanel()?.querySelector(`[data-zchatgpt-conversation-id="${config.recoveryConversationId}"]`);
+    const historyPanel = () => panel()?.querySelector('[data-zchatgpt-history]'); const historyRow = () => historyPanel()?.querySelector(`button.zchatgpt-history-item[data-zchatgpt-conversation-id="${config.recoveryConversationId}"]`);
     diagnosticState = () => {
       const row = historyRow(); const history = historyPanel(); const visibleAlert = [...(panel()?.querySelectorAll('[role="alert"]') ?? [])].find(node => !node.hidden && !node.closest('[hidden]'));
       const alertText = String(visibleAlert?.textContent ?? ''); const alertCode = /\b[A-Z][A-Z0-9_]{2,63}\b/u.exec(alertText)?.[0] ?? (visibleAlert ? 'PRESENT' : null);

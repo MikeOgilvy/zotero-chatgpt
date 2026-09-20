@@ -128,6 +128,27 @@ it('paints sidebar chrome with the reader paper background, not grey sidepane fi
   expect(css).toMatch(/#split-view\.zchatgpt-dock-open \.primary-view[\s\S]{0,80}min-width:\s*0/u);
 });
 
+it('refreshes the injected reader stylesheet so an upgraded bundle cannot style new markup with old CSS', () => {
+  const doc = readerDocument();
+  // A reader document outlives one add-on version: it still holds the text the previous bundle put
+  // there. Reloading the plugin re-renders the sidebar from the new bundle against exactly this.
+  const stale = doc.createElement('style');
+  stale.setAttribute('data-zchatgpt-sidebar-css', '');
+  stale.textContent = '.zchatgpt-previous-build-only { color: red; }';
+  doc.head.append(stale);
+  injectReaderStyles(doc, {});
+  const sheets = [...doc.querySelectorAll('style[data-zchatgpt-sidebar-css]')];
+  expect(sheets).toHaveLength(1);
+  expect(sheets[0]).toBe(stale);
+  expect(sheets[0]!.textContent ?? '').toMatch(/\.zchatgpt-visually-hidden/u);
+  expect(sheets[0]!.textContent ?? '').not.toMatch(/zchatgpt-previous-build-only/u);
+  // A second call with the current text rewrites nothing.
+  const text = sheets[0]!.textContent;
+  injectReaderStyles(doc, {});
+  expect([...doc.querySelectorAll('style[data-zchatgpt-sidebar-css]')]).toHaveLength(1);
+  expect(sheets[0]!.textContent).toBe(text);
+});
+
 it('attaches the dock stylesheet to the reader iframe document and keeps a composer-width column against reader smash rules', () => {
   const doc = readerDocument();
   const smash = doc.createElement('style');

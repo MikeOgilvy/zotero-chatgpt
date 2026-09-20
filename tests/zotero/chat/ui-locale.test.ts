@@ -214,15 +214,16 @@ it('localizes the close-chat control without touching the destructive delete lab
   expect(close.title).toBe('Close chat'); locale.dispose();
 });
 
-it('translates the context summary and re-emits every page count verbatim', () => {
+it('translates the details summary and re-emits every page count verbatim', () => {
   const { root, add } = setup();
-  const all = add('span', 'zchatgpt-shell-context-text', 'Current PDF · all 12 pages read locally');
-  const some = add('span', 'zchatgpt-shell-context-text', 'Current PDF · excerpts from 8 of 12 pages');
-  const waiting = add('span', 'zchatgpt-shell-context-text', 'Preparing current PDF text… 3 of 12 pages');
-  const alone = add('span', 'zchatgpt-shell-context-text', 'Preparing current PDF text…');
-  const off = add('span', 'zchatgpt-shell-context-text', 'Automatic PDF context is off');
-  const selected = add('span', 'zchatgpt-shell-context-text', 'Selected text · page 5');
-  const none = add('span', 'zchatgpt-shell-context-text', 'PDF text unavailable');
+  const line = (text: string) => { const node = add('span', 'zchatgpt-context-row-value', text); node.setAttribute('data-zchatgpt-ui', 'true'); return node; };
+  const all = line('Current PDF · all 12 pages read locally');
+  const some = line('Current PDF · excerpts from 8 of 12 pages');
+  const waiting = line('Preparing current PDF text… 3 of 12 pages');
+  const alone = line('Preparing current PDF text…');
+  const off = line('Automatic PDF context is off');
+  const selected = line('Selected text · page 5');
+  const none = line('PDF text unavailable');
   const locale = mountUILocale(root); locale.update('zh');
   expect(all.textContent).toBe('当前 PDF · 已在本地读取全部 12 页');
   expect(some.textContent).toBe('当前 PDF · 12 页中的 8 页摘录');
@@ -310,28 +311,35 @@ it('translates the attach-file row and the file refusals while leaving the file 
   locale.update('en'); expect(title.textContent).toBe('Attach file…'); expect(error.textContent).toBe('This file has no text to attach.'); locale.dispose();
 });
 
-it('translates the hosted-application bar while keeping its page numbers and labels verbatim', () => {
+it('translates the paper toolbar and its answers while keeping the copied identifiers verbatim', async () => {
   const { root, add } = setup();
-  const bar = add('div', 'zchatgpt-embed-bar', '', root);
-  const copy = add('button', 'zchatgpt-button', 'Copy paper context', bar); copy.dataset.zchatgptAction = 'copy-context';
-  const selection = add('button', 'zchatgpt-button', 'Copy selection', bar); selection.dataset.zchatgptAction = 'copy-selection';
-  const attach = add('button', 'zchatgpt-button', 'Attach current PDF', bar); attach.dataset.zchatgptAction = 'copy-pdf-file';
-  const reload = add('button', 'zchatgpt-button', 'Reload ChatGPT', bar); reload.dataset.zchatgptAction = 'reload-chat';
-  const status = add('span', 'zchatgpt-embed-status', 'Copied 3 of 12 pages — paste into ChatGPT.', bar);
+  const group = add('div', 'zchatgpt-paper-actions', '', root);
+  const copy = add('button', 'zchatgpt-icon-button', '', group); copy.dataset.zchatgptAction = 'copy-paper-context';
+  copy.setAttribute('aria-label', 'Copy paper context');
+  copy.title = 'Copy paper context\nCopy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.';
+  const hint = add('span', 'zchatgpt-visually-hidden', 'Copy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.', group);
+  hint.setAttribute('data-zchatgpt-ui', 'true');
+  const file = add('button', 'zchatgpt-icon-button', '', group); file.dataset.zchatgptAction = 'copy-pdf-file';
+  file.setAttribute('aria-label', 'Copy PDF file');
+  file.title = 'Copy PDF file\nCopy the current PDF file to the clipboard. Paste it into ChatGPT to attach it.';
+  const menu = add('div', 'zchatgpt-more-menu', '', root);
+  const details = add('button', 'zchatgpt-more-row', 'Paper & context details', menu); details.dataset.zchatgptAction = 'open-paper-details'; details.setAttribute('data-zchatgpt-ui', 'true');
+  const reload = add('button', 'zchatgpt-more-row', 'Reload ChatGPT', menu); reload.dataset.zchatgptAction = 'reload-chat'; reload.setAttribute('data-zchatgpt-ui', 'true');
+  const status = add('span', 'zchatgpt-shell-feedback', 'PDF copied — paste to attach', root);
   const locale = mountUILocale(root); locale.update('zh');
-  expect(copy.textContent).toBe('复制论文上下文');
-  expect(selection.textContent).toBe('复制选中内容');
-  expect(attach.textContent).toBe('附加当前 PDF');
+  expect(copy.getAttribute('aria-label')).toBe('复制文献信息');
+  expect(copy.title).toBe('复制文献信息\n以文本复制标题、作者、发表载体、年份、DOI 和摘要。不包含 PDF 正文。');
+  expect(hint.textContent).toBe('以文本复制标题、作者、发表载体、年份、DOI 和摘要。不包含 PDF 正文。');
+  expect(file.getAttribute('aria-label')).toBe('复制 PDF 文件');
+  expect(details.textContent).toBe('文献与上下文详情');
   expect(reload.textContent).toBe('重新加载 ChatGPT');
-  // The counts are data: the sentence around them translates, the numbers do not.
-  expect(status.textContent).toBe('已复制 3/12 页 — 请粘贴到 ChatGPT。');
+  expect(status.textContent).toBe('PDF 已复制 — 粘贴即可附加');
   // A line that arrives after the language switch is picked up by the observer, not just at update().
-  status.textContent = 'Copied the selection from page iv — paste into ChatGPT.';
-  return Promise.resolve().then(() => {
-    expect(status.textContent).toBe('已复制第 iv 页的选中内容 — 请粘贴到 ChatGPT。');
-    locale.update('en');
-    expect(status.textContent).toBe('Copied the selection from page iv — paste into ChatGPT.');
-    expect(copy.textContent).toBe('Copy paper context');
-    locale.dispose();
-  });
+  status.textContent = 'Paper details copied';
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(status.textContent).toBe('已复制文献信息');
+  locale.update('en');
+  expect(status.textContent).toBe('Paper details copied');
+  expect(copy.title).toBe('Copy paper context\nCopy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.');
+  locale.dispose();
 });

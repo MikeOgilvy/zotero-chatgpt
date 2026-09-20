@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationPresenter, type PresenterState } from '../../../packages/zotero/src/chat/presenter.ts';
 import type { ReaderClient, RuntimeSnapshot } from '../../../packages/contracts/src/runtime.ts';
-import { ReaderError, SHAREABLE_STORAGE_LOCATION, type Conversation, type MessageStatus, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../../packages/contracts/src/index.ts';
+import { ReaderError, SHAREABLE_STORAGE_LOCATION, paperId, type Conversation, type MessageStatus, type PaperIdentity, type ReaderEvent, type SendInput, type ShareableDiagnostics } from '../../../packages/contracts/src/index.ts';
 import { citationA, citationB, imageA, paperA, settings } from '../../contracts/factories.ts';
 import { estimateRequestBudget } from '../../../packages/core/src/codex/model-capabilities.ts';
 import { presenterContext } from '../presenter-context.ts';
@@ -274,6 +274,66 @@ describe('conversation presenter', () => {
     await presenter.activate();
     expect(await presenter.exportDocumentBrief()).toEqual({ ok: false, reason: 'failed' });
     expect(f.sent).toHaveLength(0);
+  });
+  it('copies the paper bibliography without reading the PDF, and reads it by the frozen scope', async () => {
+    const f = fixture();
+    const prepare = vi.fn(() => Promise.resolve(documentA)); const validate = vi.fn(async () => {});
+    const seen: string[] = [];
+    const identity: PaperIdentity = {
+      title: 'Synthetic Paper A', authors: ['Ada Lovelace'], itemType: 'journalArticle',
+      publicationTitle: 'Journal of Synthetic Results', year: '2024', doi: 'https://doi.org/10.1000/synthetic',
+      abstractNote: 'A stored abstract.',
+    };
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
+      ...f.services, chatHostedExternally: true,
+      document: { prepare, validate, readEnabled: () => true, writeEnabled: () => {} },
+      readPaperIdentity: readScope => { seen.push(paperId(readScope)); return Promise.resolve(identity); },
+    });
+    await presenter.activate();
+    const context = await presenter.exportPaperContext();
+    expect(context).toMatchObject({ ok: true, hasAbstract: true });
+    if (!context.ok) throw new Error('expected paper context');
+    expect(context.text).toBe([
+      'Title: Synthetic Paper A',
+      'Authors: Ada Lovelace',
+      'Publication: Journal of Synthetic Results',
+      'Year: 2024',
+      'DOI: 10.1000/synthetic',
+      '',
+      'Abstract:',
+      'A stored abstract.',
+    ].join('\n'));
+    // The manual copy never reads the PDF: that is the automatic send's own path.
+    expect(prepare).not.toHaveBeenCalled();
+    expect(validate).not.toHaveBeenCalled();
+    expect(seen).toEqual([paperId(paperA)]);
+    expect(f.sent).toHaveLength(0);
+  });
+  it('refuses a bare PDF and reports an unreadable metadata read instead of copying a placeholder', async () => {
+    const f = fixture();
+    const bare = new ConversationPresenter(presenterContext(paperA, 'scan-0001.pdf'), { ...f.services, chatHostedExternally: true });
+    await bare.activate();
+    expect(await bare.exportPaperContext()).toEqual({ ok: false, reason: 'no-info' });
+    const failing = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {
+      ...f.services, chatHostedExternally: true,
+      readPaperIdentity: () => Promise.reject(new Error('the item could not be read')),
+    });
+    await failing.activate();
+    expect(await failing.exportPaperContext()).toEqual({ ok: false, reason: 'failed' });
+  });
+  it('keeps the frozen identity when the item is gone and never borrows another paper', async () => {
+    const f = fixture();
+    const frozen: PaperIdentity = { title: 'Frozen Paper', authors: ['Ada Lovelace'], itemType: 'journalArticle', publicationTitle: 'Frozen Journal' };
+    const presenter = new ConversationPresenter(presenterContext(paperA, 'Frozen Paper', frozen), {
+      ...f.services, chatHostedExternally: true,
+      readPaperIdentity: () => Promise.resolve(null),
+    });
+    await presenter.activate();
+    const context = await presenter.exportPaperContext();
+    expect(context).toMatchObject({ ok: true });
+    if (!context.ok) throw new Error('expected paper context');
+    expect(context.text).toContain('Title: Frozen Paper');
+    expect(context.text).toContain('Publication: Frozen Journal');
   });
   it('plans a send against the one core request-budget authority when no port is injected (R5)', async () => {
     const f = fixture();

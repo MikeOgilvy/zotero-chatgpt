@@ -459,3 +459,64 @@ it('anchors the rename popover below the 44px shell bar instead of overlapping i
   expect(rule.cssText).toContain('--zchatgpt-shell-bar-height');
   expect(shippedCss()).toMatch(/\.zchatgpt-shell\s*\{[^}]*--zchatgpt-shell-bar-height:\s*44px/u);
 });
+
+it('keeps the common header a single row with 32px hit areas and one 18px icon baseline', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const chrome = el('div', 'zchatgpt-chrome');
+  const actions = el('div', 'zchatgpt-chrome-actions');
+  const group = el('div', 'zchatgpt-paper-actions');
+  const button = el('button', 'zchatgpt-icon-button');
+  const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  button.append(svg); group.append(button); actions.append(group); chrome.append(actions); doc.body.append(chrome);
+  expect(cs(chrome).flexWrap).toBe('nowrap');
+  expect(Number.parseFloat(cs(chrome).minHeight)).toBeGreaterThanOrEqual(40);
+  expect(Number.parseFloat(cs(chrome).minHeight)).toBeLessThanOrEqual(44);
+  // The toolbar's own hit area is bigger than the drawn glyph, and the glyph is one shared size.
+  expect(cs(button).width).toBe('32px');
+  expect(cs(button).height).toBe('32px');
+  expect(cs(svg).width).toBe('18px');
+  expect(cs(svg).height).toBe('18px');
+  // The paper group is tighter inside itself than the gap to the navigation beside it.
+  const inside = Number.parseFloat(cs(group).gap);
+  const between = Number.parseFloat(cs(actions).gap);
+  expect(inside).toBeLessThanOrEqual(4);
+  expect(between).toBeGreaterThanOrEqual(inside);
+  // The old permanent context row and its wrapper are gone from the stylesheet entirely.
+  const css = shippedCss();
+  expect(css).not.toMatch(/\.zchatgpt-shell-context\b/u);
+  expect(css).not.toMatch(/\.zchatgpt-embed-bar\b/u);
+  expect(css).not.toMatch(/\.zchatgpt-embed-actions\b/u);
+});
+
+it('floats the copy answer under the bar so a success or failure never changes its height', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const feedback = el('p', 'zchatgpt-shell-feedback');
+  doc.body.append(feedback);
+  expect(cs(feedback).position).toBe('absolute');
+  // It hangs below the row and is not interactive, so it cannot push or cover a control.
+  expect(cs(feedback).top).toContain('100%');
+  expect(cs(feedback).pointerEvents).toBe('none');
+  expect(shippedRule(doc, '.zchatgpt-more-menu').position).toBe('absolute');
+  expect(Number.parseInt(shippedRule(doc, '.zchatgpt-more-menu').zIndex, 10)).toBeGreaterThanOrEqual(20);
+});
+
+it('reserves the history row action slot and gives its menu the opaque popover treatment', () => {
+  const { doc, cs } = stylesheetDom();
+  const el = make(doc);
+  const row = el('div', 'zchatgpt-history-row');
+  const menuButton = el('button', 'zchatgpt-icon-button zchatgpt-history-more');
+  row.append(menuButton); doc.body.append(row);
+  // Hidden ink, reserved space: revealing it on hover or focus never shifts the row.
+  expect(cs(menuButton).opacity).toBe('0');
+  expect(Number.parseFloat(cs(menuButton).width)).toBeGreaterThanOrEqual(24);
+  const css = shippedCss();
+  expect(css).toMatch(/\.zchatgpt-history-row:hover\s+\.zchatgpt-history-more[^{}]*\{[^}]*opacity:\s*1/u);
+  const menu = shippedRule(doc, '.zchatgpt-history-menu');
+  expect(menu.position).toBe('absolute');
+  expect(Number.parseInt(menu.zIndex, 10)).toBeGreaterThanOrEqual(20);
+  expect(css).toMatch(/\.zchatgpt-history-menu\s*\{[^}]*background-color:\s*Canvas/u);
+  expect(css).toMatch(/\.zchatgpt-history-menu\s*\{[^}]*var\(--material-menu/u);
+});
+

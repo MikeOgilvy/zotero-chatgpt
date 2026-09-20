@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { mountChatView, renderReaderShell, type EmbedClipboardOutcome } from '../../../packages/zotero/src/chat/view.ts';
 import type { ConversationPresenter, PresenterState } from '../../../packages/zotero/src/chat/presenter.ts';
 import { workspaceDraft } from '../../../packages/zotero/src/chat/draft.ts';
-import type { RequestMode } from '../../../packages/contracts/src/index.ts';
+import type { PaperIdentity, RequestMode } from '../../../packages/contracts/src/index.ts';
 import { paperA } from '../../contracts/factories.ts';
 import { presenterContext } from '../presenter-context.ts';
 
@@ -12,7 +12,7 @@ import { presenterContext } from '../presenter-context.ts';
  * control. The real presenter's routing is covered by its own tests; this file is about which
  * surface Chat mode renders when the host hosts the real ChatGPT application.
  */
-function stubPresenter(mode: RequestMode = 'chat') {
+function stubPresenter(mode: RequestMode = 'chat', identity?: PaperIdentity) {
   const listeners = new Set<(state: PresenterState) => void>();
   const state: PresenterState = {
     connection: 'ready', runtime: null, conversation: null, openConversations: [], newChatOpen: true,
@@ -21,7 +21,7 @@ function stubPresenter(mode: RequestMode = 'chat') {
     pendingExplain: null, message: null, generating: false, mode, chatUnavailable: 'Chat is unavailable in this build. Use Agent mode.',
     focusToken: 0, workspace: null, history: [], historyQuery: '', scrollTop: 0, persistence: 'session',
     tasks: [], readingJobs: [], contextReport: null, queueing: false, messageFocus: null,
-    acquisitionTarget: null, collectionOptions: [], document: presenterContext(paperA, 'Synthetic Paper A'),
+    acquisitionTarget: null, collectionOptions: [], document: presenterContext(paperA, 'Synthetic Paper A', identity),
   };
   const presenter = {
     snapshot: () => state,
@@ -36,26 +36,33 @@ function stubPresenter(mode: RequestMode = 'chat') {
   return presenter as unknown as ConversationPresenter;
 }
 
-function mount(mode: RequestMode = 'chat') {
+/** A journal article with real fields, so the bibliographic action has something true to copy. */
+const paperIdentity: PaperIdentity = {
+  title: 'Synthetic Paper A', authors: ['Ada Lovelace'], itemType: 'journalArticle',
+  publicationTitle: 'Nature', year: '2026', doi: 'https://doi.org/10.1000/xyz', abstractNote: 'A stored abstract.',
+};
+
+function mount(mode: RequestMode = 'chat', identity: PaperIdentity = paperIdentity) {
   const doc = new Window({ url: 'https://zchatgpt.test/' }).document as unknown as Document;
   const body = doc.createElement('div');
   doc.body.append(body);
   const root = renderReaderShell(body, { title: 'Synthetic Paper A', key: paperA.attachmentKey, libraryID: paperA.libraryId });
   const embed = {
     show: vi.fn(), hide: vi.fn(), reload: vi.fn(),
-    copyContext: vi.fn<() => Promise<EmbedClipboardOutcome>>(() => Promise.resolve<EmbedClipboardOutcome>({ copied: true, kind: 'document', pages: 2, totalPages: 2, truncated: false })),
-    copySelection: vi.fn<() => Promise<EmbedClipboardOutcome>>(() => Promise.resolve<EmbedClipboardOutcome>({ copied: true, kind: 'selection', pageLabel: 'i' })),
+    copyPaperContext: vi.fn<() => Promise<EmbedClipboardOutcome>>(() => Promise.resolve<EmbedClipboardOutcome>({ copied: true, kind: 'paper' })),
     copyPdfFile: vi.fn<() => Promise<EmbedClipboardOutcome>>(() => Promise.resolve<EmbedClipboardOutcome>({ copied: true, kind: 'file' })),
   };
-  const presenter = stubPresenter(mode);
+  const presenter = stubPresenter(mode, identity);
   const teardown = mountChatView(root, presenter, { chatEmbed: embed });
   return { root, embed, presenter, teardown };
 }
 
-/** The bar's answer line, which is created hidden and shows the outcome of the last clipboard action. */
-function statusOf(root: ParentNode): HTMLElement {
-  return root.querySelector<HTMLElement>('[data-zchatgpt-embed-status]')!;
+/** The toolbar's short-lived answer line for the last paper action. */
+function feedbackOf(root: ParentNode): HTMLElement {
+  return root.querySelector<HTMLElement>('[data-zchatgpt-shell-feedback]')!;
 }
+const copyPaper = (root: ParentNode) => root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-paper-context"]')!;
+const copyPdf = (root: ParentNode) => root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!;
 /** Let the copy action's promise chain settle; the view announces the outcome after it resolves. */
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
@@ -86,15 +93,18 @@ it('never shows the Agent composer, approvals or task surface in hosted Chat mod
   expect(root.dataset.zchatgptEmbedActive).toBe('true');
 });
 
-it('keeps exactly one mode control, fixed in the common shell in both modes', () => {
+it('keeps exactly one mode control, fixed in the common single-row shell bar in both modes', () => {
   const { root, presenter, embed } = mount('chat');
   const switches = () => root.querySelectorAll('[data-zchatgpt-mode-switch]');
   expect(switches()).toHaveLength(1);
-  // The one switch lives in the shared shell bar, not in the hosted bar and not in the composer.
   const bar = root.querySelector('[data-zchatgpt-shell-bar]')!;
   expect(bar.contains(switches()[0]!)).toBe(true);
-  expect(root.querySelector('[data-zchatgpt-embed-bar]')!.contains(switches()[0]!)).toBe(false);
   expect(root.querySelector('[data-zchatgpt-composer-leading]')!.contains(switches()[0]!)).toBe(false);
+  // There is no second bar in the hosted surface and no permanent context row anywhere.
+  expect(root.querySelector('[data-zchatgpt-embed-bar]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-embed-actions]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-shell-context]')).toBeNull();
+  expect(root.querySelectorAll('[data-zchatgpt-shell-bar]')).toHaveLength(1);
   (root.querySelector('[data-zchatgpt-action="mode-agent"]') as HTMLButtonElement).click();
   expect(presenter.snapshot().mode).toBe('agent');
   // Agent mode is the native surface again: the same control stays exactly where it was.
@@ -110,31 +120,47 @@ it('keeps exactly one mode control, fixed in the common shell in both modes', ()
   expect(embed.show).toHaveBeenCalledTimes(2);
 });
 
-it('reloads the hosted application from the dock chrome without leaving Chat mode', () => {
+it('reloads the hosted application from the More menu without leaving Chat mode', () => {
   const { root, embed, presenter } = mount('chat');
-  (root.querySelector('[data-zchatgpt-action="reload-chat"]') as HTMLButtonElement).click();
+  const reload = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="reload-chat"]')!;
+  // It is a secondary action: reachable from the menu, not a permanent toolbar button.
+  expect(reload.closest('[data-zchatgpt-more-menu]')).not.toBeNull();
+  expect(root.querySelectorAll('.zchatgpt-chrome-actions > [data-zchatgpt-action="reload-chat"]')).toHaveLength(0);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="more-actions"]')!.click();
+  reload.click();
   expect(embed.reload).toHaveBeenCalledTimes(1);
   expect(presenter.snapshot().mode).toBe('chat');
   expect(root.querySelector<HTMLElement>('[data-zchatgpt-embed]')!.hidden).toBe(false);
 });
 
-it('offers both context copy controls and says the text is on the clipboard, not that it was sent', async () => {
+it('offers the two paper copy controls as icon buttons and says the text is on the clipboard, not sent', async () => {
   const { root, embed } = mount('chat');
-  const bar = root.querySelector<HTMLElement>('[data-zchatgpt-embed-bar]')!;
-  const copyContext = bar.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-context"]')!;
-  const copySelection = bar.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-selection"]')!;
-  // The controls the web application cannot provide are the only ones this bar adds, and the status
-  // line starts empty rather than claiming anything happened.
-  expect(statusOf(root).hidden).toBe(true);
-  copyContext.click();
+  const actions = root.querySelector<HTMLElement>('[data-zchatgpt-paper-actions]')!;
+  const paper = copyPaper(root);
+  const pdf = copyPdf(root);
+  // Two icon buttons in one group with distinct glyphs, real names and a localized explanation.
+  expect(actions.contains(paper)).toBe(true);
+  expect(actions.contains(pdf)).toBe(true);
+  expect(paper.textContent?.trim()).toBe('');
+  expect(pdf.textContent?.trim()).toBe('');
+  expect(paper.getAttribute('aria-label')).toBe('Copy paper context');
+  expect(pdf.getAttribute('aria-label')).toBe('Copy PDF file');
+  expect(paper.getAttribute('title')).toBe('Copy paper context\nCopy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.');
+  const described = root.querySelector<HTMLElement>(`#${paper.getAttribute('aria-describedby')}`)!;
+  expect(described.textContent).toBe('Copy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.');
+  expect(paper.querySelector('svg path')?.getAttribute('d')).not.toBe(pdf.querySelector('svg path')?.getAttribute('d'));
+  // The answer line starts empty rather than claiming anything happened.
+  expect(feedbackOf(root).hidden).toBe(true);
+  paper.click();
   await settle();
-  expect(embed.copyContext).toHaveBeenCalledTimes(1);
-  expect(statusOf(root).hidden).toBe(false);
-  expect(statusOf(root).textContent).toBe('Copied 2 of 2 pages — paste into ChatGPT.');
-  copySelection.click();
+  expect(embed.copyPaperContext).toHaveBeenCalledTimes(1);
+  expect(feedbackOf(root).hidden).toBe(false);
+  expect(feedbackOf(root).textContent).toBe('Paper details copied');
+  pdf.click();
   await settle();
-  expect(embed.copySelection).toHaveBeenCalledTimes(1);
-  expect(statusOf(root).textContent).toBe('Copied the selection from page i — paste into ChatGPT.');
+  expect(embed.copyPdfFile).toHaveBeenCalledTimes(1);
+  expect(feedbackOf(root).textContent).toBe('PDF copied — paste to attach');
+  expect(feedbackOf(root).textContent).not.toMatch(/attached|uploaded|sent/iu);
 });
 
 it('discloses automatic current-PDF context before the first official-page submission', () => {
@@ -143,81 +169,118 @@ it('discloses automatic current-PDF context before the first official-page submi
   presenter.snapshot().document.enabled = true;
   const acknowledge = vi.spyOn(presenter, 'acknowledgeContext');
   presenter.setMode('chat');
+  const strip = root.querySelector<HTMLElement>('[data-zchatgpt-embed-notice]')!;
   const notice = root.querySelector<HTMLElement>('[data-zchatgpt-embed-context-notice]')!;
   const consent = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="continue-with-pdf"]')!;
+  // The first outbound notice is a state, not a permanent row, and it does not claim a submission.
+  expect(strip.hidden).toBe(false);
   expect(notice.textContent).toContain('official ChatGPT');
   expect(notice.textContent).toContain('current PDF');
   expect(notice.textContent).toContain('Preferences');
   expect(consent.hidden).toBe(false);
+  expect(consent.textContent).toBe('Allow PDF context');
   consent.click();
   expect(acknowledge).toHaveBeenCalledTimes(1);
 });
 
-it('states whether automatic PDF context is on without claiming a message was accepted', () => {
+it('reports the automatic PDF state in the details without claiming a message was accepted', () => {
   const { root, presenter } = mount('chat');
-  const notice = root.querySelector<HTMLElement>('[data-zchatgpt-embed-context-notice]')!;
+  const strip = root.querySelector<HTMLElement>('[data-zchatgpt-embed-notice]')!;
+  // Nothing outstanding: the strip is gone, so the header is a single row.
   presenter.snapshot().document.disclosure = false;
   presenter.snapshot().document.enabled = true;
   presenter.setMode('chat');
-  expect(notice.textContent).toBe('Current PDF context will be added when you send in ChatGPT.');
-  expect(notice.textContent).not.toMatch(/sent|attached/u);
+  expect(strip.hidden).toBe(true);
+  expect(root.querySelector<HTMLElement>('[data-zchatgpt-embed-context-notice]')!.hidden).toBe(true);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="more-actions"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="open-paper-details"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-context-panel]')!;
+  expect(panel.textContent).toContain('Automatic PDF context On');
+  expect(panel.textContent).not.toMatch(/accepted|attached|sent/iu);
   presenter.snapshot().document.enabled = false;
   presenter.setMode('chat');
-  expect(notice.textContent).toBe('Automatic PDF context is off. You can turn it on in Zotero Preferences.');
+  expect(panel.textContent).toContain('Automatic PDF context Off');
 });
 
 it('hands the real PDF file to the clipboard for the application\'s own paste-to-attach path', async () => {
   const { root, embed } = mount('chat');
-  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!.click();
+  copyPdf(root).click();
   await settle();
   expect(embed.copyPdfFile).toHaveBeenCalledTimes(1);
-  // The bar says the file is on the clipboard, not that the application received it: pasting is the
-  // owner's step and the upload runs inside ChatGPT's own composer.
-  expect(statusOf(root).textContent).toBe('The PDF file is on your clipboard — paste it into ChatGPT to attach it.');
+  // The answer says the file is on the clipboard, not that the application received it: pasting is
+  // the owner's step and the upload runs inside ChatGPT's own composer.
+  expect(feedbackOf(root).textContent).toBe('PDF copied — paste to attach');
   embed.copyPdfFile.mockResolvedValueOnce({ copied: false, reason: 'no-file' });
-  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!.click();
+  copyPdf(root).click();
   await settle();
-  expect(statusOf(root).textContent).toBe('This attachment has no local PDF file to copy.');
+  expect(feedbackOf(root).textContent).toBe('This attachment has no local PDF file to copy.');
 });
 
 it('clears the previous answer while a new action is still running', async () => {
   const { root, embed } = mount('chat');
+  copyPaper(root).click();
+  await settle();
+  expect(feedbackOf(root).textContent).toBe('Paper details copied');
   let resolveFile!: (outcome: EmbedClipboardOutcome) => void;
   embed.copyPdfFile.mockImplementationOnce(() => new Promise<EmbedClipboardOutcome>(resolve => { resolveFile = resolve; }));
-  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!.click();
+  copyPdf(root).click();
   await settle();
-  // A stale "Copied 2 of 2 pages" next to a control the owner just pressed would be a false claim
+  // A stale "Paper details copied" next to a control the owner just pressed would be a false claim
   // about this action, so the line is empty until this action has its own answer.
-  expect(statusOf(root).hidden).toBe(true);
-  expect(statusOf(root).textContent).toBe('');
+  expect(feedbackOf(root).hidden).toBe(true);
+  expect(feedbackOf(root).textContent).toBe('');
+  expect(copyPdf(root).getAttribute('aria-busy')).toBe('true');
   resolveFile({ copied: true, kind: 'file' });
   await settle();
-  expect(statusOf(root).hidden).toBe(false);
-  expect(statusOf(root).textContent).toBe('The PDF file is on your clipboard — paste it into ChatGPT to attach it.');
+  expect(feedbackOf(root).hidden).toBe(false);
+  expect(feedbackOf(root).textContent).toBe('PDF copied — paste to attach');
+  expect(copyPdf(root).hasAttribute('aria-busy')).toBe(false);
+  // The success mark is momentary and never a permanent state on the button.
+  expect(copyPdf(root).dataset.zchatgptCopyState).toBe('copied');
 });
 
 it('reports the honest reason when there is nothing to copy', async () => {
   const { root, embed } = mount('chat');
-  embed.copyContext.mockResolvedValueOnce({ copied: false, reason: 'no-text' });
-  embed.copySelection.mockResolvedValueOnce({ copied: false, reason: 'no-selection' });
-  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-context"]')!.click();
+  embed.copyPaperContext.mockResolvedValueOnce({ copied: false, reason: 'no-info' });
+  copyPaper(root).click();
   await settle();
-  expect(statusOf(root).textContent).toBe('No text was read from this PDF, so there is nothing to copy.');
-  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-selection"]')!.click();
+  expect(feedbackOf(root).textContent).toBe('This item has no bibliographic information to copy.');
+  expect(copyPaper(root).dataset.zchatgptCopyState).toBeUndefined();
+  embed.copyPaperContext.mockRejectedValueOnce(new Error('unavailable'));
+  copyPaper(root).click();
   await settle();
-  expect(statusOf(root).textContent).toBe('Select text in the PDF first, then copy it here.');
-  embed.copyContext.mockRejectedValueOnce(new Error('unavailable'));
-  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-context"]')!.click();
+  expect(feedbackOf(root).textContent).toBe('The paper details could not be read.');
+  embed.copyPdfFile.mockRejectedValueOnce(new Error('unavailable'));
+  copyPdf(root).click();
   await settle();
-  expect(statusOf(root).textContent).toBe('The paper context could not be prepared.');
+  expect(feedbackOf(root).textContent).toBe('The PDF file could not be copied.');
 });
 
-it('carries the same copy controls into Agent mode without acting on them there', () => {
+it('disables the bibliographic copy for a bare PDF with a keyboard-discoverable reason', async () => {
+  // A bare PDF attachment proves no bibliography: only the attachment's own name is known.
+  const { root, embed } = mount('chat', { title: 'scan-0001.pdf', authors: [] });
+  const paper = copyPaper(root);
+  expect(paper.getAttribute('aria-disabled')).toBe('true');
+  expect(paper.getAttribute('title')).toBe('This item has no bibliographic information to copy.');
+  expect(paper.hasAttribute('disabled')).toBe(false);
+  paper.click();
+  await settle();
+  expect(embed.copyPaperContext).not.toHaveBeenCalled();
+  expect(feedbackOf(root).textContent).toBe('This item has no bibliographic information to copy.');
+  // The file action stays independent: a bare PDF still has a file to copy.
+  expect(copyPdf(root).getAttribute('aria-disabled')).toBeNull();
+});
+
+it('carries the paper actions into Agent mode without acting on them there', () => {
   const { root, embed } = mount('agent');
-  // The embed bar belongs to the hosted Chat surface, so it is out of the way while Agent runs.
+  // The hosted surface is out of the way while Agent runs, but the paper actions belong to the
+  // shared toolbar, so their position and availability do not change with the mode.
   expect(root.querySelector<HTMLElement>('[data-zchatgpt-embed]')!.hidden).toBe(true);
-  expect(embed.copyContext).not.toHaveBeenCalled();
   expect(root.querySelector<HTMLElement>('[data-zchatgpt-chat]')!.hidden).toBe(false);
+  expect(root.querySelector('[data-zchatgpt-paper-actions]')).not.toBeNull();
+  expect(embed.copyPaperContext).not.toHaveBeenCalled();
+  expect(embed.copyPdfFile).not.toHaveBeenCalled();
+  expect(root.querySelector('[data-zchatgpt-action="reload-chat"]')!.closest('[hidden]')).not.toBeNull();
 });
 
 it('stops painting the hosted surface when the view is torn down', () => {
@@ -228,12 +291,13 @@ it('stops painting the hosted surface when the view is torn down', () => {
   expect(embed.show).not.toHaveBeenCalled();
 });
 
-it('names the clipboard action for what it does, never as an upload or attachment', () => {
+it('names the paper actions for what they do, never as an upload or attachment', () => {
   const { root } = mount('chat');
-  const file = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!;
+  const file = copyPdf(root);
   // UI-04: the control copies the real PDF to the clipboard; the paste into ChatGPT is the owner's
   // own step, so the label must not claim the file was attached or uploaded.
-  expect(file.textContent).toBe('Copy PDF file…');
-  expect(file.getAttribute('aria-label')).toBe('Copy PDF file…');
+  expect(file.getAttribute('aria-label')).toBe('Copy PDF file');
+  expect(file.getAttribute('aria-label')).not.toMatch(/attach|upload/iu);
   expect(file.textContent).not.toMatch(/attach|upload/iu);
+  expect(copyPaper(root).getAttribute('aria-label')).toBe('Copy paper context');
 });

@@ -317,11 +317,23 @@ async function runHostSmoke(config) {
       // the hosted Chat bar or the composer.
       inShellBar: Boolean(modeSwitch()?.closest('[data-zchatgpt-shell-bar]')),
       inComposer: Boolean(modeSwitch()?.closest('[data-zchatgpt-composer-leading]')),
-      inEmbedBar: Boolean(modeSwitch()?.closest('[data-zchatgpt-embed-bar]')),
+      inEmbedNotice: Boolean(modeSwitch()?.closest('[data-zchatgpt-embed-notice]')),
+      // P-01: the normal header is one row. No permanent context row, no legacy action strip.
+      contextRow: Boolean(shell()?.querySelector('[data-zchatgpt-shell-context]')),
+      documentStatus: Boolean(shell()?.querySelector('[data-zchatgpt-document-status]')),
+      legacyEmbedBar: Boolean(shell()?.querySelector('[data-zchatgpt-embed-bar]')),
+      shellBars: shell()?.querySelectorAll('[data-zchatgpt-shell-bar]').length ?? 0,
+      paperActions: [...(shell()?.querySelectorAll('[data-zchatgpt-paper-actions] button') ?? [])].map(node => node.dataset.zchatgptAction ?? ''),
     };
     await check('mode-selector-defaults-to-chat-with-segmented-options',
       modeShape.role === 'group' && Boolean(modeShape.groupLabel) && modeShape.mode === 'chat' && modeShape.chatPressed && !modeShape.agentPressed
-        && modeShape.chatSegmented && !modeShape.genericButtonSkin && modeShape.visible && modeShape.inShellBar && !modeShape.inComposer && !modeShape.inEmbedBar,
+        && modeShape.chatSegmented && !modeShape.genericButtonSkin && modeShape.visible && modeShape.inShellBar && !modeShape.inComposer && !modeShape.inEmbedNotice,
+      modeShape);
+    await check('single-row-common-header-with-the-two-paper-actions',
+      modeShape.shellBars === 1 && !modeShape.contextRow && !modeShape.documentStatus && !modeShape.legacyEmbedBar
+        && !modeShape.paperActions.includes('copy-selection')
+        && (modeShape.paperActions.length === 0
+          || (modeShape.paperActions.length === 2 && modeShape.paperActions.includes('copy-paper-context') && modeShape.paperActions.includes('copy-pdf-file'))),
       modeShape);
     // --- Chat is not an Agent path, observed on the real dock ---
     // There is no supported Chat transport in this build, so Chat mode must state that itself rather

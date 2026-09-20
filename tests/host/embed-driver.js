@@ -715,13 +715,35 @@ async function runHostSmoke(config) {
       }
       return out;
     };
-    // UI-01: the switch is fixed in the common shell bar in both modes, never inside the bar that
-    // belongs to the hosted surface.
+    // UI-01: the switch is fixed in the common shell bar in both modes, never inside the notice
+    // strip that belongs to the hosted surface.
     const shellSwitch = doc.querySelector('[data-zchatgpt-shell-bar] [data-zchatgpt-mode-switch]');
-    const embedBarSwitch = doc.querySelector('[data-zchatgpt-embed-bar] [data-zchatgpt-mode-switch]');
+    const embedNoticeSwitch = doc.querySelector('[data-zchatgpt-embed-notice] [data-zchatgpt-mode-switch]');
     await check('product-chat-mode-shows-the-hosted-surface',
-      Boolean(slot) && Boolean(nativeChat && nativeChat.hidden === true) && Boolean(shellSwitch) && !embedBarSwitch,
-      { nativeChatHidden: nativeChat ? nativeChat.hidden : null, modeSwitchInShellBar: Boolean(shellSwitch), modeSwitchInEmbedBar: Boolean(embedBarSwitch) });
+      Boolean(slot) && Boolean(nativeChat && nativeChat.hidden === true) && Boolean(shellSwitch) && !embedNoticeSwitch,
+      { nativeChatHidden: nativeChat ? nativeChat.hidden : null, modeSwitchInShellBar: Boolean(shellSwitch), modeSwitchInEmbedNotice: Boolean(embedNoticeSwitch) });
+    // The normal header is one row: no permanent context summary row, no legacy action strip, and no
+    // second bar beside the shell bar.
+    await check('product-chat-header-is-a-single-row',
+      !doc.querySelector('[data-zchatgpt-shell-context]') && !doc.querySelector('[data-zchatgpt-embed-bar]')
+        && !doc.querySelector('[data-zchatgpt-embed-actions]') && !doc.querySelector('[data-zchatgpt-document-status]')
+        && doc.querySelectorAll('[data-zchatgpt-shell-bar]').length === 1,
+      {
+        contextRow: Boolean(doc.querySelector('[data-zchatgpt-shell-context]')),
+        legacyBar: Boolean(doc.querySelector('[data-zchatgpt-embed-bar]')),
+        legacyActions: Boolean(doc.querySelector('[data-zchatgpt-embed-actions]')),
+        documentStatus: Boolean(doc.querySelector('[data-zchatgpt-document-status]')),
+        shellBars: doc.querySelectorAll('[data-zchatgpt-shell-bar]').length,
+      });
+    const paperActions = doc.querySelector('[data-zchatgpt-paper-actions]');
+    const paperButtons = paperActions ? [...paperActions.querySelectorAll('button')] : [];
+    await check('product-chat-offers-the-two-paper-icon-actions-in-the-toolbar',
+      Boolean(paperActions)
+        && paperButtons.length === 2
+        && paperButtons.every(node => String(node.textContent || '').trim() === '' && Boolean(node.querySelector('svg')))
+        && paperButtons.some(node => node.dataset.zchatgptAction === 'copy-paper-context')
+        && paperButtons.some(node => node.dataset.zchatgptAction === 'copy-pdf-file'),
+      { actions: paperButtons.map(node => ({ action: node.dataset.zchatgptAction || null, label: node.getAttribute('aria-label'), hasGlyph: Boolean(node.querySelector('svg')), hit: rectOfNode(node) })) });
     // The dock lives in the reader's HTML document, which cannot create XUL elements at all, so the
     // surface must be the host's chrome browser in the main window rather than an element beside it.
     await check('product-chat-surface-is-not-an-element-in-the-reader-document', !doc.querySelector('[data-zchatgpt-embed-browser]'));
@@ -1096,7 +1118,9 @@ async function runHostSmoke(config) {
       }
       return { reading: null, attempts };
     };
-    const embedStatus = () => { const node = doc.querySelector('[data-zchatgpt-embed-status]'); return node ? String(node.textContent || '') : null; };
+    // The toolbar's short-lived answer line; it is absolutely positioned so it never changes the
+    // header height.
+    const embedStatus = () => { const node = doc.querySelector('[data-zchatgpt-shell-feedback]'); return node ? String(node.textContent || '') : null; };
     /**
      * Click one bar control and wait for the bar's *own* answer to that click: the line the previous
      * action left standing must not be read as this action's result, so the wait is for a change.
@@ -1128,7 +1152,7 @@ async function runHostSmoke(config) {
     };
     await check('product-clipboard-read-path', product.clipboardReadPath.sentinelSeen === true, product.clipboardReadPath);
 
-    const contextStatus = await useControl('copy-context');
+    const contextStatus = await useControl('copy-paper-context');
     await save();
     const { reading: paperReading, attempts: paperAttempts } = readFirstText();
     const paperText = paperReading ? paperReading.read : null;
@@ -1137,15 +1161,21 @@ async function runHostSmoke(config) {
       chosenFlavor: paperReading ? paperReading.flavor : null,
       attempts: paperAttempts,
       flavorsAdvertised: clipboardFlavors(),
-      // The synthetic block carries our own generated text, so a bounded head and two booleans are
-      // enough to show the pasteboard holds the document rather than a sentence about it.
+      // The manual copy is bibliography only, so the assertion is the other way round now: the block
+      // must carry the fields and must NOT carry the locally read PDF text or its brief header. The
+      // synthetic paper's own body matches `carriesPaperText`; its stored title matches `carriesTitle`.
       head: clipboardHead(paperText),
       textLength: paperText === null ? null : paperText.length,
-      carriesPaperText: paperText === null ? null : /prior describes beliefs|likelihood describes|ORCHID-72/u.test(paperText),
-      carriesHeader: paperText === null ? null : /Context from the PDF open in Zotero/u.test(paperText),
+      carriesTitle: paperText === null ? null : /^Title: /mu.test(paperText),
+      carriesAuthors: paperText === null ? null : /^Authors: /mu.test(paperText),
+      carriesPdfBody: paperText === null ? null : /prior describes beliefs|likelihood describes|ORCHID-72/u.test(paperText),
+      carriesBriefHeader: paperText === null ? null : /Context from the PDF open in Zotero/u.test(paperText),
+      carriesPageMarker: paperText === null ? null : /\[page /u.test(paperText),
     };
-    await check('product-chat-copies-the-paper-context',
-      product.contextClipboard.carriesHeader === true && product.contextClipboard.carriesPaperText === true,
+    await check('product-chat-copies-the-paper-bibliography-only',
+      product.contextClipboard.carriesTitle === true && product.contextClipboard.carriesAuthors === true
+        && product.contextClipboard.carriesPdfBody === false && product.contextClipboard.carriesBriefHeader === false
+        && product.contextClipboard.carriesPageMarker === false,
       product.contextClipboard);
 
     const fileStatus = await useControl('copy-pdf-file');

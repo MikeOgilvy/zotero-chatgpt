@@ -489,3 +489,17 @@ it('lets a newer read own the pane instead of claiming the delete could not be r
   expect(find<HTMLElement>('[data-zchatgpt-history="error"]').hidden).toBe(true);
   expect(find('[data-zchatgpt-history="status"]').textContent).toBe('Deleted 1 of 1 chat.');
 });
+
+it('re-verifies its own listing when the window regains focus, so a sidebar delete is not stale', async () => {
+  const { host, readHistory } = fixture([entry(1, 'First'), entry(2, 'Second')]);
+  const { document, rows, find } = mount(host);
+  await vi.waitFor(() => expect(rows()).toHaveLength(2));
+  const before = readHistory.mock.calls.length;
+  // The sidebar deletes through its own path; this pane has no push channel, so regaining focus is
+  // where it re-verifies. Nothing else about the listing changes here.
+  const view = document.defaultView as unknown as { Event: typeof Event; dispatchEvent(event: Event): boolean };
+  view.dispatchEvent(new view.Event('focus'));
+  await vi.waitFor(() => expect(readHistory.mock.calls.length).toBeGreaterThan(before));
+  expect(rows()).toHaveLength(2);
+  expect(find<HTMLElement>('[data-zchatgpt-history="empty"]').hidden).toBe(true);
+});

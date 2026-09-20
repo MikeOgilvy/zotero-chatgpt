@@ -414,7 +414,7 @@ it('keeps actor readiness messages separate from clipboard-action results', () =
   browser.currentURI = { spec: CHAT_APP_URL };
   const host = doc.createElement('section'); host.dataset.zchatgptEmbed = '';
   const bridge = doc.createElement('span'); bridge.dataset.zchatgptBridgeStatusLine = ''; bridge.hidden = true;
-  const clipboard = doc.createElement('span'); clipboard.dataset.zchatgptEmbedStatus = ''; clipboard.textContent = 'Copied 2 of 2 pages — paste into ChatGPT.';
+  const clipboard = doc.createElement('span'); clipboard.dataset.zchatgptShellFeedback = ''; clipboard.textContent = 'Paper details copied';
   const slot = place(doc.createElement('div'), { left: 10, top: 20, width: 300, height: 500 });
   host.append(bridge, clipboard, slot); doc.documentElement.append(host);
   surface.show(slot, null);
@@ -424,7 +424,7 @@ it('keeps actor readiness messages separate from clipboard-action results', () =
   }));
   expect(bridge.hidden).toBe(false);
   expect(bridge.textContent).toContain('send control is unsupported');
-  expect(clipboard.textContent).toBe('Copied 2 of 2 pages — paste into ChatGPT.');
+  expect(clipboard.textContent).toBe('Paper details copied');
   surface.destroy();
 });
 

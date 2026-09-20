@@ -291,22 +291,47 @@ it('reads the paper metadata in the background without writing a card on screen'
   expect(bare.root.textContent).not.toContain('About this paper');
 });
 
-it('shows the local read of this PDF so a successful auto-read is not invisible', async () => {
-  const { root } = await mountReadyChat({
+/**
+ * The one-line answer the details panel shows for the next send, opened from the toolbar's More
+ * menu. The summary is not a permanent header row any more, so a test reads it where the owner does.
+ */
+function nextSendSummary(root: HTMLElement): string {
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="more-actions"]')?.click();
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="open-paper-details"]')?.click();
+  return root.querySelector<HTMLElement>('[data-zchatgpt-context-summary]')?.textContent ?? '';
+}
+
+it('keeps the common header to one row and moves the context summary into the details', async () => {
+  const { root } = await mountReadyChat();
+  const chrome = root.querySelector<HTMLElement>('[data-zchatgpt-shell-bar]')!;
+  // One toolbar row, and no permanent second row: the old context line, its empty wrapper and the
+  // legacy action strip are gone from the default structure, not merely collapsed.
+  expect(root.querySelectorAll('[data-zchatgpt-shell-bar]')).toHaveLength(1);
+  expect(root.querySelector('[data-zchatgpt-shell-context]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-document-status]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-context-line]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-embed-bar]')).toBeNull();
+  expect(root.querySelector('[data-zchatgpt-embed-actions]')).toBeNull();
+  // The mode switch, both paper actions and the navigation all live in that one row.
+  for (const action of ['mode-chat', 'mode-agent', 'new-conversation', 'history', 'more-actions']) {
+    expect(chrome.querySelector(`[data-zchatgpt-action="${action}"]`), action).not.toBeNull();
+  }
+});
+
+it('shows the local read of this PDF in the details so a successful auto-read is not invisible', async () => {
+  const { root, presenter } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
-  await vi.waitFor(() => expect(status.hidden).toBe(false));
-  expect(status.textContent).toBe('Current PDF · all 2 pages read locally');
+  await vi.waitFor(() => expect(presenter.snapshot().document.prepared).not.toBeNull());
+  expect(nextSendSummary(root)).toBe('Current PDF · all 2 pages read locally');
 });
 
 it('reports reading in progress instead of leaving the owner with no evidence at all', async () => {
-  const { root } = await mountReadyChat({
+  const { root, presenter } = await mountReadyChat({
     document: { prepare: () => new Promise(() => {}), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
-  await vi.waitFor(() => expect(status.hidden).toBe(false));
-  expect(status.textContent).toBe('Preparing current PDF text…');
+  await vi.waitFor(() => expect(presenter.snapshot().document.phase).toBe('preparing'));
+  expect(nextSendSummary(root)).toBe('Preparing current PDF text…');
 });
 
 it('claims only the pages that really carried text when part of the PDF is scanned', async () => {
@@ -314,24 +339,20 @@ it('claims only the pages that really carried text when part of the PDF is scann
     { ...documentA.pages[0]! },
     { pageIndex: 1, pageLabel: 'ii', text: '', status: 'empty' as const },
   ] };
-  const { root } = await mountReadyChat({
+  const { root, presenter } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(partial), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
-  await vi.waitFor(() => expect(status.hidden).toBe(false));
-  expect(status.textContent).toBe('Current PDF · excerpts from 1 of 2 pages');
+  await vi.waitFor(() => expect(presenter.snapshot().document.prepared).not.toBeNull());
+  expect(nextSendSummary(root)).toBe('Current PDF · excerpts from 1 of 2 pages');
 });
 
 it('states that automatic PDF context is off instead of leaving the summary blank', async () => {
   const { root } = await mountReadyChat({
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => false, writeEnabled: () => {} },
   });
-  await new Promise(resolve => setTimeout(resolve, 0));
-  const status = root.querySelector<HTMLElement>('[data-zchatgpt-document-status]')!;
   // UI-03: the summary must answer what the next send carries; an off switch is a real scope fact,
   // not a blank line, so the owner can tell nothing from this PDF will be attached.
-  expect(status.hidden).toBe(false);
-  expect(status.textContent).toBe('Automatic PDF context is off');
+  expect(nextSendSummary(root)).toBe('Automatic PDF context is off');
 });
 
 it('sends every field the reader read in the paper identity instead of a four-field subset', async () => {
@@ -1343,7 +1364,7 @@ it('keeps the composer as one card: textarea, footer chip, and circular arrow se
   expect(root.querySelectorAll('[data-zchatgpt-picker-menu] select')).toHaveLength(0);
 });
 
-it('uses icon-only New chat and history-row delete actions with accessible names', async () => {
+it('uses icon-only New chat and history-row action-menu controls with accessible names', async () => {
   const { root } = await mountReadyChat({
     messages: [
       { id: 'm1', requestId: 'r1', role: 'user', phase: null, settings, text: 'What does this mean?', citations: [citationA], status: 'completed' },
@@ -1357,11 +1378,15 @@ it('uses icon-only New chat and history-row delete actions with accessible names
   expect(copy?.getAttribute('aria-label')).toBe('Copy');
   // Copy is a labelled chip now: the visible "Copy" text is the discoverability affordance.
   expect(copy?.querySelector('[data-zchatgpt-copy-label]')?.textContent).toBe('Copy');
-  const removeChat = root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]');
-  expect(removeChat?.getAttribute('aria-label')).toMatch(/Delete chat/u);
-  expect(removeChat?.textContent?.trim()).toBe('');
-  // History deletion is a cross, not a trash can.
-  expect(removeChat?.querySelector('svg path')?.getAttribute('d')).toBe('M4 4l8 8M12 4l-8 8');
+  // History deletion is an ellipsis menu with an explicit delete row, not a permanent cross.
+  const rowMenu = root.querySelector<HTMLButtonElement>('[data-zchatgpt-history] [data-zchatgpt-action="history-row-menu"]');
+  expect(rowMenu).not.toBeNull();
+  expect(rowMenu?.getAttribute('aria-label')).toBe('Conversation actions');
+  expect(rowMenu?.getAttribute('aria-haspopup')).toBe('dialog');
+  expect(rowMenu?.getAttribute('aria-expanded')).toBe('false');
+  expect(rowMenu?.textContent?.trim()).toBe('');
+  expect(rowMenu?.querySelector('svg path')?.getAttribute('d')).toMatch(/^M3\.25 8/u);
+  expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]')).toBeNull();
 });
 
 it('closes the current chat from the selected tab cross without confirming, deleting, or losing the chat', async () => {
@@ -1732,12 +1757,12 @@ it('lists history in a grouped panel by paper title and disambiguates a second c
   expect(panel?.querySelector('select')).toBeNull();
   expect(panel?.querySelector('[data-zchatgpt-history-search]')).toBeTruthy();
   expect(panel?.textContent).toMatch(/Today/u);
-  const labels = [...root.querySelectorAll('[data-zchatgpt-history] [data-zchatgpt-conversation-id]')].map(node => node.textContent?.trim());
+  const labels = [...root.querySelectorAll('[data-zchatgpt-history] .zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.textContent?.trim());
   expect(labels.join('\n')).not.toMatch(/Untitled|What does this mean/u);
   expect(labels.some(label => label?.includes('Synthetic Paper A'))).toBe(true);
   expect(labels.filter(label => label?.includes('Synthetic Paper A')).length).toBe(2);
   expect(labels.some(label => /Synthetic Paper A · 2|Synthetic Paper A · 09:00/u.test(label ?? ''))).toBe(true);
-  expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]')).toBeTruthy();
+  expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="history-row-menu"]')).toBeTruthy();
   expect(root.querySelector('[data-zchatgpt-action="pin-conversation"]')).toBeNull();
   } finally { now.mockRestore(); }
 });
@@ -1816,18 +1841,19 @@ it('groups workspace history entries single-line and keeps the PDF title and pre
     const done = items.find(item => item.querySelector('[data-zchatgpt-history-status="done"]'))!;
     expect(done.getAttribute('aria-label')).toContain('Workspace Paper Title');
     expect(done.getAttribute('aria-label')).toContain('Workspace preview text');
-    // The workspace port reaches the same delete path: every row carries a labelled cross, and no
-    // archive mutation surface is invented.
-    const drops = [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]')];
-    expect(drops).toHaveLength(history.length);
-    expect(drops.every(node => /Delete chat/u.test(node.getAttribute('aria-label') ?? '') && node.textContent?.trim() === '')).toBe(true);
+    // The workspace port reaches the same delete path: every row carries a labelled action menu,
+    // and no archive mutation surface is invented.
+    const menus = [...root.querySelectorAll<HTMLButtonElement>('[data-zchatgpt-history] [data-zchatgpt-action="history-row-menu"]')];
+    expect(menus).toHaveLength(history.length);
+    expect(menus.every(node => node.getAttribute('aria-label') === 'Conversation actions' && node.textContent?.trim() === '')).toBe(true);
+    expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="delete-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="archive-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-action="restore-conversation"]')).toBeNull();
     expect(root.querySelector('[data-zchatgpt-history] [data-zchatgpt-archived]')).toBeNull();
   } finally { clock.mockRestore(); }
 });
 
-it('deletes a workspace history row directly without a prompt and keeps the open list, scroll and focus', async () => {
+it('deletes a workspace history row through its own menu and confirmation, keeping the open list, scroll and focus', async () => {
   const entries = [historyEntry(0), historyEntry(1)];
   const live: HistoryEntry[] = [...entries];
   const conversationFor = (entry: HistoryEntry): Conversation => ({
@@ -1853,12 +1879,23 @@ it('deletes a workspace history row directly without a prompt and keeps the open
   const list = panel.querySelector<HTMLElement>('.zchatgpt-history-list')!;
   const listIds = () => [...panel.querySelectorAll<HTMLButtonElement>('.zchatgpt-history-list button.zchatgpt-history-item[data-zchatgpt-conversation-id]')].map(node => node.dataset.zchatgptConversationId!);
   expect(listIds().sort()).toEqual([entries[0]!.id, entries[1]!.id].sort());
-  // The owner is scrolled down and has a row's cross focused when they delete it.
+  // The owner is scrolled down and has a row's own menu trigger focused when they delete it.
   list.scrollTop = 48;
-  const drop = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="delete-conversation"][data-zchatgpt-conversation-id="${entries[0]!.id}"]`)!;
-  expect(drop).not.toBeNull();
-  drop.focus();
-  drop.click();
+  const menu = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="history-row-menu"][data-zchatgpt-conversation-id="${entries[0]!.id}"]`)!;
+  expect(menu).not.toBeNull();
+  menu.focus();
+  menu.click();
+  expect(menu.getAttribute('aria-expanded')).toBe('true');
+  const ask = panel.querySelector<HTMLButtonElement>('[data-zchatgpt-action="delete-conversation"]')!;
+  expect(ask.textContent).toBe('Delete local conversation…');
+  ask.click();
+  // One confirmation stands between the owner and the removal, and it names the real scope.
+  const confirm = panel.querySelector<HTMLButtonElement>('[data-zchatgpt-action="confirm-delete-conversation"]')!;
+  expect(confirm).not.toBeNull();
+  expect(panel.querySelector('.zchatgpt-history-menu-confirm')?.textContent).toMatch(/Delete this local conversation/u);
+  // Nothing is removed until the confirmation is actually used.
+  expect(remove).not.toHaveBeenCalled();
+  confirm.click();
   await vi.waitFor(() => expect(listIds()).not.toContain(entries[0]!.id));
   expect(remove).toHaveBeenCalledWith(expect.anything(), entries[0]!.id);
   expect(listIds()).toEqual([entries[1]!.id]);
@@ -1867,6 +1904,37 @@ it('deletes a workspace history row directly without a prompt and keeps the open
   expect(list.scrollTop).toBe(48);
   expect(panel.contains(root.ownerDocument.activeElement)).toBe(true);
   expect(root.ownerDocument.activeElement).not.toBe(root.ownerDocument.body);
+});
+
+it('closes the history row menu on Escape and on an outside click, returning focus to its trigger', async () => {
+  const entries = [historyEntry(0), historyEntry(1)];
+  const { root } = await mountReadyChat({ workspace: historyWorkspace(entries) });
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  const panel = root.querySelector<HTMLElement>('[data-zchatgpt-history]')!;
+  const list = panel.querySelector<HTMLElement>('.zchatgpt-history-list')!;
+  const trigger = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="history-row-menu"][data-zchatgpt-conversation-id="${entries[0]!.id}"]`)!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-history-menu]')!;
+  expect(menu.hidden).toBe(true);
+  trigger.click();
+  expect(menu.hidden).toBe(false);
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  // Escape closes the menu and returns focus to the control that opened it, without closing the PDF
+  // or touching the official page.
+  menu.dispatchEvent(new root.ownerDocument.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(menu.hidden).toBe(true);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(root.ownerDocument.activeElement).toBe(trigger);
+  // The menu is an overlay inside the panel, so clicking the row underneath is an outside click.
+  trigger.click();
+  expect(menu.hidden).toBe(false);
+  list.dispatchEvent(new root.ownerDocument.defaultView!.MouseEvent('click', { bubbles: true }));
+  expect(menu.hidden).toBe(true);
+  // Closing the whole panel from its trigger also takes the row menu with it.
+  trigger.click();
+  expect(menu.hidden).toBe(false);
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="history"]')!.click();
+  expect(panel.hidden).toBe(true);
+  expect(menu.hidden).toBe(true);
 });
 
 it('buckets history into Today, Yesterday, Previous 7 days and Older without losing a timestamp', () => {
@@ -1979,7 +2047,7 @@ it('lists a workspace record carrying archivedAt as an ordinary chat in the one 
   } finally { clock.mockRestore(); }
 });
 
-it('shows a host-list record carrying archivedAt as an ordinary row and deletes it directly, without a prompt', async () => {
+it('shows a host-list record carrying archivedAt as an ordinary row and deletes it through its menu', async () => {
   const first = agedConversation('aaaaaaaa-0000-4000-8000-000000000031', 'First chat', '2026-09-10T09:00:00.000Z');
   const second = agedConversation('aaaaaaaa-0000-4000-8000-000000000032', 'Second chat', '2026-09-10T09:01:00.000Z', { archivedAt: '2026-09-10T09:02:00.000Z' });
   const { root } = await mountReadyChat({ conversations: [first, second] });
@@ -1992,14 +2060,16 @@ it('shows a host-list record carrying archivedAt as an ordinary row and deletes 
   expect(panel.querySelector('[data-zchatgpt-archived]')).toBeNull();
   expect(panel.querySelector('[data-zchatgpt-action="archive-conversation"]')).toBeNull();
   expect(panel.querySelector('[data-zchatgpt-action="restore-conversation"]')).toBeNull();
-  // Delete is the only removal path and it happens on the click itself: no prompt stands between
-  // the owner and a row they asked to remove.
-  const drop = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="delete-conversation"][data-zchatgpt-conversation-id="${second.id}"]`)!;
-  expect(drop).not.toBeNull();
-  expect(drop.textContent?.trim()).toBe('');
-  expect(drop.getAttribute('aria-label')).toMatch(/Delete chat/u);
-  drop.focus();
-  drop.click();
+  // The row's own menu reaches the same confirmed removal path; the menu itself never opens the chat.
+  const menu = panel.querySelector<HTMLButtonElement>(`[data-zchatgpt-action="history-row-menu"][data-zchatgpt-conversation-id="${second.id}"]`)!;
+  expect(menu).not.toBeNull();
+  expect(menu.textContent?.trim()).toBe('');
+  expect(menu.getAttribute('aria-label')).toBe('Conversation actions');
+  menu.focus();
+  menu.click();
+  expect(panel.hidden).toBe(false);
+  panel.querySelector<HTMLButtonElement>('[data-zchatgpt-action="delete-conversation"]')!.click();
+  panel.querySelector<HTMLButtonElement>('[data-zchatgpt-action="confirm-delete-conversation"]')!.click();
   await vi.waitFor(() => expect(rowIds()).not.toContain(second.id));
   expect(rowIds()).toContain(first.id);
   // The row the owner acted on is gone, so focus falls back inside the still-open panel instead of
@@ -2736,28 +2806,64 @@ it('opens every attachment route from the plus menu and closes it after a choice
   expect(menu.hidden).toBe(true);
 });
 
-it('opens the context details from the one-line summary and returns focus on Escape', async () => {
-  const { root } = await mountReadyChat({
+it('keeps the toolbar explanations described but never printed in the header row', async () => {
+  const { root } = await mountReadyChat();
+  const chrome = root.querySelector<HTMLElement>('[data-zchatgpt-shell-bar]')!;
+  const paper = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-paper-context"]')!;
+  const hint = root.querySelector<HTMLElement>(`#${paper.getAttribute('aria-describedby')}`)!;
+  expect(hint.textContent).toBe('Copy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.');
+  // The class documents the intent; the inline declarations are what make the row safe even when the
+  // document still holds a stylesheet injected by an earlier add-on version.
+  expect(hint.classList.contains('zchatgpt-visually-hidden')).toBe(true);
+  expect(hint.style.position).toBe('absolute');
+  expect(hint.style.width).toBe('1px');
+  expect(hint.style.height).toBe('1px');
+  expect(hint.style.overflow).toBe('hidden');
+  expect(hint.style.getPropertyValue('clip-path')).toBe('inset(50%)');
+  /**
+   * The user-visible invariant, checked without the cascade: everything the header would actually
+   * print. A node that hides itself absolutely contributes no text, so a missing stylesheet rule can
+   * never make the explanation part of the single row.
+   */
+  const printed = (node: Element): string => [...node.childNodes].map(child => {
+    if (child.nodeType === 3) return child.textContent ?? '';
+    const element = child as HTMLElement;
+    if (element.style.position === 'absolute' && element.style.getPropertyValue('clip-path') !== '') return '';
+    return printed(element);
+  }).join('');
+  expect(printed(chrome)).not.toMatch(/Does not include PDF full text/u);
+  expect(printed(chrome)).not.toMatch(/Paste it into ChatGPT/u);
+  // The same holds for the second action, whose explanation is a sibling of this one.
+  const file = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="copy-pdf-file"]')!;
+  const fileHint = root.querySelector<HTMLElement>(`#${file.getAttribute('aria-describedby')}`)!;
+  expect(fileHint.style.getPropertyValue('clip-path')).toBe('inset(50%)');
+  expect(fileHint.textContent).toBe('Copy the current PDF file to the clipboard. Paste it into ChatGPT to attach it.');
+});
+
+it('opens the paper context details from the More menu and returns focus on Escape', async () => {
+  const { root, presenter } = await mountReadyChat({
     messages: [],
     document: { prepare: () => Promise.resolve(documentA), validate: async () => {}, readEnabled: () => true, writeEnabled: () => {} },
   });
-  const summary = root.querySelector<HTMLButtonElement>('[data-zchatgpt-shell-context]')!;
+  const more = root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="more-actions"]')!;
+  const menu = root.querySelector<HTMLElement>('[data-zchatgpt-more-menu]')!;
   const panel = root.querySelector<HTMLElement>('[data-zchatgpt-context-panel]')!;
-  expect(summary.getAttribute('aria-expanded')).toBe('false');
   expect(panel.hidden).toBe(true);
-  // The shell keeps exactly one summary line: there is no second permanent reading-status row.
-  expect(root.querySelectorAll('[data-zchatgpt-document-status]')).toHaveLength(1);
-  await vi.waitFor(() => expect(summary.textContent).toBe('Current PDF · all 2 pages read locally'));
-  summary.click();
+  more.click();
+  expect(menu.hidden).toBe(false);
+  expect(more.getAttribute('aria-expanded')).toBe('true');
+  root.querySelector<HTMLButtonElement>('[data-zchatgpt-action="open-paper-details"]')!.click();
   expect(panel.hidden).toBe(false);
-  expect(summary.getAttribute('aria-expanded')).toBe('true');
+  expect(menu.hidden).toBe(true);
   expect(panel.textContent).toContain('Context for the next message');
   expect(panel.textContent).toContain('Synthetic Paper A');
   // The automatic-PDF state is shown as a fact, never as a fake toggle that is not wired.
   expect(panel.textContent).toContain('Automatic PDF context');
+  await vi.waitFor(() => expect(presenter.snapshot().document.prepared).not.toBeNull());
+  expect(nextSendSummary(root)).toBe('Current PDF · all 2 pages read locally');
   panel.dispatchEvent(new root.ownerDocument.defaultView!.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   expect(panel.hidden).toBe(true);
-  expect(root.ownerDocument.activeElement).toBe(summary);
+  expect(root.ownerDocument.activeElement).toBe(more);
 });
 
 it('shows a compact Agent empty state whose entries only prepare a draft', async () => {
