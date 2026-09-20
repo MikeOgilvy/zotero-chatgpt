@@ -4,7 +4,7 @@
 
 ChatGPT for your papers. An Agent for your library.
 
-<!-- HERO: Add an overview screenshot or a short product demo here. -->
+![A demo paper open beside the zotero-chatgpt sidebar in Zotero.](docs/media/overview.png)
 
 ## Ask your paper
 
@@ -12,7 +12,9 @@ Explain a passage, unpack a derivation, or ask a follow-up—right beside your P
 
 > “What is the key idea behind this method?”
 
-<!-- CHAT DEMO: Add a GIF or video showing a question about the open PDF. -->
+![Selecting a passage and preparing a question in the Chat sidebar, without sending.](docs/media/chat-demo.gif)
+
+*Bring a passage into your question. Shown before sending.* [View still image](docs/media/chat-demo-poster.png)
 
 ## Put Agent to work
 
@@ -20,9 +22,11 @@ Highlight key passages. Organize selected papers with tags and collections. Prev
 
 > “Highlight the five most important passages and explain why.”
 
-Agent is experimental; fetching open-access PDFs from a DOI or article link is still being refined.
+![Illustrated Agent workflow: request, review, approve, and apply changes in Zotero.](docs/media/agent-workflow.svg)
 
-<!-- AGENT DEMO: Add a real recording of previewing and approving highlights or library changes. -->
+*Illustrated workflow.*
+
+Agent is experimental; fetching open-access PDFs from a DOI or article link is still being refined.
 
 ## Get started
 
