@@ -28,12 +28,11 @@ Agent is experimental; fetching open-access PDFs from a DOI or article link is s
 
 Install the `.xpi` in Zotero → open a PDF → open the sidebar → sign in.
 
-**Chat needs no API key and uses no Codex quota.** Agent uses Codex quota and requires separate sign-in. ChatGPT’s own usage limits still apply.
+**Chat needs no API key and uses no Codex quota.**
+Agent uses Codex quota and requires separate sign-in.
 
-*Early preview · macOS (Apple Silicon) · Zotero 9.0.6.*
+_Early preview · macOS (Apple Silicon) · Zotero 9.0.6._
 
 ---
-
-[Product guide](docs/zotero-chatgpt-user-flow.md) · [Development guide](docs/development.md) · [Project status](docs/progress.md)
 
 Independent community project. Not affiliated with or endorsed by Zotero or OpenAI.
