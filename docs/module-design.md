@@ -1,7 +1,7 @@
 # zotero-chatgpt：架构与数据契约
 
-> 文档类型：架构契约。修订日期：2026-09-19。
-> 保留的实现机制依据本次上传的原模块文档；本轮未核验仓库源码。共同侧栏外壳、设置归属和旧会话来源判定等补充内容是目标约束，不代表代码已经完成。动态版本与验收结论只放在 progress.md。
+> 文档类型：架构契约。修订日期：2026-09-20。
+> 2026-09-20 的发布前整备轮把本文对照当前源码、测试、manifest 与构建脚本重新核验了一遍：共同侧栏外壳、设置归属、两个复制动作的语义与历史删除同步已按实际实现更新，并在 §1.1 新增“源码 → 测试”入口导航表。动态版本、产物 hash 与验收结论只放在 progress.md。
 
 产品行为见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，操作见 [development.md](development.md)，证据见 [progress.md](progress.md)。
 
@@ -26,6 +26,34 @@ Chat 与 Agent 共用本地来源，不共用远端执行生命周期。ChatGPT 
 Chat 的任何用户操作都不得触发 Codex 模型轮次，包含辅助标题、摘要、上下文压缩、意图识别、恢复和重试。即使 Codex 被设为只读或没有工具，其模型轮次仍是 Agent 服务用量，不能被当成免 Codex 额度的 Chat。
 
 Node 仅用于构建与测试。发布运行路径为 Zotero / Gecko 与随包运行资产，不依赖系统 Node 或用户手动启动一个本地服务。具体工具链、Codex pin 与平台基线见开发和进度文档。
+
+### 1.1 入口导航（源码 → 测试）
+
+一个关键入口一行：职责写在源码里，行为由对应测试守护。测试名是位置而不是覆盖率声明。
+
+| 入口 | 职责 | 主要测试 |
+| --- | --- | --- |
+| `packages/zotero/src/index.ts` | 插件装配：偏好、窗口/reader 注册、actor 与 resource 投影、view 生命周期、chat surface 池 | `tests/build/bootstrap.test.ts`、`tests/host/context-driver.js` |
+| `packages/zotero/src/reader/dock.ts` | Zotero 原生 dock、样式注入、开合、焦点与几何 | `tests/zotero/reader/dock*.test.ts` |
+| `packages/zotero/src/reader/context.ts` | `ReaderContext` 聚合：附件身份、冻结版本、选区、阅读状态 | `tests/zotero/reader/document*.test.ts`、`tests/zotero/presenter-context.ts` |
+| `packages/zotero/src/reader/selection*.ts` | 选区捕获、`More details` / `Ask in sidechat` 路由 | `tests/zotero/reader/selection.test.ts`、`tests/zotero/chat/source-links.test.ts` |
+| `packages/zotero/src/chat/view.ts` | 共同外壳、单行工具栏、两个复制按钮、Chat/Agent 内容区渲染 | `tests/zotero/chat/view.test.ts`、`sidebar-styles.test.ts` |
+| `packages/zotero/src/chat/presenter.ts` | 状态编排：草稿、模式、任务投影、订阅与销毁 | `tests/zotero/chat/presenter*.test.ts`、`history-sync.test.ts` |
+| `packages/zotero/src/chat/embed.ts` | 官方 `chatgpt.com` 宿主 surface、冻结上下文提交与受限 bridge | `tests/zotero/chat/embed-*.test.ts`、`tests/host/embed-driver.js` |
+| `packages/zotero/actors/*.mjs` | 受限 JSWindowActor 与 DOM-only 页面助手 | `tests/zotero/chat/official-chat-{actor,child}.test.ts` |
+| `packages/zotero/src/preferences/*` | 原生 Preferences 面板与本地数据管理 | `tests/zotero/preferences/*` |
+| `packages/zotero/src/runtime/*` | GeckoStorage、随包资产、私有进程与惰性 Agent 连接 | `tests/runtime/*` |
+| `packages/zotero/src/actions/native.ts`、`src/library/*` | 受控原生执行器与受限只读库访问 | `tests/zotero/actions/native.test.ts`、`tests/zotero/library/*` |
+| `packages/core/src/index.ts` | `ReaderClient` 装配、惰性 Codex 通道、运行时状态 | `tests/core/lazy-runtime.test.ts`、`client.test.ts`、`transport.test.ts` |
+| `packages/core/src/sessions/service.ts` | 会话/请求生命周期、停止、恢复与对账 | `tests/core/recovery.test.ts`、`history.test.ts`、`execution-boundary.test.ts` |
+| `packages/core/src/tasks/controller.ts` | 审批、写前 intent、读回账本与冲突撤销 | `tests/core/tasks.test.ts`、`organization-tasks.test.ts` |
+| `packages/core/src/workspace/store.ts` | 设置/skill/草稿与历史唯一写入者，提交后发布 `HistoryChange` | `tests/core/workspace.test.ts`、`history-sync.test.ts` |
+| `packages/core/src/context/*` | 预算与规划、书目块、自动发送的文档 brief | `tests/core/context-planner.test.ts`、`bibliography.test.ts`、`document-brief.test.ts` |
+| `packages/core/src/chat/paper-context.ts` | 手动书目复制格式器（与自动发送格式器分离） | `tests/core/paper-context.test.ts` |
+| `packages/contracts/src/*` | 跨层数据契约、验证与受限输入 | `tests/contracts/*` |
+| `scripts/*` | 构建、打包、产物校验、宿主准备、发行计划 | `tests/build/*` |
+
+端到端无模型入口是 `node scripts/prepare-host-test.mjs --context --run-id <id>`（准备专用 profile 与合成 PDF，不调模型），由 `tests/host/context-driver.js` 断言；`--native` 覆盖合成候选的原生写入/读回/撤销，`--live*` 才需要真实账户与额度。命令与副作用见 [development.md](development.md)。
 
 ## 2. 分层和唯一所有者
 
@@ -216,12 +244,12 @@ GeckoStorage 使用受限相对路径、符号链接检查、原子替换和 flu
 
 `getPageData({pageIndex})` / `getPageLabels2()` 提供字符与页标签；跨 realm 参数复制。Zotero 基础数据里的 `partial` 不能直接当作文本截断状态。
 
-既有 capturePage 只在内存渲染已打开的 PDF，不产生 Zotero 写入，可以留在读端口；pickFile/exportImage 仍经显式文件动作边界，不为本轮 UI 修改机械迁移无副作用的读取。
+既有 capturePage 只在内存渲染已打开的 PDF，不产生 Zotero 写入，可以留在读端口；pickFile/exportImage 仍经显式文件动作边界，不为界面调整机械迁移无副作用的读取。
 
 Reader.open 与后台引用保留用户已有 tab；只关闭仍由插件拥有且未被接管的临时 tab。PDF.js Xray 只对已经确认的宿主页对象 waive，渲染不改变用户缩放、焦点和当前页。
 
 原生标注使用自身 saveTx，不能再套外层 DB transaction；标签/集合整理沿用 native transaction 与一次 item save。不得绕过 Zotero API 直接改数据库。
 
-strict config 禁止 shell、网络搜索、外部工具、MCP、通用插件、记忆、多 agent 和任意环境继承。旧 diagram 扩展仅在明确选择且已验证能力时沿用其受限例外；本轮不扩大该能力，也不把它列为 UI 修复的必需项。
+strict config 禁止 shell、网络搜索、外部工具、MCP、通用插件、记忆、多 agent 和任意环境继承。旧 diagram 扩展仅在明确选择且已验证能力时沿用其受限例外；发布前整备不扩大该能力，也不把它列为 UI 修复的必需项。
 
 普通诊断只输出版本、阶段、错误码和必要白名单计数，不输出正文、图像、签名、认证、cookie、原始 stdio 或私人路径。用于随机合成 PDF 的测试断言不得反向扩大生产 actor 的读取能力。

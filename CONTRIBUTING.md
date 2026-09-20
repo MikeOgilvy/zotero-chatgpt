@@ -4,16 +4,19 @@ This is a community Zotero plugin. It is not affiliated with Zotero or OpenAI.
 
 ## Development
 
-Read [AGENTS.md](AGENTS.md), [architecture](docs/module-design.md), and [macOS development](docs/development.md).
+Read [AGENTS.md](AGENTS.md), [architecture](docs/module-design.md), and the [macOS development guide](docs/development.md). Product behaviour is in [docs/zotero-chatgpt-user-flow.md](docs/zotero-chatgpt-user-flow.md); current state and evidence are in [docs/progress.md](docs/progress.md).
 
 ```sh
 npm ci
 npm run typecheck
 npm run lint
 npm run test:unit
+node scripts/runtime-prepare.mjs   # pinned, SHA-256-verified runtime into .zotero-chatgpt-dev/
+npm run package:dev
+npm run verify:artifacts
 ```
 
-Node 24 is for build and tests only. Do not add live Codex calls to default CI. Do not commit `.zotero-chatgpt-dev/`, authentication files, paper text, or conversation logs.
+None of these call a model. `runtime-prepare` downloads the pinned Codex archive but never runs it; it is required before packaging. Node 24 is for build and tests only. Do not add live Codex calls to default CI. Do not commit `.zotero-chatgpt-dev/`, authentication files, paper text, or conversation logs.
 
 Host checks use an ignored dedicated profile under `.zotero-chatgpt-dev/` and synthetic PDFs. Never use a regular Zotero profile.
 
