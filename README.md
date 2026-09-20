@@ -1,86 +1,51 @@
 # zotero-chatgpt
 
-在 Zotero 中用官方网页 ChatGPT 阅读和讨论论文，用 Codex 驱动的 Agent 高亮重点、获取文章和整理文献库。
+**Read papers. Stay in Zotero.**
 
-这是一个独立社区插件，与 Zotero、OpenAI 无官方隶属或背书关系。
+Ask ChatGPT beside your paper. Let Agent handle highlights and library organization.
 
-> **开发预览。** 现有验收文档记录的实测基线为 macOS Apple Silicon / Zotero 9.0.6，不代表其它平台或完整公开发行流程已经通过。本页说明产品定位和使用流程；具体版本、功能可用性、未完成事项及证据以 [进度与验收](docs/progress.md) 为准，目标要求不等于已经实现。
+<!-- DEMO: Add a real demo video or GIF here. Keep it near the top; no lengthy introduction needed. -->
 
-## Chat 与 Agent
+## One sidebar. Two ways to work.
 
-两种模式由用户明确选择，使用不同的执行路径，不是同一个 Codex 对话的两个权限档位。
-
-| 对比项 | Chat | Agent |
+| Mode | What it does | Powered by |
 | --- | --- | --- |
-| 执行来源 | 官方 `chatgpt.com` 普通网页对话 | 插件随包 Codex App Server |
-| 输入和回答 | 官方网页输入框与对话页面 | 插件原生输入框、对话与任务界面 |
-| 主要用途 | 阅读论文、解释选区、讨论和追问 | 问答，以及高亮、文献获取、标签和集合整理 |
-| Codex 周额度 | 不通过插件发起 Codex 模型请求，不占用 Codex 周额度 | 模型请求使用 Codex，受账户实际 Codex 额度约束 |
-| Zotero 文献数据写入 | 插件不提供写入能力 | 经任务预览、批准、受控执行和读回验证 |
-| 账户与远端历史 | 由官方 ChatGPT 网页管理 | 由 Agent 的 Codex 接入管理 |
+| **Chat** | Understand papers, explain selections, and ask follow-up questions | Official ChatGPT website |
+| **Agent · Experimental** | Highlight passages, fetch papers, and organize selected items with tags and collections | Codex |
 
-**Chat 不调用 Codex，包括后台的标题、摘要、上下文压缩、恢复和重试。** Agent 未登录、运行时不可用或额度不足，不应阻断 Chat；Chat 自身遇到问题时也不能自动改走 Codex、API 或其它服务。
+**Chat does not call Codex or consume your Codex weekly quota.** Agent requests use Codex quota. ChatGPT’s own usage limits still apply.
 
-“不占用 Codex 周额度”不代表 ChatGPT 没有自身使用限制，也不是额度绕过。Chat 不要求配置 API key。Agent 即使只回答问题、没有修改文献，其模型请求仍然使用 Codex；查看已有任务、批准既有候选、原生读回和撤销，不应额外调用模型。
+## Start with a question
 
-## 当前论文作为上下文
+Open a PDF and ask about it. Available text from the current paper is included by default—no repeated copying or manual uploads.
 
-当前打开的 PDF 和明确选中的文本，是两种模式的默认阅读来源。默认文本问答不要求反复上传文件、填写路径或输入“读取当前论文”。
+> **Chat:** “Why does this step in the derivation work?”
+>
+> **Agent:** “Highlight the five most important passages and explain why.”
 
-本地提取与发送是两件事：打开论文或侧栏本身不发送内容；首次外发前说明数据去向，并提供关闭自动 PDF 文本的入口。每次请求固定文献、版本、选区和实际发送范围，之后切换论文不会改变在途请求。
+Preview and approve Agent’s changes before they are applied. Highlights become native Zotero annotations; organization updates your selected items—not just a list of suggestions.
 
-界面必须区分“本地已提取”“本次准备发送”和“页面已接受”。长文档的片段或缩短文本不能被描述为全文已读；纯文本提取不代表已传递页面图像或完整理解图表。
+Paper retrieval starts with a DOI or article link and attempts to download a legally available PDF. This workflow is still being refined; see [project status](docs/progress.md) for availability.
 
-主动附加完整 PDF 是可选操作，与默认文本上下文分开。若插件只能把文件放入剪贴板，必须明确提示用户粘贴并在官方页面确认，不能把复制成功写成上传完成。
+## Get started
 
-## 核心使用流程
+Install the development `.xpi` → open a paper → open the sidebar → sign in and start asking.
 
-### Chat：阅读与提问
+No API key is needed for Chat. Agent requires separate Codex authorization. See the [development guide](docs/development.md) for installation and build instructions.
 
-打开 PDF → 打开侧栏，默认进入 Chat → 在官方网页输入框提问，例如“这篇文章的主要贡献是什么？”→ 在同一官方对话中查看回复并继续追问。
+**Development preview.** The documented test baseline is macOS Apple Silicon / Zotero 9.0.6. See [project status](docs/progress.md) for current support and remaining work.
 
-选区菜单中的 **Ask in sidechat** 准备选区与草稿，等待发送；**More details** 通过同一官方网页入口提交选区解释请求。两者均不调用 Codex。网页桥不可用时明确报告失败，不用手动复制成功冒充自动上下文接入成功。
+<details>
+<summary>Context and data</summary>
 
-### Agent：高亮重点
+PDF text is extracted locally. When you send a question, its context is sent to the corresponding service. You can disable automatic PDF context. Available text is not the same as the complete PDF or its page images.
 
-明确切换到 Agent，输入“高亮当前论文最重要的 5 处内容，并说明原因”。模型提出原文候选，程序验证原文与位置，用户在任务预览中批准后，才创建 Zotero 原生标注并读回验证。无法可靠匹配的候选不写入，结果应可定位并支持受控撤销。
+Chat does not modify your Zotero library or automatically switch to Agent. Agent performs library operations only within the scope you approve.
 
-### Agent：获取文章
+</details>
 
-提供明确 DOI 或公开文章 URL 及目标集合，例如“把这篇文章加入指定集合，并下载可用 PDF”。流程包括元数据预览、查重、批准、保存条目，以及尝试获取并验证合法可用的 OA PDF。
+---
 
-条目保存与 PDF 下载分别报告：有条目不等于已有 PDF。下载不绕过登录或访问控制；仅有 DOI 预览证据不能算完整获取流程通过。
+[Product guide](docs/zotero-chatgpt-user-flow.md) · [Development guide](docs/development.md) · [Project status](docs/progress.md)
 
-### Agent：整理选中文献
-
-在绑定的 Zotero 主窗口选中文献，再要求“按主题打标签，并归入合适的集合”。当前规格限定为同一文献库中最多 50 个选中的普通条目，只新增标签和已有可编辑集合的成员关系，保留原有内容；预览批准后执行并读回。
-
-“整理文献库”不是全库操作授权，也不指整理 Git 仓库或电脑目录。当前范围不包含创建或删除集合、删除或合并条目、改写元数据、移动或删除附件。
-
-## 界面与数据边界
-
-界面目标是一个共同侧栏外壳：**Chat / Agent 开关固定在顶部**，下方用紧凑摘要说明下一次的上下文；Chat 保留官方输入框，Agent 使用原生输入框，不在两种模式中分别移动开关。详细交互与待验收项见 [产品规格中的 UI-01 至 UI-07](docs/zotero-chatgpt-user-flow.md)。
-
-两种模式分别保留草稿和远端会话。切换不自动发送或转交内容，也不自动停止已经开始的 Agent 工作；仍在运行的任务需要有明确提示。插件不复制官网全部对话来伪造统一历史，Agent 的模型、instructions 和 skills 设置也不控制官网。
-
-Agent 写入只作用于批准范围。停止不等于撤销；撤销只处理能够证明属于本任务、且未被用户后续修改的变更。删除本地聊天不等于删除官网对话、撤销原生标注或清除账户数据。
-
-## 安装与开发试用
-
-交付形式为包含必要 Agent 运行组件的平台 XPI，通过 Zotero 插件管理器安装。普通用户的运行路径不要求系统 Node、单独安装 CLI、手动启动 companion 或填写 API key；Chat 网页登录和 Agent 的官方授权流程分别处理，不假定一端登录会自动授权另一端。
-
-开发预览的试用和宿主验证使用专用 `.zotero-chatgpt-dev/` profile/data 与合成资料，不操作日常文献库。安装、构建、运行资产准备与验证命令见 [开发、测试与发行](docs/development.md)。没有经过对应平台和产物验证，不提供虚构的 Release 链接或支持承诺。
-
-Agent 随包运行资产的版本与校验以 `runtime/manifest.ts` 为准，不随系统 CLI 自动更新。Node 仅用于构建与测试，具体工具链以仓库配置为准。插件自己的本地记录尚无云同步。
-
-## 文档入口
-
-| 文档 | 职责 |
-| --- | --- |
-| [AGENTS.md](AGENTS.md) | 开发助手的执行规则、权限边界与交付要求 |
-| [产品行为与交互规格](docs/zotero-chatgpt-user-flow.md) | 产品定位、用户流程和 UI 验收要求 |
-| [架构与数据契约](docs/module-design.md) | 执行隔离、模块职责、任务与兼容规则 |
-| [开发、测试与发行](docs/development.md) | 构建、隔离宿主、测试和安装方法 |
-| [进度、证据与待修事项](docs/progress.md) | 指定版本的实际结果、缺口和复验状态 |
-
-四份 `docs` 分别维护产品、架构、操作和结果；README 只作项目入口，不另立一套产品规格，也不复制容易过期的版本号、测试计数或完成结论。
+An independent community project. Not affiliated with or endorsed by Zotero or OpenAI.
