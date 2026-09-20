@@ -131,6 +131,28 @@ it('does not paint over a slot or frame that measures nothing', () => {
   surface.destroy();
 });
 
+it('stops the paint poll when the surface is hidden and starts a fresh one when it is shown again', () => {
+  const { win, doc } = chromeWindow();
+  const startPoll = vi.spyOn(win, 'setInterval');
+  const stopPoll = vi.spyOn(win, 'clearInterval');
+  const surface = createChatEmbedSurface(win);
+  const { slot, frame } = sidebar(doc);
+  surface.show(slot, frame);
+  expect(startPoll).toHaveBeenCalledTimes(1);
+  const handle = startPoll.mock.results[0]!.value as number | undefined;
+  // Repainting an already-shown surface must not stack a second 500 ms poll on the same window.
+  surface.show(slot, frame);
+  expect(startPoll).toHaveBeenCalledTimes(1);
+  // Switching to Agent, or closing the dock, hides the surface. A parked surface must stop waking
+  // the window up instead of polling for the rest of the session.
+  surface.hide();
+  expect(stopPoll).toHaveBeenCalledWith(handle);
+  surface.show(slot, frame);
+  expect(startPoll).toHaveBeenCalledTimes(2);
+  surface.destroy();
+  expect(stopPoll).toHaveBeenCalledTimes(2);
+});
+
 it('parks the box, keeping the session, when the slot is hidden or the dock unmounts', () => {
   const { win, doc } = chromeWindow();
   const surface = createChatEmbedSurface(win);

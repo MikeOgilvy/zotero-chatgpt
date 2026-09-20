@@ -505,11 +505,12 @@ export function createChatEmbedSurface(win: Window, url: string = CHAT_APP_URL):
       sync();
       // The frame can be re-laid-out by anything (window resize, dock resize, tab switch, reader
       // toolbar rewrap) and two of those are not observable from this window, so a slow poll keeps
-      // the surface on its anchor while it is painted. It stops as soon as nothing is painted.
+      // the surface on its anchor while it is painted. Hiding stops the poll and showing starts it
+      // again, so a parked surface never keeps waking this window up.
       if (timer === null) timer = win.setInterval(tick, SYNC_INTERVAL_MS);
       void probeBridge();
     },
-    hide() { anchor = null; frame = null; resizeObserver?.disconnect(); resizeObserver = null; retract(); },
+    hide() { anchor = null; frame = null; resizeObserver?.disconnect(); resizeObserver = null; retract(); stopTimer(); },
     sync,
     reload() { browser.style.pointerEvents = 'none'; probedWindowGlobal = null; bridgeProbeAfter = 0; renavigate(); },
     bindContext(binding, prepare) {
