@@ -13,7 +13,6 @@ import { CHAT_TRANSPORT_UNAVAILABLE_MESSAGE } from '../../core/src/chat/chat-tra
 import { selectionBrief } from '../../core/src/chat/document-brief.ts';
 import { copyFileToClipboard } from './chat/clipboard-file.ts';
 import type { ReaderClient } from '../../contracts/src/runtime.ts';
-import type { ChatTransport } from '../../contracts/src/execution.ts';
 import { PINNED_RUNTIME } from '../../../runtime/manifest.ts';
 import { geckoHost } from './runtime/gecko.ts';
 import { injectReaderStyles } from './reader/dock.ts';
@@ -51,12 +50,6 @@ let agent: AgentRuntime | undefined;
  */
 let clientPromise: Promise<ReaderClient> | null = null;
 let client: ReaderClient | null = null;
-/**
- * Chat's transport is no longer a boundary of ours: Chat mode hosts the real ChatGPT application in
- * a chrome browser surface (`chat/embed.ts`), so the native Chat transport stays unconfigured and is
- * never reached. Agent keeps the bundled Codex runtime.
- */
-const CHAT_TRANSPORT: ChatTransport | undefined = undefined;
 /**
  * One hosted surface per paper per main window. Each paper owns its ChatGPT draft, streaming turn and
  * official `/c/…` history independently; inactive surfaces park without unloading.
@@ -158,7 +151,6 @@ function sharedClient(): Promise<ReaderClient> {
     cwd: paths.cwd,
     uuid: () => crypto.randomUUID(),
     ...(context?.version ? { pluginVersion: context.version } : {}),
-    ...(CHAT_TRANSPORT ? { chatTransport: CHAT_TRANSPORT } : {}),
     generatedImage,
   })).then(created => {
     if (!active) { void created.close().catch(() => undefined); throw new Error('Plugin stopped.'); }
@@ -174,12 +166,12 @@ function ensureAgent(): Promise<void> {
   });
 }
 /**
- * Known without starting Codex, because the transport choice is compile-time in this build. Chat
- * mode never renders this in production any more — Chat is the hosted ChatGPT application — but the
- * native Chat path still refuses rather than silently borrowing Agent's runtime, so the reason is
- * still reported to the few callers that could reach it.
+ * Known without starting Codex: this build wires no native Chat transport, so the local Chat
+ * completion path refuses rather than silently borrowing Agent's runtime. Production Chat never
+ * renders this — Chat is the hosted ChatGPT application — but the reason stays honest for callers
+ * that could still reach the native path.
  */
-function chatUnavailableReason(): string | null { return CHAT_TRANSPORT ? null : CHAT_TRANSPORT_UNAVAILABLE_MESSAGE; }
+function chatUnavailableReason(): string { return CHAT_TRANSPORT_UNAVAILABLE_MESSAGE; }
 function presenterFor(identity: AttachmentIdentity, reader?: HostReader): ConversationPresenter {
   const client = clientId();
   const paper = paperScope(client, identity); const key = paperId(paper);

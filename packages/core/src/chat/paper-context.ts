@@ -12,9 +12,6 @@
  */
 import type { PaperIdentity } from '../../../contracts/src/index.ts';
 
-/** Fixed field order of the copied block; a field with no value is omitted rather than filled in. */
-export const PAPER_CONTEXT_FIELDS = ['Title', 'Authors', 'Publication', 'Year', 'DOI'] as const;
-
 /** Labels already on a DOI: Zotero stored the identifier, not the browser address. */
 const DOI_PREFIXES: readonly RegExp[] = [
   /^doi:\s*/iu,

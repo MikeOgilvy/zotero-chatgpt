@@ -1,4 +1,4 @@
-import type { Citation, DocumentContext, DocumentRevision, PaperIdentity, PaperScope } from '../../../contracts/src/index.ts';
+import type { Citation, DocumentContext, PaperIdentity, PaperScope } from '../../../contracts/src/index.ts';
 import { paperIdentityOf } from '../../../core/src/context/bibliography.ts';
 import type { DocumentProgress, DocumentSource, ReaderDocumentCache } from './document.ts';
 import type { HostReader, ZoteroHost } from './host-types.ts';
@@ -51,11 +51,6 @@ export interface ReaderContext {
   phase: 'idle' | 'preparing' | 'ready' | 'error';
   progress: DocumentProgress;
   error: string | null;
-}
-
-/** The frozen file version of the last completed local read, or null before one completes. */
-export function readerRevision(context: ReaderContext): DocumentRevision | null {
-  return context.prepared?.revision ?? null;
 }
 
 /**

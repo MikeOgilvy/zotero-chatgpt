@@ -1,6 +1,3 @@
-/** The only web origin the hosted Chat surface and its actor are allowed to address. */
-export const OFFICIAL_CHATGPT_ORIGIN = 'https://chatgpt.com';
-
 export interface FrozenOfficialChatInput {
   question: string;
   document: string;

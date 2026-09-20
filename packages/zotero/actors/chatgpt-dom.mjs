@@ -1,6 +1,5 @@
 /** DOM-only helpers used by the child actor and exercised without a privileged Gecko runtime. */
 
-export const CHATGPT_ORIGIN = 'https://chatgpt.com';
 const DESKTOP_COMPOSER_SELECTOR = '#prompt-textarea';
 const MOBILE_COMPOSER_SELECTOR = 'textarea#mobile-composer-prompt';
 const USER_MESSAGE_SELECTOR = '[data-message-author-role="user"]';
