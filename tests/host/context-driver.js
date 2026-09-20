@@ -160,7 +160,9 @@ async function runHostSmoke(config) {
     const view = () => reader()._internalReader._primaryView;
     const viewWin = () => view()._iframeWindow;
     const contextRing = () => panel()?.querySelector('[data-zchatgpt-context-usage]');
-    const contextSource = () => panel()?.querySelector('[data-zchatgpt-context-source]');
+    // The active citation line lives in `More → Paper & context details`, which is part of the common
+    // shell, not of the chat section the ring is mounted in.
+    const contextSource = () => shell()?.querySelector('[data-zchatgpt-context-source]');
     const disclosure = () => rdoc()?.querySelector('[data-zchatgpt-context-disclosure]');
     const refusalAlert = () => panel()?.querySelector('p.zchatgpt-error:not([data-zchatgpt-view-error])');
     const contextScale = () => shell()?.style.getPropertyValue('--zchatgpt-chat-text-scale') ?? '';
@@ -433,15 +435,19 @@ async function runHostSmoke(config) {
     click(modeButton('agent'));
     await until(() => pressed('agent') && modeSwitch().dataset.zchatgptMode === 'agent', 'mode-agent-restored-for-request-boundaries');
     await check('agent-mode-restored-before-request-boundaries', pressed('agent') && !pressed('chat'), { mode: modeSwitch().dataset.zchatgptMode });
-    // The unsent tab is the New chat copy in either interface language. It must not be named after
-    // the paper: paper identity is carried by the attachment/context system, not by a tab label.
-    const unsentTab = () => panel()?.querySelector('[data-zchatgpt-current-title]');
-    const NEW_CHAT_COPY = ['New chat', '新建对话'];
+    // The unsent tab is the new-session copy for the mode on screen — `New chat` in Chat, `New agent`
+    // in Agent (UI-05) — in either interface language. It must not be named after the paper: paper
+    // identity is carried by the attachment/context system, not by a tab label. The tab strip lives
+    // in the common shell (beside the hosted Chat surface it is hidden), so this reads the shell
+    // root: `panel()` is the chat section and does not contain the header.
+    const unsentTab = () => shell()?.querySelector('[data-zchatgpt-current-title]');
+    const NEW_SESSION_COPY = { chat: ['New chat', '新建对话'], agent: ['New agent', '新建 Agent 会话'] };
+    const expectedNewCopy = NEW_SESSION_COPY[pressed('agent') ? 'agent' : 'chat'];
     await check('new-chat-tab-before-or-with-connection',
       unsentTab()?.dataset.zchatgptConversationId === 'new-chat'
-        && NEW_CHAT_COPY.includes((unsentTab()?.querySelector('[data-zchatgpt-pane-label]')?.textContent ?? '').trim())
+        && expectedNewCopy.includes((unsentTab()?.querySelector('[data-zchatgpt-pane-label]')?.textContent ?? '').trim())
         && !unsentTab()?.textContent?.includes(title),
-      { tabId: unsentTab()?.dataset.zchatgptConversationId ?? null, label: unsentTab()?.querySelector('[data-zchatgpt-pane-label]')?.textContent ?? null, articleTitle: title });
+      { tabId: unsentTab()?.dataset.zchatgptConversationId ?? null, label: unsentTab()?.querySelector('[data-zchatgpt-pane-label]')?.textContent ?? null, expectedCopy: expectedNewCopy, articleTitle: title });
     // Wait for the product's own gate sequence for this file: one gate from `prepare()`, a second from
     // `validate()`, which it can only reach after the whole-document read returned. Nothing of the
     // driver's is on the document, and the wait can fail honestly.
@@ -669,7 +675,8 @@ async function runHostSmoke(config) {
       toggle().click(); await until(() => !panel(), 'perf-close');
       const start = win.performance.now(); toggle().click();
       await until(warmReady, 'perf-input-ready'); warm.push(win.performance.now() - start);
-      const history = panel().querySelector('[data-zchatgpt-action="history"]');
+      // `+` / history are shell-level navigation now, so they are read from the shell root.
+      const history = shell().querySelector('[data-zchatgpt-action="history"]');
       const historyPanel = panel().querySelector('[data-zchatgpt-history]');
       step = 'perf-local-feedback';
       const feedback = win.performance.now(); history.click();
@@ -907,11 +914,14 @@ async function runHostSmoke(config) {
     const paneIdentifiers = () => [...paneRoot.querySelectorAll('[data-zchatgpt-skill]')].map(row => ({ id: String(row.getAttribute('data-zchatgpt-skill')), name: String(row.querySelector('label span')?.textContent ?? '') }));
     const storedLanguage = async () => JSON.parse(String(await Zotero.ZoteroChatGPTPreferencesHost.readSettings())).uiLanguage;
     // That section's copy differs by build: the 0.4.0a3 bundle the profile ships renders it as "Chat";
-    // f6592a3 (17:28) renamed it "Appearance" and that rename is not in the a3 bundle. Identify the
-    // section from the copy this build renders, once, before any switch, so the language assertions
-    // below check a direction instead of reading the expected value off the pane they are checking. A
-    // section copy not in this table fails the check, so a rename has to be acknowledged deliberately.
+    // f6592a3 (17:28) renamed it "Appearance"; the one-row-header round reorganized the pane into
+    // General / Chat / Agent / Local data (UI-06), so the UI-language control now lives under
+    // "General". Identify the section from the copy this build renders, once, before any switch, so
+    // the language assertions below check a direction instead of reading the expected value off the
+    // pane they are checking. A section copy not in this table fails the check, so a rename has to be
+    // acknowledged deliberately.
     const paneSectionCopy = [
+      { en: 'General', zh: '通用' },
       { en: 'Chat', zh: '对话' },
       { en: 'Appearance', zh: '外观' },
     ];
