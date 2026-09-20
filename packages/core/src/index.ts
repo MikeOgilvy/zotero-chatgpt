@@ -343,7 +343,7 @@ class RuntimeSession implements ReaderClient {
   cancel(conversationId: string, requestId: string): Promise<SendReceipt> { return this.service.cancel(conversationId, requestId); }
   diagnostics(conversationId: string): Promise<ShareableDiagnostics> {
     return this.service.diagnostics(conversationId, {
-      pluginVersion: this.options.pluginVersion ?? '0.4.0-alpha.1',
+      pluginVersion: this.options.pluginVersion ?? '0.1.0',
       runtimeVersion: this.options.codexVersion,
       errorCode: this.runtimeErrorCode(),
     });

@@ -533,7 +533,7 @@ describe('attachment conversations', () => {
     expect(events.at(-1)?.type).toBe('accepted');
     const report = await c.diagnostics(explain(1).conversationId);
     expect(report).toMatchObject({
-      pluginVersion: '0.4.0-alpha.1',
+      pluginVersion: '0.1.0',
       runtimeVersion: '0.154.0',
       errorCode: null,
       requestCount: 1,

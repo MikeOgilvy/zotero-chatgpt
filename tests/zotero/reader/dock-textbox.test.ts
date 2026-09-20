@@ -73,7 +73,7 @@ async function mountDockWithChat() {
     get: () => Promise.resolve(structuredClone(conversation)), send: () => Promise.reject(new Error()),
     request: () => Promise.reject(new Error()), cancel: () => Promise.reject(new Error()),
     deleteConversation: () => Promise.reject(new Error()),
-    diagnostics: () => Promise.resolve({ pluginVersion: '0.4.0-alpha.1', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }),
+    diagnostics: () => Promise.resolve({ pluginVersion: '0.1.0', runtimeVersion: '0.144.1', errorCode: null, requestCount: 0, states: {}, storageLocation: SHAREABLE_STORAGE_LOCATION }),
     subscribe: () => () => undefined, close: async () => {},
   };
   const presenter = new ConversationPresenter(presenterContext(paperA, 'Synthetic Paper A'), {

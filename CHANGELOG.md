@@ -1,6 +1,47 @@
 # Changelog
 
-All notable user-facing changes will be recorded here. Versions below are **development previews**, not GitHub Releases.
+All notable user-facing changes are recorded here.
+
+## 0.1.0 — first release
+
+The first version of Zotero ChatGPT, published as an **unsigned early preview** for macOS on Apple
+Silicon with Zotero 9.0.6. It is a single add-on with two modes that share one sidebar and one view
+of the paper you have open.
+
+**Chat** hosts the official `chatgpt.com` application inside the Zotero reader sidebar, so the
+conversation, composer, streaming, model picker, history and uploads are the real ChatGPT web app
+rather than a reimplementation. Opening the sidebar, reading a paper and switching papers start no
+Codex work, and Chat never consumes Codex quota. Because the hosted page owns its own conversation,
+the sidebar adds only what the page cannot know — the paper you are reading — through two one-click
+clipboard actions: **Copy paper context** (local bibliography: title, authors, publication, year,
+DOI and the stored abstract) and **Copy PDF file** (the actual file, ready to paste into ChatGPT's
+own composer). Automatic PDF context is on by default, described before the first send, and can be
+turned off.
+
+**Agent** runs the bundled Codex App Server for work that changes your library, and it proposes
+rather than acts: nothing is written until you review and approve it. **Highlight key points** uses
+the model's verbatim quote plus a page hint, and the program verifies a unique match against the
+frozen PDF revision before any native highlight is created, so invented coordinates cannot reach
+your library. **Organize selected items** adds tags and collection memberships to the regular items
+selected in the main window. **Get an article** resolves a DOI or public article URL and saves
+restricted metadata, then attempts a lawful open-access PDF. A task is previewed and approved once
+rather than item by item, and every write is preceded by an intent record and followed by a readback
+and ledger entry, so a stop or a conflict can be told apart from a success and undone.
+
+The sidebar is one row: the mode switch, the paper, the two copy actions, then new chat, history and
+more. Switching modes never stops or discards work already running, each mode keeps its own draft,
+focus and scroll, and the reader keeps Zotero's native dock, zoom, rotation and reading position.
+
+**Known limitations of this release**
+
+- The build is **unsigned**, and its manifest carries no update channel: Zotero will not find
+  updates for it, and a reinstall is required to move to a later build.
+- It runs on **macOS Apple Silicon only**. The bundled Codex runtime is a `darwin/arm64` binary.
+- **Agent is experimental.** The full Agent path — a real model candidate through native write,
+  readback and conflict undo — has not been re-verified on this artifact. Fetching open-access PDFs
+  from a DOI or article link is the least settled part of it.
+- Chat's own conversation is the web application's, so the plugin keeps only its local bindings,
+  drafts and settings, not a copy of your ChatGPT history.
 
 ## Unreleased
 

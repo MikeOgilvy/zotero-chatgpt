@@ -5,7 +5,56 @@
 
 产品要求见 [zotero-chatgpt-user-flow.md](zotero-chatgpt-user-flow.md)，架构见 [module-design.md](module-design.md)，命令与状态定义见 [development.md](development.md)。
 
-## 1. 当前候选
+## 0. 首个发行版 0.1.0（2026-09-20）
+
+本轮把 add-on 版本从开发标识 `0.4.0a34` 提升为**首个发行版 `0.1.0`**，并按用户当轮的明确授权首次公开发行（push → tag `v0.1.0` → GitHub Release）。
+
+| 字段 | 值 |
+| --- | --- |
+| Zotero manifest 版本 | `0.1.0`（名称 "Zotero ChatGPT"，描述改为 "Read and discuss papers with ChatGPT inside Zotero. Early preview."） |
+| npm 版本 | `0.1.0`（`package.json`、`package-lock.json`、`packages/{zotero,core,contracts}/package.json`、`packages/core/src/index.ts` 默认 `pluginVersion`） |
+| 发行 XPI | `dist/zotero-chatgpt-0.1.0-dev.xpi`，92,760,736 bytes / 87 files |
+| SHA-256 | `31b0f4c5d0bae1e4922b1da52e1de74c00c98918a7b69b86808cae3732e4ac49` |
+| Tag | `v0.1.0` |
+| 发行性质 | **未签名**；无更新频道；支持平台仅 macOS Apple Silicon |
+
+发行 XPI 与 README 素材所用的 `0.4.0a34` 候选**逐文件比较只有两处差异**：`manifest.json` 的 name/version/description，以及 `content/zchatgpt.js` 里一个默认 `pluginVersion` 字面量（2,007,809 → 2,007,801 字节）。没有 UI 代码变化，因此 `docs/media/` 的截图与录屏对 `0.1.0` 仍然成立。
+
+### 0.1 本轮实际执行
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npm run test:unit` | PASS，103 files / 1377 passed / 2 skipped（随重命名改了 4 处断言：`build.test.ts` 的显示名、`client.test.ts` 与两个 reader stub 的 `pluginVersion`） |
+| `npm run package:dev` | PASS，产出 `dist/zotero-chatgpt-0.1.0-dev.xpi` |
+| `npm run verify:artifacts` | PASS，87 files |
+| 干净树重建 | PASS，`git ls-files` 导出到 `/tmp` 的干净树 + `npm ci` + `runtime-prepare` + `package:dev`，产物 SHA-256 与工作树**逐字节相同** |
+| 无模型宿主阶段 `--context --run-id release-010` | PASS **47/47**（build `0.1.0`，sha `31b0f4c5…`） |
+| S6 virgin 安装 | PASS，15 ok / 3 跳过（`live-model-send`、`version-bump-upgrade`、`rollback-restores-previous-version` 为单版本树的设计内跳过） |
+| S6 两版本升级/回滚 | PASS，20 ok / 2 跳过 |
+
+S6 两版本阶段用 `--upgrade-xpi dist/zotero-chatgpt-0.4.0a34-dev.xpi --rollback-xpi dist/zotero-chatgpt-0.1.0-dev.xpi`：验证 `0.1.0 → 0.4.0a34` 升级、`0.4.0a34 → 0.1.0` 回滚、两次替换后握手与「未登录」状态不变、会话记录保留，以及旧版本读取 schema 3 记录时**拒绝且不改写字节**。
+
+### 0.2 本轮修掉的两个真实问题
+
+1. **`tests/host/s6-driver.js` 的选择器过时（测试缺陷，非产品缺陷）。** 单行头部改版把模式开关移进公共 shell，而 shell bar 是 `[data-zchatgpt-chat]` 的**兄弟节点**而非后代，驱动仍在 `panel()` 里查它，因此停在 `Timed out: mode switch`。已改为从 `[data-zchatgpt-shell]` 取该控件；`panel()` 保留原义（runtime/auth/generating 数据集确实仍在 chat section 上）。
+2. **复用测试树的陈旧 add-on（测试装配问题，非产品缺陷）。** `.zotero-chatgpt-dev/s6-upgrade` 是 9 月 13 日那轮留下的树，里面仍启用着旧命名的 `zcr-host-test@local` v0.0.1 与旧 add-on id 的 `{8a5f5bde-…}` v0.3.0a1。旧驱动同样在启动时执行 `runHostSmoke` 并调用 `Zotero.Utilities.Internal.quit()`，于是在当前驱动跑到第 3 项时静默退出 Zotero，报告永远停在 `status: running`。`--s6` 只替换 `zchatgpt-host-test@local`，不会清理它们。已把这两个文件归档到 `.zotero-chatgpt-dev/verification/release-0.1.0/` 后从该专用树移除，随后阶段一次通过。
+
+两处都只影响测试工具与专用测试树，未改动产品行为、权限、运行时 pin 或数据 schema。
+
+### 0.3 本轮仍未执行
+
+```text
+真实 Codex 模型轮次、真实高亮/获取/整理原生任务、真实 ChatGPT 提交与文件粘贴：
+      NOT RUN。本轮未调用产品 Codex、未试探额度、未恢复远端线程。
+      S6 阶段只启动 bundled Codex 进程做本地协议握手（无 thread、无 turn、无模型请求），
+      驱动本身声明 live-model-send 为 notRun。
+签名与签名验证：NOT RUN（用户选择以未签名形式发行）。
+非 darwin-arm64 平台：NOT RUN / 未支持声明。
+```
+
+## 1. 当前候选（开发线）
 
 | 字段 | 值 |
 | --- | --- |

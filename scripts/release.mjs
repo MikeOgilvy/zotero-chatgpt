@@ -44,7 +44,7 @@ export async function buildReleasePlan() {
     githubRelease: null,
     githubOwner: null,
     repository: 'zotero-chatgpt',
-    tag: `v${manifest.version}-dev`,
+    tag: `v${manifest.version}`,
     npmVersion: npmPackage.version,
     addonId: SUBJECT_ID,
     addonVersion: manifest.version,
