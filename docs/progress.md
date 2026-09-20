@@ -26,7 +26,7 @@
 | --- | --- |
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npm run test:unit` | PASS，103 files / 1377 passed / 2 skipped（随重命名改了 4 处断言：`build.test.ts` 的显示名、`client.test.ts` 与两个 reader stub 的 `pluginVersion`） |
+| `npm run test:unit` | PASS，103 files / 1379 passed / 0 skipped（打包后再跑：`tests/build` 里两个以"`dist/` 存在当前版本 XPI"为条件的用例此时已执行。随重命名改了 4 处断言：`build.test.ts` 的显示名、`client.test.ts` 与两个 reader stub 的 `pluginVersion`） |
 | `npm run package:dev` | PASS，产出 `dist/zotero-chatgpt-0.1.0-dev.xpi` |
 | `npm run verify:artifacts` | PASS，87 files |
 | 干净树重建 | PASS，`git ls-files` 导出到 `/tmp` 的干净树 + `npm ci` + `runtime-prepare` + `package:dev`，产物 SHA-256 与工作树**逐字节相同** |
