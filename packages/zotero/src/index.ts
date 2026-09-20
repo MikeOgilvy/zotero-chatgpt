@@ -19,7 +19,7 @@ import { geckoHost } from './runtime/gecko.ts';
 import { injectReaderStyles } from './reader/dock.ts';
 import { NativeReaderPane, currentReaderZoom, zoomReader } from './reader/reader-pane.ts';
 import { createToolbarButton, insertToolbarButton } from './reader/toolbar.ts';
-import { captureSelection, freezeCitationVersion, openCitation, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
+import { captureSelection, freezeCitationVersion, openCitation, paperIdentityFor, paperMetadata, type SelectionPopupEvent } from './reader/selection.ts';
 import { attachmentIdentity, nativeDocumentServices, paperScope, readerContextFor, type AttachmentIdentity } from './reader/context.ts';
 import { SelectionActionBar } from './reader/selection-actions.ts';
 import { nativeDocumentSource, ReaderDocumentCache } from './reader/document.ts';
@@ -209,6 +209,9 @@ function presenterFor(identity: AttachmentIdentity, reader?: HostReader): Conver
         agent: assembleAgent(local),
         library: libraryPort(reader),
         openCitation: citation => openCitation(Zotero, citation, clientId()),
+        // The clipboard copy re-reads the local metadata by the frozen scope, so it never borrows
+        // whatever paper the reader happens to show when a slower read returns.
+        readPaperIdentity: scope => Promise.resolve(paperIdentityFor(Zotero, scope)),
         openItem: async (reference: import('../../contracts/src/native.ts').NativeItemRef) => {
           if (reference.clientId !== clientId()) throw new ReaderError('NOT_FOUND', 'The output belongs to another profile.');
           const item = Zotero.Items.getByLibraryAndKey?.(reference.libraryId, reference.key);
@@ -304,12 +307,15 @@ function entry(reader: HostReader): ReaderEntry {
         // the session; the reader's own browser is the frame whose rect the surface is measured in.
         chatEmbed: {
           show: anchor => {
+            const status = anchor.closest('[data-zchatgpt-embed]')?.querySelector<HTMLElement>('[data-zchatgpt-bridge-status-line]');
             const surface = chatSurface(reader._window, hostedBinding);
             if (!surface) {
-              const status = anchor.closest('[data-zchatgpt-embed]')?.querySelector<HTMLElement>('[data-zchatgpt-bridge-status-line]');
               if (status) { status.textContent = 'Four paper ChatGPT sessions already contain drafts or work. Finish or clear one before opening another.'; status.hidden = false; }
               return;
             }
+            // A surface really was shown: the previous capacity message is no longer true, so it is
+            // cleared instead of lingering next to a working page.
+            if (status) { status.textContent = ''; status.hidden = true; }
             surface.bindContext(hostedBinding, prepareHostedContext);
             surface.bindConversation(hostedBinding, officialConversationURL(hostedBinding), url => rememberOfficialConversationURL(hostedBinding, url));
             showChatSurface(reader._window, hostedBinding, surface, anchor, reader._iframe ?? null);
@@ -317,13 +323,14 @@ function entry(reader: HostReader): ReaderEntry {
           hide: () => chatSurfaces.get(reader._window)?.get(hostedBinding)?.hide(),
           reload: () => chatSurfaces.get(reader._window)?.get(hostedBinding)?.reload(),
           // The application owns its own conversation and this host has no supported way to put
-          // context into it, so both controls prepare text and say plainly that it is on the
-          // clipboard. Neither one sends anything, and neither starts Codex.
-          copyContext: async () => {
-            const brief = await presenter.exportDocumentBrief();
-            if (!brief.ok) return { copied: false, reason: brief.reason };
-            hooks.copyText(brief.text);
-            return { copied: true, kind: 'document', pages: brief.pages, totalPages: brief.totalPages, truncated: brief.truncated };
+          // context into it, so the paper action prepares the local *bibliography* and says plainly
+          // that it is on the clipboard. It sends nothing and starts no Codex; the automatic PDF text
+          // that a real send carries is assembled by `prepareHostedContext`, not by this.
+          copyPaperContext: async () => {
+            const context = await presenter.exportPaperContext();
+            if (!context.ok) return { copied: false, reason: context.reason };
+            hooks.copyText(context.text);
+            return { copied: true, kind: 'paper' };
           },
           // The one route that hands the real document to the application: the file itself goes on
           // the clipboard and the owner pastes it into ChatGPT's own composer. Nothing here touches
@@ -335,14 +342,6 @@ function entry(reader: HostReader): ReaderEntry {
             const outcome = copyFileToClipboard(path);
             if (outcome === 'copied') return { copied: true, kind: 'file' as const };
             return { copied: false, reason: outcome === 'unsupported' ? 'unavailable' as const : 'failed' as const };
-          },
-          copySelection: () => {
-            // The last selection Zotero reported through its own reader event; the sidebar never
-            // re-reads the reader's DOM to guess at a newer one.
-            const citation = readers.get(reader)?.latestCitation ?? null;
-            if (!citation) return Promise.resolve({ copied: false as const, reason: 'no-selection' as const });
-            hooks.copyText(selectionBrief(citation));
-            return Promise.resolve({ copied: true as const, kind: 'selection' as const, pageLabel: citation.pageLabel });
           },
         },
         uuid: () => crypto.randomUUID(),

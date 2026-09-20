@@ -5,6 +5,7 @@ import { mountWorkspaceView } from './workspace-view.ts';
 import { mountTaskView } from './task-view.ts';
 import { mountUILocale } from './ui-locale.ts';
 import { EXPLAIN_QUESTION } from '../../../core/src/codex/reader-policy.ts';
+import { hasBibliographicIdentity } from '../../../core/src/chat/paper-context.ts';
 import type { ConversationPresenter, PresenterState } from './presenter.ts';
 import {
   applyComposerChoice, composerControls, effortLabel, modelChipLabel, resolveFastTier, settingsCaption,
@@ -25,28 +26,27 @@ export type { AttachmentIdentity };
  * ChatGPT's own UI is not duplicated (see `./embed.ts` for why the surface is a chrome browser).
  */
 /**
- * What one clipboard action in the embed bar did. The hosted application owns its own conversation
- * and this host cannot put context into it, so the bar's answer is always "this is on your clipboard
- * now, paste it in" or an honest statement of why nothing was.
+ * What one paper action in the toolbar did. The hosted application owns its own conversation and
+ * this host cannot put context into it, so an action's answer is always "this is on your clipboard
+ * now, paste it in" or an honest statement of why nothing was. `no-info` is its own answer: the
+ * item proved no bibliographic fact, so there was nothing true to copy.
  */
 export type EmbedClipboardOutcome =
-  | { copied: true; kind: 'document'; pages: number; totalPages: number; truncated: boolean }
-  | { copied: true; kind: 'selection'; pageLabel: string }
+  /** The paper's local bibliographic context is on the clipboard. */
+  | { copied: true; kind: 'paper' }
   /** The real PDF file is on the clipboard, for the application's own paste-to-attach path. */
   | { copied: true; kind: 'file' }
-  | { copied: false; reason: 'unavailable' | 'no-text' | 'no-selection' | 'no-file' | 'failed' };
+  | { copied: false; reason: 'no-info' | 'no-file' | 'unavailable' | 'failed' };
 
 export interface ChatEmbedHook {
   /** Paint the hosted application over `anchor`, which is this view's slot element. */
   show(anchor: HTMLElement): void;
   /** Stop painting without unloading the application, keeping its session and conversation. */
   hide(): void;
-  /** Navigate the application document again; used by the embed bar's own reload control. */
+  /** Navigate the application document again; used by the toolbar's More menu. */
   reload?(): void;
-  /** Prepare the current paper and put it on the clipboard for the owner to paste in. */
-  copyContext?(): Promise<EmbedClipboardOutcome>;
-  /** Put the last selection Zotero reported on the clipboard for the owner to paste in. */
-  copySelection?(): Promise<EmbedClipboardOutcome>;
+  /** Put the current paper's bibliographic context on the clipboard for the owner to paste in. */
+  copyPaperContext?(): Promise<EmbedClipboardOutcome>;
   /** Put the current PDF file itself on the clipboard, for the application's paste-to-attach path. */
   copyPdfFile?(): Promise<EmbedClipboardOutcome>;
 }
@@ -206,29 +206,37 @@ const COPY = {
   // owns its own conversation, transcript and model picker, so nothing of that is duplicated here;
   // the bar only carries what the web app cannot know about this host, which is the paper it has open.
   embedLabel: 'Reload ChatGPT',
-  embedCopyContext: 'Copy paper context',
-  // The file route puts the actual PDF on the clipboard; it never uploads anything, so the control is
-  // named for what it does. The application's own paste-to-attach path is the upload step, and it
-  // happens inside ChatGPT, not here.
-  embedAttachPdf: 'Copy PDF file…',
-  embedCopySelection: 'Copy selection',
-  embedFileCopied: 'The PDF file is on your clipboard — paste it into ChatGPT to attach it.',
+  /**
+   * The two paper actions. Both are icon controls with a title + explanation tooltip; the copy that
+   * completes in one click carries no ellipsis, and neither action uploads anything. The paper action
+   * copies local bibliography only — the PDF action puts the actual file on the clipboard for the
+   * application's own paste-to-attach step.
+   */
+  copyPaperContext: 'Copy paper context',
+  copyPaperContextHint: 'Copy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.',
+  copyPdfFile: 'Copy PDF file',
+  copyPdfFileHint: 'Copy the current PDF file to the clipboard. Paste it into ChatGPT to attach it.',
+  copyPaperDone: 'Paper details copied',
+  copyPaperNoInfo: 'This item has no bibliographic information to copy.',
+  copyPaperFailed: 'The paper details could not be read.',
+  copyPdfDone: 'PDF copied — paste to attach',
   embedFileUnavailable: 'Copying the PDF file is unavailable here.',
   embedFileMissing: 'This attachment has no local PDF file to copy.',
   embedFileFailed: 'The PDF file could not be copied.',
-  embedContextCopied: (pages: number, total: number) => `Copied ${pages} of ${total} pages — paste into ChatGPT.`,
-  embedContextShortened: (pages: number, total: number) => `Copied a shortened ${pages} of ${total} pages — paste into ChatGPT.`,
-  embedSelectionCopied: (pageLabel: string) => `Copied the selection from page ${pageLabel} — paste into ChatGPT.`,
-  embedContextUnavailable: 'This PDF is not readable here, so there is nothing to copy.',
-  embedContextEmpty: 'No text was read from this PDF, so there is nothing to copy.',
-  embedContextFailed: 'The paper context could not be prepared.',
-  embedSelectionMissing: 'Select text in the PDF first, then copy it here.',
+  moreActions: 'More actions',
+  paperDetails: 'Paper & context details',
+  /** The first-outbound consent, kept as a state and shown inside the details, never as a header row. */
+  allowPdfContext: 'Allow PDF context',
   embedAutomaticDisclosure: 'When you send in official ChatGPT, locally extracted text from the current PDF and the current Zotero selection are added to that message. Nothing is sent when you open the sidebar. You can turn this off in Zotero Preferences.',
-  embedAutomaticOn: 'Current PDF context will be added when you send in ChatGPT.',
-  embedAutomaticOff: 'Automatic PDF context is off. You can turn it on in Zotero Preferences.',
   /** First outbound scope notice. It describes the request scope, never a claim about what was read locally. */
   sendScope: 'When you send, extracted text from this PDF, your selected text and attached images go to Codex through your ChatGPT account. Opening this sidebar only prepares local text. You can turn automatic PDF text off in Zotero\'s Preferences window.',
-  continueWithPdf: 'Continue with current PDF',
+  allowAndSend: 'Allow PDF context and send',
+  /** History row actions. The menu states the real scope; one confirmation precedes the removal. */
+  historyRowActions: 'Conversation actions',
+  deleteLocalConversation: 'Delete local conversation…',
+  deleteLocalConfirm: 'Delete this local conversation? Its messages and unsent draft are removed from this computer. The official ChatGPT conversation, the paper and native annotations are not touched.',
+  deleteLocalConfirmAction: 'Delete locally',
+  cancelDeleteLocal: 'Keep it',
   // Context coverage disclosure on the composer ring. Every string here is user-facing copy awaiting
   // unification into `ui-locale.ts`; the static ones carry `data-zchatgpt-ui="true"` so `mountUILocale`
   // picks them up the moment the keys exist. The dynamic ones are listed for the coordinator too.
@@ -263,13 +271,29 @@ const ICONS = {
   source: 'M8 3v8M5 8l3 3 3-3',
   remove: 'M4 4l8 8M12 4l-8 8',
   check: 'M3.5 8.25 6.5 11.25 12.5 4.75',
-  historyDone: 'M8 2.75a5.25 5.25 0 1 1 0 10.5 5.25 5.25 0 0 1 0-10.5ZM5.5 8.35 7.15 10l3.5-3.9',
   historyDraft: 'M3.5 12.5 4 10.1 10.8 3.3a1.15 1.15 0 0 1 1.62 0l.28.28a1.15 1.15 0 0 1 0 1.62L6 12l-2.5.5ZM9.9 4.2l1.9 1.9',
   reload: 'M13.1 8a5.1 5.1 0 1 1-1.5-3.6M13.1 2.4v2.5h-2.5',
   chevron: 'M4 6.5 8 10.5l4-4',
+  // Clipboard with ruled text: the paper-context copy. The clip on top is what keeps it unmistakably
+  // different from the folded page used for the file copy.
+  clipboardText: 'M9.5 5.5h1.75c.41 0 .75.34.75.75v6.5c0 .41-.34.75-.75.75h-6.5a.75.75 0 0 1-.75-.75v-6.5c0-.41.34-.75.75-.75H6.5M9.5 5.5v-.75c0-.41-.34-.75-.75-.75h-1.5a.75.75 0 0 0-.75.75v.75M6 8.25h4M6 10.5h4',
+  // Folded-corner page: the PDF-file copy.
+  pdfFile: 'M9.25 2.5H6.25A1.25 1.25 0 0 0 5 3.75v8.5c0 .69.56 1.25 1.25 1.25h5.5c.69 0 1.25-.56 1.25-1.25V6.75ZM9.25 2.5v3.5c0 .41.34.75.75.75h3M7 11h4',
+  // A plain filled dot: the calm marker for a finished local record, never a completion badge.
+  dot: 'M8 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z',
 } as const;
 /** The unbound composer tab. It is not a stored conversation id; the first send creates the record. */
 const NEW_CHAT_TAB_ID = 'new-chat';
+/**
+ * The canonical "available to assistive technology, invisible on screen" box. It is applied to the
+ * toolbar hints both as `.zchatgpt-visually-hidden` and as inline declarations: the normal header must
+ * never print an explanation because one rule went missing, and a reader document can legitimately
+ * still hold the stylesheet text injected by an earlier add-on version (see `injectReaderStyles`).
+ */
+const VISUALLY_HIDDEN = {
+  position: 'absolute', width: '1px', height: '1px', margin: '-1px', padding: '0',
+  overflow: 'hidden', 'clip-path': 'inset(50%)', 'white-space': 'nowrap', border: '0',
+} as const;
 const STATUS_LINE = {
   idle: 'Open the Codex sidebar to connect.',
   starting: 'Starting Codex…',
@@ -465,6 +489,8 @@ export function renderReaderShell(body: HTMLElement, identity: AttachmentIdentit
 export function mountChatView(root: HTMLElement, presenter: ConversationPresenter, hooks: ChatViewHooks = {}): () => void {
   const doc = root.ownerDocument;
   let latestViewState = presenter.snapshot();
+  /** Set by the returned cleanup so an in-flight clipboard promise cannot touch a destroyed view. */
+  let disposedView = false;
   // View actions own a slot separate from `state.message`: a presenter update must not erase a
   // view failure, and a view failure must never be reported as conversation state.
   const reportViewMessage = (message: string) => {
@@ -499,7 +525,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     svg.setAttribute('aria-hidden', 'true');
     const path = doc.createElementNS(SVG, 'path');
     path.setAttribute('d', ICONS[name]);
-    path.setAttribute('fill', name === 'stop' || name === 'more' ? 'currentColor' : 'none');
+    path.setAttribute('fill', name === 'stop' || name === 'more' || name === 'dot' ? 'currentColor' : 'none');
     path.setAttribute('stroke', 'currentColor');
     path.setAttribute('stroke-width', '1.25');
     path.setAttribute('stroke-linecap', 'round');
@@ -595,7 +621,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const scopeNotice = el('div', 'zchatgpt-context-disclosure');
   scopeNotice.dataset.zchatgptContextDisclosure = '';
   const scopeNoticeCopy = el('p', '', COPY.sendScope);
-  const acknowledgeScope = button(COPY.continueWithPdf, 'acknowledge-context', () => { presenter.acknowledgeContext(); });
+  const acknowledgeScope = button(COPY.allowAndSend, 'acknowledge-context', () => { presenter.acknowledgeContext(); });
   scopeNotice.append(scopeNoticeCopy, acknowledgeScope);
   scopeNotice.hidden = true; acknowledgeScope.hidden = true;
   const actions = el('div', 'zchatgpt-chrome-actions');
@@ -604,7 +630,89 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   historyBtn.setAttribute('aria-haspopup', 'dialog');
   historyBtn.setAttribute('aria-expanded', 'false');
   historyBtn.setAttribute('aria-controls', `${viewId}-history`);
-  actions.append(fresh, historyBtn);
+  /**
+   * The two paper actions. They live in the common toolbar, in the same order in both modes, and
+   * they never read the history row or the open pane: the source is always the current reader's
+   * attachment. Each is an icon button whose tooltip carries the action name and the explanation,
+   * and whose `aria-describedby` points at that same explanation so keyboard and assistive users
+   * get it too. The copy is done when the click returns, so no ellipsis is used.
+   */
+  let hintSerial = 0;
+  /**
+   * The explanation for one toolbar action. It lives beside the button so `aria-describedby` can point
+   * at it, and it hides itself: the class carries the intent, and the inline declarations make "one
+   * 1 px clipped box" a property of this element rather than of whichever stylesheet revision the
+   * document happens to hold. Nothing here is measured or shown as part of the toolbar row.
+   */
+  const describedHint = (hint: string) => {
+    const node = el('span', 'zchatgpt-visually-hidden', hint);
+    node.id = `${viewId}-hint-${++hintSerial}`;
+    node.setAttribute('data-zchatgpt-ui', 'true');
+    for (const [property, value] of Object.entries(VISUALLY_HIDDEN)) node.style.setProperty(property, value);
+    return node;
+  };
+  const copyPaperHint = describedHint(COPY.copyPaperContextHint);
+  const copyPdfHint = describedHint(COPY.copyPdfFileHint);
+  const toolbarAction = (title: string, hint: HTMLElement, action: string, glyph: keyof typeof ICONS) => {
+    const node = button(`${title}\n${hint.textContent}`, action, () => { void runToolbarCopy(node); }, glyph);
+    node.dataset.zchatgptToolbarAction = action;
+    node.setAttribute('aria-label', title);
+    node.setAttribute('aria-describedby', hint.id);
+    return node;
+  };
+  const copyPaper = toolbarAction(COPY.copyPaperContext, copyPaperHint, 'copy-paper-context', 'clipboardText');
+  const copyPdf = toolbarAction(COPY.copyPdfFile, copyPdfHint, 'copy-pdf-file', 'pdfFile');
+  const paperActions = el('div', 'zchatgpt-paper-actions');
+  paperActions.dataset.zchatgptPaperActions = '';
+  // The explanations live beside the buttons, never inside them: the controls stay icon-only, while
+  // `aria-describedby` still reads the explanation to keyboard and assistive users.
+  paperActions.append(copyPaper, copyPaperHint, copyPdfHint, copyPdf);
+  /**
+   * The More menu. It holds the paper/context details the normal header no longer shows, plus the
+   * hosted page's reload control. Only entries that really do something are rendered.
+   */
+  const more = button(COPY.moreActions, 'more-actions', () => { toggleMore(); }, 'more');
+  more.dataset.zchatgptMore = '';
+  more.setAttribute('aria-haspopup', 'dialog');
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-controls', `${viewId}-more`);
+  const moreMenu = el('div', 'zchatgpt-more-menu');
+  moreMenu.id = `${viewId}-more`;
+  moreMenu.dataset.zchatgptMoreMenu = '';
+  moreMenu.hidden = true;
+  moreMenu.setAttribute('role', 'dialog');
+  moreMenu.setAttribute('aria-label', COPY.moreActions);
+  const moreRow = (title: string, action: string, onClick: () => void) => {
+    const node = el('button', 'zchatgpt-more-row');
+    node.type = 'button';
+    node.dataset.zchatgptAction = action;
+    node.textContent = title;
+    node.setAttribute('data-zchatgpt-ui', 'true');
+    node.addEventListener('click', () => { toggleMore(false); onClick(); });
+    return node;
+  };
+  const detailsRow = moreRow(COPY.paperDetails, 'open-paper-details', () => toggleContext(true));
+  const reloadRow = moreRow(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); });
+  reloadRow.hidden = true;
+  moreMenu.append(detailsRow, reloadRow);
+  actions.append(paperActions, fresh, historyBtn, more);
+  /**
+   * The one-line answer to what the next message carries is shown in the details, not in a permanent
+   * header row. This element is only visible while something the owner must act on is outstanding.
+   */
+  const feedback = el('p', 'zchatgpt-shell-feedback');
+  feedback.dataset.zchatgptShellFeedback = '';
+  feedback.setAttribute('role', 'status');
+  feedback.setAttribute('aria-live', 'polite');
+  feedback.hidden = true;
+  let feedbackTimer: number | null = null;
+  const say = (text: string, options: { sticky?: boolean } = {}) => {
+    const view = doc.defaultView;
+    if (feedbackTimer !== null) { view?.clearTimeout(feedbackTimer); feedbackTimer = null; }
+    feedback.textContent = text;
+    feedback.hidden = !text;
+    if (text && !options.sticky && view) feedbackTimer = view.setTimeout(() => { feedbackTimer = null; feedback.textContent = ''; feedback.hidden = true; }, 3200);
+  };
   /**
    * The routing mode for the next request. Per chat: the selected state is painted from presenter
    * state, so a switch is shown only once the presenter accepted it, and it never rewrites an
@@ -622,24 +730,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     return { mode, node };
   });
   modeSwitch.append(...modeButtons.map(entry => entry.node));
-  chrome.append(modeSwitch, panes, shellTitle, actions);
-  /**
-   * The context summary (UI-02/UI-03). One line answers "what will the next message carry"; clicking
-   * it opens an anchored panel with the full source, the concrete read coverage and the actions that
-   * do not belong on a permanent toolbar row. The summary never borrows a previous request's
-   * acceptance or answer state.
-   */
-  const shellContext = el('button', 'zchatgpt-shell-context');
-  shellContext.type = 'button';
-  shellContext.dataset.zchatgptShellContext = '';
-  shellContext.setAttribute('aria-expanded', 'false');
-  shellContext.setAttribute('aria-controls', `${viewId}-context`);
-  const shellContextText = el('span', 'zchatgpt-shell-context-text');
-  shellContextText.dataset.zchatgptDocumentStatus = '';
-  shellContextText.dataset.zchatgptContextLine = '';
-  const shellContextChevron = el('span', 'zchatgpt-shell-context-chevron'); shellContextChevron.setAttribute('aria-hidden', 'true');
-  shellContextChevron.append(icon('chevron'));
-  shellContext.append(shellContextText, shellContextChevron);
+  chrome.append(modeSwitch, panes, shellTitle, actions, feedback, moreMenu);
   const contextPanel = el('div', 'zchatgpt-context-panel');
   contextPanel.id = `${viewId}-context`;
   contextPanel.dataset.zchatgptContextPanel = '';
@@ -658,7 +749,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   contextPanelStatus.setAttribute('aria-live', 'polite');
   contextPanelStatus.hidden = true;
   contextPanel.append(contextPanelBody, contextPanelStatus, contextPanelError);
-  shell.append(chrome, shellContext, contextPanel);
+  shell.append(chrome, contextPanel);
   root.append(shell);
   // Renaming hangs off the selected tab's title, the same place the owner already looks for the
   // chat's name. The form is a small popover under the chrome.
@@ -842,68 +933,33 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
    * is what lets `Chat -> Agent -> Chat` switch without rebuilding a transcript or dropping a draft.
    */
   const embedSection = hooks.chatEmbed ? el('section', 'zchatgpt-embed') : null;
-  const embedBar = embedSection ? el('div', 'zchatgpt-embed-bar') : null;
   const embedSlot = embedSection ? el('div', 'zchatgpt-embed-slot') : null;
-  /** The bar's own one-line answer to the last action; it replaces the previous answer each time. */
-  const embedStatus = embedSection ? el('span', 'zchatgpt-embed-status') : null;
-  /** Actor/readiness/submission lifecycle; clipboard controls use `embedStatus` independently. */
-  const embedBridgeStatus = embedSection ? el('span', 'zchatgpt-embed-status zchatgpt-embed-bridge-status') : null;
+  /**
+   * The one notice strip. It is empty in the normal state, so the header stays a single row: the
+   * strip only takes space while the first outbound disclosure is owed, or while the host reports
+   * that the official page could not be shown at all. The automatic-PDF state itself lives in the
+   * details, not here.
+   */
+  const embedNotice = embedSection ? el('div', 'zchatgpt-embed-notice') : null;
+  /** Actor/readiness/submission lifecycle, written by the host when it cannot show the page. */
+  const embedBridgeStatus = embedSection ? el('span', 'zchatgpt-embed-bridge-status') : null;
   const embedContextNotice = embedSection ? el('p', 'zchatgpt-embed-context-notice') : null;
-  const embedConsent = embedSection ? button(COPY.continueWithPdf, 'continue-with-pdf', () => presenter.acknowledgeContext()) : null;
-  if (embedSection && embedBar && embedSlot && embedStatus && embedBridgeStatus && embedContextNotice && embedConsent) {
+  const embedConsent = embedSection ? button(COPY.allowPdfContext, 'continue-with-pdf', () => presenter.acknowledgeContext()) : null;
+  if (embedSection && embedSlot && embedNotice && embedBridgeStatus && embedContextNotice && embedConsent) {
     embedSection.dataset.zchatgptEmbed = '';
-    embedBar.dataset.zchatgptEmbedBar = '';
     embedSlot.dataset.zchatgptEmbedSlot = '';
-    embedStatus.dataset.zchatgptEmbedStatus = '';
+    embedNotice.dataset.zchatgptEmbedNotice = '';
+    embedNotice.hidden = true;
     embedBridgeStatus.dataset.zchatgptBridgeStatusLine = '';
     embedBridgeStatus.hidden = true;
     embedContextNotice.dataset.zchatgptEmbedContextNotice = '';
     embedContextNotice.setAttribute('data-zchatgpt-ui', 'true');
+    embedContextNotice.textContent = COPY.embedAutomaticDisclosure;
+    embedContextNotice.hidden = true;
     embedConsent.dataset.zchatgptAction = 'continue-with-pdf';
-    embedStatus.hidden = true;
-    /**
-     * The one thing this host knows that the web application does not is which PDF the reader has
-     * open, and there is no supported way to hand it to the page. Both context controls therefore end
-     * in the clipboard and say so, instead of pretending the application received anything.
-     */
-    const announce = (text: string): void => { embedStatus.textContent = text; embedStatus.hidden = false; };
-    const copyAction = (run: () => Promise<EmbedClipboardOutcome>) => {
-      // The previous answer is about the previous action, so it is cleared while the new one runs;
-      // the owner never reads a stale "copied" line next to a control they just pressed.
-      embedStatus.textContent = '';
-      embedStatus.hidden = true;
-      void run().then(outcome => {
-        if (!outcome.copied) {
-          announce(outcome.reason === 'unavailable' ? COPY.embedContextUnavailable
-            : outcome.reason === 'no-text' ? COPY.embedContextEmpty
-            : outcome.reason === 'no-selection' ? COPY.embedSelectionMissing
-            : outcome.reason === 'no-file' ? COPY.embedFileMissing
-            : COPY.embedContextFailed);
-          return;
-        }
-        announce(outcome.kind === 'selection' ? COPY.embedSelectionCopied(outcome.pageLabel)
-          : outcome.kind === 'file' ? COPY.embedFileCopied
-          : outcome.truncated ? COPY.embedContextShortened(outcome.pages, outcome.totalPages)
-          : COPY.embedContextCopied(outcome.pages, outcome.totalPages));
-      }).catch(() => announce(COPY.embedContextFailed));
-    };
-    const action = (label: string, id: string, run: () => Promise<EmbedClipboardOutcome>) => {
-      const control = button(label, id, () => copyAction(run));
-      control.dataset.zchatgptAction = id;
-      return control;
-    };
-    const embedActions = el('div', 'zchatgpt-embed-actions');
-    embedActions.dataset.zchatgptEmbedActions = '';
-    embedActions.append(
-      action(COPY.embedCopyContext, 'copy-context', () => hooks.chatEmbed?.copyContext?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
-      // The file route is how the actual document reaches the application: it goes on the clipboard
-      // as a file and the owner pastes it into ChatGPT's own composer, whose own upload path runs.
-      action(COPY.embedAttachPdf, 'copy-pdf-file', () => hooks.chatEmbed?.copyPdfFile?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
-      action(COPY.embedCopySelection, 'copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
-      button(COPY.embedLabel, 'reload-chat', () => { hooks.chatEmbed?.reload?.(); }, 'reload'),
-    );
-    embedBar.append(embedActions, embedContextNotice, embedConsent, embedBridgeStatus, embedStatus);
-    embedSection.append(embedBar, embedSlot);
+    embedConsent.hidden = true;
+    embedNotice.append(embedContextNotice, embedConsent, embedBridgeStatus);
+    embedSection.append(embedNotice, embedSlot);
     root.append(embedSection);
   }
   const localizer = mountUILocale(root);
@@ -1003,27 +1059,92 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       return () => undefined;
     })();
   /**
-   * The context summary's details panel. It is an inline anchored panel, not a second transcript:
-   * opening it never reflows or replaces the conversation, and closing it returns focus to the
-   * summary button so the affordance stays keyboard-reachable.
+   * The details panel. It is an inline anchored panel, not a second transcript: opening it never
+   * reflows or replaces the conversation, and closing it returns focus to the More trigger so the
+   * affordance stays keyboard-reachable. It is opened from the toolbar's More menu, because the
+   * normal header no longer carries a permanent context row.
    */
   const toggleContext = (open?: boolean) => {
     const next = open ?? contextPanel.hidden;
     contextPanel.hidden = !next;
-    shellContext.setAttribute('aria-expanded', String(next));
+    if (next) more.setAttribute('aria-expanded', 'false');
     if (next) {
       contextPanelError.hidden = true; contextPanelStatus.hidden = true;
-      togglePicker(false); toggleHistory(false); toggleRename(false); togglePlus(false);
-      renderContextSummary(latestViewState);
+      togglePicker(false); toggleHistory(false); toggleRename(false); togglePlus(false); toggleMore(false);
+      renderContextDetails(latestViewState);
       focusMenu(contextPanel);
     }
   };
-  shellContext.addEventListener('click', () => toggleContext());
+  /** The More menu: paper/context details and the hosted page's reload control. */
+  const toggleMore = (open?: boolean) => {
+    const next = open ?? moreMenu.hidden;
+    moreMenu.hidden = !next;
+    more.setAttribute('aria-expanded', String(next));
+    more.setAttribute('aria-controls', `${viewId}-more`);
+    if (next) {
+      menu.hidden = true; picker.setAttribute('aria-expanded', 'false');
+      historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
+      toggleRename(false); togglePlus(false);
+      contextPanel.hidden = true;
+      focusMenu(moreMenu);
+    }
+  };
+  /**
+   * Run one toolbar copy. The button reports busy while the action really is in flight, then a
+   * short-lived check with a live-region sentence; a failure keeps the reason on screen and leaves
+   * the control armed to retry. Nothing here pastes, sends, switches mode, uploads or starts a model.
+   */
+  const runToolbarCopy = async (control: HTMLButtonElement) => {
+    const reason = control.dataset.zchatgptDisabledReason;
+    if (control.getAttribute('aria-disabled') === 'true') {
+      // An `aria-disabled` control stays focusable so its reason is discoverable; activation is what
+      // is refused, and saying why is the feedback the click produces.
+      say(reason ?? VIEW_ACTION_FAILED, { sticky: true });
+      return;
+    }
+    const action = control.dataset.zchatgptToolbarAction;
+    const chatEmbed = hooks.chatEmbed;
+    const missing = () => Promise.resolve<EmbedClipboardOutcome>({ copied: false, reason: 'unavailable' as const });
+    const copyPaperNow = () => chatEmbed?.copyPaperContext?.() ?? missing();
+    const copyPdfNow = () => chatEmbed?.copyPdfFile?.() ?? missing();
+    const wired = action === 'copy-pdf-file' ? !!chatEmbed?.copyPdfFile : !!chatEmbed?.copyPaperContext;
+    if (!wired) { say(COPY.embedFileUnavailable, { sticky: true }); return; }
+    if (control.dataset.zchatgptCopyBusy === 'true') return;
+    // The previous answer was about the previous action, so it is dropped before this one runs: the
+    // owner never reads a stale "copied" line next to a control they just pressed.
+    say('');
+    control.dataset.zchatgptCopyBusy = 'true';
+    control.setAttribute('aria-busy', 'true');
+    let outcome: EmbedClipboardOutcome;
+    try {
+      outcome = action === 'copy-pdf-file' ? await copyPdfNow() : await copyPaperNow();
+    } catch {
+      outcome = { copied: false, reason: 'failed' };
+    }
+    delete control.dataset.zchatgptCopyBusy;
+    control.removeAttribute('aria-busy');
+    if (disposedView) return;
+    if (outcome.copied) {
+      const label = action === 'copy-pdf-file' ? COPY.copyPdfDone : COPY.copyPaperDone;
+      say(label);
+      control.dataset.zchatgptCopyState = 'copied';
+      const restore = () => { if (control.dataset.zchatgptCopyState === 'copied') delete control.dataset.zchatgptCopyState; };
+      const view = doc.defaultView;
+      if (view) view.setTimeout(restore, 1600); else restore();
+      return;
+    }
+    delete control.dataset.zchatgptCopyState;
+    const failure = outcome.reason === 'no-info' ? COPY.copyPaperNoInfo
+      : outcome.reason === 'no-file' ? COPY.embedFileMissing
+        : outcome.reason === 'unavailable' ? COPY.embedFileUnavailable
+          : action === 'copy-pdf-file' ? COPY.embedFileFailed : COPY.copyPaperFailed;
+    say(failure, { sticky: true });
+  };
   const togglePicker = (open?: boolean) => {
     const next = open ?? menu.hidden;
     menu.hidden = !next;
     picker.setAttribute('aria-expanded', String(next));
-    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); toggleRename(false); togglePlus(false); contextPanel.hidden = true; shellContext.setAttribute('aria-expanded', 'false'); }
+    if (next) { historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false'); toggleRename(false); togglePlus(false); toggleMore(false); contextPanel.hidden = true; }
   };
   /**
    * The rename popover hangs off the selected tab's title. Opening it fills the field from the live
@@ -1037,13 +1158,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     renameTrigger?.setAttribute('aria-expanded', String(next));
     if (next) {
       historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
-      menu.hidden = true; picker.setAttribute('aria-expanded', 'false'); togglePlus(false);
+      menu.hidden = true; picker.setAttribute('aria-expanded', 'false'); togglePlus(false); toggleMore(false);
       renameInput.value = presenter.snapshot().conversation?.title ?? '';
       renameInput.focus(); renameInput.select();
     }
   };
   const toggleHistory = (open?: boolean) => {
     const next = open ?? historyPanel.hidden;
+    // The row menu belongs to the panel, so it never outlives it in either direction.
+    closeHistoryRowMenu(false);
     historyPanel.hidden = !next;
     historyBtn.setAttribute('aria-expanded', String(next));
     if (next) {
@@ -1051,6 +1174,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       picker.setAttribute('aria-expanded', 'false');
       toggleRename(false);
       togglePlus(false);
+      toggleMore(false);
       historySearch.focus();
     }
   };
@@ -1063,6 +1187,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       menu.hidden = true; picker.setAttribute('aria-expanded', 'false');
       toggleRename(false);
       historyPanel.hidden = true; historyBtn.setAttribute('aria-expanded', 'false');
+      toggleMore(false);
     }
   };
   const nextImageId = () => hooks.uuid?.() ?? (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`);
@@ -1222,11 +1347,13 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   bindMenuKeys(renameForm, { focus() { renameTrigger?.focus(); } }, () => toggleRename(false));
   bindMenuKeys(historyPanel, historyBtn, () => toggleHistory(false));
   bindMenuKeys(plusMenu, plus, () => togglePlus(false));
-  bindMenuKeys(contextPanel, shellContext, () => toggleContext(false));
+  bindMenuKeys(contextPanel, more, () => toggleContext(false));
+  bindMenuKeys(moreMenu, more, () => toggleMore(false));
   for (const [trigger, panel, open] of [
     [picker, menu, () => togglePicker(true)],
     [historyBtn, historyPanel, () => toggleHistory(true)],
     [plus, plusMenu, () => togglePlus(true)],
+    [more, moreMenu, () => toggleMore(true)],
   ] as const) trigger.addEventListener('keydown', event => {
     if (isComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
     event.preventDefault(); open(); focusMenu(panel, event.key === 'ArrowUp');
@@ -1264,11 +1391,15 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     if (!historyPanel.hidden && !historyPanel.contains(target) && !historyBtn.contains(target)) toggleHistory(false);
     if (!renameForm.hidden && !renameForm.contains(target) && !renameTrigger?.contains(target)) toggleRename(false);
     if (!plusMenu.hidden && !plusMenu.contains(target) && !plus.contains(target)) togglePlus(false);
-    if (!contextPanel.hidden && !contextPanel.contains(target) && !shellContext.contains(target)) toggleContext(false);
+    if (!contextPanel.hidden && !contextPanel.contains(target) && !more.contains(target) && !moreMenu.contains(target)) toggleContext(false);
+    if (!moreMenu.hidden && !moreMenu.contains(target) && !more.contains(target) && !historyMenu.contains(target)) toggleMore(false);
+    if (!historyMenu.hidden && !historyMenu.contains(target) && !(historyMenuTarget?.trigger.contains(target) ?? false)) closeHistoryRowMenu(false);
   };
   const onDocumentKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || isComposing(event) || !root.contains(event.target as Node | null)) return;
-    if (!contextPanel.hidden) { event.preventDefault(); toggleContext(false); shellContext.focus(); }
+    if (!historyMenu.hidden) { event.preventDefault(); closeHistoryRowMenu(true); return; }
+    if (!moreMenu.hidden) { event.preventDefault(); toggleMore(false); more.focus(); }
+    else if (!contextPanel.hidden) { event.preventDefault(); toggleContext(false); more.focus(); }
     else if (!plusMenu.hidden) { event.preventDefault(); togglePlus(false); plus.focus(); }
     else if (!menu.hidden) { event.preventDefault(); togglePicker(false); picker.focus(); }
     else if (!renameForm.hidden) { event.preventDefault(); toggleRename(false); renameTrigger?.focus(); }
@@ -1446,7 +1577,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     return phase === 'ready' ? COPY.contextLineUnavailable : COPY.contextLineUnprepared;
   };
-  let contextLineKey: string | null = null;
   /**
    * The details panel behind the summary. It holds only what does not belong on a permanent row:
    * the full source, the concrete read coverage, the automatic-PDF state (shown, never a fake
@@ -1457,10 +1587,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const citation = activeCitation(state.draft.citations, state.conversation?.messages ?? []);
     const { enabled, prepared, phase } = state.document;
     const read = prepared ? prepared.pages.filter(page => page.status === 'text' && page.text.length > 0).length : 0;
-    const row = (label: string, value: string, content = false): HTMLElement => {
+    const row = (label: string, value: string, content = false, attribute?: string): HTMLElement => {
       const line = el('p', 'zchatgpt-context-row');
       const name = el('span', 'zchatgpt-context-row-label', label); name.setAttribute('data-zchatgpt-ui', 'true');
       const text = el('span', 'zchatgpt-context-row-value', value);
+      if (attribute) text.dataset[attribute] = '';
       if (content) text.dataset.zchatgptUi = 'false'; else text.setAttribute('data-zchatgpt-ui', 'true');
       line.append(name, doc.createTextNode(' '), text);
       return line;
@@ -1472,7 +1603,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     head.append(title, close);
     nodes.push(head);
     nodes.push(row(COPY.contextPanelSource, state.document.identity.title || state.document.attachment.title, true));
-    nodes.push(row(COPY.contextPanelNextSend, summary));
+    nodes.push(row(COPY.contextPanelNextSend, summary, false, 'zchatgptContextSummary'));
     if (prepared) nodes.push(row(COPY.contextPanelLocalRead, COPY.contextPanelLocalReadValue(read, prepared.totalPages)));
     nodes.push(row(COPY.contextPanelAutomatic, enabled ? COPY.contextPanelAutomaticOn : COPY.contextPanelAutomaticOff));
     // The active citation's page and its back-to-source control keep their own node so the reader
@@ -1480,28 +1611,6 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     nodes.push(contextSource);
     if (phase === 'error' && state.document.error) nodes.push(el('p', 'zchatgpt-context-panel-error', state.document.error));
     const actionsRow = el('div', 'zchatgpt-context-panel-actions');
-    if (hooks.chatEmbed && state.mode === 'chat') {
-      const embedCopy = (label: string, action: string, run: () => Promise<EmbedClipboardOutcome>) => button(label, action, () => {
-        contextPanelStatus.hidden = true;
-        void run().then(outcome => {
-          contextPanelStatus.textContent = !outcome.copied
-            ? (outcome.reason === 'unavailable' ? COPY.embedContextUnavailable
-              : outcome.reason === 'no-text' ? COPY.embedContextEmpty
-              : outcome.reason === 'no-selection' ? COPY.embedSelectionMissing
-              : outcome.reason === 'no-file' ? COPY.embedFileMissing
-              : COPY.embedContextFailed)
-            : outcome.kind === 'selection' ? COPY.embedSelectionCopied(outcome.pageLabel)
-              : outcome.kind === 'file' ? COPY.embedFileCopied
-              : outcome.truncated ? COPY.embedContextShortened(outcome.pages, outcome.totalPages)
-              : COPY.embedContextCopied(outcome.pages, outcome.totalPages);
-          contextPanelStatus.hidden = false;
-        }).catch(() => { contextPanelStatus.textContent = COPY.embedContextFailed; contextPanelStatus.hidden = false; });
-      });
-      actionsRow.append(
-        embedCopy(COPY.embedCopyContext, 'panel-copy-context', () => hooks.chatEmbed?.copyContext?.() ?? Promise.resolve({ copied: false as const, reason: 'unavailable' as const })),
-        embedCopy(COPY.embedCopySelection, 'panel-copy-selection', () => hooks.chatEmbed?.copySelection?.() ?? Promise.resolve({ copied: false as const, reason: 'no-selection' as const })),
-      );
-    }
     actionsRow.append(button(COPY.reReadPdf, 're-read-pdf', () => {
       contextPanelError.hidden = true;
       void presenter.prepareContext().catch(error => { contextPanelError.textContent = actionFailure(error); contextPanelError.hidden = false; });
@@ -1512,16 +1621,23 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     contextPanelBody.replaceChildren(...nodes);
     contextSource.hidden = !citation;
   };
-  const renderContextSummary = (state: PresenterState) => {
-    const text = contextSummaryText(state);
-    const expanded = !contextPanel.hidden;
-    if (text !== contextLineKey) { contextLineKey = text; shellContextText.textContent = text; }
-    shellContext.setAttribute('aria-expanded', String(expanded));
-    // The accessible name is the summary itself, so it is translated by the same patterns as the
-    // visible text; `aria-expanded` already says the control discloses more.
-    shellContext.setAttribute('aria-label', text);
-    shellContext.title = text;
-    if (expanded) renderContextPanel(state, text);
+  /**
+   * Paint the details while they are open. The one-line summary answers "what will the next message
+   * carry"; it is shown inside the panel, never as a permanent header row. Its own content key keeps
+   * the DOM still — and keyboard focus with it — while nothing the panel shows has changed.
+   */
+  let contextPanelKey: string | null = null;
+  const renderContextDetails = (state: PresenterState) => {
+    if (contextPanel.hidden) { contextPanelKey = null; return; }
+    const summary = contextSummaryText(state);
+    const key = JSON.stringify([
+      summary, state.document.enabled, state.document.error, state.document.disclosure,
+      activeCitation(state.draft.citations, state.conversation?.messages ?? [])?.id ?? '',
+      state.contextReport ?? null,
+    ]);
+    if (key === contextPanelKey) return;
+    contextPanelKey = key;
+    renderContextPanel(state, summary);
   };
   /**
    * Paint the mode the presenter will freeze onto the next request. `aria-pressed` is set from
@@ -1540,6 +1656,29 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       fresh.setAttribute('aria-label', freshLabel); fresh.title = freshLabel;
     }
   };
+  /**
+   * The paper actions' availability. The copy buttons exist exactly when the host wired them; the
+   * bibliographic one is `aria-disabled` (not `disabled`) for an item with no provable bibliography,
+   * so it stays focusable, its title states the reason, and activating it announces that reason
+   * instead of silently doing nothing. `Copy PDF file` cannot know the file synchronously without a
+   * probe, so it stays armed and reports the real reason when the copy fails.
+   */
+  const paintPaperActions = (state: PresenterState) => {
+    copyPaper.hidden = !hooks.chatEmbed?.copyPaperContext;
+    copyPdf.hidden = !hooks.chatEmbed?.copyPdfFile;
+    const noInfo = !hasBibliographicIdentity(state.document.identity);
+    if (noInfo) {
+      copyPaper.setAttribute('aria-disabled', 'true');
+      copyPaper.dataset.zchatgptDisabledReason = COPY.copyPaperNoInfo;
+      if (copyPaper.title !== COPY.copyPaperNoInfo) copyPaper.title = COPY.copyPaperNoInfo;
+    } else {
+      copyPaper.removeAttribute('aria-disabled');
+      delete copyPaper.dataset.zchatgptDisabledReason;
+      const label = `${COPY.copyPaperContext}\n${COPY.copyPaperContextHint}`;
+      if (copyPaper.title !== label) copyPaper.title = label;
+    }
+    if (!hooks.chatEmbed?.copyPaperContext) { copyPaper.removeAttribute('aria-disabled'); delete copyPaper.dataset.zchatgptDisabledReason; }
+  };
   const updateContext = (state: PresenterState) => {
     if (!state.conversation && !renameForm.hidden) toggleRename(false);
     const citation = activeCitation(state.draft.citations, state.conversation?.messages ?? []);
@@ -1555,7 +1694,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       }
     }
     contextSource.hidden = !citation;
-    renderContextSummary(state);
+    // The details are only rebuilt while they are open; nothing about the summary is rendered in the
+    // header any more, so a closed panel costs nothing and cannot change the toolbar's height.
+    renderContextDetails(state);
   };
   /**
    * Reconcile the Cursor-style tab strip. A chip is kept by id instead of rebuilt, so a click or an
@@ -1576,8 +1717,11 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       conversation,
       localize: false,
     }));
+    // The unbound tab is named for the mode that would run its first send: Agent says `New agent`.
+    // A stored conversation titled `New chat` is the owner's data and is never renamed on screen.
+    const newTabLabel = state.mode === 'agent' ? COPY.newAgent : COPY.newChat;
     if (state.newChatOpen || !state.conversation) {
-      models.push({ id: NEW_CHAT_TAB_ID, label: COPY.newChat, title: COPY.newChat, conversation: null, localize: true });
+      models.push({ id: NEW_CHAT_TAB_ID, label: newTabLabel, title: newTabLabel, conversation: null, localize: true });
     }
     const ids = new Set(models.map(entry => entry.id));
     for (const [id, node] of paneNodes) if (!ids.has(id)) { node.remove(); paneNodes.delete(id); }
@@ -1617,7 +1761,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       label.className = model.localize ? 'zchatgpt-pane-tab-new' : 'zchatgpt-pane-tab-label';
       label.dataset.zchatgptPaneLabel = '';
       if (model.localize) {
-        if (label.dataset.zchatgptUiCopy !== COPY.newChat) { label.dataset.zchatgptUiCopy = COPY.newChat; label.textContent = COPY.newChat; }
+        if (label.dataset.zchatgptUiCopy !== model.label) { label.dataset.zchatgptUiCopy = model.label; label.textContent = model.label; }
       } else {
         delete label.dataset.zchatgptUiCopy;
         if (label.textContent !== model.label) label.textContent = model.label;
@@ -1673,9 +1817,10 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     const mark = el('span', `zchatgpt-history-status zchatgpt-history-status-${source.status}`);
     mark.dataset.zchatgptHistoryStatus = source.status;
     mark.setAttribute('aria-hidden', 'true');
-    // A calm glyph, not an animation: done is a checked ring, a draft is a pencil, a live request
-    // is the same clock the timing line uses.
-    mark.append(icon(source.status === 'done' ? 'historyDone' : source.status === 'draft' ? 'historyDraft' : 'clock'));
+    // A calm glyph, not an animation: a small dot for a finished local record, a pencil for a draft,
+    // and the same clock the timing line uses for a live request. A finished row deliberately gets no
+    // check mark: a conversation is not a completed task.
+    mark.append(icon(source.status === 'done' ? 'dot' : source.status === 'draft' ? 'historyDraft' : 'clock'));
     const title = el('span', 'zchatgpt-history-title', source.title);
     // The second line carries the paper and the last activity, plus a source label only when the
     // record proves one. The time is data (its own span); the source label is copy and is translated.
@@ -1699,10 +1844,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     choice.title = description;
     choice.addEventListener('click', () => { source.open(); toggleHistory(false); });
     row.append(choice);
+    // The trailing action is an ellipsis menu with an explicit, confirmed delete, not a permanent
+    // cross that reads as "close". The button keeps its slot at every width, so revealing it on
+    // hover or focus never shifts the row.
     if (source.remove) {
-      const drop = button(`${COPY.deleteChat}: ${source.title}`, 'delete-conversation', source.remove, 'remove');
-      drop.dataset.zchatgptConversationId = source.id;
-      row.append(drop);
+      const trigger = button(COPY.historyRowActions, 'history-row-menu', () => { openHistoryRowMenu(source, trigger); }, 'more', 'zchatgpt-icon-button zchatgpt-history-more');
+      trigger.dataset.zchatgptConversationId = source.id;
+      trigger.setAttribute('aria-haspopup', 'dialog');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-controls', historyMenu.id);
+      row.append(trigger);
     }
     return row;
   };
@@ -1772,12 +1923,125 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       nodes.push(group);
     }
     historyList.replaceChildren(...(nodes.length ? nodes : [el('p', 'zchatgpt-history-empty', COPY.noSavedChats)]));
+    // A row menu whose row is gone must not survive the rebuild as an orphaned popover.
+    if (historyMenuTarget && !historyMenuTarget.trigger.isConnected) closeHistoryRowMenu(false);
     // The presenter already filtered a workspace search (it also matches message text), so the
     // local row-label filter only runs for the host-list fallback.
     if (!state.workspace) applyHistoryFilter();
     historyList.scrollTop = scrollTop;
     if (focus) restoreHistoryFocus(focus);
   };
+  /**
+   * The row's own actions, in a popover anchored to its ellipsis trigger. One confirmation precedes
+   * the removal, so a stray click cannot delete a chat; the copy states that only the local record
+   * is removed. Selecting a row and acting on it are separate events: a menu row never opens the
+   * conversation, and Escape closes the menu and returns focus to its trigger.
+   */
+  const historyMenu = el('div', 'zchatgpt-history-menu');
+  historyMenu.id = `${viewId}-history-menu`;
+  historyMenu.dataset.zchatgptHistoryMenu = '';
+  historyMenu.hidden = true;
+  historyMenu.setAttribute('role', 'dialog');
+  historyMenu.setAttribute('aria-label', COPY.historyRowActions);
+  // Escape belongs to the row menu, not to the panel behind it: it closes this popover and returns
+  // focus to the trigger that opened it. The event stops here so closing the menu never also closes
+  // the History panel.
+  historyMenu.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault(); event.stopPropagation();
+    closeHistoryRowMenu(true);
+  });
+  historyPanel.append(historyMenu);
+  let historyMenuTarget: { id: string; title: string; trigger: HTMLElement; index: number } | null = null;
+  let historyMenuPending = false;
+  let historyMenuBusy = false;
+  /**
+   * Put focus back after the menu's own row left the DOM: the row that took its slot, then the rows
+   * above it, then the search field. Focus must never fall to the page body.
+   */
+  function refocusAfterHistoryDelete(): void {
+    const rows = [...historyList.querySelectorAll<HTMLElement>('.zchatgpt-history-row')];
+    const start = Math.min(Math.max(historyMenuTarget?.index ?? 0, 0), Math.max(rows.length - 1, 0));
+    for (const row of [...rows.slice(start), ...rows.slice(0, start).reverse()]) {
+      const button = row.querySelector<HTMLElement>('[data-zchatgpt-action="history-row-menu"]');
+      if (button && button.isConnected) { button.focus(); return; }
+    }
+    historySearch.focus();
+  }
+  function closeHistoryRowMenu(restoreFocus = false): void {
+    if (historyMenu.hidden) return;
+    const trigger = historyMenuTarget?.trigger;
+    historyMenu.hidden = true;
+    historyMenuTarget = null;
+    historyMenuPending = false;
+    historyMenuBusy = false;
+    if (trigger) { trigger.setAttribute('aria-expanded', 'false'); if (restoreFocus && trigger.isConnected) trigger.focus(); }
+  }
+  function renderHistoryRowMenu(): void {
+    const target = historyMenuTarget;
+    if (!target) { historyMenu.replaceChildren(); return; }
+    if (!historyMenuPending) {
+      const remove = el('button', 'zchatgpt-more-row zchatgpt-history-menu-delete');
+      remove.type = 'button';
+      remove.dataset.zchatgptAction = 'delete-conversation';
+      remove.textContent = COPY.deleteLocalConversation;
+      remove.setAttribute('data-zchatgpt-ui', 'true');
+      remove.disabled = historyMenuBusy;
+      remove.addEventListener('click', () => { historyMenuPending = true; renderHistoryRowMenu(); focusMenu(historyMenu); });
+      historyMenu.replaceChildren(remove);
+      return;
+    }
+    const text = el('p', 'zchatgpt-history-menu-confirm', COPY.deleteLocalConfirm);
+    text.setAttribute('data-zchatgpt-ui', 'true');
+    const confirm = el('button', 'zchatgpt-more-row zchatgpt-history-menu-delete');
+    confirm.type = 'button';
+    confirm.dataset.zchatgptAction = 'confirm-delete-conversation';
+    confirm.textContent = COPY.deleteLocalConfirmAction;
+    confirm.setAttribute('data-zchatgpt-ui', 'true');
+    confirm.disabled = historyMenuBusy;
+    const cancel = el('button', 'zchatgpt-more-row');
+    cancel.type = 'button';
+    cancel.dataset.zchatgptAction = 'cancel-delete-conversation';
+    cancel.textContent = COPY.cancelDeleteLocal;
+    cancel.setAttribute('data-zchatgpt-ui', 'true');
+    cancel.disabled = historyMenuBusy;
+    cancel.addEventListener('click', () => { historyMenuPending = false; renderHistoryRowMenu(); focusMenu(historyMenu); });
+    confirm.addEventListener('click', () => {
+      const id = historyMenuTarget?.id;
+      if (!id || historyMenuBusy) return;
+      historyMenuBusy = true;
+      confirm.disabled = true; cancel.disabled = true;
+      // The presenter owns refusal and failure reporting; the row stays on screen until the store
+      // really dropped it, and a refused delete keeps the record with its reason.
+      void presenter.deleteConversation(id).finally(() => {
+        historyMenuBusy = false;
+        // The trigger is gone once the store dropped the row, so focus moves to the row that took
+        // its place (or the search field); it never falls through to the page body.
+        if (historyMenuTarget?.trigger.isConnected) historyMenuTarget.trigger.focus();
+        else refocusAfterHistoryDelete();
+        closeHistoryRowMenu(false);
+      });
+    });
+    historyMenu.replaceChildren(text, confirm, cancel);
+  }
+  function openHistoryRowMenu(source: HistoryRowSource, trigger: HTMLElement): void {
+    if (!source.remove) return;
+    const rows = [...historyList.querySelectorAll<HTMLElement>('.zchatgpt-history-row')];
+    historyMenuTarget = { id: source.id, title: source.title, trigger, index: Math.max(rows.indexOf(trigger.closest<HTMLElement>('.zchatgpt-history-row')!), 0) };
+    historyMenuPending = false;
+    historyMenuBusy = false;
+    renderHistoryRowMenu();
+    historyMenu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    // Anchor under the trigger, clamped into the panel so a row near the bottom never pushes the
+    // menu off the dock.
+    const panel = historyPanel.getBoundingClientRect();
+    const rect = trigger.getBoundingClientRect();
+    const top = Math.max(4, Math.min(rect.bottom - panel.top + 4, panel.height - 12));
+    historyMenu.style.top = `${top}px`;
+    historyMenu.style.left = `${Math.max(4, rect.left - panel.left)}px`;
+    focusMenu(historyMenu);
+  }
   const renderPicker = (state: PresenterState, signedIn: boolean) => {
     const models = state.runtime?.models ?? [];
     const current = state.draft.settings ?? state.conversation?.settings ?? null;
@@ -1888,13 +2152,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   const update = (state: PresenterState) => {
     latestViewState = state;
     paintTiming(state);
+    // An open details panel follows the state even when the toolbar's own key did not change: a
+    // longer local read or a new preparation error must not leave the panel claiming an old fact.
+    renderContextDetails(state);
     /**
      * Chat mode with a host surface is the real ChatGPT application. The native surface stays mounted
      * (so a switch back rebuilds nothing) but is hidden; the common shell above it — including the
      * one mode switch and the context summary — stays visible in both modes.
      */
     const embedActive = !!hooks.chatEmbed && state.mode === 'chat';
-    if (embedSection && embedBar && embedSlot && hooks.chatEmbed) {
+    if (embedSection && embedSlot && embedNotice && embedContextNotice && embedConsent && embedBridgeStatus && hooks.chatEmbed) {
       root.dataset.zchatgptEmbedActive = String(embedActive);
       embedSection.hidden = !embedActive;
       chat.hidden = embedActive;
@@ -1906,13 +2173,16 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       // than pretending to belong to the official page's own new-chat and history controls.
       fresh.hidden = embedActive;
       historyBtn.hidden = embedActive;
+      reloadRow.hidden = !embedActive;
       if (embedActive) {
-        if (embedContextNotice && embedConsent) {
-          const disclosure = state.document.enabled && state.document.disclosure;
-          embedContextNotice.textContent = disclosure ? COPY.embedAutomaticDisclosure
-            : state.document.enabled ? COPY.embedAutomaticOn : COPY.embedAutomaticOff;
-          embedConsent.hidden = !disclosure;
-        }
+        // The first-outbound disclosure is the only thing the strip shows in the normal case, and it
+        // stops taking space as soon as the owner acknowledges it. The automatic-PDF state itself is
+        // reported in the details, not in a permanent row.
+        const disclosure = state.document.enabled && state.document.disclosure;
+        embedContextNotice.hidden = !disclosure;
+        embedConsent.hidden = !disclosure;
+        const bridgeSaysSomething = !embedBridgeStatus.hidden && !!embedBridgeStatus.textContent?.trim();
+        embedNotice.hidden = !disclosure && !bridgeSaysSomething;
         hooks.chatEmbed.show(embedSlot);
       } else {
         hooks.chatEmbed.hide();
@@ -1967,6 +2237,9 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
       list.map(m => `${m.id}:${m.status}:${m.action ?? ''}:${m.text.length}:${m.images?.map(image => image.id).join(',') ?? ''}:${m.generatedImages?.map(image => image.id).join(',') ?? ''}`).join('\n'),
       (state.conversation?.requestTiming ?? []).map(timing => `${timing.requestId}:${timing.acceptedAt}`).join(','),
       state.workspace?.uiLanguage ?? 'en',
+      // The paper actions read the frozen identity to decide whether there is anything to copy, so a
+      // change of attachment must repaint them even when nothing else in the chrome moved.
+      `${state.document.identity.itemType ?? ''}:${state.document.identity.authors.length}:${state.document.identity.year ?? ''}:${state.document.identity.doi ?? ''}:${state.document.identity.publicationTitle ?? ''}:${state.document.identity.abstractNote?.length ?? 0}`,
     ].join('\0');
     if (nextChrome === chromeKey) {
       if (!composing && input.value !== state.draft.question) { input.value = state.draft.question; resizeInput(); }
@@ -1974,6 +2247,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
     }
     chromeKey = nextChrome;
     renderMode(state);
+    paintPaperActions(state);
     const account = state.runtime?.account.state ?? 'signedOut';
     const pendingLogin = state.runtime?.login?.state === 'pending';
     // `agentMode` is already derived above for the Agent-only task surface. Sign-in and the Codex
@@ -2141,6 +2415,7 @@ export function mountChatView(root: HTMLElement, presenter: ConversationPresente
   };
   const unbind = presenter.bind(update);
   return () => {
+    disposedView = true;
     hooks.chatEmbed?.hide();
     presenter.setScrollTop(messages.scrollTop); unbindZoom(); unbind(); workspaceView?.dispose(); taskView.dispose(); localizer.dispose(); clearTimingInterval();
     doc.removeEventListener('click', onDocumentClick);

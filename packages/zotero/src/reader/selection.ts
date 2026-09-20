@@ -1,8 +1,8 @@
-import { ReaderError, type Citation, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
+import { ReaderError, type Citation, type PaperIdentity, type PaperScope, type Rect } from '../../../contracts/src/index.ts';
 import { validateCitation } from '../../../contracts/src/validation.ts';
 import type { HostItem, HostReader, ZoteroHost } from './host-types.ts';
 import { nativeDocumentSource } from './document.ts';
-import { ABSTRACT_LIMIT, MAX_PEOPLE, METADATA_FIELD_LIMIT, PERSON_LIMIT, TAG_LIMIT, TAGS_LIMIT, capList, capText, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
+import { ABSTRACT_LIMIT, MAX_PEOPLE, METADATA_FIELD_LIMIT, PERSON_LIMIT, TAG_LIMIT, TAGS_LIMIT, capList, capText, paperIdentityOf, type PaperMetadata } from '../../../core/src/context/bibliography.ts';
 export type { PaperMetadata } from '../../../core/src/context/bibliography.ts';
 /** Zotero 9.0.6 `renderTextSelectionPopup` payload (reader.js:25427-25433, 70462-70484). */
 export interface SelectionAnnotation {
@@ -106,7 +106,13 @@ export function paperMetadata(zotero: ZoteroHost, reader: HostReader): PaperMeta
   const attachment = zotero.Items.get(reader.itemID);
   if (!attachment) return undefined;
   const parent = attachment.parentItemID ? zotero.Items.get(attachment.parentItemID) : undefined;
-  const source = parent ?? attachment;
+  return paperMetadataOf(attachment, parent ?? attachment);
+}
+/**
+ * The same read, from items the caller already resolved. Kept separate so the sidebar's clipboard
+ * copy can re-read one frozen attachment by library+key without inventing a `HostReader` for it.
+ */
+export function paperMetadataOf(attachment: HostItem, source: HostItem): PaperMetadata {
   const creators = readCreators(source);
   const authors = capList(creators.filter(creator => !creator.creatorType || creator.creatorType === 'author').map(creatorName).filter(Boolean), MAX_PEOPLE, PERSON_LIMIT);
   const result: PaperMetadata = { title: readField(source, 'title') || readField(attachment, 'title') || '', authors };
@@ -125,4 +131,17 @@ export function paperMetadata(zotero: ZoteroHost, reader: HostReader): PaperMeta
   const tags = capList(readTags(source).map(entry => entry.tag), TAGS_LIMIT, TAG_LIMIT);
   if (tags.length) result.tags = tags;
   return result;
+}
+/**
+ * Re-read the bibliographic identity of one attachment addressed by its frozen `PaperScope`. Returns
+ * null when the attachment or its parent is no longer in the library, so the caller keeps what it
+ * already froze instead of copying a stranger's metadata. Read-only: nothing is written, no reader
+ * tab is opened and no PDF text is touched.
+ */
+export function paperIdentityFor(zotero: ZoteroHost, paper: PaperScope): PaperIdentity | null {
+  const attachment = zotero.Items.getByLibraryAndKey?.(paper.libraryId, paper.attachmentKey);
+  if (!attachment) return null;
+  const parent = attachment.parentItemID ? zotero.Items.get(attachment.parentItemID) : undefined;
+  const metadata = paperMetadataOf(attachment, parent ?? attachment);
+  return paperIdentityOf(metadata, metadata.title.trim() || readField(attachment, 'title') || 'PDF attachment');
 }

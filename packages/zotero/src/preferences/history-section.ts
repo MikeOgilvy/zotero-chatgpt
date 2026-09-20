@@ -533,6 +533,16 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     }
   }
 
+  /**
+   * The sidebar can delete a chat while this window is open, and this listing is a snapshot read.
+   * Zotero hands the plugin no cross-window notification channel, so the pane re-verifies when its
+   * own window regains focus — the pushed invalidation covers Settings → sidebar, and this is the
+   * documented fallback for the reverse direction. It only re-reads; it never prunes or writes.
+   */
+  const win = doc.defaultView;
+  const onWindowFocus = (): void => { if (!disposed && !busy) void refresh(); };
+  win?.addEventListener('focus', onWindowFocus);
+
   listen(search, 'input', () => {
     query = search.value;
     if (timer !== null) globalThis.clearTimeout(timer);
@@ -562,6 +572,7 @@ export function createHistorySection(doc: Document, host: HistorySectionHost, in
     refresh,
     dispose(): void {
       disposed = true;
+      win?.removeEventListener('focus', onWindowFocus);
       if (timer !== null) globalThis.clearTimeout(timer);
       timer = null;
       for (const { element, type, handler } of listeners) element.removeEventListener(type, handler);

@@ -223,6 +223,19 @@ export class ConversationStore {
     if (!loaded) throw new ReaderError('NOT_FOUND', 'Unknown conversation');
     return loaded;
   }
+  /**
+   * Throws when the conversation file itself is gone, ignoring the in-memory copy. Only the file is
+   * read here: document sources are not needed to answer "does this chat still exist".
+   */
+  private async assertStored(id: UUID): Promise<void> {
+    const path = this.conversationPath(id);
+    let bytes: Uint8Array | null;
+    try { bytes = await this.storage.read(path); } catch { unavailable(); }
+    if (bytes === null) {
+      this.conversations.delete(id);
+      throw new ReaderError('NOT_FOUND', 'This chat is no longer stored; it was not saved again.');
+    }
+  }
   /** A missing file is a dangling index entry (null); a present but unreadable one is still an error. */
   private async loadIfPresent(id: UUID): Promise<StoredConversation | null> {
     const cached = this.conversations.get(id); if (cached) return cached;
@@ -313,6 +326,11 @@ export class ConversationStore {
   /** Replaces the stored conversation. Memory changes only after the ordered log append and atomic snapshot succeeded. */
   save(conversation: StoredConversation): Promise<void> {
     return this.serial(async () => {
+      // The Preferences pane removes chats through its own store instance, so this store's in-memory
+      // copy can outlive the file. Writing that copy back is how a deleted chat was resurrected: a
+      // save therefore re-checks the file itself (never the cache) and refuses when it is gone. The
+      // explicit `create` path is the only way a conversation comes back.
+      await this.assertStored(conversation.id);
       const previous = await this.load(conversation.id);
       const copy = clone(conversation); copy.updatedAt = this.clock.now();
       let logSeq = previous.logSeq;

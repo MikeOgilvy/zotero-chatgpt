@@ -132,6 +132,14 @@ export interface HistorySource {
   history(query?: string, scope?: HistoryScope): Promise<HistoryEntry[]>;
   removeConversation?(paper: PaperScope, id: string): Promise<void>;
 }
+/**
+ * One committed change to the local chat store, published after the files are updated so no view can
+ * act on it early. `removed` lists the chat ids that are gone from disk for that paper scope.
+ */
+export interface HistoryChange {
+  paper: PaperScope;
+  removed: string[];
+}
 export interface ReaderWorkspace {
   settings(): Promise<WorkspaceSettings>;
   saveSettings(value: WorkspaceSettings): Promise<void>;
@@ -150,6 +158,12 @@ export interface ReaderWorkspace {
    * ledgers in place. Optional so older stores stay source-compatible; never invoked implicitly.
    */
   removeConversation?(paper: PaperScope, id: string): Promise<void>;
+  /**
+   * Pushes one committed {@link HistoryChange} to every subscriber, after the removal has reached the
+   * store. Optional: a store without it simply cannot invalidate an already-open listing, and callers
+   * that only read follow their own re-read path. Subscribers must unsubscribe on dispose.
+   */
+  subscribeHistory?(listener: (change: HistoryChange) => void): () => void;
 }
 export interface LibraryReferencePort {
   collections?(): Promise<Array<import('./native.ts').NativeCollectionTarget & { name: string }>>;

@@ -1,5 +1,5 @@
 import { ReaderError, paperId, type Conversation, type ImageAttachment, type PaperIdentity, type PaperScope } from '../../../contracts/src/index.ts';
-import type { HistoryEntry, HistoryScope, ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { HistoryChange, HistoryEntry, HistoryScope, ReaderReference, ReaderSkill, ReaderWorkspace, SavedDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import type { StoragePort } from '../../../contracts/src/runtime.ts';
 import type { ActionTaskRecord } from '../../../contracts/src/tasks.ts';
 import { clone } from '../../../contracts/src/clone.ts';
@@ -68,6 +68,8 @@ function preview(value: string): string { const characters = [...value]; return 
 export class WorkspaceStore implements ReaderWorkspace {
   private queue = Promise.resolve();
   private readonly clientId: string | undefined;
+  /** Views that must reconcile after a removal committed. Empty until a sidebar or pane subscribes. */
+  private readonly historyListeners = new Set<(change: HistoryChange) => void>();
   constructor(private storage: StoragePort, private clock: StoreClock, scope?: { clientId: string }) { this.clientId = scope ? uuid(scope.clientId) : undefined; }
   private ownedPaper(value: PaperScope): PaperScope {
     const paper = validatePaperScope(value); if (this.clientId && paper.clientId !== this.clientId) unavailable(); return paper;
@@ -364,7 +366,22 @@ export class WorkspaceStore implements ReaderWorkspace {
       const store = new ConversationStore(this.storage, this.clock);
       await store.remove(checked, id);
       await this.removeDraft(checked, id);
+      // Only after both files are gone: a view must never drop a row the store could not remove.
+      this.publishHistory({ paper: clone(checked), removed: [id] });
     });
+  }
+  /**
+   * Registers one listener for committed removals. The store stays the only writer; this is a
+   * notification, not a second owner, so a throw inside a listener cannot affect the removal.
+   */
+  subscribeHistory(listener: (change: HistoryChange) => void): () => void {
+    this.historyListeners.add(listener);
+    return () => { this.historyListeners.delete(listener); };
+  }
+  private publishHistory(change: HistoryChange): void {
+    for (const listener of [...this.historyListeners]) {
+      try { listener(clone(change)); } catch { /* a view cannot invalidate a committed change */ }
+    }
   }
   snapshotChat(conversationId: string, messageIds?: string[]): Promise<ReaderReference> {
     const requested = messageIds === undefined ? null : items(messageIds, 32).map(id => text(id, 128, 1));

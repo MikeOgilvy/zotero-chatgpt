@@ -20,21 +20,33 @@ const COPY: Readonly<Record<string, string>> = {
   // Chat mode's hosted application bar. The application's own UI is not translated here; these are
   // only the controls this host adds, and what they did with the user's clipboard.
   'Reload ChatGPT': '重新加载 ChatGPT',
-  'Copy paper context': '复制论文上下文',
-  'Attach current PDF': '附加当前 PDF',
-  'Copy selection': '复制选中内容',
+  // The two paper actions in the common toolbar. The tooltip is the title plus its explanation, so
+  // the combined two-line strings are dictionary keys of their own.
+  'Copy paper context': '复制文献信息',
+  'Copy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.': '以文本复制标题、作者、发表载体、年份、DOI 和摘要。不包含 PDF 正文。',
+  'Copy paper context\nCopy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.': '复制文献信息\n以文本复制标题、作者、发表载体、年份、DOI 和摘要。不包含 PDF 正文。',
+  'Copy PDF file': '复制 PDF 文件',
+  'Copy the current PDF file to the clipboard. Paste it into ChatGPT to attach it.': '将当前 PDF 文件复制到剪贴板。粘贴到 ChatGPT 即可附加。',
+  'Copy PDF file\nCopy the current PDF file to the clipboard. Paste it into ChatGPT to attach it.': '复制 PDF 文件\n将当前 PDF 文件复制到剪贴板。粘贴到 ChatGPT 即可附加。',
+  'Paper details copied': '已复制文献信息',
+  'This item has no bibliographic information to copy.': '此条目没有可复制的文献信息。',
+  'The paper details could not be read.': '无法读取文献信息。',
+  'PDF copied — paste to attach': 'PDF 已复制 — 粘贴即可附加',
+  'More actions': '更多操作',
+  'Paper & context details': '文献与上下文详情',
+  'Allow PDF context': '允许 PDF 上下文',
+  'Allow PDF context and send': '允许 PDF 上下文并发送',
+  'Conversation actions': '对话操作',
+  'Delete local conversation…': '删除本地对话…',
+  'Delete this local conversation? Its messages and unsent draft are removed from this computer. The official ChatGPT conversation, the paper and native annotations are not touched.': '删除此本地对话？其消息与未发送的草稿将从此电脑移除。官方 ChatGPT 对话、文献和原生标注不受影响。',
+  'Delete locally': '删除本地记录',
+  'Keep it': '保留',
   // The file route puts the real PDF on the clipboard; the paste into ChatGPT is the owner's step.
   'The PDF file is on your clipboard — paste it into ChatGPT to attach it.': 'PDF 文件已复制到剪贴板 — 粘贴到 ChatGPT 即可附加。',
   'Copying the PDF file is unavailable here.': '此处无法复制 PDF 文件。',
   'This attachment has no local PDF file to copy.': '此附件没有可复制的本地 PDF 文件。',
   'The PDF file could not be copied.': '无法复制该 PDF 文件。',
-  'This PDF is not readable here, so there is nothing to copy.': '此处无法读取该 PDF，没有可复制的内容。',
-  'No text was read from this PDF, so there is nothing to copy.': '未能从该 PDF 读取到文本，没有可复制的内容。',
-  'The paper context could not be prepared.': '无法准备论文上下文。',
-  'Select text in the PDF first, then copy it here.': '请先在 PDF 中选中文本，再复制。',
   'When you send in official ChatGPT, locally extracted text from the current PDF and the current Zotero selection are added to that message. Nothing is sent when you open the sidebar. You can turn this off in Zotero Preferences.': '在官方 ChatGPT 中发送时，插件会把当前 PDF 在本地提取的文本和当前 Zotero 选区加入这条消息。打开侧栏不会发送任何内容。你可以在 Zotero 偏好设置中关闭此功能。',
-  'Current PDF context will be added when you send in ChatGPT.': '在 ChatGPT 中发送时，将自动加入当前 PDF 上下文。',
-  'Automatic PDF context is off. You can turn it on in Zotero Preferences.': '自动 PDF 上下文已关闭。你可以在 Zotero 偏好设置中开启。',
   'Preparing frozen current PDF context. Nothing has been sent yet.': '正在冻结当前 PDF 上下文，尚未发送任何内容。',
   'ChatGPT accepted this message with the frozen current PDF context.': 'ChatGPT 已接收这条消息及冻结的当前 PDF 上下文。',
   'ChatGPT did not confirm that this message was accepted. It was not sent again.': 'ChatGPT 未确认已接收这条消息，插件没有再次发送。',
@@ -79,11 +91,9 @@ const COPY: Readonly<Record<string, string>> = {
   'Image preview': '图片预览', 'Close image preview': '关闭图片预览', 'Save image…': '保存图片…',
   'Move image earlier': '将图片前移',
   'Use current PDF text automatically': '自动使用当前 PDF 文本',
-  'Continue with current PDF': '继续使用当前 PDF',
   'New agent': '新建 Agent 会话',
-  'Copy PDF file…': '复制 PDF 文件…',
-  // Context summary and details (UI-02/UI-03). Dynamic sentences with counts are handled by
-  // `progress()`; these are the fixed phrases.
+  // Context details (UI-02/UI-03). Dynamic sentences with counts are handled by `progress()`; these
+  // are the fixed phrases. The one-line summary lives in the details now, not in a permanent row.
   'Automatic PDF context is off': '自动 PDF 上下文已关闭',
   'PDF text unavailable': 'PDF 文本不可用',
   'Current PDF · text not prepared yet': '当前 PDF · 文本尚未准备',
@@ -216,21 +226,21 @@ const CONTENT = [
 const BUTTONS = 'button[data-zchatgpt-action],.zchatgpt-button,.zchatgpt-icon-button,.zchatgpt-task-button,.zchatgpt-workspace-control,.zchatgpt-preferences button';
 const TEXT = [
   BUTTONS, '.zchatgpt-picker-heading', '[data-zchatgpt-setting="effort"] .zchatgpt-picker-option-label', '.zchatgpt-picker-toggle-row > span',
-  '.zchatgpt-history-heading', '.zchatgpt-history-empty', '.zchatgpt-status-line', '.zchatgpt-message-meta',
-  '.zchatgpt-context-disclosure > p', '.zchatgpt-error',
+  '.zchatgpt-history-heading', '.zchatgpt-history-empty',   '.zchatgpt-status-line', '.zchatgpt-message-meta',
+  '.zchatgpt-context-disclosure > p', '.zchatgpt-error', '.zchatgpt-shell-feedback',
   '.zchatgpt-workspace-status',
   '[data-zchatgpt-collection-target] option[value=""]', '.zchatgpt-plus-menu', '.zchatgpt-plus-heading', '.zchatgpt-plus-row-title', '.zchatgpt-plus-row-description', '.zchatgpt-acquisition-target', '.zchatgpt-command-heading', '.zchatgpt-command-status',
   '.zchatgpt-task-card > summary', '.zchatgpt-task-row-header > .zchatgpt-task-muted', '.zchatgpt-task-check', '.zchatgpt-task-field',
   '.zchatgpt-task-field option[value=""]', '.zchatgpt-task-counts', '.zchatgpt-task-body > .zchatgpt-task-muted',
   '[data-zchatgpt-reading-job] .zchatgpt-task-row > p:first-child', '[data-zchatgpt-ui="true"]',   '.zchatgpt-context-ring', '.zchatgpt-request-timing-text',
-  // Context summary and details (UI-02/UI-03): the dynamic summary line is re-emitted with its counts
-  // by `progress`; the panel's fixed phrases are dictionary keys.
-  '.zchatgpt-shell-context-text', '.zchatgpt-context-panel-title',
+  // The context details are reached from the More menu; the fixed phrases are dictionary keys.
+  '.zchatgpt-context-panel-title',
   // Agent empty state (UI-05). Drafts prepared into the composer are data and stay verbatim.
   '.zchatgpt-agent-empty-title', '.zchatgpt-agent-empty-body',
   '.zchatgpt-agent-empty-action-title', '.zchatgpt-agent-empty-action-hint', '.zchatgpt-agent-empty-note',
-  // The hosted-application bar's answer line: page counts and labels are re-emitted verbatim.
-  '.zchatgpt-embed-status', '.zchatgpt-embed-bridge-status', '.zchatgpt-embed-context-notice',
+  // The hosted page's notice strip, when the first outbound disclosure is owed or the host could not
+  // show the page at all.
+  '.zchatgpt-embed-bridge-status', '.zchatgpt-embed-context-notice',
   // The unbound New chat tab is copy, unlike named chat titles.
   '.zchatgpt-pane-tab-new',
   // Native Preferences pane: pane copy only. Skill names and ids are never matched.
@@ -249,7 +259,7 @@ const ATTRIBUTES = [
   '[data-zchatgpt-pane-tab][data-zchatgpt-conversation-id="new-chat"]',
   '.zchatgpt-pane-tab-new',
   '.zchatgpt-plus-menu input', '.zchatgpt-rename-form input', '[data-zchatgpt-collection-target]', '.zchatgpt-workspace-preview',
-  '.zchatgpt-shell-context', '.zchatgpt-context-panel',
+  '.zchatgpt-context-panel', '[data-zchatgpt-more-menu]', '.zchatgpt-history-menu',
   '.zchatgpt-workspace-preview input', '.zchatgpt-workspace-search', '.zchatgpt-image-preview', '.zchatgpt-command-list', '.zchatgpt-task-view', '.zchatgpt-task-check input', '[data-zchatgpt-ui="true"]', '.zchatgpt-context-ring',
   // The History search box carries copy in its placeholder and aria-label only when it is empty.
   '.zchatgpt-preferences [data-zchatgpt-history="search"]',
@@ -307,14 +317,6 @@ function progress(text: string): string {
   if (match) return `${match[2]} 页中有 ${match[1]} 页含文本`;
   match = /^p\. (.+)$/u.exec(text);
   if (match) return `第 ${match[1]} 页`;
-  // Clipboard answers from Chat mode's hosted-application bar. Every page count, page label and
-  // total is data and is re-emitted verbatim; only the sentence around it is translated.
-  match = /^Copied a shortened (\d+) of (\d+) pages — paste into ChatGPT\.$/u.exec(text);
-  if (match) return `已复制精简后的 ${match[1]}/${match[2]} 页 — 请粘贴到 ChatGPT。`;
-  match = /^Copied (\d+) of (\d+) pages — paste into ChatGPT\.$/u.exec(text);
-  if (match) return `已复制 ${match[1]}/${match[2]} 页 — 请粘贴到 ChatGPT。`;
-  match = /^Copied the selection from page (.+) — paste into ChatGPT\.$/u.exec(text);
-  if (match) return `已复制第 ${match[1]} 页的选中内容 — 请粘贴到 ChatGPT。`;
   match = /^Target collection: (.*)$/u.exec(text);
   if (match) return `目标分类：${match[1]}`;
   match = /^Source: (\S+)\nPermissions: (.*)\nUnsupported dependencies: (.*)$/u.exec(text);

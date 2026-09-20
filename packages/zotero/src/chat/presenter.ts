@@ -1,7 +1,7 @@
 import type { ReaderClient, RuntimeSnapshot } from '../../../contracts/src/runtime.ts';
 import { clone } from '../../../contracts/src/clone.ts';
 import { advanceRequestTiming, ReaderError, paperId, type Citation, type ContextReport, type Conversation, type DocumentContext, type GenerationSettings, type ImageAttachment, type Message, type OrganizationContext, type PaperIdentity, type PaperScope, type ReaderEvent, type RequestMode, type SendInput } from '../../../contracts/src/index.ts';
-import type { HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
+import type { HistoryChange, HistoryEntry, LibraryReferencePort, Personalization, ReaderReference, ReaderSkill, ReaderWorkspace, ReferenceInput, ResearchProfile, SavedDraft, WorkflowSnapshot, WorkspaceDraft, WorkspaceSettings } from '../../../contracts/src/workspace.ts';
 import { citationFromAnnotation, parseAnnotationCandidates, parseOrganizationProposals, type ActionTaskChoices, type ActionTaskRecord, type ActionTasks } from '../../../contracts/src/tasks.ts';
 import type { NativeCollectionTarget, NativeItemRef } from '../../../contracts/src/native.ts';
 import { validatePreferences, validateReference, validateReferenceInput, validateWorkflow } from '../../../contracts/src/workspace-validation.ts';
@@ -11,6 +11,7 @@ import { planContext, type ContextPlan } from '../../../core/src/context/planner
 import type { ReadingJob } from '../../../core/src/context/coordinator.ts';
 import { conversationHasAgentWork } from '../../../core/src/chat/agent-work.ts';
 import { documentBrief } from '../../../core/src/chat/document-brief.ts';
+import { paperContext } from '../../../core/src/chat/paper-context.ts';
 import { addCitation, addImage, makeAsk, makeExplain, moveImage, removeCitation, removeImage, workspaceDraft } from './draft.ts';
 import { pluginClipboardAccess, readGeckoClipboardImage, type ClipboardImageRead } from './pick-images.ts';
 import { alignSettings, catalogDefaultSettings } from './generation-settings.ts';
@@ -35,6 +36,14 @@ export type { AgentCapability, PresenterAgent, PresenterReading } from './capabi
 export type DocumentBriefResult =
   | { ok: true; text: string; pages: number; totalPages: number; truncated: boolean }
   | { ok: false; reason: 'unavailable' | 'no-text' | 'failed' };
+/**
+ * The outcome of copying the paper's bibliographic context. `no-info` means the item proved nothing
+ * a bibliography can hold (a bare PDF with no parent metadata), so the control is disabled rather
+ * than copying a file name as if it were a citation.
+ */
+export type PaperContextResult =
+  | { ok: true; text: string; hasAbstract: boolean }
+  | { ok: false; reason: 'no-info' | 'failed' };
 export interface PresenterServices {
   /**
    * The one shared reader client. Obtaining it performs no Codex work: opening the sidebar, listing
@@ -59,6 +68,12 @@ export interface PresenterServices {
   getWorkspace?(): Promise<ReaderWorkspace>; library?: LibraryReferencePort; agent?: PresenterAgent;
   openHistory?(paper: PaperScope, conversationId: string): Promise<void>;
   openCitation?(citation: Citation): Promise<void>; openItem?(item: NativeItemRef): Promise<void>;
+  /**
+   * Re-reads the bibliographic identity of one attachment from the local Zotero metadata, addressed
+   * by the frozen `PaperScope` rather than "whatever the reader shows now". Optional: without it the
+   * presenter copies the identity it already froze with the reader context.
+   */
+  readPaperIdentity?(paper: PaperScope): Promise<PaperIdentity | null>;
   contextBudget?(input: SendInput, conversation: Conversation): ContextBudget;
   /** Test seam for the bounded '@' search; production uses the default bound. */
   searchTimeoutMs?: number;
@@ -192,6 +207,9 @@ export class ConversationPresenter {
   private unobserve: (() => void) | null = null;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeClient: ReaderClient | null = null;
+  /** The store this presenter is listening to for removals committed by another view. */
+  private historyUnsubscribe: (() => void) | null = null;
+  private historySubscribed: ReaderWorkspace | null = null;
   private buffered: ReaderEvent[] = [];
   private syncing = false;
   private syncGeneration = 0;
@@ -370,8 +388,56 @@ export class ConversationPresenter {
   private getWorkspace(): Promise<ReaderWorkspace> {
     if (this.workspace) return Promise.resolve(this.workspace);
     if (!this.services.getWorkspace) return Promise.reject(new ReaderError('UNSUPPORTED_INTERACTION', 'Saved workspace controls are unavailable.'));
-    if (!this.workspaceFlight) this.workspaceFlight = this.services.getWorkspace().then(workspace => { this.workspace = workspace; return workspace; }).catch(error => { this.workspaceFlight = null; throw error; });
+    if (!this.workspaceFlight) this.workspaceFlight = this.services.getWorkspace().then(workspace => { this.workspace = workspace; this.attachHistory(workspace); return workspace; }).catch(error => { this.workspaceFlight = null; throw error; });
     return this.workspaceFlight;
+  }
+  /**
+   * A removal committed by another view (the Preferences pane today) must reach this sidebar
+   * without a restart, a mode switch or a re-open. The store publishes that one change; this is the
+   * only subscription the presenter keeps for it, and it is released with the presenter.
+   */
+  private attachHistory(workspace: ReaderWorkspace): void {
+    if (this.historySubscribed === workspace || !workspace.subscribeHistory) return;
+    this.historyUnsubscribe?.();
+    this.historySubscribed = workspace;
+    this.historyUnsubscribe = workspace.subscribeHistory(change => this.onHistoryChange(change));
+  }
+  /**
+   * Reconcile one committed removal. Order matters: the in-flight query is invalidated first (an
+   * older list/search must not put the row back), the rows are dropped immediately, everything this
+   * presenter still holds for those ids — draft, position and a debounced save that has not run —
+   * is discarded so nothing re-creates them, and only then is the store re-read for the query the
+   * owner is looking at. The current chat is handled like the sidebar's own delete: another open
+   * chat takes over, otherwise the reader lands on the unbound New chat state.
+   */
+  private onHistoryChange(change: HistoryChange): void {
+    if (this.disposed) return;
+    const removed = new Set(Array.isArray(change.removed) ? change.removed : []);
+    if (!removed.size) return;
+    this.historySearch += 1;
+    for (const id of removed) {
+      this.drafts.delete(id); this.positions.delete(id); this.pendingSaves.delete(id); this.submitted.delete(id);
+    }
+    if (this.state.history.some(entry => removed.has(entry.id))) {
+      this.update({ history: this.state.history.filter(entry => !removed.has(entry.id)) });
+    }
+    const currentRemoved = !!this.state.conversation && removed.has(this.state.conversation.id);
+    if (currentRemoved) {
+      const remaining = this.state.openConversations.filter(entry => !removed.has(entry.id));
+      const next = remaining.at(-1);
+      this.draftVersion++;
+      if (next) { this.update(this.panePatch(next, this.drafts.get(next.id) ?? null, this.positions.get(next.id), remaining)); this.stageDraft(); }
+      else this.enterNewChat(remaining);
+    } else {
+      // A removed chat may still sit in the presenter's own list or pane strip — the host-list
+      // fallback reads it from there — so both are reconciled, not only the active pane.
+      const open = this.state.openConversations.filter(entry => !removed.has(entry.id));
+      const known = this.state.conversations.filter(entry => !removed.has(entry.id));
+      if (open.length !== this.state.openConversations.length || known.length !== this.state.conversations.length) {
+        this.update({ openConversations: open, conversations: known });
+      }
+    }
+    void this.searchHistory(this.state.historyQuery).catch(error => this.reportError(this.errorText(error)));
   }
   private captureWorkspace(): Promise<WorkspaceSettings | null> {
     const previous = this.state.workspace;
@@ -861,6 +927,32 @@ export class ConversationPresenter {
       // call site only needs to know that nothing was copied.
       return { ok: false, reason: 'failed' };
     }
+  }
+  /**
+   * The paper's bibliographic context as clipboard text: title, authors, publication, year, DOI and
+   * the stored abstract. This is the manual copy button's content and it never reads the PDF — the
+   * automatic context that ChatGPT receives still goes through `documentBrief`, so trimming this
+   * copy cannot silently shrink what a send carries.
+   *
+   * The scope is frozen before the await and any optional re-read is addressed by that frozen scope,
+   * so a slower read for paper A can never return while the reader shows B and paste A's title with
+   * B's abstract. It starts no model, no task and no connection: it is a local metadata read.
+   */
+  async exportPaperContext(): Promise<PaperContextResult> {
+    const frozen = clone(this.paper);
+    const frozenIdentity = clone(this.identity);
+    let identity = frozenIdentity;
+    if (this.services.readPaperIdentity) {
+      try {
+        const read = await this.services.readPaperIdentity(frozen);
+        // A null answer means the item or its parent is gone: keep the frozen identity rather than
+        // borrowing metadata from whatever the reader happens to show now.
+        if (read) identity = read;
+      } catch { return { ok: false, reason: 'failed' }; }
+    }
+    const context = paperContext(identity);
+    if (!context) return { ok: false, reason: 'no-info' };
+    return { ok: true, text: context.text, hasAbstract: context.hasAbstract };
   }
   private prepareDocument(range: readonly [number, number] | null): Promise<DocumentContext> {
     const key = JSON.stringify(range);
@@ -1668,5 +1760,6 @@ export class ConversationPresenter {
     this.stageDraft(); void this.flushDraft().catch(() => {}); this.disposed = true;
     this.documentJob?.controller.abort(); for (const controller of this.submissions.values()) controller.abort();
     this.renders.clear(); this.unsubscribe?.(); this.unsubscribe = null; this.unsubscribeClient = null; this.unobserve?.(); this.unobserve = null; this.untasks?.(); this.unreading?.();
+    this.historyUnsubscribe?.(); this.historyUnsubscribe = null; this.historySubscribed = null;
   }
 }

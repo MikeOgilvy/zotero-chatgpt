@@ -320,11 +320,22 @@ export function unmountReaderDock(doc: Document): void {
 
 export function injectReaderStyles(doc: Document, assets?: { stylesheet?: string; katex?: string }): void {
   const head = doc.head ?? doc.documentElement;
-  if (!doc.querySelector('style[data-zchatgpt-sidebar-css]')) {
+  /**
+   * The stylesheet is inlined as text, and a reader document outlives one add-on version: reloading
+   * the plugin re-renders the sidebar with the new bundle while this document still holds the text
+   * injected by the previous one. That mismatch is how new markup ends up styled by old CSS, so the
+   * text is refreshed whenever it differs from the running bundle's copy. Comparing the text needs no
+   * version plumbing and rewrites nothing when it already matches.
+   */
+  const existing = doc.querySelector<HTMLElement>('style[data-zchatgpt-sidebar-css]');
+  if (!existing) {
     const css = createHtmlElement(doc, 'style');
     css.setAttribute('data-zchatgpt-sidebar-css', '');
     head.append(css);
     css.append(doc.createTextNode(__ZCHATGPT_SIDEBAR_CSS__));
+  } else if (existing.textContent !== __ZCHATGPT_SIDEBAR_CSS__) {
+    // `replaceChildren` keeps exactly one text node, so reading `textContent` back is always the CSS.
+    existing.replaceChildren(doc.createTextNode(__ZCHATGPT_SIDEBAR_CSS__));
   }
   if (assets?.katex && !doc.querySelector('link[data-zchatgpt-katex-css]')) {
     const katex = createHtmlElement(doc, 'link') as HTMLLinkElement;
