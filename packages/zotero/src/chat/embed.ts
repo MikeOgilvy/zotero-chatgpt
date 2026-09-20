@@ -32,7 +32,9 @@ export const CHAT_EMBED_CONTAINER_ATTR = 'data-zchatgpt-embed-container';
 export const CHAT_EMBED_BINDING_ATTR = 'data-zchatgpt-embed-binding';
 /** The application Chat mode hosts. No API key, no custom base URL, no token is involved. */
 export const CHAT_APP_URL = 'https://chatgpt.com/';
-const OFFICIAL_CHAT_AUTH_HOSTS = new Set(['auth.openai.com', 'appleid.apple.com']);
+// These exact HTTPS hosts may receive ordinary login clicks, never PDF context or actor commands.
+// Google sign-in leaves auth.openai.com before returning to the official ChatGPT application.
+const OFFICIAL_CHAT_AUTH_HOSTS = new Set(['auth.openai.com', 'appleid.apple.com', 'accounts.google.com']);
 /** Free/stale-layout safety net while the surface is painted, in milliseconds. */
 const SYNC_INTERVAL_MS = 500;
 /**

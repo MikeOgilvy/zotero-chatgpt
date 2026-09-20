@@ -450,35 +450,88 @@ it('keeps actor readiness messages separate from clipboard-action results', () =
   surface.destroy();
 });
 
-it('keeps an official Apple authorization navigation interactive without exposing the PDF bridge', async () => {
+it.each([
+  ['OpenAI', 'https://auth.openai.com/log-in'],
+  ['Apple', 'https://appleid.apple.com/auth/authorize'],
+  ['Google', 'https://accounts.google.com/v3/signin/identifier'],
+])('keeps %s authorization interactive without exposing the PDF bridge, then restores Chat', async (_provider, authURL) => {
+  const { win, doc } = chromeWindow();
+  const sendQuery = vi.fn((name: string) => Promise.resolve({ status: name === 'stage' ? 'staged' : 'ready' }));
+  const prepare = vi.fn(() => Promise.resolve({ status: 'allow' as const }));
+  const surface = createChatEmbedSurface(win);
+  try {
+    surface.bindContext('paper-a', prepare);
+    const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+      currentURI: { spec: string };
+      browsingContext: { currentWindowGlobal: unknown };
+    };
+    browser.currentURI = { spec: CHAT_APP_URL };
+    browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+    const { slot, frame } = sidebar(doc); surface.show(slot, frame);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(browser.style.pointerEvents).toBe('auto');
+
+    sendQuery.mockClear();
+    const srcBeforeAuth = browser.getAttribute('src');
+    browser.currentURI = { spec: authURL };
+    // Even if a host exposes an actor here, no bridge command may reach the auth origin.
+    browser.browsingContext.currentWindowGlobal = { getActor: () => ({ sendQuery }) };
+    await new Promise(resolve => setTimeout(resolve, 550));
+    expect(browser.style.pointerEvents).toBe('auto');
+    expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('auth-navigation');
+    await expect(surface.stage('synthetic selection')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+    await expect(surface.submitQuestion('must stay disabled during auth')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+    const respond = vi.fn();
+    const Event = (doc.defaultView as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent;
+    browser.dispatchEvent(new Event(OFFICIAL_CHAT_BRIDGE_EVENT, {
+      detail: { kind: 'prepare', binding: browser.getAttribute('data-zchatgpt-embed-binding'), question: 'synthetic question', transaction: 'auth-test', respond },
+    }));
+    expect(prepare).not.toHaveBeenCalled();
+    expect(respond).not.toHaveBeenCalled();
+    surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(browser.getAttribute('src')).toBe(srcBeforeAuth);
+    expect(sendQuery).not.toHaveBeenCalled();
+
+    browser.currentURI = { spec: 'https://chatgpt.com/c/12345678-abcd' };
+    browser.browsingContext.currentWindowGlobal = { getActor: () => ({ sendQuery }) };
+    await new Promise(resolve => setTimeout(resolve, 550));
+    expect(browser.style.pointerEvents).toBe('auto');
+    expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('ready');
+    await expect(surface.stage('synthetic selection')).resolves.toEqual({ status: 'staged' });
+    expect(sendQuery).toHaveBeenCalledWith('stage', { text: 'synthetic selection' });
+  } finally { surface.destroy(); }
+});
+
+it.each([
+  'https://accounts.google.com.example.org/signin',
+  'https://example.org/?next=https://accounts.google.com',
+  'https://sub.accounts.google.com/signin',
+  'http://accounts.google.com/signin',
+  'https://accounts.google.com:444/signin',
+  'https://test@accounts.google.com/signin',
+])('does not grant authentication interaction or bridge access to %s', async authURL => {
   const { win, doc } = chromeWindow();
   const sendQuery = vi.fn(() => Promise.resolve({ status: 'ready' }));
   const surface = createChatEmbedSurface(win);
-  const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
-    currentURI: { spec: string };
-    browsingContext: { currentWindowGlobal: unknown };
-  };
-  browser.currentURI = { spec: CHAT_APP_URL };
-  browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
-  const { slot, frame } = sidebar(doc); surface.show(slot, frame);
-  await new Promise(resolve => setTimeout(resolve, 0));
-  expect(browser.style.pointerEvents).toBe('auto');
-
-  const srcBeforeAuth = browser.getAttribute('src');
-  browser.currentURI = { spec: 'https://appleid.apple.com/auth/authorize?private=not-recorded' };
-  browser.browsingContext.currentWindowGlobal = { auth: true };
-  await new Promise(resolve => setTimeout(resolve, 550));
-  expect(browser.style.pointerEvents).toBe('auto');
-  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('auth-navigation');
-  await expect(surface.submitQuestion('must stay disabled during auth')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
-  surface.bindConversation('paper-a', 'https://chatgpt.com/c/12345678-abcd', vi.fn());
-  await new Promise(resolve => setTimeout(resolve, 0));
-  expect(browser.getAttribute('src')).toBe(srcBeforeAuth);
-
-  browser.currentURI = { spec: 'https://chatgpt.com/c/12345678-abcd' };
-  browser.browsingContext.currentWindowGlobal = { getActor: () => ({ sendQuery }) };
-  await new Promise(resolve => setTimeout(resolve, 550));
-  expect(browser.style.pointerEvents).toBe('auto');
-  expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('ready');
-  surface.destroy();
+  try {
+    const browser = doc.querySelector(`[${CHAT_EMBED_ATTR}]`) as unknown as HTMLElement & {
+      currentURI: { spec: string };
+      browsingContext: { currentWindowGlobal: unknown };
+    };
+    browser.currentURI = { spec: CHAT_APP_URL };
+    browser.browsingContext = { currentWindowGlobal: { getActor: () => ({ sendQuery }) } };
+    const { slot, frame } = sidebar(doc); surface.show(slot, frame);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(browser.style.pointerEvents).toBe('auto');
+    sendQuery.mockClear();
+    browser.currentURI = { spec: authURL };
+    browser.browsingContext.currentWindowGlobal = { getActor: () => ({ sendQuery }) };
+    await new Promise(resolve => setTimeout(resolve, 550));
+    expect(browser.style.pointerEvents).toBe('none');
+    expect(browser.getAttribute('data-zchatgpt-bridge-ready')).toBe('checking');
+    await expect(surface.stage('synthetic selection')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+    await expect(surface.submitQuestion('synthetic question')).resolves.toEqual({ status: 'blocked', reason: 'context-changed' });
+    expect(sendQuery).not.toHaveBeenCalled();
+  } finally { surface.destroy(); }
 });

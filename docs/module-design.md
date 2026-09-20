@@ -97,6 +97,8 @@ Chat surface 负责官方 browser 生命周期与受限 actor。Agent surface �
 
 拒绝相似域名、HTTP、credentials URL、异常端口、子 frame 和过期消息。actor 模块仅通过窄 `resource://` substitution 暴露所需 content access；其它运行资产、记录和账户数据不可读。允许用户完成官方登录导航，不等于把桥的权限扩展到第三方登录页。
 
+登录交互放行名单为 `auth.openai.com`、`appleid.apple.com` 和 `accounts.google.com`，只接受精确主机名、HTTPS、默认/443 端口且不含 URL 用户凭据的导航。该名单只恢复登录页面的鼠标操作；`stage`、`submitQuestion` 和文献准备消息仍限定在 `chatgpt.com`。返回 ChatGPT 后重新探测官方 composer。放行 Google 页面不代表真实 Google 登录已完成跨平台验收，也不绕过认证服务对内嵌浏览器的限制。
+
 生产桥不读取回答正文、认证、cookie、token 或远端 transcript。不复制其它客户端认证，不调用未公开服务端接口，不关闭宿主安全机制来制造成功。
 
 ### 4.2 可见提交与冻结

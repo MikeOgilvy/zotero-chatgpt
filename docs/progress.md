@@ -54,6 +54,32 @@ S6 两版本阶段用 `--upgrade-xpi dist/zotero-chatgpt-0.4.0a34-dev.xpi --roll
 非 darwin-arm64 平台：NOT RUN / 未支持声明。
 ```
 
+### 0.4 Google 登录交互修复（2026-09-20，未发行）
+
+基线 `bcf8d382a271b5cb05cf0403cb3768c880403602`，分支 `fix/google-login-interaction`；验证环境 Linux、Node 24.19.0、npm 11.6.1。以下仅是本次修复的证据，不继承此前 macOS 宿主或真实服务的 PASS。
+
+**原因与范围**：Chat 侧栏导航到 `accounts.google.com` 时，原认证交互名单只包含 OpenAI 和 Apple；`tick()` 将 `pointerEvents` 设为 `none`，而只匹配 `chatgpt.com` 的 actor 不能重新放行 Google 页面。本轮增加精确的 Google 主机名，只放行普通登录交互；PDF 准备、`stage`、`submitQuestion` 仍拒绝认证页面。未修改 actor origin、Agent 运行资产、插件 ID 或版本。
+
+**先复现再修复**：扩展现有 Apple 测试，覆盖 OpenAI / Apple / Google 认证跳转及返回 ChatGPT。旧代码下 Google 用例 FAIL（预期 `auto`，实际 `none`；27 项通过、1 项失败），修改后同文件 PASS 28/28。增加认证页文献准备事件和发送/选区命令隔离检查，以及相似域名、子域名、HTTP、非默认端口、URL 用户凭据等 6 个拒绝用例。合计新增 8 个用例。
+
+| 本轮检查 | 结果 |
+| --- | --- |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `node scripts/runtime-prepare.mjs` | PASS；只下载并校验固定资产，未执行 Codex |
+| `npm run package:dev` | PASS |
+| `npm run verify:artifacts` | PASS；87 files |
+| `npm run test:unit -- --maxWorkers=1` | PASS；103 files / 1386 passed / 1 skipped；Linux 按原有条件跳过 Apple 签名检查 |
+| 真实 Chat / Google 登录 | PASS（用户手动报告）：Debian / Zotero 9.0.6 中 Chat 登录成功；助手未复现，未独立核验该次 profile 与已安装包哈希。未读取账号、Cookie 或认证文件 |
+| Agent Linux 运行 | FAIL（用户手动报告）：显示 `Unable to prepare the bundled Codex runtime`；随包仍为 darwin-arm64，本次修复不增加 Agent Linux 支持 |
+| Chat 发送 / PDF 上下文 / 重启后的登录保持 | NOT RUN；用户尚未报告这些验证结果 |
+
+首次完整测试使用 `--maxWorkers=4`，结果 FAIL（1385 passed / 1 failed / 1 skipped）：既有 `install-dev-xpi.test.ts` 的临时配置安装测试超过 5 秒。单独以 `--maxWorkers=1` 复核该文件 PASS 18/18，随后完整串行测试 PASS；未修改断言、超时限制或跳过条件。保留首次失败记录，不把失败归因当成已证明的根因。
+
+本轮 XPI：`dist/zotero-chatgpt-0.1.0-dev.xpi`，92,760,745 bytes；SHA-256 `842d9447c8b38f18172dcafeeacb507976446412fa299974abb60295ef052ca0`。此为本地测试产物，与 §0 的已发布原版哈希不同。复现、定向通过、首次完整失败、安装复核及最终完整通过日志保存在忽略目录 `.zotero-chatgpt-dev/verification/google-login-20260920/`。
+
+审查：自审 PASS（实际 diff、域名和文献桥边界、无无关修改、`git diff --check`）；独立审查 NOT RUN。用户手动报告的 Chat 登录成功与自动测试分开记载，不外推为其它账户、认证流程或平台均可用。测试期间曾出现网页连接失败和菜单缺失，原因未完成诊断；不将这些问题声称为本次改动修复，也不绕过认证服务限制。
+
 ## 1. 当前候选（开发线）
 
 | 字段 | 值 |
