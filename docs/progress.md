@@ -116,7 +116,7 @@ a33 比 a32 增加了将 Chat 重新加载按钮从时钟图标改为 reload 图
 | P0 / UI-01 | 截图中 Chat/Agent 开关位置不同 | 共同顶部外壳、固定位置、无第二套开关 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
 | P0 / UI-02 | 截图顶部操作与多条反馈常驻 | 正常态紧凑；次要操作折叠；失败可处理 | 已实现；预览几何 PASS；真实宿主 NOT RUN，见 §9 |
 | P0 / UI-03 | 截图“本地 24 页”和“3/24 已缩短”未清晰分层 | 提取、待发送、已接受、回答分开表达 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
-| P1 / UI-04 | 截图 Attach 操作实际提示剪贴板粘贴 | 文件准备不冒充上传；附件和文本覆盖各自明确 | 已实现（`Copy PDF file…`）；真实页面附件流程 NOT RUN，见 §9 |
+| P1 / UI-04 | 截图 Attach 操作实际提示剪贴板粘贴 | 文件准备不冒充上传；附件和文本覆盖各自明确 | 已实现（`Copy PDF file…`）；本轮（§10）改为工具栏图标按钮 `Copy PDF file`；真实页面附件流程 NOT RUN，见 §9 |
 | P1 / UI-05 | 截图 Agent 的 New chat、Model 和不明圆点；输入细节待验 | 模式身份、禁用原因、独立草稿、IME、焦点和在途状态一致 | 已实现；离线回归 PASS；真实模型 NOT RUN，见 §9 |
 | P1 / UI-06 | 截图“适用于所有 chat”的模型/instructions | Agent 设置独立标注；不承诺控制官网；字号范围准确 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
 | P1 / UI-07 | 主界面历史入口与设置里的完整聊天列表并存 | 导航和数据管理分工；搜索/删除范围准确 | 已实现；离线回归 PASS；真实宿主 NOT RUN，见 §9 |
@@ -149,7 +149,7 @@ a33 比 a32 增加了将 Chat 重新加载按钮从时钟图标改为 reload 图
 | 目标 | 实现 |
 | --- | --- |
 | UI-01 | 新增共同外壳 `.zchatgpt-shell`：模式开关只创建一次并固定在 `.zchatgpt-chrome`（`data-zchatgpt-shell-bar`）最左侧；Chat 与 Agent 切换不再移动、也不再出现第二套开关。Agent composer 只保留附件 `+`。 |
-| UI-02 | 顶部正常态固定为一行 44 px 工具栏 + 一行 30 px 上下文摘要（实测外壳总高 75 px）。新建/历史留在右侧；`Copy paper context`、`Copy PDF file…`、`Copy selection`、`Reload` 在 Chat 面保留为次要操作。 |
+| UI-02 | 顶部正常态固定为一行 44 px 工具栏 + 一行 30 px 上下文摘要（实测外壳总高 75 px）。新建/历史留在右侧；`Copy paper context`、`Copy PDF file…`、`Copy selection`、`Reload` 在 Chat 面保留为次要操作。**（已被 §10 取代：正常态只有一行 44 px 工具栏；上下文摘要与自动 PDF 状态进入 `More → Paper & context details`；文献快捷动作只保留两个图标按钮，`Copy selection` 从工具栏移除，`Reload` 进入 More 菜单。）** |
 | UI-03 | 摘要行改为回答“下一次发送什么”：选区、自动 PDF 关闭、准备中、本地读取页数、文本不可用、无 PDF。点击摘要打开锚定详情面板（来源全名、下次发送、本地读取、自动 PDF 状态、复制/重新读取、上次覆盖报告）。 |
 | UI-04 | `Attach current PDF` 改名为 `Copy PDF file…`，状态文案明确“已复制到剪贴板，需粘贴”；复制成功不表示附件已上传。 |
 | UI-05 | Agent 新增紧凑空状态（标题 + 一句用途 + 高亮/获取文章/整理选中条目三个入口，仅准备草稿，不发送不连接）；空会话改称 `New agent`；发送与模型设置禁用时给出原因；输入框说明 Enter / Shift+Enter。 |
@@ -199,3 +199,129 @@ UI-01 至 UI-07 真实宿主（Zotero 9.0.6 + 0.4.0a34）：NOT RUN
 ```
 
 后续待办：在额度可用时于专用 `.zotero-chatgpt-dev/` profile 用 0.4.0a34 复验 UI-01 至 UI-07 的真实宿主布局、IME、焦点返回与多窗口；历史来源标记目前只在记录能证明 message mode 时显示，工作区列表条目未暴露来源字段，不猜测填充。
+
+## 10. 2026-09-20 单行工具栏、复制语义与历史同步精修轮次
+
+本轮按 [zotero-chatgpt-ui-polish-instruction.md](zotero-chatgpt-ui-polish-instruction.md) 完成：正常态收敛为单行工具栏、两个文献复制图标按钮与新的书目信息复制契约、Settings ↔ History 删除同步的数据链路修复，以及 History 排版/图标/焦点收尾。真实 Chat 服务链路与本轮按用户要求仍不运行产品 Codex 的 Agent 功能验收。
+
+### 10.1 可见变化与主要修改
+
+| 目标 | 实现 |
+| --- | --- |
+| P-01 单行共同头部 | 移除常驻 `Current PDF · …` 行、其 wrapper 与旧 `Copy selection` / 刷新按钮与大文字按钮区；`.zchatgpt-shell` 正常态只包含一行 `.zchatgpt-chrome`。上下文摘要与自动 PDF 状态进入 `More → Paper & context details`；宿主网页重新加载进 More 菜单。 |
+| P-02 尺寸与窄窗 | 工具栏最小高度 44 px；图标 18 px 绘制、32 × 32 命中区；同组间距 2 px、组间 6 px；标题先省略、标签条自身滚动，320 / 360 / 480 / 720 px 下 `scrollWidth === clientWidth`（无工具栏横向滚动）。 |
+| P-03 图标与反馈 | `Copy paper context`（剪贴板 + 文本横线）与 `Copy PDF file`（折角文件页）使用不同 path、`currentColor`、统一线宽；`title` 与 `aria-describedby` 提供标题与说明；busy / copied / error 由 `aria-busy` 与 `data-zchatgpt-copy-state` 表达，反馈出现后消失，且不改动头部高度（实测 44 px 不变）。 |
+| P-04/P-05/P-08 复制契约 | 新增 `core/src/chat/paper-context.ts`：`paperContext()` 只输出 Title / Authors / Publication / Year / DOI + Abstract，缺失字段省略、DOI 规范化、HTML 与实体安全清理；自动发送路径继续使用 `documentBrief()`，两者不共用格式器。 |
+| P-06 两个动作独立 | `hasBibliographicIdentity()` 为假时 `Copy paper context` 以 `aria-disabled` 禁用并给出原因（仍可聚焦、激活时播报原因），`Copy PDF file` 保持可用；反过来文件缺失不影响书目复制。 |
+| P-07 冻结来源 | `exportPaperContext()` 在 await 前 clone 当前 `PaperScope`，可选 `readPaperIdentity(scope)` 按该冻结 scope 读取；回调不再取“当前论文”。 |
+| H-01 设置删除 → 侧栏 | `WorkspaceStore.removeConversation` 提交后发布 `HistoryChange`；`ReaderWorkspace.subscribeHistory?` 为可选契约；侧栏 presenter 订阅后立即丢弃该行并重新读取，无需重启 / 切模式 / 刷新。 |
+| H-02 反向与多窗口 | Settings 删除 → 侧栏为推送；Sidebar 删除 → 已打开 Preferences 通过窗口重新聚焦时重新读取作兜底（面板跨沙箱暂未暴露回调，见 §10.6）。 |
+| H-04 旧查询晚返回 | 删除通知递增 `historySearch` 世代，删除前开始的 list/search 结果被丢弃，不重新插回已删除记录。 |
+| H-05 旧保存复活 | `ConversationStore.save` 写前重新确认会话文件存在（不信任内存副本），对已删除会话抛 `NOT_FOUND`；只有显式 `create` 能重新建立记录；presenter 同时丢弃该会话的草稿、位置与防抖保存。 |
+| H-06 当前会话与焦点 | 删除当前闲置会话进入未保存空会话并丢弃其草稿；删除其它会话不影响当前模式/草稿/阅读位置。行菜单删除后焦点落到接替行、上一行或搜索框，不落回页面根节点。 |
+| UI-07 行排版与图标 | 搜索框 32 px 高、单一 focus ring；分组标题 11 px；行高约 44 px；完成态改用中性小圆点（不再是勾选圈）；行末动作改为省略号菜单 + 一次确认，槽位常驻不跳动。 |
+
+主要文件：`packages/core/src/chat/paper-context.ts`（新增）、`packages/contracts/src/workspace.ts`、`packages/core/src/workspace/store.ts`、`packages/core/src/sessions/store.ts`、`packages/zotero/src/chat/view.ts`、`packages/zotero/src/chat/presenter.ts`、`packages/zotero/src/chat/ui-locale.ts`、`packages/zotero/src/reader/selection.ts`、`packages/zotero/src/index.ts`、`packages/zotero/assets/sidebar.css`，以及对应离线测试与宿主 driver 选择器。
+
+### 10.2 历史不同步的实际根因
+
+复现：在专用测试存储中用真实 `ConversationStore` + `WorkspaceStore` 建立两条合成会话，侧栏 presenter 激活并列出两条；再通过 Preferences 的 `HistoryManager.removeByIds()`（与生产同一条入口、同一个 store 实例）删除其中一条。删除前侧栏已缓存 `state.history`，删除后侧栏仍显示旧行。
+
+沿链路核对后的实际根因（不是猜测）：
+
+1. **缺少失效通知。** 删除确实落盘（`removeConversation` 删除 `conversations/<id>.json`、请求日志与绑定的 draft，并从 paper index 移除），但 `WorkspaceStore` 没有任何订阅/通知机制，侧栏的历史列表是 `searchHistory()` 的缓存快照，只有显式重新读取才会变。因此“删了另一范围/身份”“落盘但索引没更新”被排除；确认是“UI 没订阅”。
+2. **旧查询晚返回。** 删除前开始的 `history()` 读取在删除后 resolve 时，presenter 仍按原 `historySearch` 世代接受结果，会把已删除行重新写回列表。
+3. **旧保存复活。** core 的 `ReaderService` / `ConversationStore` 在内存中保有会话副本（`loaded` / `conversations` Map）；`ConversationStore.save` 只信任该缓存，于是删除后一次迟到的保存会把 `conversations/<id>.json` 重新写出来，记录复活。Preferences 关闭时未清理的 presenter 防抖草稿保存是同一类竞态的第二个入口。
+
+对应修复见 10.1 的 H-01/H-04/H-05 行。修复只使用既有的唯一写入者与可选订阅；没有新增数据库、全局事件框架或第二套持久化。
+
+### 10.3 合成条目的复制结果样例
+
+合成父条目（`journalArticle`，摘要含 HTML 与数学文本）实际写出的剪贴板文本：
+
+```text
+Title: Synthetic Paper A
+Authors: Ada Lovelace; Grace Hopper
+Publication: Journal of Synthetic Results
+Year: 2024
+DOI: 10.1000/synthetic
+
+Abstract:
+A stored abstract on the parent item.
+
+Second paragraph with p(θ|D) ∝ p(D|θ)p(θ).
+```
+
+同一份合成 PDF 正文里埋入 `FULLTEXT_ONLY_SHOULD_NOT_COPY` 时：`paperContext()` 的输出不含该标记、不含 `[page …]`、不含 `Context from the PDF open in Zotero` 与任何页数/状态串；`documentBrief()`（自动发送路径）仍包含该标记与页标记。无摘要的条目不出 `Abstract:` 段，无 DOI 就不出 `DOI:` 行；只有附件文件名的裸 PDF 返回 `no-info` 并禁用该动作。
+
+### 10.4 检查与结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npm run test:unit` | PASS，103 files / 1378 tests / 0 skipped（本轮新增 `paper-context`、`history-sync`（core 与 presenter）、Preferences 焦点重验、复制工具栏与样式回归、reader 样式表刷新与说明文本隐藏回归） |
+| `npm run package:dev` | PASS，构建 `dist/zotero-chatgpt-0.4.0a34-dev.xpi`（92,760,986 bytes） |
+| `npm run verify:artifacts` | PASS，87 个文件；SHA-256 `22afde9568ca5aa2436a0bed9a2fe146a36cd7d6684c81637967dd88c24db3e2` |
+
+产物说明：本轮 XPI 与 §9 记录的 a34 同名（add-on 版本未变），因此 §9 记录的旧 SHA-256 `c5665975…` 已不再标识当前文件；当前文件以上表 SHA-256 为准（本轮最后一次源码修改后重新打包，故与 10.4 之前的中间值不同）。
+
+### 10.5 渲染复查（浏览器预览，非 Zotero/Gecko 宿主）
+
+用真实 `view.ts` 与随包 `sidebar.css`，在隔离的 dev harness 中按合成状态渲染，并用 Blink 无头渲染测量实际 CSS px：
+
+`npx esbuild --bundle .zotero-chatgpt-dev/ui-preview/entry.ts`（产出 `preview.js`）→ `file://…/ui-preview/index.html#only=<N>&measure`，截图目录 `.zotero-chatgpt-dev/ui-preview/screenshots/ui-polish-01…14-*.png`。
+
+实测（`#only=N&measure` 输出的 `getBoundingClientRect`）：
+
+| 项目 | 观测 |
+| --- | --- |
+| 共同头部 | 每个变体 `shellBarCount === 1`，高度 44 px；正常态可见流式行只有 `zchatgpt-chrome` 一行 |
+| 图标与命中区 | 两个复制按钮各 32 × 32 px，SVG 18 × 18 px，二者 path 不同 |
+| 复制反馈 | 出现后为 26 px 高的浮层，位于工具栏下方，头部高度仍为 44 px（`chromeOverflow.overflows === false`） |
+| 窄窗 | 320 / 360 / 480 / 720 px 与 1.5×/2× 字号下均无横向溢出；标题与标签条先让位，五个工具栏按钮保持可达 |
+| History | 搜索框 32 px、历史行约 44 px、行末动作槽位 28 px、菜单 200 × 38 px（确认态 200 × 165.63 px），完成态为中性圆点而非勾选圈 |
+| 详情面板 | 从 More 打开，摘要读出 `Current PDF · excerpts from 3 of 24 pages` 与 `Automatic PDF context On` |
+
+该复查是浏览器渲染，不是 Zotero/Gecko 宿主证据：真实 Gecko 的 dock 尺寸、IME、宿主原生 tooltip 延迟、`--material-*` 深浅主题与焦点环仍需宿主复验。
+
+### 10.6 交付后修复：头部出现长串说明文字
+
+交付后用户在真实阅读器中报告：头部出现一长串英文说明（“Copy title, authors, publication, year, DOI and abstract as text. Does not include PDF full text.” 紧跟 “Copy the current PDF file…”）。按现象定义它属于本轮 P-01/P-03 的缺陷，已定位并修复。
+
+**根因（同一根因的两个面）**
+
+1. `injectReaderStyles()` 只在该 reader 文档**首次**渲染时把 `sidebar.css` 文本内联进去，之后即使存在 `style[data-zchatgpt-sidebar-css]` 就完全跳过。reader 文档的生命周期长于一个插件版本：加载新 bundle 后侧栏用**新 DOM** 重新渲染，而文档里仍是**上一个版本注入的 CSS 文本** —— 旧文本没有 `.zchatgpt-visually-hidden` 规则，于是两个仅供辅助技术的说明 `span` 按普通行内文本排进工具栏。
+2. 说明文本的隐藏原本**只**由那条样式表规则保证，没有元素自身的兜底，所以只要该文档里的规则缺失（旧版本注入、被覆盖或样式表未加载），它就会真的显示出来。
+
+**修复**
+
+- `injectReaderStyles()` 现在把内联文本与当前 bundle 的 CSS 文本比较，不一致就**原地重写**同一个 `<style>`（不新增节点、不新增版本号管道），因此打开中的 reader 在升级后也会拿到当前样式，而不是继续用旧 CSS 渲染新 DOM。
+- 工具栏说明改用 `VISUALLY_HIDDEN` 常量，同时写 class 与**元素自身的内联声明**；说明“1 px 裁剪盒”成为元素属性而非级联结果，无论文档持有哪个版本的样式表都不会打印。
+
+**验证（Blink 无头渲染 + 计算样式，非 Zotero 宿主）**
+
+`.zotero-chatgpt-dev/ui-preview/index.html` 增加两个刻意的覆盖开关（作为后续版本可复用的失败模式复现手段）：`#nohide` 用同优先级规则取消 `.zchatgpt-visually-hidden`，`#forcebreak` 用 `!important` 强制显示（=修复前现象）。
+
+| 状态 | 说明文本计算样式 | 头部 |
+| --- | --- | --- |
+| 正常（样式表规则在位） | `absolute` / `1 × 1` / `clip-path: inset(50%)` | 44 px，无横向溢出 |
+| `#nohide`（样式表规则不生效，即用户处境） | `absolute` / `1 × 1` / `clip-path: inset(50%)` | 44 px，无横向溢出 |
+| `#forcebreak`（修复前现象复现） | `static` / 670.81 px 宽 / `clip-path: none` | 溢出 |
+
+截图：`.zotero-chatgpt-dev/ui-preview/screenshots/ui-polish-15-hint-visible-repro.png`（复现）与 `ui-polish-16-hint-hidden-without-stylesheet-rule.png`（规则失效下仍为单行）。
+
+回归：`tests/zotero/reader/dock.test.ts`（已注入的旧文本被原地刷新为当前文本、当前文本不重复写）、`tests/zotero/chat/view.test.ts`（说明元素带自身隐藏声明，并断言“头部会真正打印的文字”里不含任何说明句，断言不依赖级联）。
+
+### 10.7 明确 NOT RUN
+
+```text
+真实 ChatGPT 提交、真实 Codex 模型轮次、高亮 / 获取 / 整理原生任务、跨窗口真实服务绑定：NOT RUN
+原因：用户本轮明确要求不调用产品 Codex、不试探额度、不恢复远端线程、不运行真实原生动作验收。
+边界：本地复制、离线历史删除/持久化/跨视图同步、渲染复查与打包校验 PASS 不等于真实模型或原生链路通过。
+宿主（Zotero 9.0.6 + 0.4.0a34，含 `npm run verify:install` / `install:dev`）：NOT RUN（本轮未安装到任何 profile）。
+```
+
+已知未闭合项（记录而非隐藏）：Sidebar 删除 → 已打开 Preferences 没有推送通道。Preferences 面板运行在只暴露 JSON 文本函数的沙箱里，插件尚未向它发布跨 compartment 回调；本轮以“面板窗口重新聚焦时重新读取”作为文档化兜底，未新增未验证的跨沙箱回调。真实多窗口的该方向需宿主复验后再决定是否补订阅。
+
+后续待办：在额度与授权可用时，于专用 `.zotero-chatgpt-dev/` profile 复验真实宿主下的单行头部、tooltip、IME、焦点返回与多窗口删除同步；真实文件剪贴板粘贴仍需宿主对自己写入的合成 PDF 做验证。

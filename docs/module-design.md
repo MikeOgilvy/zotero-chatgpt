@@ -9,7 +9,7 @@
 
 ```text
 Zotero Reader sidebar
-└── 共同外壳：固定模式切换、导航、上下文摘要
+└── 共同外壳：固定模式开关、单行工具栏导航、Paper & context details
     ├── Chat surface
     │   └── official chatgpt.com browser + constrained page actor
     └── Agent surface
@@ -18,6 +18,8 @@ Zotero Reader sidebar
 
 共享只读来源：attachment identity、冻结 PDF revision/text、选区与经授权的条目快照
 ```
+
+`Paper & context details` 是共同外壳的一部分：它显示下一次请求的来源与范围、本地读取覆盖和自动 PDF 上下文状态，以及两个手动复制动作的语义说明。手动复制书目信息使用独立的纯格式器，不读取 PDF 正文；自动发送路径继续使用自己的文档预算与冻结机制。
 
 Chat 与 Agent 共用本地来源，不共用远端执行生命周期。ChatGPT 页面拥有自己的登录、模型、输入框、对话和 transcript；Agent 保存 Codex thread/turn 与本地任务。不能把两个服务伪装成一个远端会话。
 
@@ -49,7 +51,7 @@ conversation 文件应由一个持久化所有者串行写入；历史查询和 
 
 ## 3. 共同外壳与各模式的所有权
 
-共同外壳拥有模式开关、插件级导航、上下文摘要、当前可见 surface 和必要的在途任务提示。模式开关只有一个稳定挂载位置，不由两种 composer 分别布局。
+共同外壳拥有模式开关、插件级导航、两个文献复制动作、`Paper & context details`、当前可见 surface 和必要的在途任务提示。模式开关只有一个稳定挂载位置，不由两种 composer 分别布局。正常态只有一行工具栏：上下文摘要不再占用常驻行，只在该详情面板内呈现。
 
 Chat surface 负责官方 browser 生命周期与受限 actor。Agent surface 负责原生 transcript、composer、模型选择和任务卡片。两者显示互斥；切换不迁移、重放或重新分类在途请求。
 
@@ -166,6 +168,20 @@ OA 下载由受控宿主动作执行。逐跳校验公网 URL，拒绝私网/本
 共用设置只控制插件共有行为。Agent 模型、instructions、skills 和生成设置不影响官网模型或官网个人设置。原始 model ID 必须与实际运行时能力一致；缓存、随包目录和已确认能力分开显示。
 
 历史索引只索引本地确实拥有的字段。官方远端 transcript 仍由官网拥有，不为 UI 的“统一历史”要求新增采集。删除通过唯一存储所有者执行，先检查活动 request/task/reading job；会话删除不调用原生撤销，也不顺便清理账户目录。
+
+### 删除后的跨视图同步
+
+`WorkspaceStore` 是本地会话的唯一写入者。一次删除在文件提交之后向订阅者发布一个 `HistoryChange`（`paper` + `removed` ids），订阅入口是可选契约 `ReaderWorkspace.subscribeHistory?`。任何已打开的历史列表都据此失效并重新读取，而不是等重启、切模式或重新打开；没有该能力的宿主退化为各自重新读取，不新增第二套持久化或全局事件框架。
+
+视图侧必须同时覆盖三种竞态，三者都属于契约的一部分：
+
+1. **旧查询晚返回**：删除会递增查询世代；删除前开始的 list/search 结果不得把已删除记录重新插回。
+2. **旧保存晚执行**：`ConversationStore.save` 在写入前重新确认会话文件仍然存在，不信任内存副本；对已删除的会话返回 `NOT_FOUND`，只有显式 `create` 能重新建立记录。
+3. **草稿与防抖保存**：删除通知到达后，该会话的草稿、位置与尚未执行的防抖保存一并丢弃，避免下一次 render、切模式或卸载时重建同一记录。
+
+`subscribeHistory` 只做失效通知；删除的身份、范围、活动依赖检查与结果账本仍由存储所有者和原生任务控制器决定。
+
+反方向（Sidebar 删除 → 已打开的 Preferences）目前没有推送通道：Preferences 面板只在 JSON 文本函数上跨沙箱运行，尚未暴露跨 compartment 回调。作为文档化的兜底，面板窗口重新获得焦点时重新读取自己的列表（只重新读取，不裁剪、不写入）。这不替代 Settings → Sidebar 的提交后推送。
 
 ### 8.1 旧 mode 不等于新服务来源
 
