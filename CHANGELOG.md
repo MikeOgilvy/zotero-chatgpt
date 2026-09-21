@@ -2,6 +2,16 @@
 
 All notable user-facing changes are recorded here.
 
+## 0.1.1 — Linux x86_64 support
+
+- Added Agent support on Linux x86_64 using the installed Codex CLI.
+- Resolves `CODEX_CLI_PATH`, `~/.local/bin/codex`, or `PATH` in that order.
+- Reuses the existing Codex login by copying only `~/.codex/auth.json` into the plugin-owned
+  runtime account.
+- Keeps the macOS Apple Silicon bundled runtime, pinned runtime verification, private configuration,
+  and Chat/Agent separation unchanged.
+- Added Linux runtime regression coverage and build/install documentation.
+
 ## 0.1.0 — first release
 
 The first version of Zotero ChatGPT, published as an **unsigned early preview** for macOS on Apple
