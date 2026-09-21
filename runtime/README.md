@@ -1,6 +1,9 @@
 # Pinned Codex runtime
 
-Production target: Codex 0.154.0, macOS Apple Silicon. `manifest.ts` pins the official release archive and its single signed executable by SHA-256 and exact byte size. Build/package CLI commands never fall back to an installed Codex, shell preview, alternate executable path, or Node companion.
+The bundled production target is Codex 0.154.0 on macOS Apple Silicon. Linux x86_64 uses the
+system-installed Codex CLI and does not extract this bundled asset; the Gecko host resolves
+`CODEX_CLI_PATH`, `~/.local/bin/codex`, then `PATH` and copies only the existing login token into
+the plugin-owned runtime account.
 
 Run `node scripts/runtime-prepare.mjs` once after checkout. It downloads the fixed official asset into ignored `.zotero-chatgpt-dev/runtime-cache/`, verifies the archive before extracting its one fixed entry, verifies the executable, and checks the existing Apple signature on macOS. `npm run build` and `npm run package:dev` require that prepared asset and independently reverify it. The binary stays out of Git. The small injectable asset used by unit tests is only a test fixture; it cannot serve a model request.
 

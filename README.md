@@ -35,7 +35,17 @@ Install the `.xpi` in Zotero → open a PDF → open the sidebar → sign in.
 **Chat needs no API key and uses no Codex quota.**
 Agent uses Codex quota and requires separate sign-in.
 
-_Early preview · macOS (Apple Silicon) · Zotero 9.0.6._
+On Linux x86_64, the Agent uses the installed Codex CLI. Set `CODEX_CLI_PATH` when it is not in
+`~/.local/bin/codex` or `PATH`; the existing `~/.codex/auth.json` login is copied into the plugin's
+private runtime account. Build this fork with Node 24, then install `build/zotero-chatgpt.xpi`:
+
+```sh
+cd ~/src/zotero-chatgpt
+npm ci
+npm run package:dev
+```
+
+_Early preview · macOS (Apple Silicon) and Linux x86_64 · Zotero 9.0.6._
 
 ---
 

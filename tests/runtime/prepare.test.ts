@@ -57,3 +57,18 @@ it('prepares only private profile state and resets executable environments befor
   // must not create or touch the shared records directory.
   await expect(readdir(path.join(privateRoot, 'records'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
+it('uses the installed Codex CLI on Linux x86_64 without extracting the macOS bundle', async () => {
+  const profile = await mkdtemp(path.join(tmpdir(), 'zchatgpt-linux-')); roots.push(profile);
+  const codexHome = path.join(profile, 'zotero-chatgpt', 'v1', 'account');
+  const host: RuntimeHost = {
+    ...nodeFiles(), os: 'Linux', abi: 'x86_64-gcc3', profileDir: profile,
+    load: () => { throw new Error('the bundled asset must not be loaded'); },
+    findSystemCodex: () => Promise.resolve({ executable: '/home/test/.local/bin/codex', home: '/home/test' }),
+  };
+  const prepared = await prepareRuntime(host, 'jar:file:///extension.xpi!/', PINNED_RUNTIME);
+  expect(prepared.codexVersion).toBe('system');
+  expect(prepared.spec.executable).toBe('/home/test/.local/bin/codex');
+  expect(prepared.spec.env.HOME).toBe('/home/test');
+  expect(prepared.spec.env.CODEX_HOME).toBe(codexHome);
+  expect(prepared.spec.env.XDG_CONFIG_HOME).toContain('/zotero-chatgpt/v1/home/config');
+});
